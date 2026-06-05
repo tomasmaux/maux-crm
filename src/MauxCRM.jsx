@@ -1100,11 +1100,11 @@ function AutoBadge() {
 
 /* ─── INTERACTIVE WEALTH DONUT ─── */
 function WealthDonut({ outerItems, innerItems, outerLabel, innerLabel, outerTotal, innerTotal }) {
-  const [hovered, setHovered] = useState(null); // {ring, label, amount, color}
-  const size = 360, cx = size/2, cy = size/2;
-  const OR = 160, ORi = 112;  // outer = osobni majetek
-  const IR = 104, IRi = 68;   // inner = sporaci ucet
-  
+  const [hovered, setHovered] = useState(null);
+  const W = 580, H = 480, cx = W/2, cy = H/2;
+  const OR = 178, ORi = 126;   // outer = osobni majetek
+  const IR = 118, IRi = 76;    // inner = sporaci ucet
+
   const arc = (outerR, innerR, startA, endA) => {
     if (Math.abs(endA - startA) < 0.001) return "";
     const x1=cx+outerR*Math.cos(startA), y1=cy+outerR*Math.sin(startA);
@@ -1114,85 +1114,138 @@ function WealthDonut({ outerItems, innerItems, outerLabel, innerLabel, outerTota
     const lg=(endA-startA)>Math.PI?1:0;
     return `M ${x1} ${y1} A ${outerR} ${outerR} 0 ${lg} 1 ${x2} ${y2} L ${xi1} ${yi1} A ${innerR} ${innerR} 0 ${lg} 0 ${xi2} ${yi2} Z`;
   };
-  
+
   const makeSegs = (items, outerR, innerR, ring) => {
     const total = items.reduce((s,i)=>s+Math.abs(i.amount||0),0);
     let a = -Math.PI/2;
-    return items.map(item => {
-      const sw = total>0 ? (Math.abs(item.amount||0)/total)*2*Math.PI : 0;
+    return items.filter(i=>Math.abs(i.amount||0)>0).map(item => {
+      const sw = (Math.abs(item.amount||0)/total)*2*Math.PI;
       const midA = a + sw/2;
-      const labelR = outerR + 22;
-      const lx = cx + labelR*Math.cos(midA);
-      const ly = cy + labelR*Math.sin(midA);
-      const path = arc(outerR, innerR, a, a+sw);
-      const seg = {...item, path, midA, lx, ly, ring, sw};
+      const seg = {...item, path: arc(outerR, innerR, a, a+sw), midA, ring, sw};
       a += sw;
       return seg;
     });
   };
-  
+
   const oSegs = makeSegs(outerItems, OR, ORi, "outer");
   const iSegs = makeSegs(innerItems, IR, IRi, "inner");
-  
+  const fmtN = n => new Intl.NumberFormat("cs-CZ").format(Math.round(n));
+
+  // Label line endpoint outside the ring
+  const labelAnchor = (seg, ringR, offset=28) => {
+    const r = ringR + offset;
+    return { x: cx + r*Math.cos(seg.midA), y: cy + r*Math.sin(seg.midA) };
+  };
+  const labelEnd = (seg, ringR, offset=52) => {
+    const r = ringR + offset;
+    const raw = { x: cx + r*Math.cos(seg.midA), y: cy + r*Math.sin(seg.midA) };
+    // Push further left/right for readability
+    const side = Math.cos(seg.midA) > 0 ? 1 : -1;
+    return { x: raw.x + side*20, y: raw.y, side };
+  };
+
+  const isHov = (s) => hovered && hovered.label === s.label && hovered.ring === s.ring;
+
   return (
-    <div style={{position:"relative",display:"flex",flexDirection:"column",alignItems:"center"}}>
-      <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} style={{overflow:"visible"}}>
+    <div style={{width:"100%", background:"#fff", borderRadius:16, border:"1px solid var(--line)", padding:"16px 8px 20px", display:"flex", flexDirection:"column", alignItems:"center"}}>
+      <div style={{fontSize:9,letterSpacing:".3em",textTransform:"uppercase",color:"var(--mut)",fontWeight:600,marginBottom:12,alignSelf:"flex-start",paddingLeft:16}}>
+        Majetek & Spořák · najeď pro detail
+      </div>
+      <svg width="100%" viewBox={`-10 0 ${W+20} ${H}`} style={{overflow:"visible", maxWidth:560}}>
         <defs>
-          <filter id="glow"><feGaussianBlur stdDeviation="3" result="blur"/><feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+          <filter id="segGlow" x="-20%" y="-20%" width="140%" height="140%">
+            <feGaussianBlur stdDeviation="4" result="blur"/>
+            <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+          </filter>
         </defs>
-        {/* Gap circles */}
-        <circle cx={cx} cy={cy} r={ORi-2} fill="var(--bg)" opacity={.5}/>
-        {/* Outer ring segments */}
+
+        {/* Outer ring — OSOBNÍ MAJETEK */}
+        <circle cx={cx} cy={cy} r={ORi-2} fill="var(--bg)" opacity={.6}/>
         {oSegs.map((s,i)=>(
           <path key={i} d={s.path} fill={s.color}
-            opacity={hovered&&hovered.label!==s.label?.0.6:0.93}
-            style={{cursor:"pointer",transition:"opacity .15s,filter .15s",filter:hovered?.label===s.label?"url(#glow)":"none"}}
-            onMouseEnter={()=>setHovered({ring:"outer",label:s.label,amount:s.amount,color:s.color})}
+            opacity={hovered && !isHov(s) ? 0.45 : 0.95}
+            style={{cursor:"pointer",transition:"opacity .15s",filter:isHov(s)?"url(#segGlow)":"none",strokeWidth:isHov(s)?1.5:0,stroke:"#fff"}}
+            onMouseEnter={()=>setHovered({ring:"outer",label:s.label,amount:s.amount,color:s.color,pct:Math.round(s.sw/(2*Math.PI)*100)})}
             onMouseLeave={()=>setHovered(null)}
           />
         ))}
-        {/* Gap */}
-        <circle cx={cx} cy={cy} r={IR-2} fill="var(--bg)" opacity={.5}/>
-        {/* Inner ring */}
+
+        {/* Inner ring — SPOŘÍCÍ ÚČET */}
+        <circle cx={cx} cy={cy} r={IR-2} fill="var(--bg)" opacity={.6}/>
         {iSegs.map((s,i)=>(
           <path key={i} d={s.path} fill={s.color}
-            opacity={hovered&&hovered.label!==s.label?.0.6:0.90}
-            style={{cursor:"pointer",transition:"opacity .15s",filter:hovered?.label===s.label?"url(#glow)":"none"}}
-            onMouseEnter={()=>setHovered({ring:"inner",label:s.label,amount:s.amount,color:s.color})}
+            opacity={hovered && !isHov(s) ? 0.45 : 0.90}
+            style={{cursor:"pointer",transition:"opacity .15s",filter:isHov(s)?"url(#segGlow)":"none",strokeWidth:isHov(s)?1.5:0,stroke:"#fff"}}
+            onMouseEnter={()=>setHovered({ring:"inner",label:s.label,amount:s.amount,color:s.color,pct:Math.round(s.sw/(2*Math.PI)*100)})}
             onMouseLeave={()=>setHovered(null)}
           />
         ))}
-        {/* Center hole */}
+
+        {/* Center hole & text */}
         <circle cx={cx} cy={cy} r={IRi-1} fill="white"/>
-        {/* Center text */}
         {hovered ? (
-          <>
-            <text x={cx} y={cy-12} textAnchor="middle" fontSize={9} fill={hovered.color} fontFamily="Inter,sans-serif" fontWeight="600">{hovered.label}</text>
-            <text x={cx} y={cy+4} textAnchor="middle" fontSize={13} fill={hovered.color} fontFamily="Fraunces,serif" fontWeight="300">{new Intl.NumberFormat("cs-CZ").format(Math.round(hovered.amount))} Kč</text>
-          </>
+          <g>
+            <text x={cx} y={cy-18} textAnchor="middle" fontSize={8} fill={hovered.color} fontFamily="Inter,sans-serif" fontWeight="700" letterSpacing="1">{hovered.ring==="outer"?"MAJETEK":"SPOŘÁK"}</text>
+            <text x={cx} y={cy-4} textAnchor="middle" fontSize={9} fill={hovered.color} fontFamily="Inter,sans-serif" fontWeight="500">{hovered.label}</text>
+            <text x={cx} y={cy+12} textAnchor="middle" fontSize={14} fill={hovered.color} fontFamily="Fraunces,serif" fontWeight="300">{fmtN(hovered.amount)}</text>
+            <text x={cx} y={cy+26} textAnchor="middle" fontSize={9} fill={hovered.color} fontFamily="Inter" opacity={.7}>{hovered.pct} %</text>
+          </g>
         ) : (
-          <>
-            <text x={cx} y={cy-14} textAnchor="middle" fontSize={8} fill="var(--mut)" fontFamily="Inter" letterSpacing="1.5">{innerLabel}</text>
-            <text x={cx} y={cy-1} textAnchor="middle" fontSize={12} fill="#3518A5" fontFamily="Fraunces,serif" fontWeight="300">{new Intl.NumberFormat("cs-CZ").format(Math.round(innerTotal))}</text>
-            <text x={cx} y={cy+12} textAnchor="middle" fontSize={8} fill="var(--mut)" fontFamily="Inter" letterSpacing="1.5">{outerLabel}</text>
-            <text x={cx} y={cy+25} textAnchor="middle" fontSize={12} fill="#059669" fontFamily="Fraunces,serif" fontWeight="300">{new Intl.NumberFormat("cs-CZ").format(Math.round(outerTotal))}</text>
-          </>
+          <g>
+            <text x={cx} y={cy-20} textAnchor="middle" fontSize={7.5} fill="var(--mut)" fontFamily="Inter" letterSpacing="1.5">SPOŘÁK</text>
+            <text x={cx} y={cy-6} textAnchor="middle" fontSize={13} fill="#3518A5" fontFamily="Fraunces,serif" fontWeight="300">{fmtN(innerTotal)} Kč</text>
+            <text x={cx} y={cy+8} textAnchor="middle" fontSize={7.5} fill="var(--mut)" fontFamily="Inter" letterSpacing="1.5">MAJETEK</text>
+            <text x={cx} y={cy+22} textAnchor="middle" fontSize={13} fill="#059669" fontFamily="Fraunces,serif" fontWeight="300">{fmtN(outerTotal)} Kč</text>
+          </g>
         )}
+
+        {/* Label lines + text for outer ring (big segments only) */}
+        {oSegs.filter(s=>s.sw>0.15).map((s,i)=>{
+          const a1 = labelAnchor(s, OR, 8);
+          const a2 = labelEnd(s, OR, 48);
+          const right = a2.side > 0;
+          return (
+            <g key={i} style={{pointerEvents:"none",opacity:hovered&&!isHov(s)?0.3:1,transition:"opacity .15s"}}>
+              <line x1={a1.x} y1={a1.y} x2={a2.x} y2={a2.y} stroke={s.color} strokeWidth={1.2} opacity={.7}/>
+              <text x={a2.x+(right?5:-5)} y={a2.y-5} textAnchor={right?"start":"end"} fontSize={10} fill={s.color} fontFamily="Inter,sans-serif" fontWeight="600">{s.label}</text>
+              <text x={a2.x+(right?5:-5)} y={a2.y+8} textAnchor={right?"start":"end"} fontSize={9.5} fill={s.color} fontFamily="Fraunces,serif" fontWeight="300" opacity={.9}>{fmtN(s.amount)} Kč</text>
+            </g>
+          );
+        })}
+
+        {/* Label lines + text for inner ring (big segments only) */}
+        {iSegs.filter(s=>s.sw>0.18).map((s,i)=>{
+          const a1 = { x: cx+(IR-4)*Math.cos(s.midA), y: cy+(IR-4)*Math.sin(s.midA) };
+          const a2 = { x: cx+(IRi-14)*Math.cos(s.midA), y: cy+(IRi-14)*Math.sin(s.midA) };
+          return (
+            <g key={i} style={{pointerEvents:"none",opacity:hovered&&!isHov(s)?0.3:1,transition:"opacity .15s"}}>
+              <text x={a2.x} y={a2.y} textAnchor="middle" fontSize={8} fill="#fff" fontFamily="Inter,sans-serif" fontWeight="700" opacity={.9}>{s.label?.split(" ")[0]}</text>
+            </g>
+          );
+        })}
+
+        {/* Ring labels */}
+        <text x={cx-OR-8} y={cy} textAnchor="end" fontSize={8} fill="var(--mut)" fontFamily="Inter" letterSpacing="1" opacity={.6}>MAJETEK</text>
+        <text x={cx+OR+8} y={cy} textAnchor="start" fontSize={8} fill="var(--mut)" fontFamily="Inter" letterSpacing="1" opacity={.6}>SPOŘÁK</text>
       </svg>
-      {/* Legend */}
-      <div style={{display:"flex",gap:6,flexWrap:"wrap",justifyContent:"center",maxWidth:360,marginTop:-8}}>
-        {[...oSegs,...iSegs].filter(s=>s.sw>0.05).map((s,i)=>(
-          <div key={i} style={{display:"flex",alignItems:"center",gap:4,padding:"2px 8px",borderRadius:20,background:hovered?.label===s.label?s.color+"22":"transparent",cursor:"pointer",transition:".12s"}}
-            onMouseEnter={()=>setHovered({ring:s.ring,label:s.label,amount:s.amount,color:s.color})}
+
+      {/* Compact legend */}
+      <div style={{display:"flex",gap:4,flexWrap:"wrap",justifyContent:"center",maxWidth:520,marginTop:4,padding:"0 16px"}}>
+        {[...oSegs.map(s=>({...s,ring:"outer"})),...iSegs.map(s=>({...s,ring:"inner"}))].map((s,i)=>(
+          <div key={i}
+            style={{display:"flex",alignItems:"center",gap:5,padding:"3px 10px",borderRadius:20,border:`1px solid ${isHov(s)?s.color:"transparent"}`,background:isHov(s)?s.color+"15":"var(--bg)",cursor:"pointer",transition:".12s"}}
+            onMouseEnter={()=>setHovered({ring:s.ring,label:s.label,amount:s.amount,color:s.color,pct:Math.round(s.sw/(2*Math.PI)*100)})}
             onMouseLeave={()=>setHovered(null)}>
-            <div style={{width:7,height:7,borderRadius:2,background:s.color,flexShrink:0}}/>
-            <span style={{fontSize:10,color:hovered?.label===s.label?s.color:"var(--mut)",fontWeight:hovered?.label===s.label?600:400}}>{s.label}</span>
+            <div style={{width:8,height:8,borderRadius:2,background:s.color,flexShrink:0}}/>
+            <span style={{fontSize:10.5,color:isHov(s)?s.color:"var(--txt)",fontWeight:isHov(s)?600:400,whiteSpace:"nowrap"}}>{s.label}</span>
+            <span style={{fontSize:10,color:isHov(s)?s.color:"var(--mut)",fontFamily:"Fraunces,serif",fontWeight:300}}>{fmtN(s.amount)}</span>
           </div>
         ))}
       </div>
     </div>
   );
 }
+
 
 /* ─── INLINE EDITABLE ROW ─── */
 function EditRow({ item, onSave, onDelete, valuePrefix = "", valueSuffix = " Kč", isCalculated = false, calculatedValue = null }) {
@@ -1702,7 +1755,7 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
       </div>
 
       {/* VELKÝ INTERAKTIVNÍ DONUT — centrální vizuál */}
-      <div style={{display:"grid",gridTemplateColumns:"380px 1fr",gap:16,alignItems:"start"}}>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 300px",gap:16,alignItems:"start"}}>
         {/* WealthDonut */}
         {(() => {
           const sp2 = (financeItems||[]).filter(i => i.category === "sporaci" && i.notes !== "SKIP_DISPLAY");
@@ -1743,7 +1796,7 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
           );
         })()}
         
-        {/* Right: SpořákTile + Majetek + Top klienti */}
+        {/* Right: Chart + Top klienti */}
         <div style={{display:"flex",flexDirection:"column",gap:12}}>
           {/* Mini chart + top klienti */}
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
