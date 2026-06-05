@@ -567,7 +567,7 @@ function WorkEntryList({ entries, clients, invoices, onNew, onEdit, onDelete, on
 }
 
 /* ─── FAKTURACE ─── */
-function InvoiceList({ invoices, clients, onOpen, onNew, onOpenClient, onToggleStatus, loading }) {
+function InvoiceList({ invoices, clients, workEntries, onOpen, onOpenClient, onToggleStatus, onGenerateInvoice, loading }) {
   const [search, setSearch] = useState("");
   const [filterStatus, setFilterStatus] = useState("vse");
   const [filterClient, setFilterClient] = useState("");
@@ -575,6 +575,28 @@ function InvoiceList({ invoices, clients, onOpen, onNew, onOpenClient, onToggleS
   const [dateTo, setDateTo] = useState("");
   const [sortBy, setSortBy] = useState("date_desc");
   const [showFilters, setShowFilters] = useState(false);
+
+  // Draft invoices — aggregate unbilled work entries per client
+  const drafts = useMemo(() => {
+    const unbilled = (workEntries || []).filter(e => !e.invoice_id && e.client_id);
+    const byClient = {};
+    unbilled.forEach(e => {
+      if (!byClient[e.client_id]) byClient[e.client_id] = [];
+      byClient[e.client_id].push(e);
+    });
+    return Object.entries(byClient).map(([clientId, entries]) => {
+      const client = clients.find(c => c.id === clientId);
+      const workAmt = entries.reduce((s,e) => s + (e.amount||0), 0);
+      const notary = entries.reduce((s,e) => s + (e.notary_fee||0), 0);
+      const admin = entries.reduce((s,e) => s + (e.admin_fee||0), 0);
+      const vat = Math.round(workAmt * 0.21);
+      const total = workAmt + vat + notary + admin;
+      const hours = entries.reduce((s,e) => s + (e.hours||0), 0);
+      return { clientId, client, entries, workAmt, notary, admin, vat, total, hours };
+    }).sort((a,b) => b.total - a.total);
+  }, [workEntries, clients]);
+
+  const [expandedDraft, setExpandedDraft] = useState(null);
 
   const filtered = useMemo(() => {
     let list = [...invoices];
@@ -623,11 +645,84 @@ function InvoiceList({ invoices, clients, onOpen, onNew, onOpenClient, onToggleS
 
   return (
     <>
+      {/* ── PŘIPRAVENO K VYSTAVENÍ ── */}
+      {drafts.length > 0 && (
+        <div style={{ marginBottom: 36 }}>
+          <div className="sec-hd" style={{ marginBottom: 14 }}>
+            <span style={{ color: "var(--ink)", fontWeight: 600 }}>
+              K vystavení · {drafts.length} {drafts.length === 1 ? "klient" : "klientů"}
+            </span>
+            <span style={{ fontSize: 12, color: "var(--mut)", fontWeight: 400, textTransform: "none", letterSpacing: 0 }}>
+              Agregováno z výkazu práce — zkontroluj a vystav
+            </span>
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            {drafts.map(d => (
+              <div key={d.clientId} style={{ background: "#fff", border: "1px solid var(--line)", borderRadius: 12, overflow: "hidden" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 16, padding: "14px 18px", cursor: "pointer" }}
+                  onClick={() => setExpandedDraft(expandedDraft === d.clientId ? null : d.clientId)}>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontWeight: 600, fontSize: 14, color: "var(--txt)" }}>{d.client?.name || "—"}</div>
+                    <div style={{ fontSize: 11.5, color: "var(--mut)", marginTop: 2 }}>
+                      {d.entries.length} záznamů · {d.hours.toFixed(1)} h fakturovaných
+                      {d.notary > 0 && ` · notář ${fmtKc(d.notary)}`}
+                      {d.admin > 0 && ` · sp.pop. ${fmtKc(d.admin)}`}
+                    </div>
+                  </div>
+                  <div style={{ textAlign: "right", marginRight: 16 }}>
+                    <div style={{ fontFamily: "Fraunces, serif", fontSize: 18, fontWeight: 300, color: "var(--gold)" }}>{fmtKc(d.total)}</div>
+                    <div style={{ fontSize: 11, color: "var(--mut)" }}>základ {fmtKc(d.workAmt)} + DPH {fmtKc(d.vat)}{(d.notary+d.admin)>0 ? ` + přef. ${fmtKc(d.notary+d.admin)}` : ""}</div>
+                  </div>
+                  <button className="btn pri" style={{ fontSize: 12, flexShrink: 0 }}
+                    onClick={e => { e.stopPropagation(); onGenerateInvoice(d.clientId, d.entries); }}>
+                    Vystavit fakturu →
+                  </button>
+                  <span style={{ fontSize: 11, color: "var(--mut)", cursor: "pointer" }}>{expandedDraft === d.clientId ? "▲" : "▼"}</span>
+                </div>
+                {expandedDraft === d.clientId && (
+                  <div style={{ borderTop: "1px solid var(--line)", background: "#FAFAFA" }}>
+                    <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5 }}>
+                      <thead><tr style={{ background: "#F3F0FF" }}>
+                        <th style={{ padding: "8px 18px", textAlign: "left", fontWeight: 500, color: "var(--mut)", fontSize: 10, letterSpacing: ".1em", textTransform: "uppercase" }}>Datum</th>
+                        <th style={{ padding: "8px 18px", textAlign: "left", fontWeight: 500, color: "var(--mut)", fontSize: 10, letterSpacing: ".1em", textTransform: "uppercase" }}>Popis</th>
+                        <th style={{ padding: "8px 18px", textAlign: "right", fontWeight: 500, color: "var(--mut)", fontSize: 10, letterSpacing: ".1em", textTransform: "uppercase" }}>Hodiny</th>
+                        <th style={{ padding: "8px 18px", textAlign: "right", fontWeight: 500, color: "var(--mut)", fontSize: 10, letterSpacing: ".1em", textTransform: "uppercase" }}>Bez DPH</th>
+                      </tr></thead>
+                      <tbody>
+                        {d.entries.sort((a,b)=>(a.entry_date||"").localeCompare(b.entry_date||"")).map(e => (
+                          <tr key={e.id} style={{ borderTop: "1px solid var(--line)" }}>
+                            <td style={{ padding: "10px 18px", color: "var(--mut)", whiteSpace: "nowrap" }}>{fmtDate(e.entry_date)}</td>
+                            <td style={{ padding: "10px 18px", color: "var(--txt)" }}>
+                              {e.description}
+                              {(e.notary_fee > 0 || e.admin_fee > 0) && (
+                                <span style={{ fontSize: 10.5, color: "var(--mut)", marginLeft: 8 }}>
+                                  {e.notary_fee > 0 && `+notář ${fmtKc(e.notary_fee)}`}
+                                  {e.admin_fee > 0 && ` +sp.pop. ${fmtKc(e.admin_fee)}`}
+                                </span>
+                              )}
+                            </td>
+                            <td style={{ padding: "10px 18px", textAlign: "right", color: "var(--mut)" }}>{e.hours > 0 ? `${e.hours} h` : "—"}</td>
+                            <td style={{ padding: "10px 18px", textAlign: "right", fontFamily: "Fraunces, serif", fontWeight: 300 }}>
+                              {fmtKc((e.amount||0)+(e.notary_fee||0)+(e.admin_fee||0))}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* ── STATISTIKY ── */}
       <div className="kpi-row">
         <div className="kpi hi">
           <div className="k">Fakturováno celkem</div>
           <div className="v">{fmtKc(total)}</div>
-          <div className="s">{invoices.length} faktur · {filtered.length} zobrazeno</div>
+          <div className="s">{invoices.length} faktur</div>
         </div>
         <div className="kpi">
           <div className="k">Neuhrazeno</div>
@@ -641,26 +736,22 @@ function InvoiceList({ invoices, clients, onOpen, onNew, onOpenClient, onToggleS
         </div>
       </div>
 
+      {/* ── FILTRY A HISTORIE ── */}
+      <div className="sec-hd" style={{ marginBottom: 12 }}><span>Historie faktur</span></div>
       <div style={{ display: "flex", gap: 8, marginBottom: 12, flexWrap: "wrap", alignItems: "center" }}>
         <div className="search" style={{ maxWidth: 280 }}>
           <span style={{ color: "var(--mut)", fontSize: 14 }}>⌕</span>
           <input placeholder="Hledat fakturu, klienta…" value={search} onChange={e => setSearch(e.target.value)} />
         </div>
-        <select
-          value={filterClient}
-          onChange={e => setFilterClient(e.target.value)}
-          style={{ font: "inherit", fontSize: 13, padding: "8px 12px", border: "1px solid var(--line2)", borderRadius: 8, color: filterClient ? "var(--ink)" : "var(--mut)", background: "#fff", cursor: "pointer", minWidth: 160 }}
-        >
+        <select value={filterClient} onChange={e => setFilterClient(e.target.value)}
+          style={{ font: "inherit", fontSize: 13, padding: "8px 12px", border: "1px solid var(--line2)", borderRadius: 8, color: filterClient ? "var(--ink)" : "var(--mut)", background: "#fff", cursor: "pointer", minWidth: 160 }}>
           <option value="">Všichni klienti</option>
           {clients.sort((a,b) => a.name.localeCompare(b.name, "cs")).map(c => (
             <option key={c.id} value={c.id}>{c.name}</option>
           ))}
         </select>
-        <select
-          value={sortBy}
-          onChange={e => setSortBy(e.target.value)}
-          style={{ font: "inherit", fontSize: 13, padding: "8px 12px", border: "1px solid var(--line2)", borderRadius: 8, color: "var(--mut)", background: "#fff", cursor: "pointer" }}
-        >
+        <select value={sortBy} onChange={e => setSortBy(e.target.value)}
+          style={{ font: "inherit", fontSize: 13, padding: "8px 12px", border: "1px solid var(--line2)", borderRadius: 8, color: "var(--mut)", background: "#fff", cursor: "pointer" }}>
           <option value="date_desc">Nejnovější</option>
           <option value="date_asc">Nejstarší</option>
           <option value="number">Číslo faktury</option>
@@ -676,7 +767,6 @@ function InvoiceList({ invoices, clients, onOpen, onNew, onOpenClient, onToggleS
             Zrušit filtry ×
           </button>
         )}
-        <button className="btn pri" onClick={onNew} style={{ marginLeft: "auto" }}>+ Nová faktura</button>
       </div>
 
       {showFilters && (
@@ -698,23 +788,21 @@ function InvoiceList({ invoices, clients, onOpen, onNew, onOpenClient, onToggleS
       {!loading && (
         <table className="tbl">
           <thead><tr>
-            <th>Klient</th><th>Číslo faktury</th><th>Vystavena</th><th>Splatnost</th><th style={{ textAlign: "right" }}>Částka s DPH</th><th style={{ textAlign: "right" }}>Stav</th>
+            <th>Klient</th><th>Číslo faktury</th><th>Vystavena</th><th>Splatnost</th><th style={{ textAlign: "right" }}>Částka s DPH</th><th style={{ textAlign: "right" }}>Stav</th><th></th>
           </tr></thead>
           <tbody>
             {filtered.length === 0 && (
-              <tr><td colSpan={6} style={{ textAlign: "center", padding: "40px 0", color: "var(--mut)", fontSize: 13 }}>
+              <tr><td colSpan={7} style={{ textAlign: "center", padding: "40px 0", color: "var(--mut)", fontSize: 13 }}>
                 {hasFilters ? "Žádné faktury neodpovídají filtru." : "Žádné faktury."}
               </td></tr>
             )}
             {filtered.map(inv => (
               <tr key={inv.id} onClick={() => onOpen(inv.id)}>
                 <td>
-                  <div
-                    className="t-name"
+                  <div className="t-name"
                     style={{ color: inv.client_id ? "var(--ink)" : "var(--txt)", cursor: inv.client_id ? "pointer" : "default", fontWeight: 500 }}
                     onClick={e => { if (inv.client_id) { e.stopPropagation(); onOpenClient(inv.client_id); } }}
-                    title={inv.client_id ? "Otevřít kartu klienta" : undefined}
-                  >
+                    title={inv.client_id ? "Otevřít kartu klienta" : undefined}>
                     {clientName(inv)}
                     {inv.client_id && <span style={{ fontSize: 10, marginLeft: 4, opacity: .5 }}>↗</span>}
                   </div>
@@ -726,6 +814,12 @@ function InvoiceList({ invoices, clients, onOpen, onNew, onOpenClient, onToggleS
                 <td className="t-amt">{fmtKc(inv.total)}</td>
                 <td style={{ textAlign: "right" }} onClick={e => e.stopPropagation()}>
                   <StatusToggle inv={inv} />
+                </td>
+                <td style={{ textAlign: "right", whiteSpace: "nowrap" }} onClick={e => e.stopPropagation()}>
+                  <button className="btn gho" style={{ fontSize: 11, padding: "4px 8px" }}
+                    onClick={() => onOpen(inv.id, "edit")}>✎</button>
+                  <button className="btn gho" style={{ fontSize: 11, padding: "4px 8px", color: "#DC2626" }}
+                    onClick={() => onOpen(inv.id, "delete")}>✕</button>
                 </td>
               </tr>
             ))}
@@ -1325,7 +1419,19 @@ export default function MauxCRM() {
 
           {/* FAKTURACE */}
           {mod === "fakturace" && curMod?.live && mode === "list" && (
-            <InvoiceList invoices={invoices} clients={clients} onOpen={id => { setSel(id); setMode("detail"); }} onNew={() => setMode("new")} onToggleStatus={toggleInvoiceStatus} onOpenClient={openClientFromInvoice} loading={dataLoading} />
+            <InvoiceList
+              invoices={invoices} clients={clients} workEntries={workEntries}
+              onOpen={(id, action) => {
+                setSel(id);
+                if (action === "edit") setMode("edit");
+                else if (action === "delete") setConfirmDel(id);
+                else setMode("detail");
+              }}
+              onToggleStatus={toggleInvoiceStatus}
+              onOpenClient={openClientFromInvoice}
+              onGenerateInvoice={generateInvoiceFromEntries}
+              loading={dataLoading}
+            />
           )}
           {mod === "fakturace" && mode === "detail" && selInvoice && (
             <InvoiceDetail inv={selInvoice} clients={clients} onBack={() => setMode("list")} onEdit={() => setMode("edit")} onDelete={() => setConfirmDel(selInvoice.id)} />
