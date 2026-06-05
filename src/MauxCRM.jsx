@@ -1101,9 +1101,9 @@ function AutoBadge() {
 /* ─── INTERACTIVE WEALTH DONUT ─── */
 function WealthDonut({ outerItems, innerItems, outerLabel, innerLabel, outerTotal, innerTotal }) {
   const [hovered, setHovered] = useState(null);
-  const W = 580, H = 480, cx = W/2, cy = H/2;
-  const OR = 178, ORi = 126;   // outer = osobni majetek
-  const IR = 118, IRi = 76;    // inner = sporaci ucet
+  const W = 700, H = 560, cx = W/2, cy = H/2;
+  const OR = 210, ORi = 150;   // outer = osobni majetek
+  const IR = 142, IRi = 92;    // inner = sporaci ucet
 
   const arc = (outerR, innerR, startA, endA) => {
     if (Math.abs(endA - startA) < 0.001) return "";
@@ -1200,21 +1200,21 @@ function WealthDonut({ outerItems, innerItems, outerLabel, innerLabel, outerTota
         )}
 
         {/* Label lines + text for outer ring (big segments only) */}
-        {oSegs.filter(s=>s.sw>0.15).map((s,i)=>{
+        {oSegs.filter(s=>s.sw>0.08).map((s,i)=>{
           const a1 = labelAnchor(s, OR, 8);
           const a2 = labelEnd(s, OR, 48);
           const right = a2.side > 0;
           return (
             <g key={i} style={{pointerEvents:"none",opacity:hovered&&!isHov(s)?0.3:1,transition:"opacity .15s"}}>
               <line x1={a1.x} y1={a1.y} x2={a2.x} y2={a2.y} stroke={s.color} strokeWidth={1.2} opacity={.7}/>
-              <text x={a2.x+(right?5:-5)} y={a2.y-5} textAnchor={right?"start":"end"} fontSize={10} fill={s.color} fontFamily="Inter,sans-serif" fontWeight="600">{s.label}</text>
-              <text x={a2.x+(right?5:-5)} y={a2.y+8} textAnchor={right?"start":"end"} fontSize={9.5} fill={s.color} fontFamily="Fraunces,serif" fontWeight="300" opacity={.9}>{fmtN(s.amount)} Kč</text>
+              <text x={a2.x+(right?5:-5)} y={a2.y-5} textAnchor={right?"start":"end"} fontSize={11} fill={s.color} fontFamily="Fraunces,Georgia,serif" fontWeight="400">{s.label}</text>
+              <text x={a2.x+(right?5:-5)} y={a2.y+8} textAnchor={right?"start":"end"} fontSize={10.5} fill={s.color} fontFamily="Fraunces,Georgia,serif" fontWeight="300">{fmtN(s.amount)} Kč</text>
             </g>
           );
         })}
 
         {/* Label lines + text for inner ring (big segments only) */}
-        {iSegs.filter(s=>s.sw>0.18).map((s,i)=>{
+        {iSegs.filter(s=>s.sw>0.10).map((s,i)=>{
           const a1 = { x: cx+(IR-4)*Math.cos(s.midA), y: cy+(IR-4)*Math.sin(s.midA) };
           const a2 = { x: cx+(IRi-14)*Math.cos(s.midA), y: cy+(IRi-14)*Math.sin(s.midA) };
           return (
@@ -1237,8 +1237,8 @@ function WealthDonut({ outerItems, innerItems, outerLabel, innerLabel, outerTota
             onMouseEnter={()=>setHovered({ring:s.ring,label:s.label,amount:s.amount,color:s.color,pct:Math.round(s.sw/(2*Math.PI)*100)})}
             onMouseLeave={()=>setHovered(null)}>
             <div style={{width:8,height:8,borderRadius:2,background:s.color,flexShrink:0}}/>
-            <span style={{fontSize:10.5,color:isHov(s)?s.color:"var(--txt)",fontWeight:isHov(s)?600:400,whiteSpace:"nowrap"}}>{s.label}</span>
-            <span style={{fontSize:10,color:isHov(s)?s.color:"var(--mut)",fontFamily:"Fraunces,serif",fontWeight:300}}>{fmtN(s.amount)}</span>
+            <span style={{fontSize:12,color:isHov(s)?s.color:"var(--txt)",fontWeight:isHov(s)?600:500,whiteSpace:"nowrap",letterSpacing:".01em"}}>{s.label}</span>
+            <span style={{fontSize:11,color:isHov(s)?s.color:"var(--mut)",fontFamily:"Fraunces,serif",fontWeight:300}}>{fmtN(s.amount)}</span>
           </div>
         ))}
       </div>
@@ -1644,118 +1644,63 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
         </div>
       </div>
 
-      {/* KPI row — 5 karet */}
-      <div style={{display:"grid",gridTemplateColumns:"2fr 1fr 1fr 1fr 1fr",gap:10}}>
-        {/* YTD — hlavní card */}
-        <div style={{background:"var(--ink)",border:"1px solid var(--ink)",borderRadius:14,padding:"20px 24px",boxShadow:"0 6px 24px rgba(53,24,165,.28)",position:"relative",overflow:"hidden"}}>
-          <div style={{position:"absolute",right:-20,top:-20,width:120,height:120,borderRadius:"50%",background:"rgba(255,255,255,.04)"}}/>
-          <div style={{position:"absolute",right:20,top:20,width:60,height:60,borderRadius:"50%",background:"rgba(255,255,255,.05)"}}/>
-          <Lbl color="rgba(255,255,255,.45)">YTD {year} — základ bez DPH</Lbl>
-          <Num size={32} color="#fff">{fmtKc(ytd)}</Num>
-          <div style={{fontSize:11,color:"rgba(255,255,255,.5)",marginTop:6}}>
-            s DPH: {fmtKc(ytdTotal)} · {invoices.filter(i=>(i.issue_date||"").startsWith(String(year))).length} faktur
-          </div>
-        </div>
-        {/* Tento měsíc */}
+      {/* TOP ROW: 3+2 */}
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr 1fr",gap:10,marginBottom:2}}>
+        <Card>
+          <Lbl>◀ Minulý měsíc</Lbl>
+          <Num size={22}>{fmtKc(mRevPrev)}</Num>
+          {trend!==null&&<div style={{fontSize:11,color:trend>=0?"#059669":"#DC2626",fontWeight:500,marginTop:4}}>{trend>=0?"↑":"↓"} {Math.abs(trend)} % · základ</div>}
+        </Card>
+        <Card style={{background:"#F0FDF4",border:"1px solid #BBF7D0"}}>
+          <Lbl color="#065F46">▶ Příší měsíc</Lbl>
+          <Num size={22} color="#059669">+{fmtKc(unbilledAmt+mestoPodebrady)}</Num>
+          <div style={{fontSize:11,color:"#065F46",marginTop:4}}>výkazy + Poděbrady</div>
+        </Card>
         <Card>
           <Lbl>Tento měsíc</Lbl>
-          <Num size={20}>{fmtKc(mRev)}</Num>
-          {trend!==null && <div style={{fontSize:11,marginTop:5,color:trend>=0?"#059669":"#DC2626",fontWeight:500}}>{trend>=0?"↑":"↓"} {Math.abs(trend)} %</div>}
+          <Num size={22}>{fmtKc(mRev)}</Num>
+          {trend!==null&&<div style={{fontSize:11,color:trend>=0?"#059669":"#DC2626",fontWeight:500,marginTop:4}}>{trend>=0?"↑":"↓"} {Math.abs(trend)} %</div>}
         </Card>
-        {/* K vystavení */}
-        <Card style={{cursor:"pointer",transition:".15s"}} onClick={()=>onNav("fakturace")}>
+        <Card style={{cursor:"pointer"}} onClick={()=>onNav("fakturace")}>
           <Lbl color="var(--ink)">K vystavení</Lbl>
-          <Num size={20} color="var(--ink)">{fmtKc(unbilledAmt)}</Num>
-          <div style={{fontSize:11,color:"var(--mut)",marginTop:5}}>{Object.keys(unbilledByClient).length} klientů</div>
+          <Num size={22} color="var(--ink)">{fmtKc(unbilledAmt)}</Num>
+          <div style={{fontSize:11,color:"var(--mut)",marginTop:4}}>{Object.keys(unbilledByClient).length} klientů →</div>
         </Card>
-        {/* DPH spořák */}
-        <Card style={{background:"#FFFBEB",border:"1px solid #FDE68A"}}>
-          <Lbl color="#92400E">DPH · spořák</Lbl>
-          <Num size={20} color="#92400E">{fmtKc(dphReserved)}</Num>
-          <div style={{fontSize:11,color:"#B45309",marginTop:5}}>rezervováno</div>
-        </Card>
-        {/* Po splatnosti */}
         <Card style={{background:overdueAmt>0?"#FEF2F2":"#F0FDF4",border:`1px solid ${overdueAmt>0?"#FECACA":"#BBF7D0"}`}}>
           <Lbl color={overdueAmt>0?"#991B1B":"#065F46"}>Po splatnosti</Lbl>
-          <Num size={20} color={overdueAmt>0?"#DC2626":"#059669"}>{fmtKc(overdueAmt)}</Num>
-          <div style={{fontSize:11,color:overdueAmt>0?"#991B1B":"#065F46",marginTop:5}}>{overdueAmt>0?`${overdue.length} faktur`:"vše OK ✓"}</div>
+          <Num size={22} color={overdueAmt>0?"#DC2626":"#059669"}>{fmtKc(overdueAmt)}</Num>
+          <div style={{fontSize:11,color:overdueAmt>0?"#991B1B":"#065F46",marginTop:4}}>{overdueAmt>0?`${overdue.length} faktur`:"vše OK ✓"}</div>
         </Card>
       </div>
 
-      {/* PŘÍJMY + CO MI ZBYDE — hero row */}
-      {(() => {
-        const prijem = (financeItems||[]).filter(i => i.category === "prijem");
-        const totalPrijem = mestoPodebrady + onTheWay + prijem.filter(i=>i.id!=="fi_pr_02"&&i.id!=="fi_pr_03").reduce((s,i)=>s+(i.amount||0),0);
-        const zbyde = totalPrijem + totalVydaje; // totalVydaje záporné
-        const zdravi = Math.abs(totalVydaje) > 0 ? ((ytd/monthsElapsed) / Math.abs(totalVydaje)) : null;
-
-        // Compute Osobní majetek for hero display
-        const sporaciH = (financeItems||[]).filter(i => i.category === "sporaci" && i.notes !== "SKIP_DISPLAY");
-        const zůstatekH = sporaciH.find(i => i.id === "fi_sp_99")?.amount || 0;
-        const dphH = invoices.filter(i => i.status === "uhrazena").reduce((s,i) => s+(i.vat_amount||0), 0);
-        const dpfoH = (dpfoMonths||[]).filter(m => m.is_paid).reduce((s,m) => s+(m.amount||8050), 0);
-        const bobH = Math.max((()=>{const b=(loanTransactions?.loan_bobnice||[]).reduce((s,t)=>s+t.amount,0); return b>0?b:((financeItems||[]).find(i=>i.id==="fi_sp_02")?.amount||0);})(), 0);
-        const manH = sporaciH.filter(i=>i.id!=="fi_sp_99"&&i.id!=="fi_sp_01"&&i.id!=="fi_sp_02").reduce((s,o)=>s+(o.amount||0),0);
-        const zkH = Math.max(zůstatekH - dphH - dpfoH - bobH - manH, 0);
-        const akcieH = (financeItems||[]).find(i=>i.id==="fi_ma_01")?.amount||0;
-        const stavebkoH = (financeItems||[]).find(i=>i.id==="fi_ma_02")?.amount||0;
-        const osobniMajetek = akcieH + stavebkoH + zkH;
-
-        return (
-          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr",gap:12}}>
-            {/* HERO 1 — osobní majetek */}
-            <div style={{background:"#1A0E5C",border:"1px solid #3518A5",borderRadius:14,padding:"20px 24px",position:"relative",overflow:"hidden",boxShadow:"0 6px 24px rgba(53,24,165,.28)"}}>
-              <div style={{position:"absolute",right:-15,top:-15,width:80,height:80,borderRadius:"50%",background:"rgba(255,255,255,.04)"}}/>
-              <Lbl color="rgba(255,255,255,.45)">Osobní majetek</Lbl>
-              <Num size={28} color="#fff">{fmtKc(osobniMajetek)}</Num>
-              <div style={{fontSize:11,color:"rgba(255,255,255,.5)",marginTop:5}}>Akcie + Stavebko + Základ. kapitál</div>
-            </div>
-            {/* HERO 2 — zbyde příští měsíc */}
-            <div style={{background:zbyde>=0?"#052E16":"#450A0A",border:`1px solid ${zbyde>=0?"#15803D":"#991B1B"}`,borderRadius:14,padding:"20px 24px",position:"relative",overflow:"hidden"}}>
-              <div style={{position:"absolute",right:-15,top:-15,width:80,height:80,borderRadius:"50%",background:"rgba(255,255,255,.03)"}}/>
-              <Lbl color={zbyde>=0?"rgba(134,239,172,.7)":"rgba(252,165,165,.7)"}>Zbyde příší měsíc</Lbl>
-              <Num size={28} color={zbyde>=0?"#4ADE80":"#F87171"}>{zbyde>=0?"+":""}{fmtKc(zbyde)}</Num>
-              <div style={{fontSize:11,color:zbyde>=0?"rgba(134,239,172,.5)":"rgba(252,165,165,.5)",marginTop:5}}>příjmy − všechny výdaje</div>
-            </div>
-            <Card style={{background:"#FFFBEB",border:"1px solid #FDE68A"}}>
-              <Lbl color="#92400E">DPH · spořák</Lbl>
-              <Num size={20} color="#92400E">{fmtKc(dphReserved)}</Num>
-              <div style={{fontSize:11,color:"#B45309",marginTop:5}}>rezervováno k odvodu</div>
-            </Card>
-            <Card style={{background:"#F5F3FF",border:"1px solid #DDD8F5"}}>
-              <Lbl color="var(--ink)">Zdraví · {zdravi?`${zdravi.toFixed(2)}×`:"—"}</Lbl>
-              <Num size={20} color={zdravi&&zdravi>=2?"#059669":zdravi&&zdravi>=1?"#D97706":"#DC2626"}>
-                {fmtKc(mRev)}
-              </Num>
-              <div style={{fontSize:11,color:"var(--mut)",marginTop:5}}>tento měsíc fakturováno</div>
-            </Card>
-          </div>
-        );
-      })()}
-
-      {/* MINULÝ vs PŘÍŠTÍ MĚSÍC */}
-      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
-        <div style={{background:"#fff",border:"1px solid var(--line)",borderRadius:14,padding:"16px 20px"}}>
-          <div style={{fontSize:8,letterSpacing:".3em",textTransform:"uppercase",color:"var(--mut)",fontWeight:600,marginBottom:2}}>◀ Minulý měsíc — výsledky</div>
-          <div style={{fontFamily:"Fraunces,serif",fontSize:24,fontWeight:300,color:"var(--ink)",marginBottom:8}}>{fmtKc(mRevPrev)}<span style={{fontSize:11,color:"var(--mut)",fontFamily:"Inter",marginLeft:8,fontWeight:400}}>bez DPH</span></div>
-          <div style={{display:"flex",gap:16,fontSize:12,color:"var(--mut)"}}>
-            <span>trend: <strong style={{color:trend>=0?"#059669":"#DC2626"}}>{trend!==null?`${trend>=0?"↑":"↓"}${Math.abs(trend)}%`:"—"}</strong></span>
-            <span>YTD: <strong style={{color:"var(--ink)"}}>{fmtKc(ytd)}</strong></span>
-          </div>
-        </div>
-        <div style={{background:"#F0FDF4",border:"1px solid #BBF7D0",borderRadius:14,padding:"16px 20px"}}>
-          <div style={{fontSize:8,letterSpacing:".3em",textTransform:"uppercase",color:"#065F46",fontWeight:600,marginBottom:2}}>▶ Příští měsíc — predikce</div>
-          <div style={{fontFamily:"Fraunces,serif",fontSize:24,fontWeight:300,color:"#059669",marginBottom:8}}>+{fmtKc(onTheWay)}<span style={{fontSize:11,color:"#065F46",fontFamily:"Inter",marginLeft:8,fontWeight:400}}>z výkazů {CZ_MONTHS[now.getMonth()]}</span></div>
-          <div style={{display:"flex",gap:16,fontSize:12,color:"#065F46"}}>
-            <span>+{fmtKc(mestoPodebrady)} Poděbrady</span>
-            <span>výdaje: {fmtKc(Math.abs(totalVydaje))}</span>
-            <span>zbyde: <strong>{fmtKc(onTheWay+mestoPodebrady+totalVydaje)}</strong></span>
-          </div>
-        </div>
+      {/* COMPACT SUMMARY */}
+      <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:10}}>
+        <Card style={{padding:"12px 16px",background:"#F0FDF4",border:"1px solid #BBF7D0"}}>
+          <Lbl color="#065F46">Příjmy měsíčně</Lbl>
+          <div style={{fontFamily:"Fraunces,serif",fontSize:19,fontWeight:300,color:"#059669",marginTop:3}}>+{fmtKc(mestoPodebrady+unbilledAmt)}</div>
+        </Card>
+        <Card style={{padding:"12px 16px"}}>
+          <Lbl color="#DC2626">Nutné výdaje</Lbl>
+          <div style={{fontFamily:"Fraunces,serif",fontSize:19,fontWeight:300,color:"#DC2626",marginTop:3}}>{fmtKc(Math.abs(totalNutne))}</div>
+        </Card>
+        <Card style={{padding:"12px 16px"}}>
+          <Lbl color="#9333EA">Lusus výdaje</Lbl>
+          <div style={{fontFamily:"Fraunces,serif",fontSize:19,fontWeight:300,color:"#9333EA",marginTop:3}}>{fmtKc(Math.abs(totalLuxus))}</div>
+        </Card>
+        {(()=>{const z=mestoPodebrady+unbilledAmt+totalVydaje;return(
+          <Card style={{padding:"12px 16px",background:z>=0?"#F0FDF4":"#FEF2F2",border:`1px solid ${z>=0?"#BBF7D0":"#FECACA"}`}}>
+            <Lbl color={z>=0?"#065F46":"#991B1B"}>Cash flow</Lbl>
+            <div style={{fontFamily:"Fraunces,serif",fontSize:19,fontWeight:300,color:z>=0?"#059669":"#DC2626",marginTop:3}}>{z>=0?"+":""}{fmtKc(z)}</div>
+          </Card>
+        );})()} 
       </div>
 
+
+
+
+
       {/* VELKÝ INTERAKTIVNÍ DONUT — centrální vizuál */}
-      <div style={{display:"grid",gridTemplateColumns:"1fr 300px",gap:16,alignItems:"start"}}>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 260px",gap:14,alignItems:"start"}}>
         {/* WealthDonut */}
         {(() => {
           const sp2 = (financeItems||[]).filter(i => i.category === "sporaci" && i.notes !== "SKIP_DISPLAY");
@@ -1859,7 +1804,7 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
           items={(financeItems||[]).filter(i=>i.category==="prijem")}
           category="prijem" accent="#059669"
           onSave={onSaveFinance} onDelete={onDeleteFinance}
-          autoItems={onTheWay>0 ? [{ label: `MAUX Legal — ${CZ_MONTHS[now.getMonth()]}`, amount: onTheWay }] : []}
+          autoItems={unbilledAmt>0 ? [{ label: `MAUX Legal — nevyfakturováno`, amount: unbilledAmt }] : []}
         />
         <FinanceSection title="Nutné výdaje" items={nutne} category="nutne" accent="#DC2626" onSave={onSaveFinance} onDelete={onDeleteFinance} />
         <FinanceSection title="Lusus výdaje" items={luxus} category="luxus" accent="#9333EA" onSave={onSaveFinance} onDelete={onDeleteFinance} />
