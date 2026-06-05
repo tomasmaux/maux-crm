@@ -323,9 +323,9 @@ function Dashboard({ invoices, workEntries, clients, onNav }) {
   }));
   const maxRev = Math.max(...revenueByMonth.map(m => m.v), 1);
 
-  const ytd = invoices.filter(i => (i.issue_date || "").startsWith(String(year))).reduce((s, i) => s + (i.total || 0), 0);
-  const thisMonthRev = invoices.filter(i => (i.issue_date || "").startsWith(thisMonth)).reduce((s, i) => s + (i.total || 0), 0);
-  const prevMonthRev = invoices.filter(i => (i.issue_date || "").startsWith(prevMonth)).reduce((s, i) => s + (i.total || 0), 0);
+  const ytd = invoices.filter(i => (i.issue_date || "").startsWith(String(year))).reduce((s, i) => s + (i.subtotal || 0), 0);
+  const thisMonthRev = invoices.filter(i => (i.issue_date || "").startsWith(thisMonth)).reduce((s, i) => s + (i.subtotal || 0), 0);
+  const prevMonthRev = invoices.filter(i => (i.issue_date || "").startsWith(prevMonth)).reduce((s, i) => s + (i.subtotal || 0), 0);
   const revTrend = prevMonthRev > 0 ? Math.round(((thisMonthRev - prevMonthRev) / prevMonthRev) * 100) : null;
 
   const unbilled = workEntries.filter(e => !e.invoice_id);
@@ -333,15 +333,15 @@ function Dashboard({ invoices, workEntries, clients, onNav }) {
   const unbilledClients = new Set(unbilled.filter(e => e.client_id).map(e => e.client_id)).size;
 
   const overdue = invoices.filter(i => invoiceStatus(i) === "po_splatnosti");
-  const overdueAmt = overdue.reduce((s, i) => s + (i.total || 0), 0);
+  const overdueAmt = overdue.reduce((s, i) => s + (i.subtotal || 0), 0);
   const pending = invoices.filter(i => invoiceStatus(i) === "vystavena");
-  const pendingAmt = pending.reduce((s, i) => s + (i.total || 0), 0);
+  const pendingAmt = pending.reduce((s, i) => s + (i.subtotal || 0), 0);
 
   const thisMonthHours = workEntries.filter(e => (e.entry_date || "").startsWith(thisMonth)).reduce((s, e) => s + (e.hours || 0), 0);
   const thisMonthRealH = workEntries.filter(e => (e.entry_date || "").startsWith(thisMonth)).reduce((s, e) => s + (e.real_hours || 0), 0);
 
   const clientRev = {};
-  invoices.forEach(i => { if (i.client_id) clientRev[i.client_id] = (clientRev[i.client_id] || 0) + (i.total || 0); });
+  invoices.forEach(i => { if (i.client_id) clientRev[i.client_id] = (clientRev[i.client_id] || 0) + (i.subtotal || 0); });
   const topClients = Object.entries(clientRev).sort(([, a], [, b]) => b - a).slice(0, 6)
     .map(([id, rev]) => ({ c: clients.find(x => x.id === id), rev })).filter(x => x.c);
   const maxCR = topClients[0]?.rev || 1;
@@ -820,9 +820,9 @@ function InvoiceList({ invoices, clients, workEntries, onOpen, onOpenClient, onT
     return list;
   }, [invoices, search, filterClient, filterStatus, dateFrom, dateTo, sortBy]);
 
-  const total = useMemo(() => invoices.reduce((s, i) => s + (i.total || 0), 0), [invoices]);
-  const nezaplaceno = useMemo(() => invoices.filter(i => invoiceStatus(i) !== "uhrazena").reduce((s, i) => s + (i.total || 0), 0), [invoices]);
-  const poSplatnosti = useMemo(() => invoices.filter(i => invoiceStatus(i) === "po_splatnosti").reduce((s, i) => s + (i.total || 0), 0), [invoices]);
+  const total = useMemo(() => invoices.reduce((s, i) => s + (i.subtotal || 0), 0), [invoices]);
+  const nezaplaceno = useMemo(() => invoices.filter(i => invoiceStatus(i) !== "uhrazena").reduce((s, i) => s + (i.subtotal || 0), 0), [invoices]);
+  const poSplatnosti = useMemo(() => invoices.filter(i => invoiceStatus(i) === "po_splatnosti").reduce((s, i) => s + (i.subtotal || 0), 0), [invoices]);
   const hasFilters = search || filterClient || filterStatus !== "vse" || dateFrom || dateTo;
 
   const clientName = (inv) => inv.clients?.name || inv.notes?.split(" - ")[0] || "—";
@@ -986,7 +986,7 @@ function InvoiceList({ invoices, clients, workEntries, onOpen, onOpenClient, onT
       {!loading && (
         <table className="tbl">
           <thead><tr>
-            <th>Klient</th><th>Číslo faktury</th><th>Vystavena</th><th>Splatnost</th><th style={{ textAlign: "right" }}>Částka s DPH</th><th style={{ textAlign: "right" }}>Stav</th><th></th>
+            <th>Klient</th><th>Číslo faktury</th><th>Vystavena</th><th>Splatnost</th><th style={{ textAlign: "right" }}>Základ (bez DPH)</th><th style={{ textAlign: "right" }}>Stav</th><th></th>
           </tr></thead>
           <tbody>
             {filtered.length === 0 && (
@@ -1019,7 +1019,7 @@ function InvoiceList({ invoices, clients, workEntries, onOpen, onOpenClient, onT
                 </td>
                 <td className="t-date">{fmtDate(inv.issue_date)}</td>
                 <td className="t-date">{fmtDate(inv.due_date)}</td>
-                <td className="t-amt">{fmtKc(inv.total)}</td>
+                <td className="t-amt">{fmtKc(inv.subtotal)}</td>
                 <td style={{ textAlign: "right" }} onClick={e => e.stopPropagation()}>
                   <StatusToggle inv={inv} />
                 </td>
@@ -1060,7 +1060,8 @@ function InvoiceDetail({ inv, clients, onBack, onEdit, onDelete }) {
         <div className="mf"><div className="ml">Klient</div><div className="mv">{clientName}</div></div>
         <div className="mf"><div className="ml">Vystavena</div><div className="mv">{fmtDate(inv.issue_date)}</div></div>
         <div className="mf"><div className="ml">Splatnost</div><div className="mv">{fmtDate(inv.due_date)}</div></div>
-        <div className="mf"><div className="ml">Celkem s DPH</div><div className="mv" style={{ fontFamily: "Fraunces, serif", fontSize: 20, fontWeight: 300, color: "var(--gold)" }}>{fmtKc(inv.total)}</div></div>
+        <div className="mf"><div className="ml">Základ bez DPH</div><div className="mv" style={{ fontFamily: "Fraunces, serif", fontSize: 20, fontWeight: 300, color: "var(--gold)" }}>{fmtKc(inv.subtotal)}</div></div>
+        <div className="mf"><div className="ml">Celkem s DPH</div><div className="mv" style={{ fontSize: 14, color: "var(--mut)" }}>{fmtKc(inv.total)}</div></div>
       </div>
       <table className="inv-items-det">
         <thead><tr><th style={{width:"50%"}}>Popis</th><th>Hodin</th><th>Sazba/h</th><th>Částka</th></tr></thead>
