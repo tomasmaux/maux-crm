@@ -810,9 +810,11 @@ export default function MauxCRM() {
   useEffect(() => {
     if (!session) return;
     setDataLoading(true);
-    Promise.all([fetchClients(), fetchInvoices()])
+    Promise.all([
+      fetchClients().catch(e => { console.error("clients:", e); return []; }),
+      fetchInvoices().catch(e => { console.error("invoices:", e); return []; }),
+    ])
       .then(([c, i]) => { setClients(c); setInvoices(i); })
-      .catch(console.error)
       .finally(() => setDataLoading(false));
   }, [session]);
 
