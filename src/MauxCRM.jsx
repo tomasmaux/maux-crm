@@ -1347,7 +1347,8 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
 
   // Příjmy měsíční
   const mestoPodebrady = (financeItems||[]).find(i => i.id === "fi_pr_02")?.amount || 7245;
-  const onTheWay = invoices.filter(i => invoiceStatus(i) === "vystavena").reduce((s,i) => s+(i.subtotal||0), 0);
+  // On the way = nevyfakturovaná práce (work entries bez invoice_id)
+  const onTheWay = (workEntries||[]).filter(e => !e.invoice_id).reduce((s,e) => s + Math.round((e.amount||0)*1.21) + (e.notary_fee||0) + (e.admin_fee||0), 0);
   // Zdraví skóre = YTD avg monthly / abs(monthly expenses)
   const monthsElapsed = Math.max(now.getMonth()+1, 1);
 
@@ -1492,11 +1493,8 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
         );
       })()}
 
-      {/* SPOŘÍCÍ ÚČET */}
-      <SpořákTile financeItems={financeItems} invoices={invoices} dpfoMonths={dpfoMonths} loanTransactions={loanTransactions} onSaveFinance={onSaveFinance} />
-
-      {/* Chart + Majetek + Top klienti — fixed proportions */}
-      <div style={{display:"grid",gridTemplateColumns:"1fr 260px 200px",gap:12}}>
+      {/* Chart (half) + Happy Life tiles (half) — side by side */}
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
         <Card>
           {(() => {
             const W = 420, H = 120, padL = 8, padR = 8, padT = 24, padB = 26;
@@ -1573,76 +1571,76 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
             );
           })()}
         </Card>
-        {/* MAJETEK — kombinovaný donut */}
-        {(() => {
-          const sporaci = (financeItems||[]).filter(i => i.category === "sporaci" && i.notes !== "SKIP_DISPLAY");
-          const zůstatekItem = sporaci.find(i => i.id === "fi_sp_99");
-          const dphAuto = invoices.filter(i => i.status === "uhrazena").reduce((s,i) => s+(i.vat_amount||0), 0);
-          const dpfoAcc = (dpfoMonths||[]).filter(m => m.is_paid).reduce((s,m) => s+(m.amount||8050), 0);
-          const bobloan2 = (loanTransactions?.loan_bobnice||[]).reduce((s,t) => s+t.amount, 0);
-          const bobFb2 = (financeItems||[]).find(i => i.id === "fi_sp_02")?.amount || 0;
-          const bobniceBal2 = Math.max(bobloan2 > 0 ? bobloan2 : bobFb2, 0);
-          const manualObálky2 = sporaci.filter(i => i.id !== "fi_sp_99" && i.id !== "fi_sp_01" && i.id !== "fi_sp_02");
-          const totalEarmarked = dphAuto + dpfoAcc + bobniceBal2 + manualObálky2.reduce((s,o) => s+(o.amount||0), 0);
-          const actualBalance = zůstatekItem?.amount || 0;
-          const základníKapitál = Math.max(actualBalance - totalEarmarked, 0);
-          const majetek = (financeItems||[]).filter(i => i.category === "majetek" && i.id !== "fi_ma_03");
-          const akcie = majetek.find(i => i.id === "fi_ma_01")?.amount || 0;
-          const stavebko = majetek.find(i => i.id === "fi_ma_02")?.amount || 0;
-          const wItems = [
-            { label: "Akcie", amount: akcie, color: "#3518A5" },
-            { label: "Stavebko", amount: stavebko, color: "#B8923D" },
-            { label: "Základ. kapitál", amount: základníKapitál, color: "#059669" },
-          ].filter(i => i.amount > 0);
-          const totalW = wItems.reduce((s,i) => s+i.amount, 0);
-          const planKapitál = (financeItems||[]).find(i => i.id === "fi_plan_kapital")?.amount || 150000;
-          return (
-            <Card style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-              <Lbl color="#7C3AED">Osobní majetek</Lbl>
-              <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
-                <DonutChart items={wItems} size={90} />
-                <div style={{ flex: 1 }}>
-                  <div style={{ fontFamily: "Fraunces,serif", fontSize: 18, fontWeight: 300, color: "var(--txt)", marginBottom: 8 }}>{fmtKc(totalW)}</div>
-                  {wItems.map((item,i) => (
-                    <div key={i} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 5 }}>
-                      <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
-                        <div style={{ width: 7, height: 7, borderRadius: 2, background: item.color }} />
-                        <span style={{ fontSize: 11, color: "var(--txt)" }}>{item.label}</span>
+        {/* Right: SpořákTile + Majetek donut stacked */}
+        <div style={{display:"flex",flexDirection:"column",gap:12}}>
+          <SpořákTile financeItems={financeItems} invoices={invoices} dpfoMonths={dpfoMonths} loanTransactions={loanTransactions} onSaveFinance={onSaveFinance} />
+          {(() => {
+            const sporaci2 = (financeItems||[]).filter(i => i.category === "sporaci" && i.notes !== "SKIP_DISPLAY");
+            const zůstatekItem2 = sporaci2.find(i => i.id === "fi_sp_99");
+            const dphAuto2 = invoices.filter(i => i.status === "uhrazena").reduce((s,i) => s+(i.vat_amount||0), 0);
+            const dpfoAcc2 = (dpfoMonths||[]).filter(m => m.is_paid).reduce((s,m) => s+(m.amount||8050), 0);
+            const bobloan2 = (loanTransactions?.loan_bobnice||[]).reduce((s,t) => s+t.amount, 0);
+            const bobFb2 = (financeItems||[]).find(i => i.id === "fi_sp_02")?.amount || 0;
+            const bobniceBal2 = Math.max(bobloan2 > 0 ? bobloan2 : bobFb2, 0);
+            const manualObálky2 = sporaci2.filter(i => i.id !== "fi_sp_99" && i.id !== "fi_sp_01" && i.id !== "fi_sp_02");
+            const totalEarmarked2 = dphAuto2 + dpfoAcc2 + bobniceBal2 + manualObálky2.reduce((s,o) => s+(o.amount||0), 0);
+            const actualBalance2 = zůstatekItem2?.amount || 0;
+            const základníKapitál = Math.max(actualBalance2 - totalEarmarked2, 0);
+            const akcie = (financeItems||[]).find(i => i.id === "fi_ma_01")?.amount || 0;
+            const stavebko = (financeItems||[]).find(i => i.id === "fi_ma_02")?.amount || 0;
+            const wItems = [
+              { label: "Akcie", amount: akcie, color: "#3518A5" },
+              { label: "Stavebko", amount: stavebko, color: "#B8923D" },
+              { label: "Zákl. kapitál", amount: základníKapitál, color: "#059669" },
+            ].filter(i => i.amount > 0);
+            const totalW = wItems.reduce((s,i) => s+i.amount, 0);
+            const planKapitál = (financeItems||[]).find(i => i.id === "fi_plan_kapital")?.amount || 150000;
+            return (
+              <Card>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:12}}>
+                  <Lbl color="#7C3AED">Osobní majetek</Lbl>
+                  <span style={{fontFamily:"Fraunces,serif",fontSize:20,fontWeight:300,color:"#7C3AED"}}>{fmtKc(totalW)}</span>
+                </div>
+                <div style={{display:"flex",alignItems:"center",gap:16}}>
+                  <DonutChart items={wItems} size={80} />
+                  <div style={{flex:1}}>
+                    {wItems.map((item,i) => (
+                      <div key={i} style={{display:"flex",justifyContent:"space-between",marginBottom:6}}>
+                        <div style={{display:"flex",alignItems:"center",gap:6}}>
+                          <div style={{width:8,height:8,borderRadius:2,background:item.color}}/>
+                          <span style={{fontSize:12,color:"var(--txt)"}}>{item.label}</span>
+                        </div>
+                        <span style={{fontSize:13,fontFamily:"Fraunces,serif",fontWeight:300,color:item.color}}>{Math.round(item.amount/1000)}k</span>
                       </div>
-                      <span style={{ fontSize: 11, fontFamily: "Fraunces,serif", fontWeight: 300, color: item.color }}>{Math.round(item.amount/1000)}k</span>
+                    ))}
+                    <div style={{marginTop:8,paddingTop:8,borderTop:"1px solid var(--line)"}}>
+                      <div style={{height:4,background:"#F0EEF8",borderRadius:2,marginBottom:4}}>
+                        <div style={{height:"100%",width:`${Math.min((základníKapitál/planKapitál)*100,100)}%`,background:základníKapitál>=planKapitál?"#059669":"#3518A5",borderRadius:2}}/>
+                      </div>
+                      <div style={{fontSize:11,color:základníKapitál>=planKapitál?"#059669":"#DC2626",fontWeight:500}}>
+                        {základníKapitál>=planKapitál?"✓ Cíl splněn":`ZK: ${fmtKc(základníKapitál)} / cíl ${fmtKc(planKapitál)}`}
+                      </div>
                     </div>
-                  ))}
+                  </div>
+                </div>
+              </Card>
+            );
+          })()}
+          <Card>
+            <Lbl>Top klienti</Lbl>
+            {topC.slice(0,5).map(({c,rev},i)=>(
+              <div key={i} style={{marginBottom:10}}>
+                <div style={{display:"flex",justifyContent:"space-between",marginBottom:3}}>
+                  <span style={{fontSize:12,color:"var(--txt)",fontWeight:500,maxWidth:150,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{c.name.split(" ")[0]}</span>
+                  <span style={{fontSize:12,fontFamily:"Fraunces,serif",color:"var(--gold)",flexShrink:0}}>{Math.round(rev/1000)}k</span>
+                </div>
+                <div style={{height:3,background:"#F0EEF8",borderRadius:2}}>
+                  <div style={{height:"100%",width:`${Math.round((rev/maxC)*100)}%`,background:i===0?"var(--ink)":"#B8ACE8",borderRadius:2}}/>
                 </div>
               </div>
-              {/* Kapitál vs plán mini-bar */}
-              <div style={{ borderTop: "1px solid var(--line)", paddingTop: 10 }}>
-                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10, color: "var(--mut)", marginBottom: 5 }}>
-                  <span>Základ. kapitál</span><span>cíl {fmtKc(planKapitál)}</span>
-                </div>
-                <div style={{ height: 5, background: "#F0EEF8", borderRadius: 3 }}>
-                  <div style={{ height: "100%", width: `${Math.min((základníKapitál/planKapitál)*100,100)}%`, background: základníKapitál >= planKapitál ? "#059669" : "#3518A5", borderRadius: 3 }} />
-                </div>
-                <div style={{ fontSize: 11, color: základníKapitál >= planKapitál ? "#059669" : "#DC2626", marginTop: 4, fontWeight: 500 }}>
-                  {základníKapitál >= planKapitál ? "✓ Cíl splněn" : `chybí ${fmtKc(planKapitál-základníKapitál)}`}
-                </div>
-              </div>
-            </Card>
-          );
-        })()}
-        <Card>
-          <Lbl>Top klienti</Lbl>
-          {topC.slice(0,5).map(({c,rev},i)=>(
-            <div key={i} style={{marginBottom:12}}>
-              <div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}>
-                <span style={{fontSize:12,color:"var(--txt)",fontWeight:500,maxWidth:130,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{c.name.split(" ")[0]}</span>
-                <span style={{fontSize:12,fontFamily:"Fraunces,serif",color:"var(--gold)",flexShrink:0}}>{Math.round(rev/1000)}k</span>
-              </div>
-              <div style={{height:3,background:"#F0EEF8",borderRadius:2}}>
-                <div style={{height:"100%",width:`${Math.round((rev/maxC)*100)}%`,background:i===0?"var(--ink)":"#B8ACE8",borderRadius:2}}/>
-              </div>
-            </div>
-          ))}
-        </Card>
+            ))}
+          </Card>
+        </div>
       </div>
 
       {/* Cash flow + personal finance */}
