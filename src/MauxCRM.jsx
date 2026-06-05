@@ -793,10 +793,13 @@ function Sidebar({ mod, setMod, onLogout }) {
 function SpořákTile({ financeItems, invoices, dpfoMonths, loanTransactions, onSaveFinance }) {
   const sporaci = (financeItems||[]).filter(i => i.category === "sporaci" && i.notes !== "SKIP_DISPLAY");
   const zůstatekItem = sporaci.find(i => i.id === "fi_sp_99");
-  const manualObálky = sporaci.filter(i => i.id !== "fi_sp_99");
+  // Always exclude fi_sp_02 (Bobnice) from manual — comes from loan tracker
+  const manualObálky = sporaci.filter(i => i.id !== "fi_sp_99" && i.id !== "fi_sp_01" && i.id !== "fi_sp_02");
   const dphAuto = invoices.filter(i => i.status === "uhrazena").reduce((s,i) => s+(i.vat_amount||0), 0);
   const dpfoAcc = (dpfoMonths||[]).filter(m => m.is_paid).reduce((s,m) => s+(m.amount||8050), 0);
-  const bobniceBal = Math.max((loanTransactions?.loan_bobnice||[]).reduce((s,t) => s+t.amount, 0), 0);
+  const bobloanBal = (loanTransactions?.loan_bobnice||[]).reduce((s,t) => s+t.amount, 0);
+  const bobniceFallback = (financeItems||[]).find(i => i.id === "fi_sp_02")?.amount || 0;
+  const bobniceBal = Math.max(bobloanBal > 0 ? bobloanBal : bobniceFallback, 0);
   const planKapitál = (financeItems||[]).find(i => i.id === "fi_plan_kapital")?.amount || 150000;
 
   const allItems = [
@@ -1342,6 +1345,12 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
   const year = now.getFullYear();
   const H = now.getHours();
 
+  // Příjmy měsíční
+  const mestoPodebrady = (financeItems||[]).find(i => i.id === "fi_pr_02")?.amount || 7245;
+  const onTheWay = invoices.filter(i => invoiceStatus(i) === "vystavena").reduce((s,i) => s+(i.subtotal||0), 0);
+  // Zdraví skóre = YTD avg monthly / abs(monthly expenses)
+  const monthsElapsed = Math.max(now.getMonth()+1, 1);
+
   // Revenue metrics
   const ytd = invoices.filter(i => (i.issue_date||"").startsWith(String(year))).reduce((s,i) => s+(i.subtotal||0), 0);
   const ytdTotal = invoices.filter(i => (i.issue_date||"").startsWith(String(year))).reduce((s,i) => s+(i.total||0), 0);
@@ -1451,14 +1460,46 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
         </Card>
       </div>
 
+      {/* PŘÍJMY + CO MI ZBYDE */}
+      {(() => {
+        const zbyde = mestoPodebrady + onTheWay + totalVydaje; // výdaje jsou záporné
+        const zdravi = Math.abs(totalVydaje) > 0 ? (mRev / Math.abs(totalVydaje)) : null;
+        return (
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr",gap:12}}>
+            <Card style={{background:"#F0FDF4",border:"1px solid #BBF7D0"}}>
+              <Lbl color="#065F46">Město Poděbrady</Lbl>
+              <Num size={20} color="#059669">+{fmtKc(mestoPodebrady)}</Num>
+              <div style={{fontSize:11,color:"#065F46",marginTop:5}}>fixní · 15. každý měsíc</div>
+            </Card>
+            <Card style={{cursor:"pointer"}} onClick={()=>onNav("fakturace")}>
+              <Lbl color="var(--ink)">MAUX Legal (on the way)</Lbl>
+              <Num size={20} color="var(--ink)">+{fmtKc(onTheWay)}</Num>
+              <div style={{fontSize:11,color:"var(--mut)",marginTop:5}}>vystavené faktury</div>
+            </Card>
+            <Card style={{background: zbyde>=0?"#F0FDF4":"#FEF2F2", border:`1px solid ${zbyde>=0?"#BBF7D0":"#FECACA"}`}}>
+              <Lbl color={zbyde>=0?"#065F46":"#991B1B"}>Zbyde mi tento měsíc</Lbl>
+              <Num size={22} color={zbyde>=0?"#059669":"#DC2626"}>{zbyde>=0?"+":""}{fmtKc(zbyde)}</Num>
+              <div style={{fontSize:11,color:zbyde>=0?"#065F46":"#991B1B",marginTop:5}}>příjmy − všechny výdaje</div>
+            </Card>
+            <Card style={{background:"#F5F3FF",border:"1px solid #DDD8F5"}}>
+              <Lbl color="var(--ink)">Zdraví skóre</Lbl>
+              <Num size={22} color={zdravi&&zdravi>=2?"#059669":zdravi&&zdravi>=1?"#D97706":"#DC2626"}>
+                {zdravi ? `${zdravi.toFixed(2)}×` : "—"}
+              </Num>
+              <div style={{fontSize:11,color:"var(--mut)",marginTop:5}}>fakturace ÷ náklady</div>
+            </Card>
+          </div>
+        );
+      })()}
+
       {/* SPOŘÍCÍ ÚČET */}
       <SpořákTile financeItems={financeItems} invoices={invoices} dpfoMonths={dpfoMonths} loanTransactions={loanTransactions} onSaveFinance={onSaveFinance} />
 
-      {/* Chart + Majetek + Top klienti */}
-      <div style={{display:"grid",gridTemplateColumns:"1fr 280px 220px",gap:12}}>
+      {/* Chart + Majetek + Top klienti — fixed proportions */}
+      <div style={{display:"grid",gridTemplateColumns:"1fr 260px 200px",gap:12}}>
         <Card>
           {(() => {
-            const W = 560, H = 130, padL = 10, padR = 10, padT = 24, padB = 28;
+            const W = 420, H = 120, padL = 8, padR = 8, padT = 24, padB = 26;
             const n = chartData.length;
             if (n === 0) return null;
             const nonZero = chartData.filter(d => d.v > 0);
@@ -1538,9 +1579,11 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
           const zůstatekItem = sporaci.find(i => i.id === "fi_sp_99");
           const dphAuto = invoices.filter(i => i.status === "uhrazena").reduce((s,i) => s+(i.vat_amount||0), 0);
           const dpfoAcc = (dpfoMonths||[]).filter(m => m.is_paid).reduce((s,m) => s+(m.amount||8050), 0);
-          const bobniceBal = Math.max((loanTransactions?.loan_bobnice||[]).reduce((s,t) => s+t.amount, 0), 0);
-          const manualObálky = sporaci.filter(i => i.id !== "fi_sp_99");
-          const totalEarmarked = dphAuto + dpfoAcc + bobniceBal + manualObálky.reduce((s,o) => s+(o.amount||0), 0);
+          const bobloan2 = (loanTransactions?.loan_bobnice||[]).reduce((s,t) => s+t.amount, 0);
+          const bobFb2 = (financeItems||[]).find(i => i.id === "fi_sp_02")?.amount || 0;
+          const bobniceBal2 = Math.max(bobloan2 > 0 ? bobloan2 : bobFb2, 0);
+          const manualObálky2 = sporaci.filter(i => i.id !== "fi_sp_99" && i.id !== "fi_sp_01" && i.id !== "fi_sp_02");
+          const totalEarmarked = dphAuto + dpfoAcc + bobniceBal2 + manualObálky2.reduce((s,o) => s+(o.amount||0), 0);
           const actualBalance = zůstatekItem?.amount || 0;
           const základníKapitál = Math.max(actualBalance - totalEarmarked, 0);
           const majetek = (financeItems||[]).filter(i => i.category === "majetek" && i.id !== "fi_ma_03");
