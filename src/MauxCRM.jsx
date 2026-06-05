@@ -237,6 +237,53 @@ async function deleteClientDb(id) {
   const { error } = await supabase.from("clients").delete().eq("id", id);
   if (error) throw error;
 }
+// ── DPFO ──
+async function fetchDpfoMonths(year) {
+  const { data, error } = await supabase.from("dpfo_months").select("*").eq("year", year).order("month");
+  if (error) throw error;
+  return data || [];
+}
+async function toggleDpfoMonth(row) {
+  const updated = { ...row, is_paid: !row.is_paid, paid_at: !row.is_paid ? new Date().toISOString() : null };
+  const { error } = await supabase.from("dpfo_months").upsert(updated);
+  if (error) throw error;
+  return updated;
+}
+async function ensureDpfoYear(year) {
+  const months = await fetchDpfoMonths(year);
+  if (months.length === 12) return months;
+  for (let m = 1; m <= 12; m++) {
+    if (!months.find(x => x.month === m)) {
+      await supabase.from("dpfo_months").insert({ id: `dpfo_${year}_${String(m).padStart(2,"0")}`, year, month: m, amount: 8050, is_paid: false });
+    }
+  }
+  return fetchDpfoMonths(year);
+}
+
+// ── LOANS ──
+async function fetchLoanTrackers() {
+  const { data, error } = await supabase.from("loan_trackers").select("*");
+  if (error) throw error;
+  return data || [];
+}
+async function upsertLoanTracker(t) {
+  const { error } = await supabase.from("loan_trackers").upsert(t);
+  if (error) throw error;
+}
+async function fetchLoanTransactions(loanId) {
+  const { data, error } = await supabase.from("loan_transactions").select("*").eq("loan_id", loanId).order("transaction_date");
+  if (error) throw error;
+  return data || [];
+}
+async function upsertLoanTransaction(tx) {
+  const { error } = await supabase.from("loan_transactions").upsert(tx);
+  if (error) throw error;
+}
+async function deleteLoanTransaction(id) {
+  const { error } = await supabase.from("loan_transactions").delete().eq("id", id);
+  if (error) throw error;
+}
+
 async function fetchFinanceItems() {
   const { data, error } = await supabase.from("finance_items").select("*").order("sort_order");
   if (error) throw error;
@@ -869,8 +916,198 @@ function FinanceSection({ title, items, category, onSave, onDelete, accent }) {
   );
 }
 
+/* ─── DPFO TRACKER ─── */
+function DpfoTracker({ months, onToggle, monthlyAmount = 8050, year }) {
+  const paid = months.filter(m => m.is_paid);
+  const paidTotal = paid.reduce((s, m) => s + (m.amount || monthlyAmount), 0);
+  const yearTotal = months.reduce((s, m) => s + (m.amount || monthlyAmount), 0);
+  const CZM = ["Led","Úno","Bře","Dub","Kvě","Čer","Čvn","Srp","Zář","Říj","Lis","Pro"];
+  return (
+    <div style={{ background: "#fff", border: "1px solid var(--line)", borderRadius: 14, padding: "18px 20px" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 14 }}>
+        <div>
+          <div style={{ fontSize: 9, letterSpacing: ".28em", textTransform: "uppercase", fontWeight: 600, color: "#92400E", marginBottom: 4 }}>DPFO {year} — záloha na daň z příjmu</div>
+          <div style={{ fontFamily: "Fraunces,serif", fontSize: 20, fontWeight: 300, color: "var(--txt)" }}>
+            {fmtKc(paidTotal)} <span style={{ fontSize: 12, color: "var(--mut)", fontFamily: "Inter,sans-serif" }}>/ {fmtKc(yearTotal)} ročně</span>
+          </div>
+        </div>
+        <div style={{ textAlign: "right", fontSize: 11.5, color: "var(--mut)" }}>
+          {paid.length} / 12 měsíců zaplaceno<br />
+          <span style={{ color: "#059669", fontWeight: 500 }}>{fmtKc(paidTotal)} na spořáku</span>
+        </div>
+      </div>
+      {/* Yearly progress */}
+      <div style={{ height: 4, background: "#F0EEF8", borderRadius: 2, marginBottom: 14 }}>
+        <div style={{ height: "100%", width: `${(paid.length / 12) * 100}%`, background: "#F59E0B", borderRadius: 2, transition: ".3s" }} />
+      </div>
+      {/* 12 month buttons */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(6,1fr)", gap: 6 }}>
+        {months.map(m => (
+          <button key={m.month} onClick={() => onToggle(m)}
+            style={{ padding: "8px 4px", borderRadius: 8, border: `1.5px solid ${m.is_paid ? "#F59E0B" : "var(--line2)"}`,
+              background: m.is_paid ? "#FEF3C7" : "#fff", cursor: "pointer", transition: ".15s",
+              display: "flex", flexDirection: "column", alignItems: "center", gap: 3 }}>
+            <span style={{ fontSize: 10, fontWeight: 600, color: m.is_paid ? "#92400E" : "var(--mut)" }}>{CZM[m.month - 1]}</span>
+            <span style={{ fontSize: 9, color: m.is_paid ? "#B45309" : "#DDD" }}>{m.is_paid ? "✓" : "○"}</span>
+            <span style={{ fontSize: 8.5, color: m.is_paid ? "#92400E" : "var(--mut)", opacity: .7 }}>{Math.round((m.amount||monthlyAmount)/1000)}k</span>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/* ─── LOAN TRACKER ─── */
+function LoanTrackerCard({ tracker, transactions, onUpdateTracker, onAddTransaction, onToggleTransaction, onDeleteTransaction }) {
+  const [showLog, setShowLog] = useState(false);
+  const [addForm, setAddForm] = useState(false);
+  const [newTx, setNewTx] = useState({ date: today(), amount: -(tracker?.monthly_payment || 0), description: "Splátka", is_done: false });
+  const [editAmount, setEditAmount] = useState(false);
+
+  const isInvestment = tracker?.type === "investment";
+
+  // Calculate running balance with cumulative sum
+  const txWithBalance = useMemo(() => {
+    let bal = 0;
+    return [...transactions].sort((a,b) => a.transaction_date.localeCompare(b.transaction_date)).map(tx => {
+      bal += tx.amount;
+      return { ...tx, balance: bal };
+    });
+  }, [transactions]);
+
+  const currentBalance = txWithBalance[txWithBalance.length - 1]?.balance || 0;
+  const totalPaid = transactions.filter(t => t.amount < 0 && t.is_done).reduce((s,t) => s + Math.abs(t.amount), 0);
+  const original = tracker?.original_amount || 0;
+  const remaining = isInvestment ? currentBalance : (original - totalPaid);
+  const monthlyPmt = tracker?.monthly_payment || 0;
+  const monthsLeft = monthlyPmt > 0 && remaining > 0 ? Math.ceil(remaining / monthlyPmt) : 0;
+  const finalDate = monthsLeft > 0 ? new Date(Date.now() + monthsLeft * 30 * 24 * 3600 * 1000).toLocaleDateString("cs-CZ", { month: "long", year: "numeric" }) : "—";
+
+  const colorAccent = isInvestment ? "#059669" : "#DC2626";
+
+  return (
+    <div style={{ background: "#fff", border: `1px solid ${isInvestment ? "#BBF7D0" : "var(--line)"}`, borderRadius: 14, overflow: "hidden" }}>
+      <div style={{ padding: "16px 20px", borderBottom: "1px solid var(--line)" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 8 }}>
+          <div>
+            <div style={{ fontSize: 9, letterSpacing: ".28em", textTransform: "uppercase", fontWeight: 600, color: colorAccent, marginBottom: 4 }}>
+              {isInvestment ? "Investiční úvěr" : "Osobní dluh"} · {tracker?.name}
+            </div>
+            {isInvestment ? (
+              <div style={{ fontFamily: "Fraunces,serif", fontSize: 18, fontWeight: 300, color: "#059669" }}>
+                {fmtKc(Math.max(currentBalance, 0))} <span style={{ fontSize: 11, color: "var(--mut)", fontFamily: "Inter" }}>zbývá v kase</span>
+              </div>
+            ) : (
+              <div>
+                {editAmount ? (
+                  <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                    <input type="number" defaultValue={original} autoFocus
+                      style={{ width: 120, font: "inherit", fontSize: 15, padding: "4px 8px", border: "1px solid var(--ink)", borderRadius: 6, outline: "none" }}
+                      onKeyDown={e => { if(e.key==="Enter") { onUpdateTracker({...tracker, original_amount: Number(e.target.value)}); setEditAmount(false); } }}
+                    />
+                    <span style={{ fontSize: 11, color: "var(--mut)" }}>Kč původní dluh</span>
+                  </div>
+                ) : (
+                  <div style={{ fontFamily: "Fraunces,serif", fontSize: 18, fontWeight: 300, color: "#DC2626", cursor: "pointer" }}
+                    onClick={() => setEditAmount(true)}>
+                    {original === 0 ? <span style={{ fontSize: 13, color: "var(--mut)" }}>Klikni — zadej původní částku</span> : fmtKc(remaining)}
+                    {original > 0 && <span style={{ fontSize: 11, color: "var(--mut)", fontFamily: "Inter", marginLeft: 6 }}>zbývá · původně {fmtKc(original)}</span>}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+          <div style={{ textAlign: "right", fontSize: 11, color: "var(--mut)", lineHeight: 1.7 }}>
+            {isInvestment ? (
+              <>Načerpáno: <strong>{fmtKc(transactions.filter(t=>t.amount>0).reduce((s,t)=>s+t.amount,0))}</strong><br/>
+              Zaplaceno: <strong>{fmtKc(totalPaid)}</strong><br/>
+              <span style={{ color: "#059669" }}>Projekt: ~1M profit 🎯</span></>
+            ) : (
+              <>Splaceno: <strong>{fmtKc(totalPaid)}</strong><br/>
+              {monthsLeft > 0 && <><strong>{monthsLeft}</strong> splátek · {finalDate}</>}</>
+            )}
+          </div>
+        </div>
+        {!isInvestment && original > 0 && (
+          <div style={{ height: 4, background: "#FEE2E2", borderRadius: 2, marginTop: 8 }}>
+            <div style={{ height: "100%", width: `${Math.min((totalPaid/original)*100,100)}%`, background: "#059669", borderRadius: 2, transition: ".3s" }} />
+          </div>
+        )}
+      </div>
+
+      {/* Actions */}
+      <div style={{ padding: "10px 16px", background: "#FAFAF9", borderBottom: "1px solid var(--line)", display: "flex", gap: 8, alignItems: "center" }}>
+        <button className="btn pri" style={{ fontSize: 11, padding: "5px 12px" }} onClick={() => { setNewTx({ date: today(), amount: -monthlyPmt, description: "Splátka", is_done: false }); setAddForm(true); }}>
+          + Přidat pohyb
+        </button>
+        <button className="btn gho" style={{ fontSize: 11 }} onClick={() => setShowLog(p => !p)}>
+          {showLog ? "Skrýt log" : `Log pohybů (${transactions.length})`}
+        </button>
+      </div>
+
+      {/* Add form */}
+      {addForm && (
+        <div style={{ padding: "12px 16px", background: "#F7F5FF", borderBottom: "1px solid var(--line)", display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+          <input type="date" value={newTx.date} onChange={e => setNewTx(p => ({...p, date: e.target.value}))}
+            style={{ font: "inherit", fontSize: 12.5, padding: "5px 8px", border: "1px solid var(--line2)", borderRadius: 7, outline: "none" }} />
+          <input type="number" value={newTx.amount} onChange={e => setNewTx(p => ({...p, amount: Number(e.target.value)}))}
+            style={{ width: 110, font: "inherit", fontSize: 12.5, padding: "5px 8px", border: "1px solid var(--line2)", borderRadius: 7, outline: "none" }}
+            placeholder="−13 000" />
+          <input value={newTx.description} onChange={e => setNewTx(p => ({...p, description: e.target.value}))}
+            style={{ flex: 1, minWidth: 120, font: "inherit", fontSize: 12.5, padding: "5px 8px", border: "1px solid var(--line2)", borderRadius: 7, outline: "none" }}
+            placeholder="Popis..." />
+          <label style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 12, color: "var(--mut)", cursor: "pointer" }}>
+            <input type="checkbox" checked={newTx.is_done} onChange={e => setNewTx(p => ({...p, is_done: e.target.checked}))} />Provedeno
+          </label>
+          <button className="btn pri" style={{ fontSize: 11, padding: "5px 12px" }}
+            onClick={() => { onAddTransaction({ id: uid(), loan_id: tracker.id, transaction_date: newTx.date, amount: newTx.amount, description: newTx.description, is_done: newTx.is_done }); setAddForm(false); }}>
+            Uložit
+          </button>
+          <button className="btn gho" style={{ fontSize: 11 }} onClick={() => setAddForm(false)}>✕</button>
+        </div>
+      )}
+
+      {/* Transaction log */}
+      {showLog && (
+        <div style={{ maxHeight: 320, overflowY: "auto" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+            <thead><tr style={{ background: "#F5F3FF", borderBottom: "1px solid var(--line)" }}>
+              <th style={{ padding: "8px 12px", textAlign: "left", fontSize: 9, letterSpacing: ".1em", textTransform: "uppercase", color: "var(--mut)", fontWeight: 500 }}>Datum</th>
+              <th style={{ padding: "8px 12px", textAlign: "left", fontSize: 9, letterSpacing: ".1em", textTransform: "uppercase", color: "var(--mut)", fontWeight: 500 }}>Popis</th>
+              <th style={{ padding: "8px 12px", textAlign: "right", fontSize: 9, letterSpacing: ".1em", textTransform: "uppercase", color: "var(--mut)", fontWeight: 500 }}>Částka</th>
+              <th style={{ padding: "8px 12px", textAlign: "right", fontSize: 9, letterSpacing: ".1em", textTransform: "uppercase", color: "var(--mut)", fontWeight: 500 }}>Zůstatek</th>
+              <th style={{ padding: "8px 12px", textAlign: "center", fontSize: 9, letterSpacing: ".1em", textTransform: "uppercase", color: "var(--mut)", fontWeight: 500 }}>✓</th>
+              <th style={{ padding: "8px 4px" }}></th>
+            </tr></thead>
+            <tbody>
+              {txWithBalance.map(tx => (
+                <tr key={tx.id} style={{ borderBottom: "1px solid var(--line)", opacity: tx.is_done ? 1 : .7 }}>
+                  <td style={{ padding: "9px 12px", color: "var(--mut)", whiteSpace: "nowrap" }}>{fmtDate(tx.transaction_date)}</td>
+                  <td style={{ padding: "9px 12px", color: "var(--txt)" }}>{tx.description}</td>
+                  <td style={{ padding: "9px 12px", textAlign: "right", fontFamily: "Fraunces,serif", fontWeight: 300, color: tx.amount < 0 ? "#DC2626" : "#059669" }}>
+                    {tx.amount > 0 ? "+" : ""}{fmtKc(tx.amount)}
+                  </td>
+                  <td style={{ padding: "9px 12px", textAlign: "right", fontFamily: "Fraunces,serif", fontWeight: 300, color: "var(--txt)" }}>{fmtKc(tx.balance)}</td>
+                  <td style={{ padding: "9px 12px", textAlign: "center" }}>
+                    <span style={{ cursor: "pointer", fontSize: 14 }} onClick={() => onToggleTransaction({...tx, is_done: !tx.is_done})}>
+                      {tx.is_done ? "✅" : "⬜"}
+                    </span>
+                  </td>
+                  <td style={{ padding: "9px 4px", textAlign: "center" }}>
+                    <button onClick={() => onDeleteTransaction(tx.id)} style={{ background: "none", border: "none", color: "#DDD", cursor: "pointer", fontSize: 12 }}>✕</button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
 /* ─── DASHBOARD ─── */
-function Dashboard({ invoices, workEntries, clients, financeItems, onNav, onSaveFinance, onDeleteFinance }) {
+function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, loanTrackers, loanTransactions, onNav, onSaveFinance, onDeleteFinance, onDpfoToggle, onLoanTxAdd, onLoanTxToggle, onLoanTxDelete, onLoanUpdate }) {
   const now = new Date();
   const thisMonth = now.toISOString().slice(0, 7);
   const prevMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1).toISOString().slice(0, 7);
@@ -1051,6 +1288,21 @@ function Dashboard({ invoices, workEntries, clients, financeItems, onNav, onSave
           <button className="btn gho" style={{fontSize:11,marginTop:4,width:"100%"}} onClick={()=>onNav("vykaz")}>+ Nový výkaz práce</button>
         </Card>
       </div>
+
+      {/* ── DPFO + LOANS ── */}
+      {dpfoMonths.length > 0 && (
+        <DpfoTracker months={dpfoMonths} onToggle={onDpfoToggle} year={new Date().getFullYear()} />
+      )}
+      {(loanTrackers||[]).map(tracker => (
+        <LoanTrackerCard key={tracker.id}
+          tracker={tracker}
+          transactions={loanTransactions[tracker.id] || []}
+          onUpdateTracker={onLoanUpdate}
+          onAddTransaction={onLoanTxAdd}
+          onToggleTransaction={onLoanTxToggle}
+          onDeleteTransaction={(txId) => onLoanTxDelete(tracker.id, txId)}
+        />
+      ))}
 
       {/* ── HAPPY LIFE SEKCE ── */}
       {(financeItems||[]).some(i => ['sporaci','majetek','firma_kpi'].includes(i.category)) && (
@@ -2140,6 +2392,9 @@ export default function MauxCRM() {
   const [invoices, setInvoices] = useState([]);
   const [workEntries, setWorkEntries] = useState([]);
   const [financeItems, setFinanceItems] = useState([]);
+  const [dpfoMonths, setDpfoMonths] = useState([]);
+  const [loanTrackers, setLoanTrackers] = useState([]);
+  const [loanTransactions, setLoanTransactions] = useState({}); // { loanId: [] }
   const [dataLoading, setDataLoading] = useState(false);
   const [mod, setMod] = useState("dashboard");
   const [mode, setMode] = useState("list");
@@ -2168,8 +2423,19 @@ export default function MauxCRM() {
       fetchInvoices().catch(e => { console.error("invoices:", e); return []; }),
       fetchWorkEntries().catch(e => { console.error("work:", e); return []; }),
       fetchFinanceItems().catch(e => { console.error("finance:", e); return []; }),
+      ensureDpfoYear(new Date().getFullYear()).catch(() => []),
+      fetchLoanTrackers().catch(() => []),
     ])
-      .then(([c, i, w, f]) => { setClients(c); setInvoices(i); setWorkEntries(w); setFinanceItems(f); })
+      .then(async ([c, i, w, f, dpfo, loans]) => {
+        setClients(c); setInvoices(i); setWorkEntries(w); setFinanceItems(f);
+        setDpfoMonths(dpfo);
+        setLoanTrackers(loans);
+        const txMap = {};
+        await Promise.all(loans.map(async l => {
+          txMap[l.id] = await fetchLoanTransactions(l.id).catch(() => []);
+        }));
+        setLoanTransactions(txMap);
+      })
       .finally(() => setDataLoading(false));
   }, [session]);
 
@@ -2179,6 +2445,28 @@ export default function MauxCRM() {
     try { await upsertFinanceItem(item); setFinanceItems(await fetchFinanceItems()); }
     catch(e) { alert("Chyba: " + e.message); }
   };
+  const handleDpfoToggle = async (row) => {
+    const updated = await toggleDpfoMonth(row);
+    setDpfoMonths(p => p.map(m => m.id === row.id ? updated : m));
+  };
+  const handleLoanTxAdd = async (tx) => {
+    await upsertLoanTransaction(tx);
+    const updated = await fetchLoanTransactions(tx.loan_id);
+    setLoanTransactions(p => ({ ...p, [tx.loan_id]: updated }));
+  };
+  const handleLoanTxToggle = async (tx) => {
+    await upsertLoanTransaction(tx);
+    setLoanTransactions(p => ({ ...p, [tx.loan_id]: p[tx.loan_id].map(t => t.id === tx.id ? tx : t) }));
+  };
+  const handleLoanTxDelete = async (loanId, txId) => {
+    await deleteLoanTransaction(txId);
+    setLoanTransactions(p => ({ ...p, [loanId]: p[loanId].filter(t => t.id !== txId) }));
+  };
+  const handleLoanUpdate = async (tracker) => {
+    await upsertLoanTracker(tracker);
+    setLoanTrackers(p => p.map(t => t.id === tracker.id ? tracker : t));
+  };
+
   const deleteFinanceItem = async (id) => {
     try { await deleteFinanceItemDb(id); setFinanceItems(p => p.filter(i => i.id !== id)); }
     catch(e) { alert("Chyba: " + e.message); }
@@ -2343,8 +2631,16 @@ export default function MauxCRM() {
           {mod === "dashboard" && (
             <Dashboard invoices={invoices} workEntries={workEntries} clients={clients}
               financeItems={financeItems}
+              dpfoMonths={dpfoMonths}
+              loanTrackers={loanTrackers}
+              loanTransactions={loanTransactions}
               onSaveFinance={saveFinanceItem}
               onDeleteFinance={deleteFinanceItem}
+              onDpfoToggle={handleDpfoToggle}
+              onLoanTxAdd={handleLoanTxAdd}
+              onLoanTxToggle={handleLoanTxToggle}
+              onLoanTxDelete={(loanId, txId) => handleLoanTxDelete(loanId, txId)}
+              onLoanUpdate={handleLoanUpdate}
               onNav={k => { setMod(k); setMode("list"); setSel(null); }} />
           )}
 
