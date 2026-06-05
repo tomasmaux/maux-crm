@@ -123,6 +123,7 @@ html,body,#root{height:100%;background:#F3F2F9}
 .b-late{background:#FEF2F2;color:#991B1B}.b-late::before{background:#EF4444}
 .b-vy{background:#EEF2FF;color:#3730A3}.b-vy::before{background:#6366F1}
 .b-prep{background:#FEF3C7;color:#92400E}.b-prep::before{background:#F59E0B}
+.b-dph{background:#ECFDF5;color:#065F46}.b-dph::before{background:#059669}
 .det{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:28px 32px;max-width:780px}
 .det-head{display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:8px}
 .det h2{font-family:'Fraunces',serif;font-size:26px;font-weight:300;color:var(--txt);line-height:1.2;display:flex;align-items:center;gap:10px;flex-wrap:wrap}
@@ -741,6 +742,60 @@ function Sidebar({ mod, setMod, onLogout }) {
   );
 }
 
+/* ─── DONUT CHART ─── */
+function DonutChart({ items, size = 160 }) {
+  const total = items.reduce((s, i) => s + Math.abs(i.amount || 0), 0);
+  if (total === 0) return null;
+  const colors = ["#3518A5", "#B8923D", "#059669", "#7C3AED", "#DC2626", "#0EA5E9"];
+  let angle = -Math.PI / 2;
+  const cx = size / 2, cy = size / 2, r = size * 0.38, ri = size * 0.22;
+  const segments = items.map((item, i) => {
+    const pct = Math.abs(item.amount) / total;
+    const sweep = pct * 2 * Math.PI;
+    const x1 = cx + r * Math.cos(angle), y1 = cy + r * Math.sin(angle);
+    angle += sweep;
+    const x2 = cx + r * Math.cos(angle), y2 = cy + r * Math.sin(angle);
+    const xi1 = cx + ri * Math.cos(angle - sweep), yi1 = cy + ri * Math.sin(angle - sweep);
+    const xi2 = cx + ri * Math.cos(angle), yi2 = cy + ri * Math.sin(angle);
+    const large = sweep > Math.PI ? 1 : 0;
+    return { path: `M ${x1} ${y1} A ${r} ${r} 0 ${large} 1 ${x2} ${y2} L ${xi2} ${yi2} A ${ri} ${ri} 0 ${large} 0 ${xi1} ${yi1} Z`, color: colors[i % colors.length], pct, item };
+  });
+  return (
+    <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
+      {segments.map((s, i) => <path key={i} d={s.path} fill={s.color} opacity={.9} />)}
+      <text x={cx} y={cy - 6} textAnchor="middle" fontSize={9} fill="var(--mut)" fontFamily="Inter,sans-serif">celkem</text>
+      <text x={cx} y={cy + 8} textAnchor="middle" fontSize={11} fill="var(--txt)" fontFamily="Fraunces,serif" fontWeight="300">{Math.round(total / 1000)}k</text>
+    </svg>
+  );
+}
+
+/* ─── INLINE EDITABLE ROW ─── */
+function EditRow({ item, onSave, onDelete, valuePrefix = "", valueSuffix = " Kč", isCalculated = false, calculatedValue = null }) {
+  const [editing, setEditing] = useState(false);
+  const [val, setVal] = useState(Math.abs(item?.amount || 0));
+  const displayVal = isCalculated ? calculatedValue : Math.abs(item?.amount || 0);
+
+  return (
+    <div style={{ display: "flex", alignItems: "center", padding: "8px 0", borderBottom: "1px solid var(--line)", gap: 8, cursor: isCalculated ? "default" : "pointer" }}
+      onClick={() => !isCalculated && !editing && setEditing(true)}>
+      <div style={{ flex: 1, fontSize: 12.5, color: "var(--txt)" }}>{item?.label}</div>
+      {editing ? (
+        <>
+          <input type="number" value={val} onChange={e => setVal(e.target.value)} autoFocus
+            style={{ width: 100, font: "inherit", fontSize: 12.5, padding: "3px 7px", border: "1px solid var(--ink)", borderRadius: 6, outline: "none", textAlign: "right" }}
+            onKeyDown={e => { if(e.key==="Enter") { onSave({...item, amount: Number(val)}); setEditing(false); } if(e.key==="Escape") setEditing(false); }} />
+          <button onClick={e => { e.stopPropagation(); onSave({...item, amount: Number(val)}); setEditing(false); }} style={{ background: "var(--ink)", color: "#fff", border: "none", borderRadius: 5, padding: "3px 8px", fontSize: 11, cursor: "pointer" }}>✓</button>
+        </>
+      ) : (
+        <div style={{ fontSize: 13, fontFamily: "Fraunces,serif", fontWeight: 300, color: isCalculated ? "var(--mut)" : "var(--gold)", whiteSpace: "nowrap" }}>
+          {isCalculated ? <span style={{ fontSize: 11, color: "#059669" }}>auto</span> : ""} {valuePrefix}{new Intl.NumberFormat("cs-CZ").format(Math.round(displayVal))}{valueSuffix}
+        </div>
+      )}
+      {!isCalculated && !editing && <span style={{ fontSize: 9, color: "var(--mut)", opacity: .4 }}>✎</span>}
+    </div>
+  );
+}
+
 /* ─── FINANCE ITEM EDITOR ─── */
 function FinanceSection({ title, items, category, onSave, onDelete, accent }) {
   const [editing, setEditing] = useState(null);
@@ -847,7 +902,7 @@ function Dashboard({ invoices, workEntries, clients, financeItems, onNav, onSave
   const totalNutne = nutne.reduce((s,i) => s+(i.amount||0), 0);
   const totalLuxus = luxus.reduce((s,i) => s+(i.amount||0), 0);
   const totalVydaje = totalNutne + totalLuxus;
-  const cashflow = mRev + totalVydaje; // výdaje jsou záporné
+  const cashflow = mRev + totalVydaje;
 
   // Chart data
   const months = Array.from({length: now.getMonth()+1}, (_,i) => {
@@ -996,6 +1051,120 @@ function Dashboard({ invoices, workEntries, clients, financeItems, onNav, onSave
           <button className="btn gho" style={{fontSize:11,marginTop:4,width:"100%"}} onClick={()=>onNav("vykaz")}>+ Nový výkaz práce</button>
         </Card>
       </div>
+
+      {/* ── HAPPY LIFE SEKCE ── */}
+      {(financeItems||[]).some(i => ['sporaci','majetek','firma_kpi'].includes(i.category)) && (
+        <div>
+          <div style={{fontSize:9,letterSpacing:".3em",textTransform:"uppercase",color:"var(--mut)",fontWeight:600,margin:"8px 0 12px",opacity:.7}}>Happy Life · Přehled majetku & spořáku</div>
+
+          {/* Row: Spořák + Majetek + Firma */}
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:12}}>
+
+            {/* SPOŘÍCÍ ÚČET */}
+            {(() => {
+              const sporaci = (financeItems||[]).filter(i => i.category === "sporaci");
+              const zůstatek = sporaci.find(i => i.id === "fi_sp_99");
+              const obálky = sporaci.filter(i => i.id !== "fi_sp_99");
+              const dphAuto = invoices.filter(i => i.status === "uhrazena").reduce((s,i) => s+(i.vat_amount||0), 0);
+              const totalObálky = obálky.reduce((s,i) => s+(i.amount||0), 0) + dphAuto;
+              return (
+                <Card>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:12}}>
+                    <Lbl color="#3518A5">Spořící účet · obálky</Lbl>
+                    <Num size={16} color="var(--ink)">{fmtKc(totalObálky)}</Num>
+                  </div>
+                  {/* DPH auto */}
+                  <div style={{display:"flex",justifyContent:"space-between",padding:"7px 0",borderBottom:"1px solid var(--line)"}}>
+                    <span style={{fontSize:12.5,color:"var(--txt)"}}>DPH</span>
+                    <div style={{display:"flex",alignItems:"center",gap:6}}>
+                      <span style={{fontSize:10,background:"#ECFDF5",color:"#065F46",padding:"1px 6px",borderRadius:4,fontWeight:600}}>auto</span>
+                      <span style={{fontFamily:"Fraunces,serif",fontSize:13,color:"var(--gold)"}}>{fmtKc(dphAuto)}</span>
+                    </div>
+                  </div>
+                  {obálky.map(item => (
+                    <EditRow key={item.id} item={item} onSave={onSaveFinance} onDelete={onDeleteFinance} />
+                  ))}
+                  {zůstatek && (
+                    <div style={{marginTop:8,paddingTop:8,borderTop:"2px solid var(--ink)"}}>
+                      <EditRow item={zůstatek} onSave={onSaveFinance} onDelete={onDeleteFinance} />
+                    </div>
+                  )}
+                </Card>
+              );
+            })()}
+
+            {/* OSOBNÍ MAJETEK + PIE */}
+            {(() => {
+              const majetek = (financeItems||[]).filter(i => i.category === "majetek");
+              const total = majetek.reduce((s,i) => s+(i.amount||0), 0);
+              return (
+                <Card>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:12}}>
+                    <Lbl color="#7C3AED">Osobní majetek</Lbl>
+                    <Num size={16} color="#7C3AED">{fmtKc(total)}</Num>
+                  </div>
+                  <div style={{display:"flex",gap:16,alignItems:"center",marginBottom:12}}>
+                    <DonutChart items={majetek} size={100} />
+                    <div style={{flex:1}}>
+                      {majetek.map((item,i) => (
+                        <div key={item.id} style={{display:"flex",alignItems:"center",gap:6,marginBottom:5}}>
+                          <div style={{width:8,height:8,borderRadius:"50%",background:["#3518A5","#B8923D","#059669"][i%3],flexShrink:0}}/>
+                          <span style={{fontSize:11,color:"var(--txt)",flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{item.label}</span>
+                          <span style={{fontSize:11,fontFamily:"Fraunces,serif",color:"var(--mut)"}}>{Math.round((item.amount||0)/total*100)}%</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                  {majetek.map(item => (
+                    <EditRow key={item.id} item={item} onSave={onSaveFinance} onDelete={onDeleteFinance} />
+                  ))}
+                </Card>
+              );
+            })()}
+
+            {/* FIRMA */}
+            {(() => {
+              const firmaRezerva = (financeItems||[]).find(i => i.id === "fi_ma_03")?.amount || 0;
+              const planovana = (financeItems||[]).find(i => i.id === "fi_fi_01");
+              const rozdil = firmaRezerva - (planovana?.amount || 0);
+              const onTheWay = invoices.filter(i => invoiceStatus(i) === "vystavena").reduce((s,i) => s+(i.subtotal||0), 0);
+              const monthlyBurn = Math.abs(totalVydaje);
+              const runway = monthlyBurn > 0 ? firmaRezerva / monthlyBurn : 0;
+              const runwayM = Math.floor(runway);
+              const runwayD = Math.round((runway - runwayM) * 30);
+              const zdravi = monthlyBurn > 0 ? (mRev / monthlyBurn).toFixed(2) : "—";
+              return (
+                <Card>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:12}}>
+                    <Lbl color="#059669">Firma</Lbl>
+                    <Num size={16} color="#059669">{fmtKc(firmaRezerva)}</Num>
+                  </div>
+                  {planovana && <EditRow item={planovana} onSave={onSaveFinance} onDelete={onDeleteFinance} />}
+                  <div style={{display:"flex",justifyContent:"space-between",padding:"7px 0",borderBottom:"1px solid var(--line)"}}>
+                    <span style={{fontSize:12.5,color:"var(--txt)"}}>Rozdíl rezervy</span>
+                    <span style={{fontFamily:"Fraunces,serif",fontSize:13,color:rozdil>=0?"#059669":"#DC2626"}}>{rozdil>=0?"+":""}{fmtKc(rozdil)}</span>
+                  </div>
+                  <div style={{display:"flex",justifyContent:"space-between",padding:"7px 0",borderBottom:"1px solid var(--line)"}}>
+                    <span style={{fontSize:12.5,color:"var(--txt)"}}>On the way</span>
+                    <div style={{display:"flex",alignItems:"center",gap:5}}>
+                      <span style={{fontSize:10,background:"#EEF2FF",color:"#3730A3",padding:"1px 6px",borderRadius:4,fontWeight:600}}>auto</span>
+                      <span style={{fontFamily:"Fraunces,serif",fontSize:13,color:"var(--ink)"}}>{fmtKc(onTheWay)}</span>
+                    </div>
+                  </div>
+                  <div style={{display:"flex",justifyContent:"space-between",padding:"7px 0",borderBottom:"1px solid var(--line)"}}>
+                    <span style={{fontSize:12.5,color:"var(--txt)"}}>Runway</span>
+                    <span style={{fontFamily:"Fraunces,serif",fontSize:13,color:"var(--txt)"}}>{runwayM} měs. {runwayD} dní</span>
+                  </div>
+                  <div style={{display:"flex",justifyContent:"space-between",padding:"10px 0 0",borderTop:"2px solid var(--line2)",marginTop:4}}>
+                    <span style={{fontSize:12,fontWeight:600,color:"var(--txt)"}}>Zdraví skóre</span>
+                    <span style={{fontFamily:"Fraunces,serif",fontSize:18,color:Number(zdravi)>=2?"#059669":Number(zdravi)>=1?"#D97706":"#DC2626"}}>{zdravi}×</span>
+                  </div>
+                </Card>
+              );
+            })()}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -1333,16 +1502,23 @@ function InvoiceList({ invoices, clients, workEntries, onOpen, onOpenClient, onT
 
   const StatusToggle = ({ inv }) => {
     const s = invoiceStatus(inv);
-    const next = s === "uhrazena" ? "→ Vystavena" : "→ Uhrazena ✓";
+    const badgeClass = s === "dph_odvedeno" ? "b-ok" : s === "uhrazena" ? "b-ok" : s === "po_splatnosti" ? "b-late" : s === "pripravena" ? "b-prep" : "b-vy";
+    const label = s === "dph_odvedeno" ? "DPH odvedeno ✓✓" : s === "uhrazena" ? "Uhrazena ✓" : s === "po_splatnosti" ? "Po splatnosti" : s === "pripravena" ? "Připravena" : "Vystavena";
     return (
-      <span
-        className={`badge ${s === "uhrazena" ? "b-ok" : s === "po_splatnosti" ? "b-late" : s === "pripravena" ? "b-prep" : "b-vy"}`}
-        style={{ cursor: "pointer", userSelect: "none" }}
-        title={`Klikni: ${next}`}
-        onClick={e => { e.stopPropagation(); onToggleStatus(inv); }}
-      >
-        {s === "uhrazena" ? "Uhrazena ✓" : s === "po_splatnosti" ? "Po splatnosti" : s === "pripravena" ? "Připravena" : "Vystavena"}
-      </span>
+      <div style={{ display: "flex", alignItems: "center", gap: 5, justifyContent: "flex-end" }}>
+        <span className={`badge ${badgeClass}`} style={{ cursor: "pointer", userSelect: "none" }}
+          title={s === "uhrazena" ? "→ Zpět na Vystavena" : s === "vystavena" ? "→ Uhrazena ✓" : ""}
+          onClick={e => { e.stopPropagation(); if (s !== "dph_odvedeno") onToggleStatus(inv); }}>
+          {label}
+        </span>
+        {s === "uhrazena" && (
+          <span style={{ fontSize: 9.5, padding: "3px 8px", borderRadius: 20, background: "#FEF3C7", color: "#92400E", cursor: "pointer", fontWeight: 600, whiteSpace: "nowrap", border: "1px solid #FDE68A" }}
+            title="Označit DPH jako odvedené"
+            onClick={e => { e.stopPropagation(); onToggleStatus({ ...inv, _forceDph: true }); }}>
+            DPH →
+          </span>
+        )}
+      </div>
     );
   };
 
@@ -2089,11 +2265,21 @@ export default function MauxCRM() {
     catch (e) { alert("Chyba: " + e.message); }
   };
   const toggleInvoiceStatus = async (inv) => {
-    const newStatus = inv.status === "uhrazena" ? "vystavena" : "uhrazena";
-    const updated = { ...inv, status: newStatus };
+    let newStatus;
+    if (inv._forceDph) {
+      newStatus = "dph_odvedeno";
+    } else if (inv.status === "uhrazena") {
+      newStatus = "vystavena";
+    } else if (inv.status === "dph_odvedeno") {
+      newStatus = "uhrazena"; // revert if needed
+    } else {
+      newStatus = "uhrazena";
+    }
+    const { _forceDph, ...cleanInv } = inv;
+    const updated = { ...cleanInv, status: newStatus };
     setInvoices(p => p.map(i => i.id === inv.id ? { ...i, status: newStatus } : i));
     try { await upsertInvoice(updated); }
-    catch (e) { setInvoices(p => p.map(i => i.id === inv.id ? inv : i)); alert("Chyba: " + e.message); }
+    catch (e) { setInvoices(p => p.map(i => i.id === inv.id ? cleanInv : i)); alert("Chyba: " + e.message); }
   };
   const openClientFromInvoice = (clientId) => {
     setSel(clientId); setMod("klienti"); setMode("detail");
