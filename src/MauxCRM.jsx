@@ -1047,7 +1047,7 @@ function DonutChart({ items, size = 160 }) {
   );
 }
 
-/* ─── DOUBLE RING CHART (Excel style) ─── */
+/* ─── DOUBLE RING CHART — interactive, branded ─── */
 function DoubleRingChart({ outerItems, innerItems, size = 300 }) {
   const cx = size/2, cy = size/2;
   const OR = size*0.46, ORi = size*0.32; // outer ring (osobni majetek)
@@ -1095,7 +1095,103 @@ function DoubleRingChart({ outerItems, innerItems, size = 300 }) {
 
 /* ─── AUTO BADGE ─── */
 function AutoBadge() {
-  return <span style={{fontSize:7.5,background:"#3518A5",color:"#fff",padding:"2px 6px",borderRadius:4,fontWeight:700,letterSpacing:".08em",fontFamily:"Inter,sans-serif",flexShrink:0}}>AUTO</span>;
+  return <span style={{fontSize:7.5,background:"#3518A5",color:"#fff",padding:"2px 6px",borderRadius:4,fontWeight:700,letterSpacing:".08em",fontFamily:"Inter,sans-serif",flexShrink:0,display:"inline-flex",alignItems:"center",gap:3}}><span style={{opacity:.7}}>⚡</span>auto</span>;
+}
+
+/* ─── INTERACTIVE WEALTH DONUT ─── */
+function WealthDonut({ outerItems, innerItems, outerLabel, innerLabel, outerTotal, innerTotal }) {
+  const [hovered, setHovered] = useState(null); // {ring, label, amount, color}
+  const size = 360, cx = size/2, cy = size/2;
+  const OR = 160, ORi = 112;  // outer = osobni majetek
+  const IR = 104, IRi = 68;   // inner = sporaci ucet
+  
+  const arc = (outerR, innerR, startA, endA) => {
+    if (Math.abs(endA - startA) < 0.001) return "";
+    const x1=cx+outerR*Math.cos(startA), y1=cy+outerR*Math.sin(startA);
+    const x2=cx+outerR*Math.cos(endA),   y2=cy+outerR*Math.sin(endA);
+    const xi1=cx+innerR*Math.cos(endA),  yi1=cy+innerR*Math.sin(endA);
+    const xi2=cx+innerR*Math.cos(startA),yi2=cy+innerR*Math.sin(startA);
+    const lg=(endA-startA)>Math.PI?1:0;
+    return `M ${x1} ${y1} A ${outerR} ${outerR} 0 ${lg} 1 ${x2} ${y2} L ${xi1} ${yi1} A ${innerR} ${innerR} 0 ${lg} 0 ${xi2} ${yi2} Z`;
+  };
+  
+  const makeSegs = (items, outerR, innerR, ring) => {
+    const total = items.reduce((s,i)=>s+Math.abs(i.amount||0),0);
+    let a = -Math.PI/2;
+    return items.map(item => {
+      const sw = total>0 ? (Math.abs(item.amount||0)/total)*2*Math.PI : 0;
+      const midA = a + sw/2;
+      const labelR = outerR + 22;
+      const lx = cx + labelR*Math.cos(midA);
+      const ly = cy + labelR*Math.sin(midA);
+      const path = arc(outerR, innerR, a, a+sw);
+      const seg = {...item, path, midA, lx, ly, ring, sw};
+      a += sw;
+      return seg;
+    });
+  };
+  
+  const oSegs = makeSegs(outerItems, OR, ORi, "outer");
+  const iSegs = makeSegs(innerItems, IR, IRi, "inner");
+  
+  return (
+    <div style={{position:"relative",display:"flex",flexDirection:"column",alignItems:"center"}}>
+      <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} style={{overflow:"visible"}}>
+        <defs>
+          <filter id="glow"><feGaussianBlur stdDeviation="3" result="blur"/><feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+        </defs>
+        {/* Gap circles */}
+        <circle cx={cx} cy={cy} r={ORi-2} fill="var(--bg)" opacity={.5}/>
+        {/* Outer ring segments */}
+        {oSegs.map((s,i)=>(
+          <path key={i} d={s.path} fill={s.color}
+            opacity={hovered&&hovered.label!==s.label?.0.6:0.93}
+            style={{cursor:"pointer",transition:"opacity .15s,filter .15s",filter:hovered?.label===s.label?"url(#glow)":"none"}}
+            onMouseEnter={()=>setHovered({ring:"outer",label:s.label,amount:s.amount,color:s.color})}
+            onMouseLeave={()=>setHovered(null)}
+          />
+        ))}
+        {/* Gap */}
+        <circle cx={cx} cy={cy} r={IR-2} fill="var(--bg)" opacity={.5}/>
+        {/* Inner ring */}
+        {iSegs.map((s,i)=>(
+          <path key={i} d={s.path} fill={s.color}
+            opacity={hovered&&hovered.label!==s.label?.0.6:0.90}
+            style={{cursor:"pointer",transition:"opacity .15s",filter:hovered?.label===s.label?"url(#glow)":"none"}}
+            onMouseEnter={()=>setHovered({ring:"inner",label:s.label,amount:s.amount,color:s.color})}
+            onMouseLeave={()=>setHovered(null)}
+          />
+        ))}
+        {/* Center hole */}
+        <circle cx={cx} cy={cy} r={IRi-1} fill="white"/>
+        {/* Center text */}
+        {hovered ? (
+          <>
+            <text x={cx} y={cy-12} textAnchor="middle" fontSize={9} fill={hovered.color} fontFamily="Inter,sans-serif" fontWeight="600">{hovered.label}</text>
+            <text x={cx} y={cy+4} textAnchor="middle" fontSize={13} fill={hovered.color} fontFamily="Fraunces,serif" fontWeight="300">{new Intl.NumberFormat("cs-CZ").format(Math.round(hovered.amount))} Kč</text>
+          </>
+        ) : (
+          <>
+            <text x={cx} y={cy-14} textAnchor="middle" fontSize={8} fill="var(--mut)" fontFamily="Inter" letterSpacing="1.5">{innerLabel}</text>
+            <text x={cx} y={cy-1} textAnchor="middle" fontSize={12} fill="#3518A5" fontFamily="Fraunces,serif" fontWeight="300">{new Intl.NumberFormat("cs-CZ").format(Math.round(innerTotal))}</text>
+            <text x={cx} y={cy+12} textAnchor="middle" fontSize={8} fill="var(--mut)" fontFamily="Inter" letterSpacing="1.5">{outerLabel}</text>
+            <text x={cx} y={cy+25} textAnchor="middle" fontSize={12} fill="#059669" fontFamily="Fraunces,serif" fontWeight="300">{new Intl.NumberFormat("cs-CZ").format(Math.round(outerTotal))}</text>
+          </>
+        )}
+      </svg>
+      {/* Legend */}
+      <div style={{display:"flex",gap:6,flexWrap:"wrap",justifyContent:"center",maxWidth:360,marginTop:-8}}>
+        {[...oSegs,...iSegs].filter(s=>s.sw>0.05).map((s,i)=>(
+          <div key={i} style={{display:"flex",alignItems:"center",gap:4,padding:"2px 8px",borderRadius:20,background:hovered?.label===s.label?s.color+"22":"transparent",cursor:"pointer",transition:".12s"}}
+            onMouseEnter={()=>setHovered({ring:s.ring,label:s.label,amount:s.amount,color:s.color})}
+            onMouseLeave={()=>setHovered(null)}>
+            <div style={{width:7,height:7,borderRadius:2,background:s.color,flexShrink:0}}/>
+            <span style={{fontSize:10,color:hovered?.label===s.label?s.color:"var(--mut)",fontWeight:hovered?.label===s.label?600:400}}>{s.label}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
 }
 
 /* ─── INLINE EDITABLE ROW ─── */
@@ -1584,9 +1680,30 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
         );
       })()}
 
-      {/* DOUBLE RING CHART + Spořák columns */}
-      <div style={{display:"grid",gridTemplateColumns:"300px 1fr",gap:16}}>
-        {/* Double ring donut */}
+      {/* MINULÝ vs PŘÍŠTÍ MĚSÍC */}
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
+        <div style={{background:"#fff",border:"1px solid var(--line)",borderRadius:14,padding:"16px 20px"}}>
+          <div style={{fontSize:8,letterSpacing:".3em",textTransform:"uppercase",color:"var(--mut)",fontWeight:600,marginBottom:2}}>◀ Minulý měsíc — výsledky</div>
+          <div style={{fontFamily:"Fraunces,serif",fontSize:24,fontWeight:300,color:"var(--ink)",marginBottom:8}}>{fmtKc(mRevPrev)}<span style={{fontSize:11,color:"var(--mut)",fontFamily:"Inter",marginLeft:8,fontWeight:400}}>bez DPH</span></div>
+          <div style={{display:"flex",gap:16,fontSize:12,color:"var(--mut)"}}>
+            <span>trend: <strong style={{color:trend>=0?"#059669":"#DC2626"}}>{trend!==null?`${trend>=0?"↑":"↓"}${Math.abs(trend)}%`:"—"}</strong></span>
+            <span>YTD: <strong style={{color:"var(--ink)"}}>{fmtKc(ytd)}</strong></span>
+          </div>
+        </div>
+        <div style={{background:"#F0FDF4",border:"1px solid #BBF7D0",borderRadius:14,padding:"16px 20px"}}>
+          <div style={{fontSize:8,letterSpacing:".3em",textTransform:"uppercase",color:"#065F46",fontWeight:600,marginBottom:2}}>▶ Příští měsíc — predikce</div>
+          <div style={{fontFamily:"Fraunces,serif",fontSize:24,fontWeight:300,color:"#059669",marginBottom:8}}>+{fmtKc(onTheWay)}<span style={{fontSize:11,color:"#065F46",fontFamily:"Inter",marginLeft:8,fontWeight:400}}>z výkazů {CZ_MONTHS[now.getMonth()]}</span></div>
+          <div style={{display:"flex",gap:16,fontSize:12,color:"#065F46"}}>
+            <span>+{fmtKc(mestoPodebrady)} Poděbrady</span>
+            <span>výdaje: {fmtKc(Math.abs(totalVydaje))}</span>
+            <span>zbyde: <strong>{fmtKc(onTheWay+mestoPodebrady+totalVydaje)}</strong></span>
+          </div>
+        </div>
+      </div>
+
+      {/* VELKÝ INTERAKTIVNÍ DONUT — centrální vizuál */}
+      <div style={{display:"grid",gridTemplateColumns:"380px 1fr",gap:16,alignItems:"start"}}>
+        {/* WealthDonut */}
         {(() => {
           const sp2 = (financeItems||[]).filter(i => i.category === "sporaci" && i.notes !== "SKIP_DISPLAY");
           const bal2 = sp2.find(i => i.id === "fi_sp_99")?.amount || 0;
@@ -1614,30 +1731,20 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
             {amount:zk,      color:"#C4B5FD"},
           ].filter(i=>i.amount>0);
           
+          const oTotal = outerItems.reduce((s,i)=>s+Math.abs(i.amount||0),0);
+          const iTotal = innerItems.reduce((s,i)=>s+Math.abs(i.amount||0),0);
           return (
-            <div style={{background:"#fff",border:"1px solid var(--line)",borderRadius:14,padding:"20px",display:"flex",flexDirection:"column",alignItems:"center",gap:12}}>
-              <div style={{fontSize:9,letterSpacing:".25em",textTransform:"uppercase",color:"var(--mut)",fontWeight:600,alignSelf:"flex-start"}}>Majetek & Spořák</div>
-              <DoubleRingChart outerItems={outerItems} innerItems={innerItems} size={240}/>
-              <div style={{display:"flex",gap:16,flexWrap:"wrap",justifyContent:"center"}}>
-                {[
-                  {label:"Akcie",color:"#10B981",v:akcie},
-                  {label:"Stavebko",color:"#D97706",v:stavebko},
-                  {label:"Základ. kap.",color:"#6EE7B7",v:zk},
-                ].map((it,i)=>(
-                  <div key={i} style={{display:"flex",alignItems:"center",gap:5}}>
-                    <div style={{width:8,height:8,borderRadius:2,background:it.color,flexShrink:0}}/>
-                    <span style={{fontSize:10,color:"var(--txt)"}}>{it.label}</span>
-                    <span style={{fontSize:10,fontFamily:"Fraunces,serif",color:it.color,fontWeight:300}}>{Math.round(it.v/1000)}k</span>
-                  </div>
-                ))}
-              </div>
+            <div style={{background:"#fff",border:"1px solid var(--line)",borderRadius:16,padding:"24px 20px 16px",display:"flex",flexDirection:"column",alignItems:"center"}}>
+              <div style={{fontSize:9,letterSpacing:".3em",textTransform:"uppercase",color:"var(--mut)",fontWeight:600,marginBottom:16,alignSelf:"flex-start"}}>Přehled majetku & spořáku</div>
+              <WealthDonut outerItems={outerItems} innerItems={innerItems}
+                outerLabel="OSOBNÍ MAJETEK" innerLabel="SPOŘÍCÍ ÚČET"
+                outerTotal={oTotal} innerTotal={iTotal} />
             </div>
           );
         })()}
         
         {/* Right: SpořákTile + Majetek + Top klienti */}
         <div style={{display:"flex",flexDirection:"column",gap:12}}>
-          <SpořákTile financeItems={financeItems} invoices={invoices} dpfoMonths={dpfoMonths} loanTransactions={loanTransactions} onSaveFinance={onSaveFinance} />
           {/* Mini chart + top klienti */}
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
             <Card style={{padding:"14px 16px"}}>
