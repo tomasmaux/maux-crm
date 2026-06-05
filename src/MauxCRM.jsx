@@ -1075,22 +1075,29 @@ function EditRow({ item, onSave, onDelete, valuePrefix = "", valueSuffix = " Kč
 }
 
 /* ─── FINANCE ITEM EDITOR ─── */
-function FinanceSection({ title, items, category, onSave, onDelete, accent }) {
+function FinanceSection({ title, items, category, onSave, onDelete, accent, autoItems }) {
+  const isIncome = category === "prijem";
   const [editing, setEditing] = useState(null);
   const [editVal, setEditVal] = useState({ label: "", amount: "" });
   const [adding, setAdding] = useState(false);
   const [newItem, setNewItem] = useState({ label: "", amount: "" });
 
-  const total = items.reduce((s, i) => s + (i.amount || 0), 0);
+  const manualTotal = items.filter(i => i.notes !== "TBD").reduce((s, i) => s + Math.abs(i.amount || 0), 0);
+  const autoTotal = (autoItems||[]).reduce((s,i) => s+i.amount, 0);
+  const total = manualTotal + autoTotal;
+  const amtColor = isIncome ? "#059669" : "#DC2626";
+  const signStr = isIncome ? "+" : "−";
 
   const startEdit = (item) => { setEditing(item.id); setEditVal({ label: item.label, amount: Math.abs(item.amount) }); };
   const saveEdit = async (item) => {
-    await onSave({ ...item, label: editVal.label, amount: -Math.abs(Number(editVal.amount) || 0) });
+    const sign = isIncome ? 1 : -1;
+    await onSave({ ...item, label: editVal.label, amount: sign * Math.abs(Number(editVal.amount) || 0) });
     setEditing(null);
   };
   const addNew = async () => {
     if (!newItem.label || !newItem.amount) return;
-    await onSave({ id: "fi_" + Math.random().toString(36).slice(2,8), category, label: newItem.label, amount: -Math.abs(Number(newItem.amount)), sort_order: items.length + 1 });
+    const sign = isIncome ? 1 : -1;
+    await onSave({ id: "fi_" + Math.random().toString(36).slice(2,8), category, label: newItem.label, amount: sign * Math.abs(Number(newItem.amount)), sort_order: items.length + 1 });
     setNewItem({ label: "", amount: "" }); setAdding(false);
   };
 
@@ -1100,14 +1107,26 @@ function FinanceSection({ title, items, category, onSave, onDelete, accent }) {
         <div>
           <div style={{ fontSize: 9, letterSpacing: ".3em", textTransform: "uppercase", color: accent || "var(--mut)", fontWeight: 600 }}>{title}</div>
           <div style={{ fontFamily: "Fraunces, serif", fontSize: 22, fontWeight: 300, color: "var(--txt)", marginTop: 2 }}>
-            {fmtKc(Math.abs(total))}
-            <span style={{ fontSize: 11, color: "var(--mut)", fontFamily: "Inter, sans-serif", marginLeft: 6 }}>/ měsíc</span>
+            {isIncome ? "+" : ""}{fmtKc(total)}
+            <span style={{ fontSize: 11, color: "var(--mut)", fontFamily: "Inter, sans-serif", marginLeft: 6, fontWeight: 400 }}>/ měsíc</span>
           </div>
         </div>
         <button onClick={() => setAdding(true)} style={{ background: "none", border: "1px solid var(--line2)", borderRadius: 7, padding: "5px 12px", fontSize: 12, color: "var(--ink)", cursor: "pointer", fontFamily: "inherit" }}>+ Přidat</button>
       </div>
       <div>
-        {items.map(item => (
+        {(autoItems||[]).map((item, i) => (
+          <div key={i} style={{ display: "flex", alignItems: "center", padding: "9px 18px", borderBottom: "1px solid var(--line)", gap: 10 }}>
+            <div style={{ flex: 1, fontSize: 12.5, color: "var(--txt)" }}>{item.label}</div>
+            <span style={{ fontSize: 7, background: "#EEF2FF", color: "#3730A3", padding: "1px 4px", borderRadius: 3, fontWeight: 700 }}>auto</span>
+            <div style={{ fontSize: 13, fontFamily: "var(--mono)", color: amtColor }}>+{item.amount.toLocaleString("cs-CZ")} Kč</div>
+          </div>
+        ))}
+        {items.map(item => item.notes === "TBD" ? (
+          <div key={item.id} style={{ display: "flex", alignItems: "center", padding: "9px 18px", borderBottom: "1px solid var(--line)", gap: 10 }}>
+            <div style={{ flex: 1, fontSize: 12.5, color: "var(--mut)", fontStyle: "italic" }}>{item.label}</div>
+            <span style={{ fontSize: 10, color: "var(--mut)", background: "#F5F5F5", padding: "2px 8px", borderRadius: 4 }}>k doplnění</span>
+          </div>
+        ) : (
           <div key={item.id} style={{ display: "flex", alignItems: "center", padding: "10px 20px", borderBottom: "1px solid var(--line)", gap: 12, cursor: "pointer" }}
             onClick={() => startEdit(item)}>
             {editing === item.id ? (
@@ -1125,7 +1144,7 @@ function FinanceSection({ title, items, category, onSave, onDelete, accent }) {
             ) : (
               <>
                 <div style={{ flex: 1, fontSize: 13, color: "var(--txt)" }}>{item.label}</div>
-                <div style={{ fontFamily: "var(--mono)", fontSize: 13, color: "#DC2626", letterSpacing: ".02em" }}>−{Math.abs(item.amount).toLocaleString("cs-CZ")} Kč</div>
+                <div style={{ fontSize: 13, fontFamily: "var(--mono)", color: amtColor }}>{signStr}{Math.abs(item.amount).toLocaleString("cs-CZ")} Kč</div>
                 <div style={{ fontSize: 10, color: "var(--mut)", opacity: .5 }}>✎</div>
               </>
             )}
@@ -1664,7 +1683,12 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
 
       {/* Příjmy + Výdaje + Cash flow */}
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 240px",gap:12}}>
-        <FinanceSection title="Příjmy měsíční" items={(financeItems||[]).filter(i=>i.category==="prijem")} category="prijem" accent="#059669" onSave={onSaveFinance} onDelete={onDeleteFinance} />
+        <FinanceSection title="Příjmy měsíční"
+          items={(financeItems||[]).filter(i=>i.category==="prijem")}
+          category="prijem" accent="#059669"
+          onSave={onSaveFinance} onDelete={onDeleteFinance}
+          autoItems={onTheWay>0 ? [{ label: `MAUX Legal — ${CZ_MONTHS[now.getMonth()]}`, amount: onTheWay }] : []}
+        />
         <FinanceSection title="Nutné výdaje" items={nutne} category="nutne" accent="#DC2626" onSave={onSaveFinance} onDelete={onDeleteFinance} />
         <FinanceSection title="Lusus výdaje" items={luxus} category="luxus" accent="#9333EA" onSave={onSaveFinance} onDelete={onDeleteFinance} />
         {/* Cash flow summary */}
