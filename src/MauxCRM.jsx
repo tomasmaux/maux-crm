@@ -375,8 +375,8 @@ function Dashboard({ invoices, workEntries, clients, onNav }) {
       {/* KPI row */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 12, marginBottom: 28 }}>
         {[
-          { k: "YTD příjmy", v: fmtKc(ytd), s: `${invoices.filter(i=>(i.issue_date||"").startsWith(String(year))).length} faktur`, accent: true },
-          { k: `${CZ_MONTHS[now.getMonth()]} — fakturováno`, v: fmtKc(thisMonthRev), s: revTrend !== null ? `${revTrend >= 0 ? "↑" : "↓"} ${Math.abs(revTrend)} % vs. minulý měsíc` : "aktuální měsíc", warn: revTrend !== null && revTrend < -10 },
+          { k: "YTD — bez DPH", v: fmtKc(ytd), s: `s DPH: ${fmtKc(invoices.filter(i=>(i.issue_date||"").startsWith(String(year))).reduce((s,i)=>s+(i.total||0),0))} · ${invoices.filter(i=>(i.issue_date||"").startsWith(String(year))).length} faktur`, accent: true },
+          { k: `${CZ_MONTHS[now.getMonth()]} — bez DPH`, v: fmtKc(thisMonthRev), s: revTrend !== null ? `${revTrend >= 0 ? "↑" : "↓"} ${Math.abs(revTrend)} % vs. minulý měsíc` : "aktuální měsíc", warn: revTrend !== null && revTrend < -10 },
           { k: "K vyfakturování", v: fmtKc(unbilledAmt), s: `${unbilledClients} klientů · ${unbilled.length} záznamů`, cta: true },
           { k: overdueAmt > 0 ? "Po splatnosti ⚠" : "Neuhrazeno", v: fmtKc(overdueAmt > 0 ? overdueAmt : pendingAmt), s: overdueAmt > 0 ? `${overdue.length} faktur — nutná akce` : `${pending.length} faktur čeká`, danger: overdueAmt > 0 },
         ].map((item, i) => (
@@ -918,19 +918,21 @@ function InvoiceList({ invoices, clients, workEntries, onOpen, onOpenClient, onT
       {/* ── STATISTIKY ── */}
       <div className="kpi-row">
         <div className="kpi hi">
-          <div className="k">Fakturováno celkem</div>
+          <div className="k">Fakturováno celkem — bez DPH</div>
           <div className="v">{fmtKc(total)}</div>
-          <div className="s">{invoices.length} faktur</div>
+          <div className="s">s DPH: {fmtKc(invoices.reduce((s,i) => s+(i.total||0),0))} · {invoices.length} faktur</div>
         </div>
         <div className="kpi">
-          <div className="k">Neuhrazeno</div>
+          <div className="k">Neuhrazeno — bez DPH</div>
           <div className="v">{fmtKc(nezaplaceno)}</div>
-          <div className="s">čeká na platbu</div>
+          <div className="s">s DPH: {fmtKc(invoices.filter(i=>invoiceStatus(i)!=="uhrazena").reduce((s,i)=>s+(i.total||0),0))} · čeká na platbu</div>
         </div>
         <div className="kpi">
-          <div className="k">Po splatnosti</div>
+          <div className="k">Po splatnosti — bez DPH</div>
           <div className="v" style={{ color: poSplatnosti > 0 ? "#DC2626" : "var(--txt)" }}>{fmtKc(poSplatnosti)}</div>
-          <div className="s" style={{ color: poSplatnosti > 0 ? "#DC2626" : "var(--mut)" }}>{poSplatnosti > 0 ? "nutná akce" : "vše v pořádku"}</div>
+          <div className="s" style={{ color: poSplatnosti > 0 ? "#DC2626" : "var(--mut)" }}>
+            {poSplatnosti > 0 ? `s DPH: ${fmtKc(invoices.filter(i=>invoiceStatus(i)==="po_splatnosti").reduce((s,i)=>s+(i.total||0),0))} — nutná akce` : "vše v pořádku"}
+          </div>
         </div>
       </div>
 
@@ -986,7 +988,7 @@ function InvoiceList({ invoices, clients, workEntries, onOpen, onOpenClient, onT
       {!loading && (
         <table className="tbl">
           <thead><tr>
-            <th>Klient</th><th>Číslo faktury</th><th>Vystavena</th><th>Splatnost</th><th style={{ textAlign: "right" }}>Základ (bez DPH)</th><th style={{ textAlign: "right" }}>Stav</th><th></th>
+            <th>Klient</th><th>Číslo faktury</th><th>Vystavena</th><th>Splatnost</th><th style={{ textAlign: "right" }}>Základ / S DPH</th><th style={{ textAlign: "right" }}>Stav</th><th></th>
           </tr></thead>
           <tbody>
             {filtered.length === 0 && (
@@ -1019,7 +1021,10 @@ function InvoiceList({ invoices, clients, workEntries, onOpen, onOpenClient, onT
                 </td>
                 <td className="t-date">{fmtDate(inv.issue_date)}</td>
                 <td className="t-date">{fmtDate(inv.due_date)}</td>
-                <td className="t-amt">{fmtKc(inv.subtotal)}</td>
+                <td style={{ textAlign: "right" }}>
+                  <div className="t-amt">{fmtKc(inv.subtotal)}</div>
+                  <div style={{ fontSize: 10.5, color: "var(--mut)", marginTop: 2 }}>s DPH: {fmtKc(inv.total)}</div>
+                </td>
                 <td style={{ textAlign: "right" }} onClick={e => e.stopPropagation()}>
                   <StatusToggle inv={inv} />
                 </td>
