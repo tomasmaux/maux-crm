@@ -2403,18 +2403,18 @@ function InvoiceList({ invoices, clients, workEntries, onOpen, onOpenClient, onT
         <div className="kpi hi">
           <div className="k">Fakturováno celkem — bez DPH</div>
           <div className="v">{fmtKc(total)}</div>
-          <div className="s">s DPH: {fmtKc(invoices.reduce((s,i) => s+(i.total||0),0))} · {invoices.length} faktur</div>
+          <div className="s">s DPH: {fmtKc(invoices.reduce((s,i)=>s+(i.total||0),0))} · {invoices.length} faktur</div>
         </div>
-        <div className="kpi">
-          <div className="k">Neuhrazeno — bez DPH</div>
-          <div className="v">{fmtKc(nezaplaceno)}</div>
-          <div className="s">s DPH: {fmtKc(invoices.filter(i=>invoiceStatus(i)!=="uhrazena").reduce((s,i)=>s+(i.total||0),0))} · čeká na platbu</div>
+        <div className="kpi" style={{background:"#F0FDF4",border:"1px solid #BBF7D0"}}>
+          <div className="k" style={{color:"#065F46"}}>Bude fakturováno — tento měsíc</div>
+          <div className="v" style={{color:"#059669"}}>{fmtKc((workEntries||[]).filter(e=>!e.invoice_id).reduce((s,e)=>s+Math.round((e.amount||0)*1.21)+(e.notary_fee||0)+(e.admin_fee||0),0))}</div>
+          <div className="s" style={{color:"#065F46"}}>nevyfakturované výkazy · s DPH</div>
         </div>
         <div className="kpi">
           <div className="k">Po splatnosti — bez DPH</div>
           <div className="v" style={{ color: poSplatnosti > 0 ? "#DC2626" : "var(--txt)" }}>{fmtKc(poSplatnosti)}</div>
           <div className="s" style={{ color: poSplatnosti > 0 ? "#DC2626" : "var(--mut)" }}>
-            {poSplatnosti > 0 ? `s DPH: ${fmtKc(invoices.filter(i=>invoiceStatus(i)==="po_splatnosti").reduce((s,i)=>s+(i.total||0),0))} — nutná akce` : "vše v pořádku"}
+            {poSplatnosti > 0 ? `${overdue.length} faktur — nutná akce` : "vše v pořádku"}
           </div>
         </div>
       </div>
