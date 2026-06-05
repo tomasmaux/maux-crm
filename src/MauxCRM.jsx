@@ -50,24 +50,23 @@ const addDays = (d, n) => { const dt = new Date(d); dt.setDate(dt.getDate() + n)
 const CSS = `
 @import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,300;9..144,400;9..144,500&family=Inter:wght@300;400;500;600&display=swap');
 *{box-sizing:border-box;margin:0;padding:0}
-html,body,#root{height:100%;background:#F0EFF8}
-.mx{--ink:#3518A5;--ink2:#2810a0;--ink3:#4a2bc4;--gold:#B8923D;--gold2:#d4a84b;--bg:#F0EFF8;--surface:#FFFFFF;--line:#E8E6F2;--line2:#D4D1E8;--mut:#9896A8;--txt:#18162A;
+html,body,#root{height:100%;background:#F5F4FB}
+.mx{--ink:#3518A5;--ink2:#2810a0;--ink3:#4a2bc4;--gold:#B8923D;--gold2:#d4a84b;--bg:#F5F4FB;--surface:#FFFFFF;--line:#EDEDF4;--line2:#D8D6E8;--mut:#9896A8;--txt:#18162A;
   font-family:'Inter',system-ui,sans-serif;color:var(--txt);background:var(--bg);min-height:100vh;display:flex;font-size:14px;line-height:1.5}
 .serif{font-family:'Fraunces',Georgia,serif}
-.sb{width:224px;flex:0 0 224px;background:#1A0E5C;display:flex;flex-direction:column;padding:28px 14px 24px;min-height:100vh;position:sticky;top:0}
-.brand{padding:2px 8px 32px}
-.brand .wm{font-family:'Fraunces',serif;font-size:21px;font-weight:400;color:#fff;letter-spacing:.08em}
-.brand .sub{font-size:7.5px;letter-spacing:.45em;text-transform:uppercase;color:var(--gold2);margin-top:4px;font-weight:600;opacity:.9}
-.nav{display:flex;flex-direction:column;gap:2px}
-.ni{display:flex;align-items:center;justify-content:space-between;padding:10px 12px;border-radius:9px;cursor:pointer;font-size:12.5px;font-weight:400;color:rgba(255,255,255,.5);border:none;background:none;text-align:left;width:100%;transition:all .15s;letter-spacing:.01em}
-.ni:hover{color:rgba(255,255,255,.85);background:rgba(255,255,255,.07)}
-.ni.on{color:#fff;background:rgba(255,255,255,.12);font-weight:500}
-.ni.on::before{content:'';display:inline-block;width:3px;height:16px;background:var(--gold2);border-radius:2px;margin-right:10px;flex-shrink:0}
-.ni:not(.on)::before{content:'';display:inline-block;width:3px;height:16px;border-radius:2px;margin-right:10px;flex-shrink:0;opacity:0}
-.ni .soon{font-size:8px;color:rgba(255,255,255,.2);letter-spacing:.04em;font-weight:400;background:rgba(255,255,255,.06);border-radius:4px;padding:2px 6px}
-.sbfoot{margin-top:auto;font-size:10.5px;color:rgba(255,255,255,.25);line-height:1.7;padding:16px 8px 0;border-top:1px solid rgba(255,255,255,.08)}
-.sbfoot button{background:none;border:none;color:rgba(255,255,255,.25);font:inherit;font-size:10.5px;cursor:pointer;padding:0;text-decoration:underline;transition:.12s}
-.sbfoot button:hover{color:rgba(255,255,255,.5)}
+.sb{width:220px;flex:0 0 220px;background:#FFFFFF;border-right:1px solid #EEEDF5;display:flex;flex-direction:column;padding:32px 16px 24px;min-height:100vh;position:sticky;top:0}
+.brand{padding:0 8px 36px}
+.brand .wm{font-family:'Fraunces',serif;font-size:22px;font-weight:400;color:var(--ink);letter-spacing:.06em;line-height:1}
+.brand .sub{font-size:7.5px;letter-spacing:.42em;text-transform:uppercase;color:var(--gold);margin-top:5px;font-weight:600;opacity:.85}
+.brand .sub2{font-size:8.5px;color:var(--mut);margin-top:2px;letter-spacing:.01em;font-weight:400;opacity:.7}
+.nav{display:flex;flex-direction:column;gap:1px}
+.ni{display:flex;align-items:center;justify-content:space-between;padding:9px 12px;border-radius:8px;cursor:pointer;font-size:13px;font-weight:400;color:#9896B8;border:none;background:none;text-align:left;width:100%;transition:all .12s;letter-spacing:0}
+.ni:hover{color:var(--ink);background:#F5F3FF}
+.ni.on{color:var(--ink);background:#EDE9FD;font-weight:500}
+.ni .soon{font-size:8px;color:#CCC;letter-spacing:.04em;font-weight:400;background:#F5F5F8;border-radius:4px;padding:2px 7px}
+.sbfoot{margin-top:auto;font-size:10.5px;color:#C8C6D8;line-height:1.8;padding:18px 8px 0;border-top:1px solid #F0EEF8}
+.sbfoot button{background:none;border:none;color:#C8C6D8;font:inherit;font-size:10.5px;cursor:pointer;padding:0;text-decoration:underline;transition:.12s}
+.sbfoot button:hover{color:var(--mut)}
 .main{flex:1;display:flex;flex-direction:column;min-width:0;background:var(--bg)}
 .top{padding:32px 40px 0;display:flex;align-items:flex-end;justify-content:space-between;gap:16px}
 .top-l .eyebrow{font-size:9px;letter-spacing:.3em;text-transform:uppercase;color:var(--ink);font-weight:600;opacity:.5;margin-bottom:8px}
@@ -684,8 +683,16 @@ function Sidebar({ mod, setMod, onLogout }) {
   return (
     <aside className="sb">
       <div className="brand">
-        <div className="wm serif">MAUX</div>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6 }}>
+          <div style={{ width: 32, height: 32, borderRadius: "50%", border: "1.5px solid var(--ink)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+            <span style={{ fontFamily: "Fraunces, serif", fontSize: 14, color: "var(--ink)", fontWeight: 400 }}>M</span>
+          </div>
+          <div>
+            <div className="wm serif">MAUX</div>
+          </div>
+        </div>
         <div className="sub">Legal · CRM</div>
+        <div className="sub2">Poděbrady · advokat@maux.cz</div>
       </div>
       <nav className="nav">
         {MODULES.map(m => (
@@ -1176,7 +1183,7 @@ function WorkEntryList({ entries, clients, invoices, onNew, onEdit, onDelete, on
 }
 
 /* ─── FAKTURACE ─── */
-function InvoiceList({ invoices, clients, workEntries, onOpen, onOpenClient, onToggleStatus, onGenerateInvoice, loading }) {
+function InvoiceList({ invoices, clients, workEntries, onOpen, onOpenClient, onToggleStatus, onGenerateInvoice, onPreviewInvoice, loading }) {
   const [search, setSearch] = useState("");
   const [filterStatus, setFilterStatus] = useState("vse");
   const [filterClient, setFilterClient] = useState("");
@@ -1284,6 +1291,10 @@ function InvoiceList({ invoices, clients, workEntries, onOpen, onOpenClient, onT
                     <div style={{ fontFamily: "Fraunces, serif", fontSize: 18, fontWeight: 300, color: "var(--gold)" }}>{fmtKc(d.total)}</div>
                     <div style={{ fontSize: 11, color: "var(--mut)" }}>základ {fmtKc(d.workAmt)} + DPH {fmtKc(d.vat)}{(d.notary+d.admin)>0 ? ` + přef. ${fmtKc(d.notary+d.admin)}` : ""}</div>
                   </div>
+                  <button className="btn" style={{ fontSize: 12, flexShrink: 0 }}
+                    onClick={e => { e.stopPropagation(); onPreviewInvoice && onPreviewInvoice(d.clientId, d.entries); }}>
+                    Náhled
+                  </button>
                   <button className="btn pri" style={{ fontSize: 12, flexShrink: 0 }}
                     onClick={e => { e.stopPropagation(); onGenerateInvoice(d.clientId, d.entries); }}>
                     Vystavit fakturu →
@@ -2081,7 +2092,8 @@ export default function MauxCRM() {
               }}
               onToggleStatus={toggleInvoiceStatus}
               onOpenClient={openClientFromInvoice}
-              onGenerateInvoice={generateInvoiceFromEntries}
+              onGenerateInvoice={openIssueModal}
+              onPreviewInvoice={openPreviewModal}
               loading={dataLoading}
             />
           )}
