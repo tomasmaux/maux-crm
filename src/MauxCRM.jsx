@@ -1225,69 +1225,106 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
 
       {/* SPOŘÍCÍ ÚČET — command center */}
       {(() => {
-        const sporaci = (financeItems||[]).filter(i => i.category === "sporaci");
-        const zůstatek = sporaci.find(i => i.id === "fi_sp_99");
-        const obálky = sporaci.filter(i => i.id !== "fi_sp_99");
+        const sporaci = (financeItems||[]).filter(i => i.category === "sporaci" && i.notes !== "SKIP_DISPLAY");
+        const zůstatekItem = sporaci.find(i => i.id === "fi_sp_99");
+        const manualObálky = sporaci.filter(i => i.id !== "fi_sp_99");
         const dphAuto = invoices.filter(i => i.status === "uhrazena").reduce((s,i) => s+(i.vat_amount||0), 0);
         const dpfoAcc = (dpfoMonths||[]).filter(m => m.is_paid).reduce((s,m) => s+(m.amount||8050), 0);
+        const bobniceBal = Math.max((loanTransactions?.loan_bobnice||[]).reduce((s,t) => s+t.amount, 0), 0);
+
+        const [editBal, setEditBal] = useState(false);
+        const [balInput, setBalInput] = useState(zůstatekItem?.amount || 0);
+
         const allItems = [
           { label: "DPH", amount: dphAuto, color: "#3518A5", auto: true },
           { label: "DPFO", amount: dpfoAcc, color: "#F59E0B", auto: true },
-          ...obálky.map((o,i) => ({ label: o.label, amount: o.amount||0, color: ["#059669","#7C3AED","#0EA5E9","#DC2626"][i%4], auto: false })),
+          ...(bobniceBal > 0 ? [{ label: "Bobnice", amount: bobniceBal, color: "#059669", auto: true }] : []),
+          ...manualObálky.map((o,i) => ({ id: o.id, label: o.label, amount: o.amount||0, color: ["#7C3AED","#0EA5E9","#DC2626","#6B7280"][i%4], auto: false })),
         ].filter(i => i.amount > 0);
+
         const totalEarmarked = allItems.reduce((s,i) => s+i.amount, 0);
-        const actualBalance = zůstatek?.amount || 0;
-        const diff = actualBalance - totalEarmarked;
+        const actualBalance = zůstatekItem?.amount || 0;
+        const základníKapitál = actualBalance - totalEarmarked;
+        const planKapitál = (financeItems||[]).find(i => i.id === "fi_plan_kapital")?.amount || 150000;
+
         return (
           <div style={{ background: "#fff", border: "1px solid var(--line)", borderRadius: 14, padding: "20px 24px" }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 20 }}>
+            {/* Header */}
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 18 }}>
               <div>
-                <Lbl color="#3518A5">Spořící účet — přehled obálek</Lbl>
-                <div style={{ display: "flex", alignItems: "baseline", gap: 16, marginTop: 4 }}>
-                  <div style={{ fontFamily: "Fraunces,serif", fontSize: 32, fontWeight: 300, color: "var(--ink)" }}>{fmtKc(actualBalance)}</div>
-                  <div style={{ fontSize: 12, color: "var(--mut)" }}>skutečný zůstatek účtu</div>
-                </div>
+                <Lbl color="#3518A5">Spořící účet</Lbl>
+                {editBal ? (
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 4 }}>
+                    <input type="number" value={balInput} onChange={e => setBalInput(Number(e.target.value))} autoFocus
+                      style={{ width: 140, font: "inherit", fontSize: 22, padding: "4px 10px", border: "2px solid var(--ink)", borderRadius: 8, outline: "none", fontFamily: "Fraunces,serif", fontWeight: 300 }}
+                      onKeyDown={e => { if(e.key==="Enter") { onSaveFinance({...zůstatekItem, amount: balInput}); setEditBal(false); } if(e.key==="Escape") setEditBal(false); }} />
+                    <button onClick={() => { onSaveFinance({...zůstatekItem, amount: balInput}); setEditBal(false); }}
+                      style={{ background: "var(--ink)", color: "#fff", border: "none", borderRadius: 7, padding: "6px 12px", fontSize: 12, cursor: "pointer" }}>✓</button>
+                  </div>
+                ) : (
+                  <div style={{ display: "flex", alignItems: "baseline", gap: 10, marginTop: 4, cursor: "pointer" }} onClick={() => { setBalInput(actualBalance); setEditBal(true); }}>
+                    <div style={{ fontFamily: "Fraunces,serif", fontSize: 32, fontWeight: 300, color: "var(--ink)" }}>{fmtKc(actualBalance)}</div>
+                    <span style={{ fontSize: 11, color: "var(--mut)" }}>skutečný zůstatek ✎</span>
+                  </div>
+                )}
               </div>
               <div style={{ textAlign: "right" }}>
-                <div style={{ fontSize: 11, color: "var(--mut)", marginBottom: 4 }}>Rezervováno v obálkách</div>
-                <div style={{ fontFamily: "Fraunces,serif", fontSize: 22, fontWeight: 300, color: "var(--txt)" }}>{fmtKc(totalEarmarked)}</div>
-                <div style={{ fontSize: 11, marginTop: 4, color: diff >= 0 ? "#059669" : "#DC2626", fontWeight: 500 }}>
-                  {diff >= 0 ? `+${fmtKc(diff)} volných` : `${fmtKc(diff)} nedostatek`}
+                <div style={{ fontSize: 10, color: "var(--mut)", marginBottom: 3 }}>Obálky celkem</div>
+                <div style={{ fontFamily: "Fraunces,serif", fontSize: 18, fontWeight: 300 }}>{fmtKc(totalEarmarked)}</div>
+                <div style={{ fontSize: 12, marginTop: 4, fontWeight: 600, color: základníKapitál >= 0 ? "#059669" : "#DC2626" }}>
+                  {základníKapitál >= 0 ? "+" : ""}{fmtKc(základníKapitál)} volného
                 </div>
               </div>
             </div>
+
             {/* Stacked bar */}
-            <div style={{ height: 28, borderRadius: 8, overflow: "hidden", display: "flex", marginBottom: 16, background: "#F0EEF8" }}>
+            <div style={{ height: 20, borderRadius: 6, overflow: "hidden", display: "flex", marginBottom: 14, background: "#F0EEF8" }}>
               {allItems.map((item, i) => (
                 <div key={i} title={`${item.label}: ${fmtKc(item.amount)}`}
-                  style={{ width: `${totalEarmarked > 0 ? (item.amount/totalEarmarked)*100 : 0}%`, background: item.color, transition: ".5s", position: "relative", display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden" }}>
-                  {(item.amount/totalEarmarked) > 0.08 && (
-                    <span style={{ fontSize: 9, color: "#fff", fontWeight: 600, letterSpacing: ".04em", whiteSpace: "nowrap" }}>{item.label}</span>
-                  )}
+                  style={{ width: `${totalEarmarked > 0 ? (item.amount/totalEarmarked)*100 : 0}%`, background: item.color, transition: ".5s", display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden" }}>
+                  {(item.amount/totalEarmarked) > 0.1 && <span style={{ fontSize: 8, color: "#fff", fontWeight: 700, letterSpacing: ".04em" }}>{item.label}</span>}
                 </div>
               ))}
             </div>
-            {/* Legend */}
-            <div style={{ display: "flex", gap: 20, flexWrap: "wrap" }}>
+
+            {/* Legend grid */}
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(110px, 1fr))", gap: "8px 16px", marginBottom: 16 }}>
               {allItems.map((item, i) => (
-                <div key={i} style={{ display: "flex", alignItems: "center", gap: 7 }}>
-                  <div style={{ width: 10, height: 10, borderRadius: 3, background: item.color, flexShrink: 0 }} />
+                <div key={i} style={{ display: "flex", alignItems: "flex-start", gap: 7 }}>
+                  <div style={{ width: 8, height: 8, borderRadius: 2, background: item.color, flexShrink: 0, marginTop: 3 }} />
                   <div>
-                    <div style={{ fontSize: 11, color: "var(--txt)", fontWeight: 500, display: "flex", alignItems: "center", gap: 4 }}>
+                    <div style={{ fontSize: 10, color: "var(--mut)", display: "flex", gap: 4, alignItems: "center" }}>
                       {item.label}
-                      {item.auto && <span style={{ fontSize: 8, background: "#EEF2FF", color: "#3730A3", padding: "1px 5px", borderRadius: 3, fontWeight: 600 }}>auto</span>}
+                      {item.auto && <span style={{ fontSize: 7, background: "#EEF2FF", color: "#3730A3", padding: "1px 4px", borderRadius: 3, fontWeight: 700 }}>auto</span>}
                     </div>
-                    <div style={{ fontSize: 12, fontFamily: "Fraunces,serif", fontWeight: 300, color: item.color }}>{fmtKc(item.amount)}</div>
+                    <div style={{ fontSize: 13, fontFamily: "Fraunces,serif", fontWeight: 300, color: item.color }}>{fmtKc(item.amount)}</div>
                   </div>
                 </div>
               ))}
+            </div>
+
+            {/* Základní kapitál vs. plán */}
+            <div style={{ background: základníKapitál >= planKapitál ? "#F0FDF4" : "#FEF2F2", borderRadius: 10, padding: "12px 16px", border: `1px solid ${základníKapitál >= planKapitál ? "#BBF7D0" : "#FECACA"}` }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 8 }}>
+                <span style={{ fontSize: 10, letterSpacing: ".15em", textTransform: "uppercase", fontWeight: 600, color: základníKapitál >= planKapitál ? "#065F46" : "#991B1B" }}>Základní kapitál MAUX Legal</span>
+                <span style={{ fontSize: 11, color: "var(--mut)" }}>cíl: {fmtKc(planKapitál)}</span>
+              </div>
+              <div style={{ height: 6, background: "rgba(0,0,0,.08)", borderRadius: 3, marginBottom: 8 }}>
+                <div style={{ height: "100%", width: `${Math.min((Math.max(základníKapitál,0)/planKapitál)*100,100)}%`, background: základníKapitál >= planKapitál ? "#059669" : "#DC2626", borderRadius: 3, transition: ".5s" }} />
+              </div>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+                <span style={{ fontFamily: "Fraunces,serif", fontSize: 20, fontWeight: 300, color: základníKapitál >= planKapitál ? "#059669" : "#DC2626" }}>{fmtKc(Math.max(základníKapitál,0))}</span>
+                <span style={{ fontSize: 12, color: základníKapitál >= 0 ? "#059669" : "#DC2626", fontWeight: 600 }}>
+                  {základníKapitál >= planKapitál ? "✓ Cíl splněn" : `${fmtKc(planKapitál - Math.max(základníKapitál,0))} do cíle`}
+                </span>
+              </div>
             </div>
           </div>
         );
       })()}
 
-      {/* Chart + Top klienti */}
-      <div style={{display:"grid",gridTemplateColumns:"1fr 240px",gap:12}}>
+      {/* Chart + Majetek + Top klienti */}
+      <div style={{display:"grid",gridTemplateColumns:"1fr 280px 220px",gap:12}}>
         <Card>
           {(() => {
             const W = 560, H = 130, padL = 10, padR = 10, padT = 24, padB = 28;
@@ -1364,6 +1401,60 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
             );
           })()}
         </Card>
+        {/* MAJETEK — kombinovaný donut */}
+        {(() => {
+          const sporaci = (financeItems||[]).filter(i => i.category === "sporaci" && i.notes !== "SKIP_DISPLAY");
+          const zůstatekItem = sporaci.find(i => i.id === "fi_sp_99");
+          const dphAuto = invoices.filter(i => i.status === "uhrazena").reduce((s,i) => s+(i.vat_amount||0), 0);
+          const dpfoAcc = (dpfoMonths||[]).filter(m => m.is_paid).reduce((s,m) => s+(m.amount||8050), 0);
+          const bobniceBal = Math.max((loanTransactions?.loan_bobnice||[]).reduce((s,t) => s+t.amount, 0), 0);
+          const manualObálky = sporaci.filter(i => i.id !== "fi_sp_99");
+          const totalEarmarked = dphAuto + dpfoAcc + bobniceBal + manualObálky.reduce((s,o) => s+(o.amount||0), 0);
+          const actualBalance = zůstatekItem?.amount || 0;
+          const základníKapitál = Math.max(actualBalance - totalEarmarked, 0);
+          const majetek = (financeItems||[]).filter(i => i.category === "majetek" && i.id !== "fi_ma_03");
+          const akcie = majetek.find(i => i.id === "fi_ma_01")?.amount || 0;
+          const stavebko = majetek.find(i => i.id === "fi_ma_02")?.amount || 0;
+          const wItems = [
+            { label: "Akcie", amount: akcie, color: "#3518A5" },
+            { label: "Stavebko", amount: stavebko, color: "#B8923D" },
+            { label: "Základ. kapitál", amount: základníKapitál, color: "#059669" },
+          ].filter(i => i.amount > 0);
+          const totalW = wItems.reduce((s,i) => s+i.amount, 0);
+          const planKapitál = (financeItems||[]).find(i => i.id === "fi_plan_kapital")?.amount || 150000;
+          return (
+            <Card style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+              <Lbl color="#7C3AED">Osobní majetek</Lbl>
+              <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+                <DonutChart items={wItems} size={90} />
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontFamily: "Fraunces,serif", fontSize: 18, fontWeight: 300, color: "var(--txt)", marginBottom: 8 }}>{fmtKc(totalW)}</div>
+                  {wItems.map((item,i) => (
+                    <div key={i} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 5 }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
+                        <div style={{ width: 7, height: 7, borderRadius: 2, background: item.color }} />
+                        <span style={{ fontSize: 11, color: "var(--txt)" }}>{item.label}</span>
+                      </div>
+                      <span style={{ fontSize: 11, fontFamily: "Fraunces,serif", fontWeight: 300, color: item.color }}>{Math.round(item.amount/1000)}k</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+              {/* Kapitál vs plán mini-bar */}
+              <div style={{ borderTop: "1px solid var(--line)", paddingTop: 10 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10, color: "var(--mut)", marginBottom: 5 }}>
+                  <span>Základ. kapitál</span><span>cíl {fmtKc(planKapitál)}</span>
+                </div>
+                <div style={{ height: 5, background: "#F0EEF8", borderRadius: 3 }}>
+                  <div style={{ height: "100%", width: `${Math.min((základníKapitál/planKapitál)*100,100)}%`, background: základníKapitál >= planKapitál ? "#059669" : "#3518A5", borderRadius: 3 }} />
+                </div>
+                <div style={{ fontSize: 11, color: základníKapitál >= planKapitál ? "#059669" : "#DC2626", marginTop: 4, fontWeight: 500 }}>
+                  {základníKapitál >= planKapitál ? "✓ Cíl splněn" : `chybí ${fmtKc(planKapitál-základníKapitál)}`}
+                </div>
+              </div>
+            </Card>
+          );
+        })()}
         <Card>
           <Lbl>Top klienti</Lbl>
           {topC.slice(0,5).map(({c,rev},i)=>(
