@@ -15,12 +15,13 @@ const SERVICE_COLORS = {
 const ALL_SERVICES = Object.keys(SERVICE_COLORS);
 
 const MODULES = [
-  { key: "vykaz",     label: "Výkaz práce", live: true },
-  { key: "fakturace", label: "Fakturace",   live: true },
-  { key: "klienti",   label: "Klienti",     live: true },
-  { key: "uschovy",   label: "Úschovy",     live: false, desc: "Evidence advokátních úschov a výpočet úroků." },
-  { key: "ucetni",    label: "Účetní export", live: false, desc: "Export podkladu pro účetní — základ, DPH, splatnosti." },
-  { key: "happy",     label: "Happy Life",  live: false, desc: "Osobní finance — spoření, majetek, přehledy." },
+  { key: "dashboard",  label: "Přehled",      live: true },
+  { key: "vykaz",      label: "Výkaz práce",  live: true },
+  { key: "fakturace",  label: "Fakturace",    live: true },
+  { key: "klienti",    label: "Klienti",      live: true },
+  { key: "uschovy",    label: "Úschovy",      live: false, desc: "Evidence advokátních úschov a výpočet úroků." },
+  { key: "ucetni",     label: "Účetní export",live: false, desc: "Export podkladu pro účetní — základ, DPH, splatnosti." },
+  { key: "happy",      label: "Happy Life",   live: false, desc: "Osobní finance — spoření, majetek, přehledy." },
 ];
 
 const fmtKc = (n) => new Intl.NumberFormat("cs-CZ").format(Math.round(n || 0)) + " Kč";
@@ -33,29 +34,35 @@ const addDays = (d, n) => { const dt = new Date(d); dt.setDate(dt.getDate() + n)
 const CSS = `
 @import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,300;9..144,400;9..144,500&family=Inter:wght@300;400;500;600&display=swap');
 *{box-sizing:border-box;margin:0;padding:0}
-html,body,#root{height:100%;background:#F7F6FB}
-.mx{--ink:#3518A5;--ink2:#2810a0;--gold:#B8923D;--bg:#F7F6FB;--surface:#FFFFFF;--line:#EBEBF0;--line2:#D9D8E3;--mut:#9896A8;--txt:#1A1825;
+html,body,#root{height:100%;background:#F0EFF8}
+.mx{--ink:#3518A5;--ink2:#2810a0;--ink3:#4a2bc4;--gold:#B8923D;--gold2:#d4a84b;--bg:#F0EFF8;--surface:#FFFFFF;--line:#E8E6F2;--line2:#D4D1E8;--mut:#9896A8;--txt:#18162A;
   font-family:'Inter',system-ui,sans-serif;color:var(--txt);background:var(--bg);min-height:100vh;display:flex;font-size:14px;line-height:1.5}
 .serif{font-family:'Fraunces',Georgia,serif}
-.sb{width:220px;flex:0 0 220px;background:var(--surface);border-right:1px solid var(--line);display:flex;flex-direction:column;padding:24px 12px 24px 16px;min-height:100vh;position:sticky;top:0}
-.brand{padding:4px 8px 28px}
-.brand .wm{font-family:'Fraunces',serif;font-size:19px;font-weight:400;color:var(--ink);letter-spacing:.06em}
-.brand .sub{font-size:7.5px;letter-spacing:.45em;text-transform:uppercase;color:var(--gold);margin-top:3px;font-weight:600}
+.sb{width:224px;flex:0 0 224px;background:#1A0E5C;display:flex;flex-direction:column;padding:28px 14px 24px;min-height:100vh;position:sticky;top:0}
+.brand{padding:2px 8px 32px}
+.brand .wm{font-family:'Fraunces',serif;font-size:21px;font-weight:400;color:#fff;letter-spacing:.08em}
+.brand .sub{font-size:7.5px;letter-spacing:.45em;text-transform:uppercase;color:var(--gold2);margin-top:4px;font-weight:600;opacity:.9}
 .nav{display:flex;flex-direction:column;gap:2px}
-.ni{display:flex;align-items:center;justify-content:space-between;padding:9px 10px;border-radius:8px;cursor:pointer;font-size:13px;font-weight:400;color:var(--mut);border:none;background:none;text-align:left;width:100%;transition:all .15s;letter-spacing:0}
-.ni:hover{color:var(--txt);background:#F3F0FF}
-.ni.on{color:var(--ink);background:#EDE8FD;font-weight:500}
-.ni .soon{font-size:8px;color:#CCC;letter-spacing:.05em;font-weight:400;background:#F5F5F5;border-radius:4px;padding:1px 6px}
-.sbfoot{margin-top:auto;font-size:10.5px;color:#CCC;line-height:1.7;padding:16px 8px 0;border-top:1px solid var(--line)}
-.sbfoot button{background:none;border:none;color:#CCC;font:inherit;font-size:10.5px;cursor:pointer;padding:0;text-decoration:underline;transition:.12s}
-.sbfoot button:hover{color:var(--mut)}
+.ni{display:flex;align-items:center;justify-content:space-between;padding:10px 12px;border-radius:9px;cursor:pointer;font-size:12.5px;font-weight:400;color:rgba(255,255,255,.5);border:none;background:none;text-align:left;width:100%;transition:all .15s;letter-spacing:.01em}
+.ni:hover{color:rgba(255,255,255,.85);background:rgba(255,255,255,.07)}
+.ni.on{color:#fff;background:rgba(255,255,255,.12);font-weight:500}
+.ni.on::before{content:'';display:inline-block;width:3px;height:16px;background:var(--gold2);border-radius:2px;margin-right:10px;flex-shrink:0}
+.ni:not(.on)::before{content:'';display:inline-block;width:3px;height:16px;border-radius:2px;margin-right:10px;flex-shrink:0;opacity:0}
+.ni .soon{font-size:8px;color:rgba(255,255,255,.2);letter-spacing:.04em;font-weight:400;background:rgba(255,255,255,.06);border-radius:4px;padding:2px 6px}
+.sbfoot{margin-top:auto;font-size:10.5px;color:rgba(255,255,255,.25);line-height:1.7;padding:16px 8px 0;border-top:1px solid rgba(255,255,255,.08)}
+.sbfoot button{background:none;border:none;color:rgba(255,255,255,.25);font:inherit;font-size:10.5px;cursor:pointer;padding:0;text-decoration:underline;transition:.12s}
+.sbfoot button:hover{color:rgba(255,255,255,.5)}
 .main{flex:1;display:flex;flex-direction:column;min-width:0;background:var(--bg)}
 .top{padding:32px 40px 0;display:flex;align-items:flex-end;justify-content:space-between;gap:16px}
-.top-l .eyebrow{font-size:9px;letter-spacing:.3em;text-transform:uppercase;color:var(--ink);font-weight:600;opacity:.6;margin-bottom:8px}
-.top-l h1{font-family:'Fraunces',serif;font-size:30px;font-weight:300;color:var(--txt);line-height:1.1}
+.top-l .eyebrow{font-size:9px;letter-spacing:.3em;text-transform:uppercase;color:var(--ink);font-weight:600;opacity:.5;margin-bottom:8px}
+.top-l h1{font-family:'Fraunces',serif;font-size:32px;font-weight:300;color:var(--txt);line-height:1.1;letter-spacing:-.01em}
 .top-r{display:flex;gap:8px;align-items:center;padding-bottom:2px}
 .hr{height:1px;background:var(--line);margin:24px 40px 0}
 .body{flex:1;padding:28px 40px 48px}
+/* tooltip */
+.tt-wrap{position:relative;display:inline-block;max-width:100%}
+.tt-wrap .tt{display:none;position:absolute;left:0;top:calc(100% + 6px);z-index:50;background:#1A0E5C;color:#fff;font-size:12px;line-height:1.6;padding:10px 14px;border-radius:8px;min-width:280px;max-width:420px;box-shadow:0 8px 24px rgba(0,0,0,.18);white-space:pre-wrap;word-break:break-word}
+.tt-wrap:hover .tt{display:block}
 .btn{font:inherit;font-size:12.5px;font-weight:500;border-radius:8px;padding:8px 16px;cursor:pointer;border:1px solid var(--line2);background:var(--surface);color:var(--ink);transition:all .15s;white-space:nowrap}
 .btn:hover{border-color:var(--ink);background:#F7F5FF}
 .btn.pri{background:var(--ink);color:#fff;border-color:var(--ink);box-shadow:0 2px 8px rgba(53,24,165,.25)}
@@ -295,6 +302,197 @@ function Sidebar({ mod, setMod, onLogout }) {
         <button onClick={onLogout}>Odhlásit se</button>
       </div>
     </aside>
+  );
+}
+
+/* ─── DASHBOARD ─── */
+function Dashboard({ invoices, workEntries, clients, onNav }) {
+  const now = new Date();
+  const thisMonth = now.toISOString().slice(0, 7);
+  const prevMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1).toISOString().slice(0, 7);
+  const year = now.getFullYear();
+
+  const months = Array.from({ length: now.getMonth() + 1 }, (_, i) => {
+    const m = String(i + 1).padStart(2, "0");
+    return { key: `${year}-${m}`, label: CZ_MONTHS[i].slice(0, 3) };
+  });
+
+  const revenueByMonth = months.map(({ key, label }) => ({
+    label,
+    v: invoices.filter(i => (i.issue_date || "").startsWith(key)).reduce((s, i) => s + (i.total || 0), 0),
+  }));
+  const maxRev = Math.max(...revenueByMonth.map(m => m.v), 1);
+
+  const ytd = invoices.filter(i => (i.issue_date || "").startsWith(String(year))).reduce((s, i) => s + (i.total || 0), 0);
+  const thisMonthRev = invoices.filter(i => (i.issue_date || "").startsWith(thisMonth)).reduce((s, i) => s + (i.total || 0), 0);
+  const prevMonthRev = invoices.filter(i => (i.issue_date || "").startsWith(prevMonth)).reduce((s, i) => s + (i.total || 0), 0);
+  const revTrend = prevMonthRev > 0 ? Math.round(((thisMonthRev - prevMonthRev) / prevMonthRev) * 100) : null;
+
+  const unbilled = workEntries.filter(e => !e.invoice_id);
+  const unbilledAmt = unbilled.reduce((s, e) => s + Math.round((e.amount || 0) * 1.21) + (e.notary_fee || 0) + (e.admin_fee || 0), 0);
+  const unbilledClients = new Set(unbilled.filter(e => e.client_id).map(e => e.client_id)).size;
+
+  const overdue = invoices.filter(i => invoiceStatus(i) === "po_splatnosti");
+  const overdueAmt = overdue.reduce((s, i) => s + (i.total || 0), 0);
+  const pending = invoices.filter(i => invoiceStatus(i) === "vystavena");
+  const pendingAmt = pending.reduce((s, i) => s + (i.total || 0), 0);
+
+  const thisMonthHours = workEntries.filter(e => (e.entry_date || "").startsWith(thisMonth)).reduce((s, e) => s + (e.hours || 0), 0);
+  const thisMonthRealH = workEntries.filter(e => (e.entry_date || "").startsWith(thisMonth)).reduce((s, e) => s + (e.real_hours || 0), 0);
+
+  const clientRev = {};
+  invoices.forEach(i => { if (i.client_id) clientRev[i.client_id] = (clientRev[i.client_id] || 0) + (i.total || 0); });
+  const topClients = Object.entries(clientRev).sort(([, a], [, b]) => b - a).slice(0, 6)
+    .map(([id, rev]) => ({ c: clients.find(x => x.id === id), rev })).filter(x => x.c);
+  const maxCR = topClients[0]?.rev || 1;
+
+  const recentWork = [...workEntries].sort((a, b) => (b.entry_date || "").localeCompare(a.entry_date || "")).slice(0, 5);
+
+  const greeting = () => {
+    const h = now.getHours();
+    if (h < 12) return "Dobré ráno";
+    if (h < 18) return "Dobré odpoledne";
+    return "Dobrý večer";
+  };
+
+  const W = 440; const H = 140; const pad = 28;
+  const barW = Math.floor((W - pad * 2) / Math.max(revenueByMonth.length, 1)) - 4;
+
+  return (
+    <div>
+      {/* Greeting */}
+      <div style={{ marginBottom: 28 }}>
+        <div style={{ fontFamily: "Fraunces, serif", fontSize: 26, fontWeight: 300, color: "var(--txt)" }}>
+          {greeting()}, Tomáši.
+        </div>
+        <div style={{ fontSize: 13, color: "var(--mut)", marginTop: 4 }}>
+          {now.toLocaleDateString("cs-CZ", { weekday: "long", day: "numeric", month: "long", year: "numeric" })}
+          {overdue.length > 0 && <span style={{ marginLeft: 12, color: "#DC2626", fontWeight: 500 }}>⚠ {overdue.length} faktura po splatnosti</span>}
+          {unbilledClients > 0 && <span style={{ marginLeft: 12, color: "var(--ink)", fontWeight: 500 }}>● {unbilledClients} klientů čeká na fakturu</span>}
+        </div>
+      </div>
+
+      {/* KPI row */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 12, marginBottom: 28 }}>
+        {[
+          { k: "YTD příjmy", v: fmtKc(ytd), s: `${invoices.filter(i=>(i.issue_date||"").startsWith(String(year))).length} faktur`, accent: true },
+          { k: `${CZ_MONTHS[now.getMonth()]} — fakturováno`, v: fmtKc(thisMonthRev), s: revTrend !== null ? `${revTrend >= 0 ? "↑" : "↓"} ${Math.abs(revTrend)} % vs. minulý měsíc` : "aktuální měsíc", warn: revTrend !== null && revTrend < -10 },
+          { k: "K vyfakturování", v: fmtKc(unbilledAmt), s: `${unbilledClients} klientů · ${unbilled.length} záznamů`, cta: true },
+          { k: overdueAmt > 0 ? "Po splatnosti ⚠" : "Neuhrazeno", v: fmtKc(overdueAmt > 0 ? overdueAmt : pendingAmt), s: overdueAmt > 0 ? `${overdue.length} faktur — nutná akce` : `${pending.length} faktur čeká`, danger: overdueAmt > 0 },
+        ].map((item, i) => (
+          <div key={i} style={{
+            background: item.accent ? "var(--ink)" : item.danger ? "#FEF2F2" : item.cta ? "#F3F0FF" : "#fff",
+            border: `1px solid ${item.accent ? "var(--ink)" : item.danger ? "#FECACA" : item.cta ? "#D8D2F5" : "var(--line)"}`,
+            borderRadius: 12, padding: "18px 20px",
+            boxShadow: item.accent ? "0 4px 20px rgba(53,24,165,.3)" : "0 1px 4px rgba(0,0,0,.04)"
+          }}>
+            <div style={{ fontSize: 9.5, letterSpacing: ".15em", textTransform: "uppercase", fontWeight: 500, marginBottom: 10, color: item.accent ? "rgba(255,255,255,.5)" : item.danger ? "#991B1B" : item.cta ? "var(--ink)" : "var(--mut)", opacity: item.accent ? 1 : .9 }}>{item.k}</div>
+            <div style={{ fontFamily: "Fraunces, serif", fontSize: 22, fontWeight: 300, lineHeight: 1, color: item.accent ? "#fff" : item.danger ? "#DC2626" : item.cta ? "var(--ink)" : "var(--txt)" }}>{item.v}</div>
+            <div style={{ fontSize: 11.5, marginTop: 7, color: item.accent ? "rgba(255,255,255,.6)" : item.danger ? "#991B1B" : item.cta ? "var(--ink3)" : "var(--mut)" }}>{item.s}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* Charts row */}
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 320px", gap: 16, marginBottom: 24 }}>
+        {/* Bar chart */}
+        <div style={{ background: "#fff", border: "1px solid var(--line)", borderRadius: 12, padding: "20px 24px" }}>
+          <div style={{ fontSize: 10, letterSpacing: ".12em", textTransform: "uppercase", color: "var(--mut)", fontWeight: 500, marginBottom: 16 }}>Měsíční příjmy {year}</div>
+          <svg width="100%" viewBox={`0 0 ${W} ${H + 24}`} style={{ overflow: "visible" }}>
+            {revenueByMonth.map((m, i) => {
+              const bh = maxRev > 0 ? Math.round((m.v / maxRev) * H) : 0;
+              const x = pad + i * ((W - pad * 2) / revenueByMonth.length);
+              const bx = x + ((W - pad * 2) / revenueByMonth.length - barW) / 2;
+              const isThis = i === revenueByMonth.length - 1;
+              return (
+                <g key={i}>
+                  <rect x={bx} y={H - bh} width={barW} height={bh}
+                    fill={isThis ? "var(--ink)" : "#E8E4FB"} rx={4} />
+                  <text x={bx + barW / 2} y={H + 16} textAnchor="middle"
+                    fill={isThis ? "var(--ink)" : "var(--mut)"}
+                    fontSize={10} fontFamily="Inter, sans-serif" fontWeight={isThis ? 600 : 400}>{m.label}</text>
+                  {m.v > 0 && bh > 20 && <text x={bx + barW / 2} y={H - bh - 5} textAnchor="middle"
+                    fill={isThis ? "var(--ink)" : "var(--mut)"} fontSize={9} fontFamily="Inter, sans-serif">
+                    {Math.round(m.v / 1000)}k
+                  </text>}
+                </g>
+              );
+            })}
+          </svg>
+        </div>
+
+        {/* Top clients */}
+        <div style={{ background: "#fff", border: "1px solid var(--line)", borderRadius: 12, padding: "20px 22px" }}>
+          <div style={{ fontSize: 10, letterSpacing: ".12em", textTransform: "uppercase", color: "var(--mut)", fontWeight: 500, marginBottom: 16 }}>Top klienti</div>
+          {topClients.map(({ c, rev }, i) => (
+            <div key={i} style={{ marginBottom: 12 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
+                <span style={{ fontSize: 12.5, color: "var(--txt)", fontWeight: 500, maxWidth: 170, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{c.name}</span>
+                <span style={{ fontSize: 12, fontFamily: "Fraunces, serif", fontWeight: 300, color: "var(--gold)", flexShrink: 0, marginLeft: 8 }}>{Math.round(rev / 1000)}k Kč</span>
+              </div>
+              <div style={{ height: 4, background: "#F0EEF8", borderRadius: 2 }}>
+                <div style={{ height: "100%", width: `${Math.round((rev / maxCR) * 100)}%`, background: i === 0 ? "var(--ink)" : "#A89DE0", borderRadius: 2 }} />
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Bottom row */}
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+        {/* K vystavení */}
+        <div style={{ background: "#fff", border: "1px solid var(--line)", borderRadius: 12, padding: "20px 22px" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+            <div style={{ fontSize: 10, letterSpacing: ".12em", textTransform: "uppercase", color: "var(--mut)", fontWeight: 500 }}>K vystavení</div>
+            <button className="btn" style={{ fontSize: 11, padding: "4px 10px" }} onClick={() => onNav("fakturace")}>Přejít →</button>
+          </div>
+          {unbilledClients === 0 ? (
+            <div style={{ fontSize: 13, color: "var(--mut)", textAlign: "center", padding: "16px 0" }}>Vše vyfakturováno ✓</div>
+          ) : (
+            Object.entries(
+              unbilled.reduce((acc, e) => { acc[e.client_id] = [...(acc[e.client_id] || []), e]; return acc; }, {})
+            ).slice(0, 4).map(([cid, es]) => {
+              const c = clients.find(x => x.id === cid);
+              const amt = es.reduce((s,e) => s + Math.round((e.amount||0)*1.21) + (e.notary_fee||0) + (e.admin_fee||0), 0);
+              return (
+                <div key={cid} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 0", borderBottom: "1px solid var(--line)" }}>
+                  <div>
+                    <div style={{ fontSize: 13, fontWeight: 500, color: "var(--txt)" }}>{c?.name || "—"}</div>
+                    <div style={{ fontSize: 11, color: "var(--mut)" }}>{es.length} záznamů</div>
+                  </div>
+                  <div style={{ fontFamily: "Fraunces, serif", fontSize: 14, fontWeight: 300, color: "var(--ink)" }}>{fmtKc(amt)}</div>
+                </div>
+              );
+            })
+          )}
+        </div>
+
+        {/* Posledních 5 výkazů */}
+        <div style={{ background: "#fff", border: "1px solid var(--line)", borderRadius: 12, padding: "20px 22px" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+            <div style={{ fontSize: 10, letterSpacing: ".12em", textTransform: "uppercase", color: "var(--mut)", fontWeight: 500 }}>
+              Posledních 5 výkazů · {thisMonthHours.toFixed(1)} h tento měsíc
+            </div>
+            <button className="btn" style={{ fontSize: 11, padding: "4px 10px" }} onClick={() => onNav("vykaz")}>+ Nový záznam</button>
+          </div>
+          {recentWork.length === 0 ? (
+            <div style={{ fontSize: 13, color: "var(--mut)", textAlign: "center", padding: "16px 0" }}>Žádné záznamy.</div>
+          ) : recentWork.map(e => {
+            const c = e.clients?.name || clients.find(x => x.id === e.client_id)?.name;
+            return (
+              <div key={e.id} style={{ display: "flex", gap: 12, padding: "8px 0", borderBottom: "1px solid var(--line)", alignItems: "flex-start" }}>
+                <div style={{ fontSize: 10.5, color: "var(--mut)", whiteSpace: "nowrap", paddingTop: 2 }}>{fmtDate(e.entry_date)}</div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 12, fontWeight: 500, color: "var(--ink)", marginBottom: 1 }}>{c || "—"}</div>
+                  <div style={{ fontSize: 11.5, color: "var(--txt)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{e.description}</div>
+                </div>
+                <div style={{ fontSize: 11, color: "var(--mut)", whiteSpace: "nowrap" }}>{e.hours > 0 ? `${e.hours} h` : "—"}</div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -808,7 +1006,17 @@ function InvoiceList({ invoices, clients, workEntries, onOpen, onOpenClient, onT
                   </div>
                   {inv.clients?.ico && <div className="t-sub">IČO: {inv.clients.ico}</div>}
                 </td>
-                <td className="t-date" style={{ fontVariantNumeric: "tabular-nums" }}>{inv.invoice_number || "—"}</td>
+                <td className="t-date" style={{ fontVariantNumeric: "tabular-nums" }}>
+                  {(() => {
+                    const desc = (inv.items || []).map(it => it.description).filter(Boolean).join("\n");
+                    return desc ? (
+                      <div className="tt-wrap">
+                        <span>{inv.invoice_number || "—"}</span>
+                        <div className="tt">{desc}</div>
+                      </div>
+                    ) : <span>{inv.invoice_number || "—"}</span>;
+                  })()}
+                </td>
                 <td className="t-date">{fmtDate(inv.issue_date)}</td>
                 <td className="t-date">{fmtDate(inv.due_date)}</td>
                 <td className="t-amt">{fmtKc(inv.total)}</td>
@@ -1241,7 +1449,7 @@ export default function MauxCRM() {
   const [invoices, setInvoices] = useState([]);
   const [workEntries, setWorkEntries] = useState([]);
   const [dataLoading, setDataLoading] = useState(false);
-  const [mod, setMod] = useState("vykaz");
+  const [mod, setMod] = useState("dashboard");
   const [mode, setMode] = useState("list");
   const [sel, setSel] = useState(null);
   const [query, setQuery] = useState("");
@@ -1355,6 +1563,7 @@ export default function MauxCRM() {
   const selWorkEntry = workEntries.find(e => e.id === sel);
 
   const pageTitle = () => {
+    if (mod === "dashboard") return "Přehled";
     if (mod === "vykaz") {
       if (mode === "new") return "Nový záznam";
       if (mode === "edit") return "Upravit záznam";
@@ -1400,6 +1609,12 @@ export default function MauxCRM() {
         <div className="hr" />
         <div className="body">
           {!curMod?.live && <Placeholder m={curMod} />}
+
+          {/* DASHBOARD */}
+          {mod === "dashboard" && (
+            <Dashboard invoices={invoices} workEntries={workEntries} clients={clients}
+              onNav={k => { setMod(k); setMode("list"); setSel(null); }} />
+          )}
 
           {/* VÝKAZ PRÁCE */}
           {mod === "vykaz" && mode === "list" && (
