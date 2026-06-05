@@ -618,9 +618,56 @@ function Lock({ onOk }) {
   );
 }
 
+function PasswordReset({ onDone }) {
+  const [pw, setPw] = useState("");
+  const [pw2, setPw2] = useState("");
+  const [err, setErr] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [done, setDone] = useState(false);
+
+  const save = async () => {
+    if (pw.length < 8) { setErr("Heslo musí mít alespoň 8 znaků."); return; }
+    if (pw !== pw2) { setErr("Hesla se neshodují."); return; }
+    setLoading(true);
+    const { error } = await supabase.auth.updateUser({ password: pw });
+    if (error) { setErr(error.message); setLoading(false); return; }
+    setDone(true);
+    setTimeout(onDone, 2000);
+  };
+
+  return (
+    <div className="lock">
+      <div className="lockcard">
+        <div className="wm serif">MAUX</div>
+        <div className="sub">CRM</div>
+        <p>Nastav si nové heslo.</p>
+        {done ? (
+          <div style={{ color: "#b8923d", marginTop: 16 }}>Heslo změněno. Přihlašuji…</div>
+        ) : (
+          <>
+            <div className="field">
+              <label>Nové heslo</label>
+              <input type="password" placeholder="min. 8 znaků" value={pw} onChange={e => { setPw(e.target.value); setErr(""); }} autoFocus />
+            </div>
+            <div className="field">
+              <label>Zopakuj heslo</label>
+              <input type="password" placeholder="stejné heslo" value={pw2} onChange={e => { setPw2(e.target.value); setErr(""); }} onKeyDown={e => e.key === "Enter" && save()} />
+            </div>
+            <button className="btn-login" onClick={save} disabled={loading}>
+              {loading ? "Ukládám…" : "Nastavit heslo"}
+            </button>
+            <div className="err">{err}</div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
 /* ─── MAIN APP ─── */
 export default function MauxCRM() {
   const [session, setSession] = useState(undefined); // undefined = loading
+  const [passwordRecovery, setPasswordRecovery] = useState(false);
   const [clients, setClients] = useState([]);
   const [clientsLoading, setClientsLoading] = useState(false);
   const [mod, setMod] = useState("klienti");
@@ -636,8 +683,14 @@ export default function MauxCRM() {
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session);
     });
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_e, session) => {
-      setSession(session);
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      if (event === "PASSWORD_RECOVERY") {
+        setPasswordRecovery(true);
+        setSession(session);
+      } else {
+        setSession(session);
+        setPasswordRecovery(false);
+      }
     });
     return () => subscription.unsubscribe();
   }, []);
@@ -705,6 +758,16 @@ export default function MauxCRM() {
       <div style={{ display: "flex", alignItems: "center", justifyContent: "center", minHeight: "100vh", background: "#1c0a63" }}>
         <style>{CSS}</style>
         <div style={{ color: "#b8923d", fontFamily: "Georgia, serif", fontSize: 24 }}>MAUX CRM</div>
+      </div>
+    );
+  }
+
+  // Password recovery flow
+  if (passwordRecovery) {
+    return (
+      <div className="mx">
+        <style>{CSS}</style>
+        <PasswordReset onDone={() => setPasswordRecovery(false)} />
       </div>
     );
   }
