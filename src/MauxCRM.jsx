@@ -2292,7 +2292,7 @@ function InvoiceList({ invoices, clients, workEntries, onOpen, onOpenClient, onT
   }, [invoices, search, filterClient, filterStatus, dateFrom, dateTo, sortBy]);
 
   const total = useMemo(() => invoices.reduce((s, i) => s + (i.subtotal || 0), 0), [invoices]);
-  const nezaplaceno = useMemo(() => invoices.filter(i => invoiceStatus(i) !== "uhrazena").reduce((s, i) => s + (i.subtotal || 0), 0), [invoices]);
+  const nezaplaceno = useMemo(() => invoices.filter(i => !["uhrazena","dph_odvedeno"].includes(invoiceStatus(i))).reduce((s, i) => s + (i.subtotal || 0), 0), [invoices]);
   const poSplatnosti = useMemo(() => invoices.filter(i => invoiceStatus(i) === "po_splatnosti").reduce((s, i) => s + (i.subtotal || 0), 0), [invoices]);
   const hasFilters = search || filterClient || filterStatus !== "vse" || dateFrom || dateTo;
 
