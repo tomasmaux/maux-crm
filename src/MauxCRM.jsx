@@ -284,33 +284,67 @@ function Sidebar({ mod, setMod, onLogout }) {
 }
 
 /* ─── FAKTURACE ─── */
-function InvoiceList({ invoices, clients, onOpen, onNew, loading }) {
-  const [filter, setFilter] = useState("vse");
+function InvoiceList({ invoices, clients, onOpen, onNew, onOpenClient, onToggleStatus, loading }) {
+  const [search, setSearch] = useState("");
+  const [filterStatus, setFilterStatus] = useState("vse");
+  const [filterClient, setFilterClient] = useState("");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
+  const [sortBy, setSortBy] = useState("date_desc");
+  const [showFilters, setShowFilters] = useState(false);
+
+  const filtered = useMemo(() => {
+    let list = [...invoices];
+    const q = search.trim().toLowerCase();
+    if (q) list = list.filter(i =>
+      (i.clients?.name || i.notes || "").toLowerCase().includes(q) ||
+      (i.invoice_number || "").toLowerCase().includes(q)
+    );
+    if (filterClient) list = list.filter(i => i.client_id === filterClient);
+    if (filterStatus === "uhrazena") list = list.filter(i => i.status === "uhrazena");
+    if (filterStatus === "vystavena") list = list.filter(i => invoiceStatus(i) === "vystavena");
+    if (filterStatus === "po_splatnosti") list = list.filter(i => invoiceStatus(i) === "po_splatnosti");
+    if (dateFrom) list = list.filter(i => i.issue_date >= dateFrom);
+    if (dateTo) list = list.filter(i => i.issue_date <= dateTo);
+    list.sort((a, b) => {
+      if (sortBy === "date_desc") return (b.issue_date || "").localeCompare(a.issue_date || "");
+      if (sortBy === "date_asc") return (a.issue_date || "").localeCompare(b.issue_date || "");
+      if (sortBy === "number") return (a.invoice_number || "").localeCompare(b.invoice_number || "", undefined, { numeric: true });
+      if (sortBy === "amount_desc") return (b.total || 0) - (a.total || 0);
+      if (sortBy === "amount_asc") return (a.total || 0) - (b.total || 0);
+      return 0;
+    });
+    return list;
+  }, [invoices, search, filterClient, filterStatus, dateFrom, dateTo, sortBy]);
+
   const total = useMemo(() => invoices.reduce((s, i) => s + (i.total || 0), 0), [invoices]);
   const nezaplaceno = useMemo(() => invoices.filter(i => invoiceStatus(i) !== "uhrazena").reduce((s, i) => s + (i.total || 0), 0), [invoices]);
   const poSplatnosti = useMemo(() => invoices.filter(i => invoiceStatus(i) === "po_splatnosti").reduce((s, i) => s + (i.total || 0), 0), [invoices]);
+  const hasFilters = search || filterClient || filterStatus !== "vse" || dateFrom || dateTo;
 
-  const filtered = useMemo(() => {
-    if (filter === "vse") return invoices;
-    if (filter === "ceka") return invoices.filter(i => invoiceStatus(i) === "vystavena");
-    if (filter === "pozde") return invoices.filter(i => invoiceStatus(i) === "po_splatnosti");
-    return invoices;
-  }, [invoices, filter]);
+  const clientName = (inv) => inv.clients?.name || inv.notes?.split(" - ")[0] || "—";
 
-  const statusBadge = (inv) => {
+  const StatusToggle = ({ inv }) => {
     const s = invoiceStatus(inv);
-    if (s === "uhrazena") return <span className="badge b-ok">Uhrazeno</span>;
-    if (s === "po_splatnosti") return <span className="badge b-late">Po splatnosti</span>;
-    return <span className="badge b-vy">Vystavena</span>;
+    return (
+      <span
+        className={`badge ${s === "uhrazena" ? "b-ok" : s === "po_splatnosti" ? "b-late" : "b-vy"}`}
+        style={{ cursor: "pointer", userSelect: "none" }}
+        title="Klikni pro změnu stavu"
+        onClick={e => { e.stopPropagation(); onToggleStatus(inv); }}
+      >
+        {s === "uhrazena" ? "Uhrazeno ✓" : s === "po_splatnosti" ? "Po splatnosti" : "Vystavena"}
+      </span>
+    );
   };
 
   return (
     <>
       <div className="kpi-row">
         <div className="kpi hi">
-          <div className="k">Fakturováno YTD</div>
+          <div className="k">Fakturováno celkem</div>
           <div className="v">{fmtKc(total)}</div>
-          <div className="s">{invoices.length} faktur celkem</div>
+          <div className="s">{invoices.length} faktur · {filtered.length} zobrazeno</div>
         </div>
         <div className="kpi">
           <div className="k">Neuhrazeno</div>
@@ -319,42 +353,97 @@ function InvoiceList({ invoices, clients, onOpen, onNew, loading }) {
         </div>
         <div className="kpi">
           <div className="k">Po splatnosti</div>
-          <div className="v">{fmtKc(poSplatnosti)}</div>
-          <div className="s" style={{ color: poSplatnosti > 0 ? "#c0392b" : "var(--gold)" }}>
-            {poSplatnosti > 0 ? "nutná akce" : "vše v pořádku"}
-          </div>
+          <div className="v" style={{ color: poSplatnosti > 0 ? "#DC2626" : "var(--txt)" }}>{fmtKc(poSplatnosti)}</div>
+          <div className="s" style={{ color: poSplatnosti > 0 ? "#DC2626" : "var(--mut)" }}>{poSplatnosti > 0 ? "nutná akce" : "vše v pořádku"}</div>
         </div>
       </div>
-      <div className="sec-hd">
-        <span>Faktury</span>
-      </div>
-      <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap" }}>
-        {[["vse","Vše"],["ceka","Čeká"],["pozde","Po splatnosti"]].map(([k,l]) => (
-          <span key={k} className={"fchip"+(filter===k?" on":"")} onClick={()=>setFilter(k)}>{l}</span>
-        ))}
+
+      <div style={{ display: "flex", gap: 8, marginBottom: 12, flexWrap: "wrap", alignItems: "center" }}>
+        <div className="search" style={{ maxWidth: 280 }}>
+          <span style={{ color: "var(--mut)", fontSize: 14 }}>⌕</span>
+          <input placeholder="Hledat fakturu, klienta…" value={search} onChange={e => setSearch(e.target.value)} />
+        </div>
+        <select
+          value={filterClient}
+          onChange={e => setFilterClient(e.target.value)}
+          style={{ font: "inherit", fontSize: 13, padding: "8px 12px", border: "1px solid var(--line2)", borderRadius: 8, color: filterClient ? "var(--ink)" : "var(--mut)", background: "#fff", cursor: "pointer", minWidth: 160 }}
+        >
+          <option value="">Všichni klienti</option>
+          {clients.sort((a,b) => a.name.localeCompare(b.name, "cs")).map(c => (
+            <option key={c.id} value={c.id}>{c.name}</option>
+          ))}
+        </select>
+        <select
+          value={sortBy}
+          onChange={e => setSortBy(e.target.value)}
+          style={{ font: "inherit", fontSize: 13, padding: "8px 12px", border: "1px solid var(--line2)", borderRadius: 8, color: "var(--mut)", background: "#fff", cursor: "pointer" }}
+        >
+          <option value="date_desc">Nejnovější</option>
+          <option value="date_asc">Nejstarší</option>
+          <option value="number">Číslo faktury</option>
+          <option value="amount_desc">Částka ↓</option>
+          <option value="amount_asc">Částka ↑</option>
+        </select>
+        <button className={`btn${showFilters ? "" : " gho"}`} onClick={() => setShowFilters(p => !p)} style={{ fontSize: 12 }}>
+          {showFilters ? "Skrýt filtry" : "Datum & stav ▾"}
+        </button>
+        {hasFilters && (
+          <button className="btn gho" style={{ fontSize: 12, color: "#DC2626" }}
+            onClick={() => { setSearch(""); setFilterClient(""); setFilterStatus("vse"); setDateFrom(""); setDateTo(""); }}>
+            Zrušit filtry ×
+          </button>
+        )}
         <button className="btn pri" onClick={onNew} style={{ marginLeft: "auto" }}>+ Nová faktura</button>
       </div>
+
+      {showFilters && (
+        <div style={{ display: "flex", gap: 8, marginBottom: 12, flexWrap: "wrap", alignItems: "center", padding: "12px 16px", background: "var(--surface)", border: "1px solid var(--line)", borderRadius: 10 }}>
+          <span style={{ fontSize: 11, letterSpacing: ".1em", textTransform: "uppercase", color: "var(--mut)", fontWeight: 500 }}>Stav:</span>
+          {[["vse","Vše"],["vystavena","Vystavena"],["uhrazena","Uhrazena"],["po_splatnosti","Po splatnosti"]].map(([k,l]) => (
+            <span key={k} className={"fchip"+(filterStatus===k?" on":"")} onClick={()=>setFilterStatus(k)}>{l}</span>
+          ))}
+          <span style={{ fontSize: 11, letterSpacing: ".1em", textTransform: "uppercase", color: "var(--mut)", fontWeight: 500, marginLeft: 8 }}>Datum od:</span>
+          <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)}
+            style={{ font: "inherit", fontSize: 13, padding: "6px 10px", border: "1px solid var(--line2)", borderRadius: 8, color: "var(--txt)", background: "#fff" }} />
+          <span style={{ fontSize: 11, letterSpacing: ".1em", textTransform: "uppercase", color: "var(--mut)", fontWeight: 500 }}>do:</span>
+          <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)}
+            style={{ font: "inherit", fontSize: 13, padding: "6px 10px", border: "1px solid var(--line2)", borderRadius: 8, color: "var(--txt)", background: "#fff" }} />
+        </div>
+      )}
+
       {loading && <div className="loading">Načítám faktury…</div>}
       {!loading && (
         <table className="tbl">
           <thead><tr>
-            <th>Klient</th><th>Číslo faktury</th><th>Vystavena</th><th>Splatnost</th><th>Částka s DPH</th><th>Stav</th>
+            <th>Klient</th><th>Číslo faktury</th><th>Vystavena</th><th>Splatnost</th><th style={{ textAlign: "right" }}>Částka s DPH</th><th style={{ textAlign: "right" }}>Stav</th>
           </tr></thead>
           <tbody>
             {filtered.length === 0 && (
-              <tr><td colSpan={6} style={{ textAlign: "center", padding: "40px 0", color: "var(--mut)" }}>Žádné faktury</td></tr>
+              <tr><td colSpan={6} style={{ textAlign: "center", padding: "40px 0", color: "var(--mut)", fontSize: 13 }}>
+                {hasFilters ? "Žádné faktury neodpovídají filtru." : "Žádné faktury."}
+              </td></tr>
             )}
             {filtered.map(inv => (
               <tr key={inv.id} onClick={() => onOpen(inv.id)}>
                 <td>
-                  <div className="t-name">{inv.clients?.name || "—"}</div>
+                  <div
+                    className="t-name"
+                    style={{ color: inv.client_id ? "var(--ink)" : "var(--txt)", cursor: inv.client_id ? "pointer" : "default", fontWeight: 500 }}
+                    onClick={e => { if (inv.client_id) { e.stopPropagation(); onOpenClient(inv.client_id); } }}
+                    title={inv.client_id ? "Otevřít kartu klienta" : undefined}
+                  >
+                    {clientName(inv)}
+                    {inv.client_id && <span style={{ fontSize: 10, marginLeft: 4, opacity: .5 }}>↗</span>}
+                  </div>
                   {inv.clients?.ico && <div className="t-sub">IČO: {inv.clients.ico}</div>}
                 </td>
-                <td className="t-date">{inv.invoice_number}</td>
+                <td className="t-date" style={{ fontVariantNumeric: "tabular-nums" }}>{inv.invoice_number || "—"}</td>
                 <td className="t-date">{fmtDate(inv.issue_date)}</td>
                 <td className="t-date">{fmtDate(inv.due_date)}</td>
                 <td className="t-amt">{fmtKc(inv.total)}</td>
-                <td>{statusBadge(inv)}</td>
+                <td style={{ textAlign: "right" }} onClick={e => e.stopPropagation()}>
+                  <StatusToggle inv={inv} />
+                </td>
               </tr>
             ))}
           </tbody>
@@ -822,6 +911,16 @@ export default function MauxCRM() {
     try { await deleteInvoiceDb(id); setInvoices(p => p.filter(i => i.id !== id)); setConfirmDel(null); setMode("list"); setSel(null); }
     catch (e) { alert("Chyba: " + e.message); }
   };
+  const toggleInvoiceStatus = async (inv) => {
+    const newStatus = inv.status === "uhrazena" ? "vystavena" : "uhrazena";
+    const updated = { ...inv, status: newStatus };
+    setInvoices(p => p.map(i => i.id === inv.id ? { ...i, status: newStatus } : i));
+    try { await upsertInvoice(updated); }
+    catch (e) { setInvoices(p => p.map(i => i.id === inv.id ? inv : i)); alert("Chyba: " + e.message); }
+  };
+  const openClientFromInvoice = (clientId) => {
+    setSel(clientId); setMod("klienti"); setMode("detail");
+  };
 
   const selClient = clients.find(c => c.id === sel);
   const selInvoice = invoices.find(i => i.id === sel);
@@ -871,7 +970,7 @@ export default function MauxCRM() {
 
           {/* FAKTURACE */}
           {mod === "fakturace" && curMod?.live && mode === "list" && (
-            <InvoiceList invoices={invoices} clients={clients} onOpen={id => { setSel(id); setMode("detail"); }} onNew={() => setMode("new")} loading={dataLoading} />
+            <InvoiceList invoices={invoices} clients={clients} onOpen={id => { setSel(id); setMode("detail"); }} onNew={() => setMode("new")} onToggleStatus={toggleInvoiceStatus} onOpenClient={openClientFromInvoice} loading={dataLoading} />
           )}
           {mod === "fakturace" && mode === "detail" && selInvoice && (
             <InvoiceDetail inv={selInvoice} clients={clients} onBack={() => setMode("list")} onEdit={() => setMode("edit")} onDelete={() => setConfirmDel(selInvoice.id)} />
