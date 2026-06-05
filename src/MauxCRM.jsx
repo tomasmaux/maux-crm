@@ -1223,36 +1223,154 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
         </Card>
       </div>
 
-      {/* Chart + Top klienti */}
-      <div style={{display:"grid",gridTemplateColumns:"1fr 260px",gap:12}}>
-        <Card>
-          <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:20}}>
-            <Lbl>Fakturace {year} — základ bez DPH</Lbl>
-            <div style={{fontFamily:"Fraunces,serif",fontSize:14,fontWeight:300,color:"var(--gold)"}}>{fmtKc(ytd)} celkem</div>
-          </div>
-          <div style={{display:"flex",alignItems:"flex-end",gap:6,height:100}}>
-            {chartData.map((d,i)=>{
-              const pct = maxV>0?d.v/maxV:0;
-              const isNow = i===chartData.length-1;
-              return (
-                <div key={i} style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",gap:4}}>
-                  <div style={{fontSize:8,color:isNow?"var(--ink)":"var(--mut)",fontWeight:isNow?600:400,opacity:pct>0?1:.3}}>
-                    {pct>0?`${Math.round(d.v/1000)}k`:""}
-                  </div>
-                  <div style={{width:"100%",background:isNow?"var(--ink)":pct>0?"#DDD9F5":"#F0EEF8",borderRadius:"4px 4px 2px 2px",height:`${Math.max(pct*80,pct>0?4:2)}px`,transition:".3s"}}/>
-                  <div style={{fontSize:9,color:isNow?"var(--ink)":"var(--mut)",fontWeight:isNow?600:400}}>{d.label}</div>
+      {/* SPOŘÍCÍ ÚČET — command center */}
+      {(() => {
+        const sporaci = (financeItems||[]).filter(i => i.category === "sporaci");
+        const zůstatek = sporaci.find(i => i.id === "fi_sp_99");
+        const obálky = sporaci.filter(i => i.id !== "fi_sp_99");
+        const dphAuto = invoices.filter(i => i.status === "uhrazena").reduce((s,i) => s+(i.vat_amount||0), 0);
+        const dpfoAcc = (dpfoMonths||[]).filter(m => m.is_paid).reduce((s,m) => s+(m.amount||8050), 0);
+        const allItems = [
+          { label: "DPH", amount: dphAuto, color: "#3518A5", auto: true },
+          { label: "DPFO", amount: dpfoAcc, color: "#F59E0B", auto: true },
+          ...obálky.map((o,i) => ({ label: o.label, amount: o.amount||0, color: ["#059669","#7C3AED","#0EA5E9","#DC2626"][i%4], auto: false })),
+        ].filter(i => i.amount > 0);
+        const totalEarmarked = allItems.reduce((s,i) => s+i.amount, 0);
+        const actualBalance = zůstatek?.amount || 0;
+        const diff = actualBalance - totalEarmarked;
+        return (
+          <div style={{ background: "#fff", border: "1px solid var(--line)", borderRadius: 14, padding: "20px 24px" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 20 }}>
+              <div>
+                <Lbl color="#3518A5">Spořící účet — přehled obálek</Lbl>
+                <div style={{ display: "flex", alignItems: "baseline", gap: 16, marginTop: 4 }}>
+                  <div style={{ fontFamily: "Fraunces,serif", fontSize: 32, fontWeight: 300, color: "var(--ink)" }}>{fmtKc(actualBalance)}</div>
+                  <div style={{ fontSize: 12, color: "var(--mut)" }}>skutečný zůstatek účtu</div>
                 </div>
-              );
-            })}
+              </div>
+              <div style={{ textAlign: "right" }}>
+                <div style={{ fontSize: 11, color: "var(--mut)", marginBottom: 4 }}>Rezervováno v obálkách</div>
+                <div style={{ fontFamily: "Fraunces,serif", fontSize: 22, fontWeight: 300, color: "var(--txt)" }}>{fmtKc(totalEarmarked)}</div>
+                <div style={{ fontSize: 11, marginTop: 4, color: diff >= 0 ? "#059669" : "#DC2626", fontWeight: 500 }}>
+                  {diff >= 0 ? `+${fmtKc(diff)} volných` : `${fmtKc(diff)} nedostatek`}
+                </div>
+              </div>
+            </div>
+            {/* Stacked bar */}
+            <div style={{ height: 28, borderRadius: 8, overflow: "hidden", display: "flex", marginBottom: 16, background: "#F0EEF8" }}>
+              {allItems.map((item, i) => (
+                <div key={i} title={`${item.label}: ${fmtKc(item.amount)}`}
+                  style={{ width: `${totalEarmarked > 0 ? (item.amount/totalEarmarked)*100 : 0}%`, background: item.color, transition: ".5s", position: "relative", display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden" }}>
+                  {(item.amount/totalEarmarked) > 0.08 && (
+                    <span style={{ fontSize: 9, color: "#fff", fontWeight: 600, letterSpacing: ".04em", whiteSpace: "nowrap" }}>{item.label}</span>
+                  )}
+                </div>
+              ))}
+            </div>
+            {/* Legend */}
+            <div style={{ display: "flex", gap: 20, flexWrap: "wrap" }}>
+              {allItems.map((item, i) => (
+                <div key={i} style={{ display: "flex", alignItems: "center", gap: 7 }}>
+                  <div style={{ width: 10, height: 10, borderRadius: 3, background: item.color, flexShrink: 0 }} />
+                  <div>
+                    <div style={{ fontSize: 11, color: "var(--txt)", fontWeight: 500, display: "flex", alignItems: "center", gap: 4 }}>
+                      {item.label}
+                      {item.auto && <span style={{ fontSize: 8, background: "#EEF2FF", color: "#3730A3", padding: "1px 5px", borderRadius: 3, fontWeight: 600 }}>auto</span>}
+                    </div>
+                    <div style={{ fontSize: 12, fontFamily: "Fraunces,serif", fontWeight: 300, color: item.color }}>{fmtKc(item.amount)}</div>
+                  </div>
+                </div>
+              ))}
+            </div>
           </div>
+        );
+      })()}
+
+      {/* Chart + Top klienti */}
+      <div style={{display:"grid",gridTemplateColumns:"1fr 240px",gap:12}}>
+        <Card>
+          {(() => {
+            const W = 560, H = 130, padL = 10, padR = 10, padT = 24, padB = 28;
+            const n = chartData.length;
+            if (n === 0) return null;
+            const nonZero = chartData.filter(d => d.v > 0);
+            const minV = nonZero.length > 1 ? Math.min(...nonZero.map(d => d.v)) * 0.7 : 0;
+            const range = Math.max(maxV - minV, 1);
+            const toY = v => padT + H - ((Math.max(v, 0) - minV) / range) * H;
+            const xs = chartData.map((_, i) => padL + i * ((W - padL - padR) / Math.max(n - 1, 1)));
+
+            // Area path
+            const pts = chartData.map((d, i) => `${xs[i]},${toY(d.v)}`).join(" L ");
+            const area = `M ${xs[0]},${toY(0)} L ${pts.replace("M ","")} L ${xs[n-1]},${toY(0)} Z`;
+            const line = `M ${pts}`;
+
+            // Delta vs previous
+            const deltas = chartData.map((d, i) => i === 0 ? 0 : d.v - chartData[i-1].v);
+
+            return (
+              <>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:12}}>
+                  <Lbl>Fakturace {year} — základ bez DPH · mesíční pohyb</Lbl>
+                  <div style={{fontFamily:"Fraunces,serif",fontSize:14,fontWeight:300,color:"var(--gold)"}}>{fmtKc(ytd)} YTD</div>
+                </div>
+                <svg width="100%" viewBox={`0 0 ${W} ${padT + H + padB}`} style={{overflow:"visible"}}>
+                  {/* Grid lines */}
+                  {[0,.25,.5,.75,1].map(p => {
+                    const y = padT + H * (1-p);
+                    return <line key={p} x1={padL} x2={W-padR} y1={y} y2={y} stroke="#F0EEF8" strokeWidth={1}/>;
+                  })}
+                  {/* Area fill */}
+                  <path d={area} fill="url(#areaGrad)" opacity={.35}/>
+                  <defs>
+                    <linearGradient id="areaGrad" x1="0" x2="0" y1="0" y2="1">
+                      <stop offset="0%" stopColor="#3518A5" stopOpacity=".6"/>
+                      <stop offset="100%" stopColor="#3518A5" stopOpacity=".02"/>
+                    </linearGradient>
+                  </defs>
+                  {/* Line */}
+                  <path d={line} fill="none" stroke="#3518A5" strokeWidth={2.5} strokeLinejoin="round" strokeLinecap="round"/>
+                  {/* Data points + labels */}
+                  {chartData.map((d, i) => {
+                    if (d.v === 0) return null;
+                    const x = xs[i], y = toY(d.v);
+                    const isNow = i === n - 1;
+                    const delta = deltas[i];
+                    const up = delta > 0;
+                    return (
+                      <g key={i}>
+                        <circle cx={x} cy={y} r={isNow?5:3.5} fill={isNow?"#3518A5":"#fff"} stroke="#3518A5" strokeWidth={isNow?0:2}/>
+                        {/* Value label */}
+                        <text x={x} y={y - 10} textAnchor="middle" fontSize={isNow?11:9} fontFamily="Fraunces,Georgia,serif" fontWeight={isNow?"400":"300"}
+                          fill={isNow?"#3518A5":"var(--mut)"}>
+                          {Math.round(d.v/1000)}k
+                        </text>
+                        {/* Delta indicator */}
+                        {i > 0 && delta !== 0 && (
+                          <text x={x} y={y - 22} textAnchor="middle" fontSize={8} fontFamily="Inter,sans-serif" fontWeight="600"
+                            fill={up?"#059669":"#DC2626"}>
+                            {up?"↑+":"↓"}{Math.round(Math.abs(delta)/1000)}k
+                          </text>
+                        )}
+                        {/* Month label */}
+                        <text x={x} y={padT+H+padB-4} textAnchor="middle" fontSize={isNow?10:9} fontFamily="Inter,sans-serif"
+                          fontWeight={isNow?"600":"400"} fill={isNow?"#3518A5":"var(--mut)"}>
+                          {d.label}
+                        </text>
+                      </g>
+                    );
+                  })}
+                </svg>
+              </>
+            );
+          })()}
         </Card>
         <Card>
           <Lbl>Top klienti</Lbl>
           {topC.slice(0,5).map(({c,rev},i)=>(
-            <div key={i} style={{marginBottom:10}}>
-              <div style={{display:"flex",justifyContent:"space-between",marginBottom:3}}>
-                <span style={{fontSize:12,color:"var(--txt)",fontWeight:500,maxWidth:140,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{c.name.split(" ")[0]}</span>
-                <span style={{fontSize:11,fontFamily:"Fraunces,serif",color:"var(--gold)",flexShrink:0}}>{Math.round(rev/1000)}k</span>
+            <div key={i} style={{marginBottom:12}}>
+              <div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}>
+                <span style={{fontSize:12,color:"var(--txt)",fontWeight:500,maxWidth:130,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{c.name.split(" ")[0]}</span>
+                <span style={{fontSize:12,fontFamily:"Fraunces,serif",color:"var(--gold)",flexShrink:0}}>{Math.round(rev/1000)}k</span>
               </div>
               <div style={{height:3,background:"#F0EEF8",borderRadius:2}}>
                 <div style={{height:"100%",width:`${Math.round((rev/maxC)*100)}%`,background:i===0?"var(--ink)":"#B8ACE8",borderRadius:2}}/>
