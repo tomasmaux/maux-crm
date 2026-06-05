@@ -15,11 +15,12 @@ const SERVICE_COLORS = {
 const ALL_SERVICES = Object.keys(SERVICE_COLORS);
 
 const MODULES = [
-  { key: "fakturace", label: "Fakturace", live: true },
-  { key: "klienti",   label: "Klienti",   live: true },
-  { key: "uschovy",   label: "Úschovy",   live: false, desc: "Evidence advokátních úschov a výpočet úroků." },
+  { key: "vykaz",     label: "Výkaz práce", live: true },
+  { key: "fakturace", label: "Fakturace",   live: true },
+  { key: "klienti",   label: "Klienti",     live: true },
+  { key: "uschovy",   label: "Úschovy",     live: false, desc: "Evidence advokátních úschov a výpočet úroků." },
   { key: "ucetni",    label: "Účetní export", live: false, desc: "Export podkladu pro účetní — základ, DPH, splatnosti." },
-  { key: "happy",     label: "Happy Life", live: false, desc: "Osobní finance — spoření, majetek, přehledy." },
+  { key: "happy",     label: "Happy Life",  live: false, desc: "Osobní finance — spoření, majetek, přehledy." },
 ];
 
 const fmtKc = (n) => new Intl.NumberFormat("cs-CZ").format(Math.round(n || 0)) + " Kč";
@@ -210,6 +211,20 @@ async function deleteClientDb(id) {
   const { error } = await supabase.from("clients").delete().eq("id", id);
   if (error) throw error;
 }
+async function fetchWorkEntries() {
+  const { data, error } = await supabase.from("work_entries").select("*, clients(name, ico, hourly_rate)").order("entry_date", { ascending: false });
+  if (error) throw error;
+  return data || [];
+}
+async function upsertWorkEntry(e) {
+  const { clients: _c, ...rest } = e;
+  const { error } = await supabase.from("work_entries").upsert({ ...rest, updated_at: new Date().toISOString() });
+  if (error) throw error;
+}
+async function deleteWorkEntryDb(id) {
+  const { error } = await supabase.from("work_entries").delete().eq("id", id);
+  if (error) throw error;
+}
 async function fetchInvoices() {
   const { data, error } = await supabase.from("invoices").select("*, clients(name, ico)").order("created_at", { ascending: false });
   if (error) throw error;
@@ -280,6 +295,274 @@ function Sidebar({ mod, setMod, onLogout }) {
         <button onClick={onLogout}>Odhlásit se</button>
       </div>
     </aside>
+  );
+}
+
+/* ─── VÝKAZ PRÁCE ─── */
+const CZ_MONTHS = ["Leden","Únor","Březen","Duben","Květen","Červen","Červenec","Srpen","Září","Říjen","Listopad","Prosinec"];
+const monthKey = (d) => d ? d.slice(0, 7) : "";
+const monthLabel = (k) => { const [y,m] = k.split("-"); return `${CZ_MONTHS[parseInt(m)-1]} ${y}`; };
+
+function WorkEntryForm({ init, clients, onSave, onCancel, saving }) {
+  const [d, setD] = useState(() => init || {
+    id: uid(), client_id: "", entry_date: today(),
+    description: "", hours: "", rate: 2000,
+    notary_fee: 0, admin_fee: 0,
+    real_hours: "", notes: "",
+  });
+  const set = (k, v) => setD(p => ({ ...p, [k]: v }));
+
+  const onClientChange = (clientId) => {
+    const c = clients.find(x => x.id === clientId);
+    set("client_id", clientId);
+    if (c?.hourly_rate > 0) set("rate", c.hourly_rate);
+  };
+
+  const amount = Math.round((Number(d.hours) || 0) * (Number(d.rate) || 0));
+  const client = clients.find(c => c.id === d.client_id);
+
+  const save = () => {
+    if (!d.client_id || !d.description.trim()) return;
+    onSave({ ...d, hours: Number(d.hours) || 0, rate: Number(d.rate) || 2000,
+      amount, notary_fee: Number(d.notary_fee) || 0, admin_fee: Number(d.admin_fee) || 0,
+      real_hours: Number(d.real_hours) || 0 });
+  };
+
+  return (
+    <div className="form" style={{ maxWidth: 680 }}>
+      <h2>{init ? "Upravit záznam" : "Nový záznam"}</h2>
+      <div className="two">
+        <div className="frow">
+          <label>Klient *</label>
+          <select value={d.client_id} onChange={e => onClientChange(e.target.value)}>
+            <option value="">— vyber klienta —</option>
+            {clients.sort((a,b) => a.name.localeCompare(b.name,"cs")).map(c =>
+              <option key={c.id} value={c.id}>{c.name}</option>
+            )}
+          </select>
+        </div>
+        <div className="frow">
+          <label>Datum</label>
+          <input type="date" value={d.entry_date} onChange={e => set("entry_date", e.target.value)} />
+        </div>
+      </div>
+      <div className="frow">
+        <label>Popis úkonu *</label>
+        <textarea value={d.description} onChange={e => set("description", e.target.value)}
+          placeholder="Příprava kupní smlouvy - Mochov; koordinace s klientem; ověření stavu v KN…" rows={3} />
+      </div>
+      <div style={{ background: "#F7F5FF", border: "1px solid var(--line)", borderRadius: 10, padding: "14px 16px", marginBottom: 14 }}>
+        <div style={{ fontSize: 9, letterSpacing: ".12em", textTransform: "uppercase", color: "var(--ink)", fontWeight: 600, marginBottom: 12, opacity: .7 }}>Fakturované položky</div>
+        <div className="three">
+          <div className="frow" style={{ marginBottom: 0 }}>
+            <label>Hodiny (faktur.)</label>
+            <input type="number" step="0.5" min="0" value={d.hours} onChange={e => set("hours", e.target.value)} placeholder="0" />
+          </div>
+          <div className="frow" style={{ marginBottom: 0 }}>
+            <label>Hodinovka (Kč)</label>
+            <input type="number" value={d.rate} onChange={e => set("rate", e.target.value)} />
+          </div>
+          <div className="frow" style={{ marginBottom: 0 }}>
+            <label>Celkem bez DPH</label>
+            <input readOnly value={`${new Intl.NumberFormat("cs-CZ").format(amount)} Kč`}
+              style={{ background: "#fff", color: "var(--ink)", fontFamily: "Fraunces, serif", fontWeight: 300, fontSize: 15 }} />
+          </div>
+        </div>
+        <div className="two" style={{ marginTop: 10 }}>
+          <div className="frow" style={{ marginBottom: 0 }}>
+            <label>Notář — přefakturace (Kč, bez DPH)</label>
+            <input type="number" min="0" value={d.notary_fee || ""} onChange={e => set("notary_fee", e.target.value)} placeholder="0" />
+          </div>
+          <div className="frow" style={{ marginBottom: 0 }}>
+            <label>Správní poplatek (Kč, bez DPH)</label>
+            <input type="number" min="0" value={d.admin_fee || ""} onChange={e => set("admin_fee", e.target.value)} placeholder="0" />
+          </div>
+        </div>
+      </div>
+      <div className="two">
+        <div className="frow">
+          <label>Reálné hodiny (interní — nezobrazí se klientovi)</label>
+          <input type="number" step="0.5" min="0" value={d.real_hours || ""} onChange={e => set("real_hours", e.target.value)} placeholder="0" />
+        </div>
+        <div className="frow">
+          <label>Interní poznámka</label>
+          <input value={d.notes} onChange={e => set("notes", e.target.value)} placeholder="Vlastní memo…" />
+        </div>
+      </div>
+      {client && <div style={{ fontSize: 12, color: "var(--mut)", marginBottom: 14 }}>
+        Klient: <strong style={{ color: "var(--ink)" }}>{client.name}</strong>
+        {client.hourly_rate > 0 && <span> · sazba {new Intl.NumberFormat("cs-CZ").format(client.hourly_rate)} Kč/h</span>}
+      </div>}
+      <div className="actions" style={{ borderTop: "none", paddingTop: 0, marginTop: 4 }}>
+        <button className="btn gho" onClick={onCancel}>Zrušit</button>
+        <button className="btn pri" onClick={save} disabled={saving} style={{ marginLeft: "auto" }}>
+          {saving ? "Ukládám…" : "Uložit záznam"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function WorkEntryList({ entries, clients, invoices, onNew, onEdit, onDelete, onGenerateInvoice, loading }) {
+  const [filterClient, setFilterClient] = useState("");
+
+  const filtered = useMemo(() => {
+    let list = filterClient ? entries.filter(e => e.client_id === filterClient) : entries;
+    return list;
+  }, [entries, filterClient]);
+
+  const unbilled = filtered.filter(e => !e.invoice_id);
+  const unbilledByMonth = useMemo(() => {
+    const map = {};
+    unbilled.forEach(e => {
+      const k = monthKey(e.entry_date);
+      if (!map[k]) map[k] = [];
+      map[k].push(e);
+    });
+    return Object.entries(map).sort(([a],[b]) => b.localeCompare(a));
+  }, [unbilled]);
+
+  const totalHours = unbilled.reduce((s, e) => s + (e.hours || 0), 0);
+  const totalAmount = unbilled.reduce((s, e) => s + (e.amount || 0) + (e.notary_fee || 0) + (e.admin_fee || 0), 0);
+
+  const clientName = (e) => e.clients?.name || clients.find(c => c.id === e.client_id)?.name || "—";
+
+  return (
+    <>
+      <div className="kpi-row">
+        <div className="kpi hi">
+          <div className="k">Nevyfakturováno</div>
+          <div className="v">{new Intl.NumberFormat("cs-CZ").format(Math.round(totalAmount * 1.21))} Kč</div>
+          <div className="s">{unbilled.length} záznamů · {totalHours.toFixed(1)} h</div>
+        </div>
+        <div className="kpi">
+          <div className="k">Celkem záznamů</div>
+          <div className="v">{entries.length}</div>
+          <div className="s">vyfakturováno {entries.filter(e => e.invoice_id).length}</div>
+        </div>
+        <div className="kpi">
+          <div className="k">Klientů aktivních</div>
+          <div className="v">{new Set(unbilled.map(e => e.client_id).filter(Boolean)).size}</div>
+          <div className="s">s nevyfakturovanou prací</div>
+        </div>
+      </div>
+
+      <div style={{ display: "flex", gap: 8, marginBottom: 16, alignItems: "center", flexWrap: "wrap" }}>
+        <select value={filterClient} onChange={e => setFilterClient(e.target.value)}
+          style={{ font: "inherit", fontSize: 13, padding: "8px 12px", border: "1px solid var(--line2)", borderRadius: 8, color: filterClient ? "var(--ink)" : "var(--mut)", background: "#fff", minWidth: 200 }}>
+          <option value="">Všichni klienti</option>
+          {clients.sort((a,b) => a.name.localeCompare(b.name,"cs")).map(c =>
+            <option key={c.id} value={c.id}>{c.name}</option>
+          )}
+        </select>
+        {filterClient && <button className="btn gho" style={{ fontSize: 12, color: "#DC2626" }} onClick={() => setFilterClient("")}>Zrušit ×</button>}
+        <button className="btn pri" onClick={onNew} style={{ marginLeft: "auto" }}>+ Nový záznam</button>
+      </div>
+
+      {loading && <div className="loading">Načítám záznamy…</div>}
+      {!loading && unbilledByMonth.length === 0 && (
+        <div className="ph" style={{ marginBottom: 24 }}>
+          <h2 className="serif">Žádné nevyfakturované záznamy</h2>
+          <p>Přidej první záznam práce tlačítkem výše.</p>
+        </div>
+      )}
+
+      {!loading && unbilledByMonth.map(([month, monthEntries]) => {
+        const mHours = monthEntries.reduce((s,e) => s + (e.hours||0), 0);
+        const mWork = monthEntries.reduce((s,e) => s + (e.amount||0), 0);
+        const mNotary = monthEntries.reduce((s,e) => s + (e.notary_fee||0), 0);
+        const mAdmin = monthEntries.reduce((s,e) => s + (e.admin_fee||0), 0);
+        const mTotal = Math.round(mWork * 1.21) + mNotary + mAdmin;
+        const clients_in_month = [...new Set(monthEntries.map(e => e.client_id))];
+
+        return (
+          <div key={month} style={{ marginBottom: 24 }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12, gap: 12 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                <span style={{ fontFamily: "Fraunces, serif", fontSize: 17, fontWeight: 400, color: "var(--txt)" }}>{monthLabel(month)}</span>
+                <span style={{ fontSize: 11, color: "var(--mut)" }}>{mHours.toFixed(1)} h · {monthEntries.length} záznamů</span>
+                <span style={{ fontSize: 13, fontFamily: "Fraunces, serif", fontWeight: 300, color: "var(--gold)" }}>{new Intl.NumberFormat("cs-CZ").format(mTotal)} Kč</span>
+              </div>
+              <div style={{ display: "flex", gap: 8 }}>
+                {filterClient ? (
+                  <button className="btn pri" style={{ fontSize: 12 }}
+                    onClick={() => onGenerateInvoice(filterClient, monthEntries)}>
+                    Vystavit fakturu →
+                  </button>
+                ) : (
+                  clients_in_month.map(cid => {
+                    const c = clients.find(x => x.id === cid);
+                    const ces = monthEntries.filter(e => e.client_id === cid);
+                    return (
+                      <button key={cid} className="btn" style={{ fontSize: 11 }}
+                        onClick={() => onGenerateInvoice(cid, ces)}>
+                        FA: {c?.name?.split(" ")[0] || "?"}
+                      </button>
+                    );
+                  })
+                )}
+              </div>
+            </div>
+            <table className="tbl" style={{ marginBottom: 0 }}>
+              <thead><tr>
+                <th>Datum</th>
+                {!filterClient && <th>Klient</th>}
+                <th>Popis úkonu</th>
+                <th>Hodiny</th>
+                <th>Notář / Sp.</th>
+                <th style={{ textAlign: "right" }}>Bez DPH</th>
+                <th style={{ textAlign: "right" }}></th>
+              </tr></thead>
+              <tbody>
+                {monthEntries.sort((a,b) => (a.entry_date||"").localeCompare(b.entry_date||"")).map(e => (
+                  <tr key={e.id} onClick={() => onEdit(e)}>
+                    <td className="t-date">{fmtDate(e.entry_date)}</td>
+                    {!filterClient && <td><div className="t-name" style={{ fontSize: 13 }}>{clientName(e)}</div></td>}
+                    <td>
+                      <div style={{ fontSize: 13, color: "var(--txt)", maxWidth: 360, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{e.description}</div>
+                      {e.real_hours > 0 && <div className="t-sub">reálně: {e.real_hours} h</div>}
+                    </td>
+                    <td className="t-date">{e.hours > 0 ? `${e.hours} h` : "—"}</td>
+                    <td className="t-date" style={{ fontSize: 11 }}>
+                      {e.notary_fee > 0 && <div>Notář: {new Intl.NumberFormat("cs-CZ").format(e.notary_fee)} Kč</div>}
+                      {e.admin_fee > 0 && <div>Sp.pop.: {new Intl.NumberFormat("cs-CZ").format(e.admin_fee)} Kč</div>}
+                    </td>
+                    <td className="t-amt">{new Intl.NumberFormat("cs-CZ").format((e.amount||0) + (e.notary_fee||0) + (e.admin_fee||0))} Kč</td>
+                    <td style={{ textAlign: "right" }} onClick={ev => ev.stopPropagation()}>
+                      <button className="btn gho" style={{ fontSize: 11, padding: "4px 8px", color: "#DC2626" }}
+                        onClick={() => onDelete(e.id)}>✕</button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        );
+      })}
+
+      {!loading && entries.filter(e => e.invoice_id).length > 0 && (
+        <details style={{ marginTop: 24 }}>
+          <summary style={{ cursor: "pointer", fontSize: 12, color: "var(--mut)", letterSpacing: ".08em", textTransform: "uppercase", fontWeight: 500 }}>
+            Vyfakturované záznamy ({entries.filter(e => e.invoice_id).length})
+          </summary>
+          <table className="tbl" style={{ marginTop: 12 }}>
+            <thead><tr><th>Datum</th><th>Klient</th><th>Popis</th><th>Hodiny</th><th style={{ textAlign: "right" }}>Bez DPH</th></tr></thead>
+            <tbody>
+              {entries.filter(e => e.invoice_id && (!filterClient || e.client_id === filterClient))
+                .slice(0, 20).map(e => (
+                <tr key={e.id} style={{ opacity: .6 }}>
+                  <td className="t-date">{fmtDate(e.entry_date)}</td>
+                  <td className="t-date">{clientName(e)}</td>
+                  <td style={{ fontSize: 13 }}>{e.description?.slice(0,80)}</td>
+                  <td className="t-date">{e.hours > 0 ? `${e.hours} h` : "—"}</td>
+                  <td className="t-amt">{new Intl.NumberFormat("cs-CZ").format((e.amount||0) + (e.notary_fee||0) + (e.admin_fee||0))} Kč</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </details>
+      )}
+    </>
   );
 }
 
@@ -862,8 +1145,9 @@ export default function MauxCRM() {
   const [passwordRecovery, setPasswordRecovery] = useState(false);
   const [clients, setClients] = useState([]);
   const [invoices, setInvoices] = useState([]);
+  const [workEntries, setWorkEntries] = useState([]);
   const [dataLoading, setDataLoading] = useState(false);
-  const [mod, setMod] = useState("fakturace");
+  const [mod, setMod] = useState("vykaz");
   const [mode, setMode] = useState("list");
   const [sel, setSel] = useState(null);
   const [query, setQuery] = useState("");
@@ -886,12 +1170,60 @@ export default function MauxCRM() {
     Promise.all([
       fetchClients().catch(e => { console.error("clients:", e); return []; }),
       fetchInvoices().catch(e => { console.error("invoices:", e); return []; }),
+      fetchWorkEntries().catch(e => { console.error("work:", e); return []; }),
     ])
-      .then(([c, i]) => { setClients(c); setInvoices(i); })
+      .then(([c, i, w]) => { setClients(c); setInvoices(i); setWorkEntries(w); })
       .finally(() => setDataLoading(false));
   }, [session]);
 
-  const handleLogout = async () => { await supabase.auth.signOut(); setClients([]); setInvoices([]); };
+  const handleLogout = async () => { await supabase.auth.signOut(); setClients([]); setInvoices([]); setWorkEntries([]); };
+
+  const saveWorkEntry = async (e) => {
+    setSaving(true);
+    try {
+      await upsertWorkEntry(e);
+      const updated = await fetchWorkEntries();
+      setWorkEntries(updated);
+      setMode("list"); setSel(null);
+    } catch (err) { alert("Chyba: " + err.message); } finally { setSaving(false); }
+  };
+  const doDeleteWorkEntry = async (id) => {
+    try {
+      await deleteWorkEntryDb(id);
+      setWorkEntries(p => p.filter(e => e.id !== id));
+    } catch (err) { alert("Chyba: " + err.message); }
+  };
+
+  const generateInvoiceFromEntries = async (clientId, entries) => {
+    const client = clients.find(c => c.id === clientId);
+    const workItems = entries.filter(e => e.hours > 0).map(e => ({
+      id: uid(), description: e.description, hours: e.hours, rate: e.rate, amount: e.amount, no_vat: false
+    }));
+    const totalNotary = entries.reduce((s,e) => s + (e.notary_fee||0), 0);
+    const totalAdmin = entries.reduce((s,e) => s + (e.admin_fee||0), 0);
+    const items = [...workItems];
+    if (totalNotary > 0) items.push({ id: uid(), description: "Přefakturace — notář", hours: 0, rate: 0, amount: totalNotary, no_vat: true });
+    if (totalAdmin > 0) items.push({ id: uid(), description: "Správní poplatek — přefakturace", hours: 0, rate: 0, amount: totalAdmin, no_vat: true });
+    const workSubtotal = workItems.reduce((s,i) => s + i.amount, 0);
+    const vatAmount = Math.round(workSubtotal * 0.21);
+    const subtotal = workSubtotal;
+    const total = workSubtotal + vatAmount + totalNotary + totalAdmin;
+    const inv = {
+      id: uid(), invoice_number: nextInvoiceNumber(invoices),
+      client_id: clientId, issue_date: today(), due_date: addDays(today(), 14),
+      items, subtotal, vat_rate: 21, vat_amount: vatAmount, total,
+      status: "vystavena", notes: "",
+    };
+    setSaving(true);
+    try {
+      await upsertInvoice(inv);
+      const entryIds = entries.map(e => e.id);
+      await Promise.all(entries.map(e => upsertWorkEntry({ ...e, invoice_id: inv.id })));
+      const [updatedInvoices, updatedWork] = await Promise.all([fetchInvoices(), fetchWorkEntries()]);
+      setInvoices(updatedInvoices); setWorkEntries(updatedWork);
+      setSel(inv.id); setMod("fakturace"); setMode("detail");
+    } catch (err) { alert("Chyba: " + err.message); } finally { setSaving(false); }
+  };
 
   const saveClient = async (c) => {
     setSaving(true);
@@ -926,7 +1258,14 @@ export default function MauxCRM() {
   const selInvoice = invoices.find(i => i.id === sel);
   const curMod = MODULES.find(m => m.key === mod);
 
+  const selWorkEntry = workEntries.find(e => e.id === sel);
+
   const pageTitle = () => {
+    if (mod === "vykaz") {
+      if (mode === "new") return "Nový záznam";
+      if (mode === "edit") return "Upravit záznam";
+      return "Výkaz práce";
+    }
     if (mod === "klienti") {
       if (mode === "new") return "Nový klient";
       if (mode === "edit") return "Upravit klienta";
@@ -967,6 +1306,22 @@ export default function MauxCRM() {
         <div className="hr" />
         <div className="body">
           {!curMod?.live && <Placeholder m={curMod} />}
+
+          {/* VÝKAZ PRÁCE */}
+          {mod === "vykaz" && mode === "list" && (
+            <WorkEntryList entries={workEntries} clients={clients} invoices={invoices}
+              onNew={() => setMode("new")}
+              onEdit={e => { setSel(e.id); setMode("edit"); }}
+              onDelete={doDeleteWorkEntry}
+              onGenerateInvoice={generateInvoiceFromEntries}
+              loading={dataLoading} />
+          )}
+          {mod === "vykaz" && mode === "new" && (
+            <WorkEntryForm clients={clients} onSave={saveWorkEntry} onCancel={() => setMode("list")} saving={saving} />
+          )}
+          {mod === "vykaz" && mode === "edit" && selWorkEntry && (
+            <WorkEntryForm init={selWorkEntry} clients={clients} onSave={saveWorkEntry} onCancel={() => setMode("list")} saving={saving} />
+          )}
 
           {/* FAKTURACE */}
           {mod === "fakturace" && curMod?.live && mode === "list" && (
