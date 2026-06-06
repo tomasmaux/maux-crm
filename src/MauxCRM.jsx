@@ -3345,11 +3345,11 @@ export default function MauxCRM() {
       fetchLoanTrackers().catch(() => []),
       fetchEscrows().catch(e => { console.error("escrows load:", e); return []; }),
     ])
-      .then(async ([c, i, w, f, dpfo, loans]) => {
+      .then(async ([c, i, w, f, dpfo, loans, esc]) => {
         setClients(c); setInvoices(i); setWorkEntries(w); setFinanceItems(f);
         setDpfoMonths(dpfo);
         setLoanTrackers(loans);
-        setEscrows(esc);
+        setEscrows(esc || []);
         const txMap = {};
         await Promise.all(loans.map(async l => {
           txMap[l.id] = await fetchLoanTransactions(l.id).catch(() => []);
