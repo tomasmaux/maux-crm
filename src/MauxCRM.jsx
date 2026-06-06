@@ -1923,7 +1923,7 @@ const BREAKDOWN_COLS = {
   ],
 };
 
-function KpiBreakdown({ rows, colSet, onClose }) {
+function KpiBreakdown({ rows, colSet, onClose, earnLabel, incLabel }) {
   if (!rows || rows.length === 0) return (
     <div style={{padding:"14px 18px",fontSize:12,color:"var(--mut)",borderTop:"1px solid var(--line)"}}>
       Žádné tranše v tomto období.
@@ -1947,7 +1947,14 @@ function KpiBreakdown({ rows, colSet, onClose }) {
   return (
     <div style={{borderTop:"1px solid var(--line)",overflow:"auto",maxHeight:320}}>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"7px 14px",background:"var(--bg2)"}}>
-        <span style={{fontSize:11,color:"var(--mut)",fontWeight:500}}>Podrobný rozpis</span>
+        <span style={{fontSize:11,color:"var(--mut)",fontWeight:500}}>
+          Podrobný rozpis
+          {earnLabel && incLabel && (
+            <span style={{marginLeft:8,fontWeight:400,color:"var(--mut)"}}>
+              (úroky za <strong style={{color:"var(--ink)"}}>{earnLabel}</strong> → příjem <strong style={{color:"#059669"}}>{incLabel}</strong>)
+            </span>
+          )}
+        </span>
         <button onClick={onClose} style={{border:"none",background:"none",cursor:"pointer",fontSize:13,color:"var(--mut)",lineHeight:1}}>✕</button>
       </div>
       <table style={{width:"100%",borderCollapse:"collapse",fontSize:11.5}}>
@@ -2152,23 +2159,35 @@ function EscrowCard({ escrow, onEdit, onDelete }) {
           </table>
           {interest.months.length > 0 && (
             <>
-              <div style={{fontSize:9,letterSpacing:".2em",textTransform:"uppercase",color:"var(--mut)",fontWeight:600,marginBottom:6}}>Výpočet úroků</div>
+              <div style={{fontSize:9,letterSpacing:".2em",textTransform:"uppercase",color:"var(--mut)",fontWeight:600,marginBottom:6}}>Výpočet úroků · cash-flow protokol</div>
+              {/* Legenda cash-flow protokolu */}
+              <div style={{fontSize:10,color:"#92400E",background:"#FFFBEB",border:"1px solid #FDE68A",borderRadius:4,padding:"4px 8px",marginBottom:6,lineHeight:1.5}}>
+                📋 <strong>Protokol:</strong> Úroky za měsíc X → banka připisuje poslední den X → Tom eviduje jako příjem <strong>1. (X+1)</strong>
+              </div>
               <table style={{width:"100%",borderCollapse:"collapse",fontSize:11}}>
                 <thead><tr style={{background:"#FEF9C3"}}>
-                  <th style={{padding:"5px 8px",textAlign:"left",color:"#92400E",fontWeight:500}}>Měsíc</th>
+                  <th style={{padding:"5px 8px",textAlign:"left",color:"#92400E",fontWeight:500}}>Úroky za</th>
                   <th className="r" style={{padding:"5px 8px",color:"#92400E",fontWeight:500}}>Hrubý</th>
                   <th className="r" style={{padding:"5px 8px",color:"#92400E",fontWeight:500}}>Čistý (−15 %)</th>
-                  <th style={{padding:"5px 8px",textAlign:"left",color:"#92400E",fontWeight:500}}>Připsáno 1.</th>
+                  <th style={{padding:"5px 8px",textAlign:"left",color:"#92400E",fontWeight:500}}>→ Příjem v měsíci</th>
                 </tr></thead>
                 <tbody>
-                  {interest.months.map((m,i)=>(
-                    <tr key={i} style={{borderTop:"1px solid #FDE68A"}}>
-                      <td style={{padding:"5px 8px"}}>{m.label}</td>
-                      <td className="r num" style={{padding:"5px 8px"}}>{fmtKc(m.gross)}</td>
-                      <td className="r num" style={{padding:"5px 8px",color:"#059669",fontWeight:500}}>{fmtKc(m.net)}</td>
-                      <td style={{padding:"5px 8px",color:"var(--mut)",fontSize:10}}>{m.creditedOn}</td>
-                    </tr>
-                  ))}
+                  {interest.months.map((m,i)=>{
+                    const cDate = new Date(m.creditedOn + 'T00:00:00');
+                    const incNom = ["Leden","Únor","Březen","Duben","Květen","Červen","Červenec","Srpen","Září","Říjen","Listopad","Prosinec"][cDate.getMonth()];
+                    const incKr  = ["Led","Ún","Bře","Dub","Kvě","Čer","Čvn","Srp","Zář","Říj","Lis","Pro"][cDate.getMonth()];
+                    return (
+                      <tr key={i} style={{borderTop:"1px solid #FDE68A"}}>
+                        <td style={{padding:"5px 8px",color:"var(--mut)"}}>{m.label}</td>
+                        <td className="r num" style={{padding:"5px 8px"}}>{fmtKc(m.gross)}</td>
+                        <td className="r num" style={{padding:"5px 8px",color:"#059669",fontWeight:500}}>{fmtKc(m.net)}</td>
+                        <td style={{padding:"5px 8px"}}>
+                          <span style={{fontWeight:600,color:"#065F46"}}>{incNom} {cDate.getFullYear()}</span>
+                          <span style={{color:"var(--mut)",fontSize:9,marginLeft:4}}>(1.{cDate.getMonth()+1}.)</span>
+                        </td>
+                      </tr>
+                    );
+                  })}
                   <tr style={{borderTop:"2px solid #F59E0B",background:"#FFFBEB"}}>
                     <td style={{padding:"6px 8px",fontWeight:600}}>Celkem</td>
                     <td className="r num" style={{padding:"6px 8px",fontWeight:500}}>{fmtKc(interest.totalGross)}</td>
@@ -2465,7 +2484,14 @@ function EscrowList({ escrows, onNew, onEdit, onDelete, loading }) {
   ];
   const now = new Date();
   const cy = now.getFullYear(), cm = now.getMonth();
-  const MESICE = ["ledna","února","března","dubna","května","června","července","srpna","září","října","listopadu","prosince"];
+  const MESICE     = ["ledna","února","března","dubna","května","června","července","srpna","září","října","listopadu","prosince"];
+  const MESICE_NOM = ["Leden","Únor","Březen","Duben","Květen","Červen","Červenec","Srpen","Září","Říjen","Listopad","Prosinec"];
+  const MESICE_GEN = ["ledna","února","března","dubna","května","června","července","srpna","září","října","listopadu","prosince"];
+  // Cash-flow: úroky za [earnLabel] → příjem 1. [incomeLabel]
+  const earnLabel1  = MESICE_GEN[cm % 12];             // "června" (aktuální měsíc)
+  const earnLabel2  = MESICE_GEN[(cm + 1) % 12];       // "července"
+  const incLabel1   = MESICE_NOM[(cm + 1) % 12];       // "Červenec" (příjem)
+  const incLabel2   = MESICE_NOM[(cm + 2) % 12];       // "Srpen"
   const active = escrows.filter(e => e.status !== 'ukončeno');
   const totalInEscrow = active.reduce((s,e) => {
     return s + (e.escrow_tranches||[]).filter(t=>t.party_type==='složitel').reduce((ss,t)=>ss+(t.amount||0),0);
@@ -2507,25 +2533,47 @@ function EscrowList({ escrows, onNew, onEdit, onDelete, loading }) {
           <div className="v">{fmtKc(totalInEscrow)}</div>
           <div className="s">{active.length} aktivních · celkem proteklo {fmtKc(totalFlowed)}</div>
         </div>
-        {/* Dostanu 1. příštího měsíce — klikatelné */}
+        {/* Příjem 1. příštího měsíce — cash-flow protokol */}
         <div className="kpi" style={{background:"#FFFBEB",border:`1px solid ${openDetail==="m1"?"#D97706":"#FDE68A"}`,padding:0,overflow:"hidden",...kpiClickable}}
              onClick={()=>toggleDetail("m1")}>
           <div style={{padding:"14px 18px 10px"}}>
-            <div className="k" style={{color:"#92400E"}}>Dostanu {next1Label} {openDetail==="m1"?"▲":"▼"}</div>
+            <div className="k" style={{color:"#92400E"}}>
+              Příjem {next1Label} {openDetail==="m1"?"▲":"▼"}
+            </div>
             <div className="v" style={{color:"#D97706"}}>{netNextMonth1 > 0 ? fmtKc(Math.round(netNextMonth1)) : "–"}</div>
-            <div className="s" style={{color:"#92400E"}}>čistý úrok · narůstá každý den · klikni pro rozpis</div>
+            <div className="s" style={{color:"#92400E"}}>
+              za úroky z <strong>{earnLabel1}</strong> · narůstá každý den · klikni pro rozpis
+            </div>
           </div>
-          {openDetail==="m1" && <KpiBreakdown rows={rows1} colSet="nextMonth" onClose={(e)=>{e.stopPropagation();setOpenDetail(null);}} />}
+          {openDetail==="m1" && (
+            <>
+              <div style={{padding:"6px 14px 0",fontSize:10.5,color:"#92400E",borderTop:"1px solid #FDE68A",background:"#FFFBEB"}}>
+                📋 Úroky za <strong>{earnLabel1} {cy}</strong> → připsány banka 30./31.{cm+1}. → příjem <strong>1.{cm+2}. = {incLabel1} {(cm+2)>12?cy+1:cy}</strong>
+              </div>
+              <KpiBreakdown rows={rows1} colSet="nextMonth" earnLabel={earnLabel1} incLabel={`1. ${incLabel1}`} onClose={(e)=>{e.stopPropagation();setOpenDetail(null);}} />
+            </>
+          )}
         </div>
-        {/* Dostanu 1. přespříštího měsíce */}
+        {/* Příjem 1. přespříštího měsíce — projekce */}
         <div className="kpi" style={{background:"#F0FDF4",border:`1px solid ${openDetail==="m2"?"#059669":"#BBF7D0"}`,padding:0,overflow:"hidden",...kpiClickable}}
              onClick={()=>toggleDetail("m2")}>
           <div style={{padding:"14px 18px 10px"}}>
-            <div className="k" style={{color:"#065F46"}}>Dostanu {next2Label} (odhad) {openDetail==="m2"?"▲":"▼"}</div>
+            <div className="k" style={{color:"#065F46"}}>
+              Příjem {next2Label} (odhad) {openDetail==="m2"?"▲":"▼"}
+            </div>
             <div className="v" style={{color:"#059669"}}>{netNextMonth2 > 0 ? fmtKc(Math.round(netNextMonth2)) : "–"}</div>
-            <div className="s" style={{color:"#065F46"}}>tranše končící v {MESICE[(cm+1)%12]}</div>
+            <div className="s" style={{color:"#065F46"}}>
+              za úroky z <strong>{earnLabel2}</strong> · projekce při zachování jistin
+            </div>
           </div>
-          {openDetail==="m2" && <KpiBreakdown rows={rows2} colSet="nextMonth" onClose={(e)=>{e.stopPropagation();setOpenDetail(null);}} />}
+          {openDetail==="m2" && (
+            <>
+              <div style={{padding:"6px 14px 0",fontSize:10.5,color:"#065F46",borderTop:"1px solid #BBF7D0",background:"#F0FDF4"}}>
+                📋 Úroky za <strong>{earnLabel2} {(cm+1)>11?cy+1:cy}</strong> → připsány banka 30./31.{(cm+2)%12+1}. → příjem <strong>1.{(cm+3)%12+1}. = {incLabel2}</strong>
+              </div>
+              <KpiBreakdown rows={rows2} colSet="nextMonth" earnLabel={earnLabel2} incLabel={`1. ${incLabel2}`} onClose={(e)=>{e.stopPropagation();setOpenDetail(null);}} />
+            </>
+          )}
         </div>
       </div>
       {/* Souhrn – řada 2 */}
