@@ -35,8 +35,7 @@ const MODULES = [
   { key: "vykaz",      label: "Výkaz práce",  live: true },
   { key: "fakturace",  label: "Fakturace",    live: true },
   { key: "klienti",    label: "Klienti",      live: true },
-  { key: "uschovy",    label: "Úschovy",      live: false, desc: "Evidence advokátních úschov a výpočet úroků." },
-  { key: "ucetni",     label: "Účetní export",live: false, desc: "Export podkladu pro účetní — základ, DPH, splatnosti." },
+  { key: "uschovy",    label: "Úschovy",      live: true },
   { key: "happy",      label: "Happy Life",   live: false, desc: "Osobní finance — spoření, majetek, přehledy." },
 ];
 
@@ -282,6 +281,29 @@ async function upsertLoanTransaction(tx) {
 }
 async function deleteLoanTransaction(id) {
   const { error } = await supabase.from("loan_transactions").delete().eq("id", id);
+  if (error) throw error;
+}
+
+async function fetchEscrows() {
+  const { data, error } = await supabase.from("escrows").select("*, escrow_tranches(*)").order("escrow_number");
+  if (error) throw error;
+  return data || [];
+}
+async function upsertEscrow(e) {
+  const { escrow_tranches: _t, ...rest } = e;
+  const { error } = await supabase.from("escrows").upsert({ ...rest, updated_at: new Date().toISOString() });
+  if (error) throw error;
+}
+async function deleteEscrowDb(id) {
+  const { error } = await supabase.from("escrows").delete().eq("id", id);
+  if (error) throw error;
+}
+async function upsertEscrowTranche(t) {
+  const { error } = await supabase.from("escrow_tranches").upsert(t);
+  if (error) throw error;
+}
+async function deleteEscrowTranche(id) {
+  const { error } = await supabase.from("escrow_tranches").delete().eq("id", id);
   if (error) throw error;
 }
 
@@ -1557,8 +1579,321 @@ function LoanTrackerCard({ tracker, transactions, onUpdateTracker, onAddTransact
   );
 }
 
+
+/* ─── ÚSCHOVY (Escrow) MODULE ─── */
+function calcEscrowInterest(amount, rate, dateFrom, dateTo) {
+  // Interest credited 1st of each month FOR previous calendar month
+  // Daily rate = amount * annual_rate / 365
+  // Net = gross * 0.85 (15% withholding tax)
+  if (!dateFrom || !amount || !rate) return { months: [], totalGross: 0, totalNet: 0 };
+  const from = new Date(dateFrom);
+  const to = dateTo ? new Date(dateTo) : new Date();
+  const months = [];
+  let d = new Date(from.getFullYear(), from.getMonth(), 1);
+  while (d <= to) {
+    const monthStart = new Date(Math.max(from.getTime(), d.getTime()));
+    const monthEnd = new Date(d.getFullYear(), d.getMonth() + 1, 0);
+    const effectiveEnd = new Date(Math.min(to.getTime(), monthEnd.getTime()));
+    const days = Math.max(0, Math.round((effectiveEnd - monthStart) / 86400000) + 1);
+    const gross = amount * rate / 365 * days;
+    const net = gross * 0.85;
+    if (days > 0) {
+      months.push({
+        month: `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`,
+        label: `${['Led','Úno','Bře','Dub','Kvě','Čer','Čvn','Srp','Zář','Říj','Lis','Pro'][d.getMonth()]} ${d.getFullYear()}`,
+        days, gross: Math.round(gross*100)/100, net: Math.round(net*100)/100,
+        creditedOn: `${d.getMonth()+2 > 12 ? d.getFullYear()+1 : d.getFullYear()}-${String((d.getMonth()+2)>12?1:d.getMonth()+2).padStart(2,'0')}-01`
+      });
+    }
+    d = new Date(d.getFullYear(), d.getMonth() + 1, 1);
+  }
+  return { months, totalGross: months.reduce((s,m)=>s+m.gross,0), totalNet: months.reduce((s,m)=>s+m.net,0) };
+}
+
+function EscrowCard({ escrow, onEdit, onDelete }) {
+  const [showTranches, setShowTranches] = useState(false);
+  const tranches = escrow.escrow_tranches || [];
+  const total = tranches.reduce((s,t) => s + (t.amount||0), 0);
+  const depositTotal = tranches.filter(t=>t.party_type==='složitel').reduce((s,t)=>s+(t.amount||0),0);
+  const interest = calcEscrowInterest(depositTotal, escrow.interest_rate, escrow.date_received, escrow.date_paid);
+  const isActive = !['ukončeno'].includes(escrow.status);
+  const needsAlert = escrow.date_plomba_end && (() => {
+    const d = new Date(escrow.date_plomba_end);
+    const diff = (d - new Date()) / 86400000;
+    return diff >= 0 && diff <= 7;
+  })();
+
+  const statusColors = {
+    'aktivní': { bg:'#F0FDF4', border:'#BBF7D0', text:'#065F46' },
+    'čeká_na_plombu': { bg:'#FEF3C7', border:'#FDE68A', text:'#92400E' },
+    'čeká_na_přijetí': { bg:'#EEF2FF', border:'#C7D2FE', text:'#3730A3' },
+    'částečně_vyplaceno': { bg:'#F0F9FF', border:'#BAE6FD', text:'#0369A1' },
+    'ukončeno': { bg:'#F9FAFB', border:'#E5E7EB', text:'#6B7280' },
+  };
+  const sc = statusColors[escrow.status] || statusColors['aktivní'];
+  const statusLabel = {
+    'aktivní':'Aktivní','čeká_na_plombu':'Čeká na plombu','čeká_na_přijetí':'Čeká na přijetí',
+    'částečně_vyplaceno':'Částečně vyplaceno','ukončeno':'Ukončeno ✓'
+  }[escrow.status] || escrow.status;
+
+  return (
+    <div style={{background:"#fff",border:`1px solid ${needsAlert?"#F59E0B":sc.border}`,borderRadius:12,overflow:"hidden",boxShadow:needsAlert?"0 0 0 2px #FDE68A":undefined}}>
+      <div style={{padding:"14px 18px",borderBottom:"1px solid var(--line)",display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
+        <div>
+          <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:6}}>
+            <span style={{fontFamily:"Fraunces,serif",fontSize:17,fontWeight:400,color:"var(--ink)"}}>{escrow.escrow_number}</span>
+            <span style={{fontSize:10,padding:"2px 9px",borderRadius:20,background:sc.bg,color:sc.text,border:`1px solid ${sc.border}`,fontWeight:500}}>{statusLabel}</span>
+            {escrow.banka && <span style={{fontSize:9,padding:"2px 7px",borderRadius:4,background:"#EEF2FF",color:"#3730A3",fontWeight:600}}>BANKA</span>}
+            {escrow.spis_aml && <span style={{fontSize:9,padding:"2px 7px",borderRadius:4,background:"#F0FDF4",color:"#065F46",fontWeight:600}}>AML ✓</span>}
+            {!escrow.spis_aml && <span style={{fontSize:9,padding:"2px 7px",borderRadius:4,background:"#FEF2F2",color:"#991B1B",fontWeight:600}}>AML ⚠</span>}
+            {needsAlert && <span style={{fontSize:9,padding:"2px 7px",borderRadius:4,background:"#FEF3C7",color:"#92400E",fontWeight:700}}>⚠ Blíží se konec plomby</span>}
+          </div>
+          <div style={{fontSize:12,color:"var(--mut)",lineHeight:1.6}}>
+            {escrow.date_received && <span>Přijato: <strong>{fmtDate(escrow.date_received)}</strong> · </span>}
+            {escrow.date_plomba_end && <span>Konec plomby: <strong style={{color:needsAlert?"#D97706":"inherit"}}>{fmtDate(escrow.date_plomba_end)}</strong> · </span>}
+            {escrow.date_paid && <span>Vyplaceno: <strong style={{color:"#059669"}}>{fmtDate(escrow.date_paid)}</strong></span>}
+          </div>
+        </div>
+        <div style={{textAlign:"right"}}>
+          <div style={{fontFamily:"Fraunces,serif",fontSize:20,fontWeight:300,color:"var(--gold)"}}>{fmtKc(depositTotal)}</div>
+          <div style={{fontSize:11,color:"var(--mut)"}}>v úschově · sazba {(escrow.interest_rate*100).toFixed(1)}%</div>
+          {isActive && interest.totalNet > 0 && <div style={{fontSize:11,color:"#059669",fontWeight:500,marginTop:2}}>Zisk: {fmtKc(interest.totalNet)} čistého</div>}
+        </div>
+      </div>
+      {escrow.notes && <div style={{padding:"8px 18px",fontSize:12,color:"var(--mut)",borderBottom:"1px solid var(--line)",background:"#FAFAFA"}}>{escrow.notes}</div>}
+      <div style={{padding:"10px 18px",display:"flex",gap:8,flexWrap:"wrap",borderBottom:"1px solid var(--line)"}}>
+        {tranches.slice(0,6).map((t,i)=>(
+          <span key={i} style={{fontSize:11,padding:"3px 10px",borderRadius:20,background:t.party_type==='složitel'?"#EEF2FF":"#F0FDF4",color:t.party_type==='složitel'?"#3730A3":"#065F46",fontWeight:400}}>
+            {t.party_type==='složitel'?"↓":"↑"} {t.party_name?.split(' ')[0]} · {fmtKc(t.amount)}
+            {t.is_paid && " ✓"}
+          </span>
+        ))}
+      </div>
+      <div style={{padding:"8px 14px",display:"flex",gap:8,background:"#FAFAFA"}}>
+        <button className="btn gho" style={{fontSize:11}} onClick={()=>setShowTranches(p=>!p)}>
+          {showTranches?"Skrýt detail":"Zobrazit detail + úroky"}
+        </button>
+        <button className="btn" style={{fontSize:11}} onClick={()=>onEdit(escrow)}>Upravit</button>
+        {!isActive && <button className="btn dng" style={{fontSize:11}} onClick={()=>onDelete(escrow.id)}>Smazat</button>}
+      </div>
+      {showTranches && (
+        <div style={{padding:"12px 18px",borderTop:"1px solid var(--line)"}}>
+          <div style={{fontSize:9,letterSpacing:".2em",textTransform:"uppercase",color:"var(--mut)",fontWeight:600,marginBottom:8}}>Tranše</div>
+          <table style={{width:"100%",borderCollapse:"collapse",fontSize:12,marginBottom:12}}>
+            <thead><tr style={{background:"#F5F3FF"}}>
+              <th style={{padding:"6px 10px",textAlign:"left",fontWeight:500,color:"var(--mut)"}}>Typ</th>
+              <th style={{padding:"6px 10px",textAlign:"left",fontWeight:500,color:"var(--mut)"}}>Strana</th>
+              <th style={{padding:"6px 10px",textAlign:"right",fontWeight:500,color:"var(--mut)"}}>Částka</th>
+              <th style={{padding:"6px 10px",textAlign:"center",fontWeight:500,color:"var(--mut)"}}>Vyplaceno</th>
+            </tr></thead>
+            <tbody>
+              {tranches.map((t,i)=>(
+                <tr key={i} style={{borderTop:"1px solid var(--line)"}}>
+                  <td style={{padding:"7px 10px"}}><span style={{fontSize:10,padding:"2px 7px",borderRadius:3,background:t.party_type==='složitel'?"#EEF2FF":"#F0FDF4",color:t.party_type==='složitel'?"#3730A3":"#065F46"}}>{t.party_type}</span></td>
+                  <td style={{padding:"7px 10px",color:"var(--txt)"}}>{t.party_name}</td>
+                  <td style={{padding:"7px 10px",textAlign:"right",fontFamily:"Fraunces,serif",fontWeight:300}}>{fmtKc(t.amount)}</td>
+                  <td style={{padding:"7px 10px",textAlign:"center",fontSize:14}}>{t.is_paid ? "✅" : "⬜"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {interest.months.length > 0 && (
+            <>
+              <div style={{fontSize:9,letterSpacing:".2em",textTransform:"uppercase",color:"var(--mut)",fontWeight:600,marginBottom:6}}>Výpočet úroků</div>
+              <table style={{width:"100%",borderCollapse:"collapse",fontSize:11}}>
+                <thead><tr style={{background:"#FEF9C3"}}>
+                  <th style={{padding:"5px 8px",textAlign:"left",color:"#92400E",fontWeight:500}}>Měsíc</th>
+                  <th style={{padding:"5px 8px",textAlign:"right",color:"#92400E",fontWeight:500}}>Dní</th>
+                  <th style={{padding:"5px 8px",textAlign:"right",color:"#92400E",fontWeight:500}}>Hrubý</th>
+                  <th style={{padding:"5px 8px",textAlign:"right",color:"#92400E",fontWeight:500}}>Čistý</th>
+                  <th style={{padding:"5px 8px",textAlign:"left",color:"#92400E",fontWeight:500}}>Připíše se</th>
+                </tr></thead>
+                <tbody>
+                  {interest.months.map((m,i)=>(
+                    <tr key={i} style={{borderTop:"1px solid #FDE68A"}}>
+                      <td style={{padding:"5px 8px"}}>{m.label}</td>
+                      <td style={{padding:"5px 8px",textAlign:"right",color:"var(--mut)"}}>{m.days}</td>
+                      <td style={{padding:"5px 8px",textAlign:"right"}}>{fmtKc(m.gross)}</td>
+                      <td style={{padding:"5px 8px",textAlign:"right",color:"#059669",fontWeight:500}}>{fmtKc(m.net)}</td>
+                      <td style={{padding:"5px 8px",color:"var(--mut)",fontSize:10}}>{m.creditedOn}</td>
+                    </tr>
+                  ))}
+                  <tr style={{borderTop:"2px solid #F59E0B",background:"#FFFBEB"}}>
+                    <td style={{padding:"6px 8px",fontWeight:600}}>Celkem</td>
+                    <td></td>
+                    <td style={{padding:"6px 8px",textAlign:"right",fontWeight:500}}>{fmtKc(interest.totalGross)}</td>
+                    <td style={{padding:"6px 8px",textAlign:"right",color:"#059669",fontWeight:700}}>{fmtKc(interest.totalNet)}</td>
+                    <td></td>
+                  </tr>
+                </tbody>
+              </table>
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function EscrowForm({ init, onSave, onCancel, saving }) {
+  const [d, setD] = useState(() => init || {
+    id: uid(), escrow_number: "", status: "aktivní", banka: false, spis_aml: false,
+    interest_rate: 0.035, date_received: "", date_plomba_end: "", date_paid: "", notes: ""
+  });
+  const set = (k,v) => setD(p=>({...p,[k]:v}));
+  // Tranche management
+  const [tranches, setTranches] = useState(() => (init?.escrow_tranches || []));
+  const [newT, setNewT] = useState({ party_type:"složitel", party_name:"", amount:0, notes:"" });
+  const addTranche = () => {
+    if (!newT.party_name.trim()) return;
+    const t = { ...newT, id: uid(), escrow_id: d.id, sort_order: tranches.length };
+    setTranches(p => [...p, t]);
+    setNewT({ party_type:"složitel", party_name:"", amount:0, notes:"" });
+  };
+  const removeTranche = (id) => setTranches(p => p.filter(t => t.id !== id));
+  const save = async () => {
+    if(!d.escrow_number.trim()) return;
+    // Save escrow first, then sync tranches
+    await upsertEscrow(d);
+    // Delete removed tranches and upsert current ones
+    const existing = init?.escrow_tranches || [];
+    const removedIds = existing.filter(e => !tranches.find(t=>t.id===e.id)).map(e=>e.id);
+    await Promise.all([
+      ...removedIds.map(id => deleteEscrowTranche(id)),
+      ...tranches.map(t => upsertEscrowTranche({ ...t, escrow_id: d.id }))
+    ]);
+    onSave({ ...d, escrow_tranches: tranches });
+  };
+  return (
+    <div className="form" style={{maxWidth:660}}>
+      <h2>{init?"Upravit úschovu":"Nová úschova"}</h2>
+      <div className="two">
+        <div className="frow"><label>Číslo úschovy *</label><input value={d.escrow_number} onChange={e=>set("escrow_number",e.target.value)} placeholder="010_2026"/></div>
+        <div className="frow"><label>Stav</label>
+          <select value={d.status} onChange={e=>set("status",e.target.value)}>
+            {['aktivní','čeká_na_plombu','čeká_na_přijetí','částečně_vyplaceno','ukončeno'].map(s=><option key={s} value={s}>{s.replace(/_/g,' ')}</option>)}
+          </select>
+        </div>
+      </div>
+      <div className="three">
+        <div className="frow"><label>Sazba (%)</label><input type="number" step="0.001" value={d.interest_rate} onChange={e=>set("interest_rate",Number(e.target.value))}/></div>
+        <div className="frow"><label>Datum přijetí</label><input type="date" value={d.date_received||""} onChange={e=>set("date_received",e.target.value)}/></div>
+        <div className="frow"><label>Konec plomby (odhad)</label><input type="date" value={d.date_plomba_end||""} onChange={e=>set("date_plomba_end",e.target.value)}/></div>
+      </div>
+      <div className="two">
+        <div className="frow"><label>Datum vyplacení (finalizuje)</label><input type="date" value={d.date_paid||""} onChange={e=>set("date_paid",e.target.value)}/></div>
+        <div className="frow" style={{display:"flex",alignItems:"center",gap:16,paddingTop:24}}>
+          <label style={{display:"flex",alignItems:"center",gap:6,fontSize:13,textTransform:"none",letterSpacing:0,cursor:"pointer"}}>
+            <input type="checkbox" checked={!!d.banka} onChange={e=>set("banka",e.target.checked)} style={{width:"auto"}}/>Banka
+          </label>
+          <label style={{display:"flex",alignItems:"center",gap:6,fontSize:13,textTransform:"none",letterSpacing:0,cursor:"pointer"}}>
+            <input type="checkbox" checked={!!d.spis_aml} onChange={e=>set("spis_aml",e.target.checked)} style={{width:"auto"}}/>AML ✓
+          </label>
+        </div>
+      </div>
+      <div className="frow"><label>Poznámka</label><textarea value={d.notes||""} onChange={e=>set("notes",e.target.value)}/></div>
+
+      {/* Tranše */}
+      <div style={{marginTop:16}}>
+        <div style={{fontSize:9,letterSpacing:".2em",textTransform:"uppercase",color:"var(--mut)",fontWeight:600,marginBottom:8}}>Tranše</div>
+        {tranches.length > 0 && (
+          <table style={{width:"100%",borderCollapse:"collapse",fontSize:12,marginBottom:10}}>
+            <thead><tr style={{background:"#F5F3FF"}}>
+              <th style={{padding:"5px 8px",textAlign:"left",fontWeight:500,color:"var(--mut)"}}>Typ</th>
+              <th style={{padding:"5px 8px",textAlign:"left",fontWeight:500,color:"var(--mut)"}}>Strana</th>
+              <th style={{padding:"5px 8px",textAlign:"right",fontWeight:500,color:"var(--mut)"}}>Částka</th>
+              <th style={{padding:"5px 8px"}}></th>
+            </tr></thead>
+            <tbody>
+              {tranches.map((t,i) => (
+                <tr key={t.id} style={{borderTop:"1px solid var(--line)"}}>
+                  <td style={{padding:"6px 8px"}}><span style={{fontSize:10,padding:"2px 6px",borderRadius:3,background:t.party_type==='složitel'?"#EEF2FF":"#F0FDF4",color:t.party_type==='složitel'?"#3730A3":"#065F46"}}>{t.party_type}</span></td>
+                  <td style={{padding:"6px 8px",color:"var(--txt)"}}>{t.party_name}</td>
+                  <td style={{padding:"6px 8px",textAlign:"right",fontFamily:"Fraunces,serif"}}>{fmtKc(t.amount)}</td>
+                  <td style={{padding:"6px 8px",textAlign:"center"}}><button className="btn dng" style={{fontSize:10,padding:"2px 8px"}} onClick={()=>removeTranche(t.id)}>✕</button></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+        <div style={{display:"grid",gridTemplateColumns:"auto 1fr auto auto",gap:6,alignItems:"center",background:"#F9FAFB",borderRadius:8,padding:"10px 12px"}}>
+          <select value={newT.party_type} onChange={e=>setNewT(p=>({...p,party_type:e.target.value}))} style={{fontSize:12,padding:"5px 8px",borderRadius:4,border:"1px solid var(--line)"}}>
+            <option value="složitel">složitel</option>
+            <option value="oprávněný">oprávněný</option>
+          </select>
+          <input placeholder="Jméno strany" value={newT.party_name} onChange={e=>setNewT(p=>({...p,party_name:e.target.value}))} style={{fontSize:12,padding:"5px 8px",borderRadius:4,border:"1px solid var(--line)"}}/>
+          <input type="number" placeholder="Částka" value={newT.amount||""} onChange={e=>setNewT(p=>({...p,amount:Number(e.target.value)}))} style={{fontSize:12,padding:"5px 8px",borderRadius:4,border:"1px solid var(--line)",width:120,textAlign:"right"}}/>
+          <button className="btn" style={{fontSize:11}} onClick={addTranche}>+ Přidat</button>
+        </div>
+      </div>
+
+      <div className="actions" style={{borderTop:"none",paddingTop:0,marginTop:8}}>
+        <button className="btn gho" onClick={onCancel}>Zrušit</button>
+        <button className="btn pri" onClick={save} disabled={saving} style={{marginLeft:"auto"}}>{saving?"Ukládám…":"Uložit"}</button>
+      </div>
+    </div>
+  );
+}
+
+function EscrowList({ escrows, onNew, onEdit, onDelete, loading }) {
+  const active = escrows.filter(e => e.status !== 'ukončeno');
+  const totalInEscrow = active.reduce((s,e) => {
+    const t = e.escrow_tranches||[];
+    return s + t.filter(tr=>tr.party_type==='složitel').reduce((ss,tr)=>ss+(tr.amount||0),0);
+  }, 0);
+  const monthlyNet = active.reduce((s,e) => {
+    const depositTotal = (e.escrow_tranches||[]).filter(t=>t.party_type==='složitel').reduce((ss,t)=>ss+(t.amount||0),0);
+    const today = new Date();
+    const thisMonthDays = new Date(today.getFullYear(), today.getMonth()+1, 0).getDate();
+    return s + depositTotal * (e.interest_rate||0.035) / 365 * thisMonthDays * 0.85;
+  }, 0);
+  const alerts = active.filter(e => e.date_plomba_end && (() => {
+    const diff = (new Date(e.date_plomba_end) - new Date()) / 86400000;
+    return diff >= 0 && diff <= 7;
+  })());
+
+  return (
+    <div style={{display:"flex",flexDirection:"column",gap:16}}>
+      {/* Souhrn */}
+      <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:12}}>
+        <div className="kpi hi">
+          <div className="k">V úschově celkem</div>
+          <div className="v">{fmtKc(totalInEscrow)}</div>
+          <div className="s">{active.length} aktivních úschov</div>
+        </div>
+        <div className="kpi" style={{background:"#FFFBEB",border:"1px solid #FDE68A"}}>
+          <div className="k" style={{color:"#92400E"}}>Příjem tento měsíc (čistý)</div>
+          <div className="v" style={{color:"#D97706"}}>{fmtKc(Math.round(monthlyNet))}</div>
+          <div className="s" style={{color:"#92400E"}}>připíše se 1. příštího měsíce</div>
+        </div>
+        <div className="kpi" style={{background:alerts.length>0?"#FEF3C7":"#F0FDF4",border:`1px solid ${alerts.length>0?"#FDE68A":"#BBF7D0"}`}}>
+          <div className="k" style={{color:alerts.length>0?"#92400E":"#065F46"}}>Alerty</div>
+          <div className="v" style={{color:alerts.length>0?"#D97706":"#059669"}}>{alerts.length > 0 ? `${alerts.length}× ⚠` : "Vše OK"}</div>
+          <div className="s" style={{color:alerts.length>0?"#92400E":"#065F46"}}>
+            {alerts.length > 0 ? alerts.map(e=>e.escrow_number).join(", ") : "Žádná úschova se neblíží"}
+          </div>
+        </div>
+      </div>
+      {/* Toolbar */}
+      <div style={{display:"flex",justifyContent:"flex-end"}}>
+        <button className="btn pri" onClick={onNew}>+ Nová úschova</button>
+      </div>
+      {/* List */}
+      {loading ? <div className="loading">Načítám úschovy…</div> : (
+        <div style={{display:"flex",flexDirection:"column",gap:10}}>
+          {escrows.length === 0 ? (
+            <div className="ph"><h2 className="serif">Žádné úschovy</h2><p>Přidej první úschovu tlačítkem výše.</p></div>
+          ) : (
+            escrows.map(e => <EscrowCard key={e.id} escrow={e} onEdit={onEdit} onDelete={onDelete} />)
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 /* ─── DASHBOARD ─── */
-function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, loanTrackers, loanTransactions, onNav, onSaveFinance, onDeleteFinance, onDpfoToggle, onLoanTxAdd, onLoanTxToggle, onLoanTxDelete, onLoanUpdate }) {
+function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, loanTrackers, loanTransactions, escrows, onNav, onSaveFinance, onDeleteFinance, onDpfoToggle, onLoanTxAdd, onLoanTxToggle, onLoanTxDelete, onLoanUpdate }) {
   const now = new Date();
   const thisMonth = now.toISOString().slice(0, 7);
   const prevMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1).toISOString().slice(0, 7);
@@ -1631,6 +1966,31 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
 
   return (
     <div style={{display:"flex",flexDirection:"column",gap:16}}>
+
+      {/* Escrow Alerts */}
+      {(escrows||[]).filter(e => {
+        if (!e.date_plomba_end) return false;
+        const diff = (new Date(e.date_plomba_end) - new Date()) / 86400000;
+        return diff >= 0 && diff <= 3;
+      }).length > 0 && (
+        <div style={{background:"#FEF3C7",border:"1px solid #F59E0B",borderRadius:10,padding:"12px 18px",display:"flex",alignItems:"center",gap:12,cursor:"pointer"}} onClick={()=>onNav("uschovy")}>
+          <span style={{fontSize:18}}>⚠️</span>
+          <div>
+            <div style={{fontWeight:600,color:"#92400E",fontSize:13}}>Blíží se konec plomby</div>
+            <div style={{fontSize:12,color:"#B45309",marginTop:2}}>
+              {(escrows||[]).filter(e => {
+                if (!e.date_plomba_end) return false;
+                const diff = (new Date(e.date_plomba_end) - new Date()) / 86400000;
+                return diff >= 0 && diff <= 3;
+              }).map(e => {
+                const days = Math.ceil((new Date(e.date_plomba_end) - new Date()) / 86400000);
+                return `${e.escrow_number} — za ${days} ${days===1?"den":days<=4?"dny":"dní"}`;
+              }).join(" · ")}
+            </div>
+          </div>
+          <span style={{marginLeft:"auto",fontSize:11,color:"#92400E",textDecoration:"underline"}}>Přejít na Úschovy →</span>
+        </div>
+      )}
 
       {/* Greeting */}
       <div style={{display:"flex",alignItems:"baseline",justifyContent:"space-between"}}>
@@ -2945,6 +3305,9 @@ export default function MauxCRM() {
   const [dpfoMonths, setDpfoMonths] = useState([]);
   const [loanTrackers, setLoanTrackers] = useState([]);
   const [loanTransactions, setLoanTransactions] = useState({}); // { loanId: [] }
+  const [escrows, setEscrows] = useState([]);
+  const [escrowMode, setEscrowMode] = useState("list"); // list | edit | new
+  const [selEscrow, setSelEscrow] = useState(null);
   const [dataLoading, setDataLoading] = useState(false);
   const [mod, setMod] = useState("dashboard");
   const [mode, setMode] = useState("list");
@@ -2975,11 +3338,13 @@ export default function MauxCRM() {
       fetchFinanceItems().catch(e => { console.error("finance:", e); return []; }),
       ensureDpfoYear(new Date().getFullYear()).catch(() => []),
       fetchLoanTrackers().catch(() => []),
+      fetchEscrows().catch(() => []),
     ])
       .then(async ([c, i, w, f, dpfo, loans]) => {
         setClients(c); setInvoices(i); setWorkEntries(w); setFinanceItems(f);
         setDpfoMonths(dpfo);
         setLoanTrackers(loans);
+        setEscrows(esc);
         const txMap = {};
         await Promise.all(loans.map(async l => {
           txMap[l.id] = await fetchLoanTransactions(l.id).catch(() => []);
@@ -3123,6 +3488,20 @@ export default function MauxCRM() {
     setSel(clientId); setMod("klienti"); setMode("detail");
   };
 
+  // Escrow handlers
+  const saveEscrow = async () => {
+    // EscrowForm already saved to Supabase; just refresh state
+    try {
+      const updated = await fetchEscrows();
+      setEscrows(updated);
+    } catch(err) { console.error(err); }
+    setEscrowMode("list"); setSelEscrow(null); setSaving(false);
+  };
+  const doDeleteEscrow = async (id) => {
+    try { await deleteEscrowDb(id); setEscrows(p => p.filter(e => e.id !== id)); }
+    catch(e) { alert("Chyba: " + e.message); }
+  };
+
   const selClient = clients.find(c => c.id === sel);
   const selInvoice = invoices.find(i => i.id === sel);
   const curMod = MODULES.find(m => m.key === mod);
@@ -3163,7 +3542,7 @@ export default function MauxCRM() {
   return (
     <div className="mx">
       <style>{CSS}</style>
-      <Sidebar mod={mod} setMod={k => { setMod(k); setMode("list"); setSel(null); }} onLogout={handleLogout} />
+      <Sidebar mod={mod} setMod={k => { setMod(k); setMode("list"); setSel(null); setEscrowMode("list"); setSelEscrow(null); }} onLogout={handleLogout} />
       <div className="main">
         <div className="top">
           <div className="top-l">
@@ -3191,6 +3570,8 @@ export default function MauxCRM() {
               onLoanTxToggle={handleLoanTxToggle}
               onLoanTxDelete={(loanId, txId) => handleLoanTxDelete(loanId, txId)}
               onLoanUpdate={handleLoanUpdate}
+              escrows={escrows}
+              escrows={escrows}
               onNav={k => { setMod(k); setMode("list"); setSel(null); }} />
           )}
 
@@ -3250,6 +3631,25 @@ export default function MauxCRM() {
           )}
           {mod === "klienti" && mode === "new" && (
             <ClientForm onSave={saveClient} onCancel={() => setMode("list")} saving={saving} />
+          )}
+
+          {/* ÚSCHOVY */}
+          {mod === "uschovy" && escrowMode === "list" && (
+            <EscrowList
+              escrows={escrows}
+              loading={dataLoading}
+              onNew={() => { setSelEscrow(null); setEscrowMode("new"); }}
+              onEdit={e => { setSelEscrow(e); setEscrowMode("edit"); }}
+              onDelete={doDeleteEscrow}
+            />
+          )}
+          {mod === "uschovy" && (escrowMode === "new" || escrowMode === "edit") && (
+            <EscrowForm
+              init={escrowMode === "edit" ? selEscrow : null}
+              onSave={saveEscrow}
+              onCancel={() => { setEscrowMode("list"); setSelEscrow(null); }}
+              saving={saving}
+            />
           )}
         </div>
       </div>
