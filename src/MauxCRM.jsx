@@ -2104,7 +2104,6 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
         })()}
         {/* Col 2: Graf fakturace */}
         <Card style={{padding:"14px 16px"}}>
-          <Card style={{padding:"14px 16px"}}>
               {(() => {
                 const W=300,H=90,padL=6,padR=6,padT=20,padB=22;
                 const n=chartData.length;
@@ -2145,7 +2144,6 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
         </Card>
         {/* Col 3: Top 10 klientů */}
         <Card style={{padding:"14px 16px"}}>
-          <Card style={{padding:"14px 16px"}}>
               <div style={{fontSize:9,letterSpacing:".2em",textTransform:"uppercase",color:"var(--mut)",fontWeight:600,marginBottom:10}}>Top 10 klientů</div>
               <div style={{display:"flex",flexDirection:"column",gap:5}}>
                 {topC.slice(0,10).map(({c,rev},i)=>(
@@ -2158,7 +2156,6 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
                   </div>
                 ))}
               </div>
-            </Card>
         </Card>
       </div>
 
@@ -3570,7 +3567,6 @@ export default function MauxCRM() {
               onLoanTxToggle={handleLoanTxToggle}
               onLoanTxDelete={(loanId, txId) => handleLoanTxDelete(loanId, txId)}
               onLoanUpdate={handleLoanUpdate}
-              escrows={escrows}
               escrows={escrows}
               onNav={k => { setMod(k); setMode("list"); setSel(null); }} />
           )}
