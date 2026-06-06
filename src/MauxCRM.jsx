@@ -2747,18 +2747,6 @@ function MiniSpořák({ financeItems, invoices, dpfoMonths, loanTransactions, es
         ))}
       </div>
 
-      <Div />
-
-      {/* === FIRMA + RUNWAY === */}
-      <div style={{display:"flex",flexDirection:"column",justifyContent:"center"}}>
-        <div style={{fontSize:11,letterSpacing:".2em",textTransform:"uppercase",color:"var(--mut)",fontWeight:600,marginBottom:6}}>FIRMA · RUNWAY</div>
-        <div style={{fontFamily:"Fraunces,serif",fontSize:28,fontWeight:300,color:"#7C3AED",lineHeight:1,marginBottom:6}}>{runwayM} měs. {runwayD} dní</div>
-        {firmaKap > 0 && (
-          <div style={{fontSize:11,color:firmaKap>=planKap?"#059669":"#DC2626"}}>
-            Rezerva {fmtKc(firmaKap)} / {fmtKc(planKap)} {firmaKap>=planKap?"✓ OK":"↓ chybí " + fmtKc(planKap-firmaKap)}
-          </div>
-        )}
-      </div>
     </div>
   );
 }
@@ -2886,9 +2874,169 @@ function MajetekBar({ financeItems, onSaveFinance, invoices, dpfoMonths, loanTra
   );
 }
 
+/* ─── FIRMA BAR (firemní přehled — dedikovaný třetí řádek) ─── */
+function FirmaBar({ financeItems, invoices, dpfoMonths, loanTransactions, escrows, onSaveFinance }) {
+  // Firemní rezerva = spořák − obálky (stejná logika jako MajetekBar)
+  const sporBal    = (financeItems||[]).find(i => i.id === "fi_sp_99")?.amount || 0;
+  const dphF       = (invoices||[]).filter(i => i.status === "uhrazena").reduce((s,i) => s+(i.vat_amount||0), 0);
+  const dpfoF      = (dpfoMonths||[]).filter(m => m.is_paid).reduce((s,m) => s+(m.amount||8050), 0);
+  const boblF      = (loanTransactions?.loan_bobnice||[]).reduce((s,t) => s+t.amount, 0);
+  const bobFbF     = (financeItems||[]).find(i => i.id === "fi_sp_02")?.amount || 0;
+  const bobBalF    = Math.max(boblF > 0 ? boblF : bobFbF, 0);
+  const danUF      = Math.round(escrowTotalTax(escrows||[]));
+  const autoLabF   = new Set(["dph","dpfo 2026","bobnice","daň z úschov"]);
+  const manEnvF    = (financeItems||[]).filter(i =>
+    i.category === "sporaci" && i.notes !== "SKIP_DISPLAY"
+    && i.id !== "fi_sp_99" && i.id !== "fi_sp_01" && i.id !== "fi_sp_02"
+    && !autoLabF.has((i.label||"").toLowerCase().trim())
+  );
+  const totalEarF  = dphF + dpfoF + (bobBalF > 0 ? bobBalF : 0) + danUF + manEnvF.reduce((s,i)=>s+(i.amount||0),0);
+  const firmaRez   = Math.max(sporBal - totalEarF, 0);
+
+  const nutne      = (financeItems||[]).filter(i => i.category === "nutne");
+  const luxus      = (financeItems||[]).filter(i => i.category === "luxus");
+  const totalVyd   = Math.abs(nutne.reduce((s,i)=>s+(i.amount||0),0) + luxus.reduce((s,i)=>s+(i.amount||0),0));
+  const runway     = totalVyd > 0 ? sporBal / totalVyd : 0;
+  const runwayM    = Math.floor(runway);
+  const runwayD    = Math.round((runway - runwayM) * 30);
+  const planKap    = (financeItems||[]).find(i => i.id === "fi_plan_kapital")?.amount || 130000;
+  const onTheWayF  = (invoices||[]).filter(i => invoiceStatus(i) === "vystavena").reduce((s,i)=>s+(i.subtotal||0),0);
+  const mRevF      = (invoices||[]).filter(i=>(i.issue_date||"").startsWith(new Date().toISOString().slice(0,7))).reduce((s,i)=>s+(i.subtotal||0),0);
+  const zdravi     = totalVyd > 0 ? (mRevF / totalVyd).toFixed(2) : "—";
+  const rezervaDiff = firmaRez - planKap;
+
+  const [editTarget, setEditTarget] = useState(null);
+  const [editVal, setEditVal] = useState(0);
+
+  return (
+    <div style={{background:"#fff",border:"2px solid #059669",borderRadius:14,padding:"28px 36px",display:"flex",alignItems:"stretch",gap:24,flexWrap:"wrap"}}>
+      {/* === FIRMA REZERVA === */}
+      <div style={{minWidth:220,display:"flex",flexDirection:"column",justifyContent:"center"}}>
+        <div style={{fontSize:11,letterSpacing:".22em",textTransform:"uppercase",color:"#059669",fontWeight:700,marginBottom:10}}>FIREMNÍ REZERVA · RUNWAY</div>
+        <div style={{fontFamily:"Fraunces,serif",fontSize:44,fontWeight:300,color:"#059669",lineHeight:1,marginBottom:6}}>{fmtKc(firmaRez)}</div>
+        <div style={{fontSize:11,color:rezervaDiff>=0?"#059669":"#DC2626",fontWeight:600}}>
+          {rezervaDiff>=0 ? `✓ Cíl splněn +${fmtKc(rezervaDiff)}` : `↓ Do cíle chybí ${fmtKc(Math.abs(rezervaDiff))}`}
+        </div>
+        <div style={{fontSize:10,color:"var(--mut)",marginTop:2}}>Cíl: {fmtKc(planKap)}</div>
+      </div>
+
+      <div style={{width:1,alignSelf:"stretch",background:"var(--line)",margin:"0 4px",flexShrink:0}} />
+
+      {/* === RUNWAY === */}
+      <div style={{display:"flex",flexDirection:"column",justifyContent:"center",minWidth:150}}>
+        <div style={{fontSize:11,letterSpacing:".15em",textTransform:"uppercase",color:"var(--mut)",fontWeight:600,marginBottom:8}}>RUNWAY</div>
+        <div style={{fontFamily:"Fraunces,serif",fontSize:32,fontWeight:300,color:"#7C3AED",lineHeight:1,marginBottom:4}}>{runwayM} měs. {runwayD} dní</div>
+        <div style={{fontSize:11,color:"var(--mut)"}}>z celkového zůstatku spořáku</div>
+      </div>
+
+      <div style={{width:1,alignSelf:"stretch",background:"var(--line)",margin:"0 4px",flexShrink:0}} />
+
+      {/* === METRIKY === */}
+      <div style={{display:"flex",gap:28,alignItems:"center",flexWrap:"wrap"}}>
+        <div>
+          <div style={{fontSize:11,color:"var(--mut)",marginBottom:4}}>💳 Na cestě (faktury)</div>
+          <div style={{fontFamily:"Fraunces,serif",fontSize:22,fontWeight:300,color:"#D97706"}}>{fmtKc(onTheWayF)}</div>
+          <div style={{fontSize:10,color:"var(--mut)"}}>vystaveno, čeká na úhradu</div>
+        </div>
+        <div>
+          <div style={{fontSize:11,color:"var(--mut)",marginBottom:4}}>📈 Zdraví skóre</div>
+          <div style={{fontFamily:"Fraunces,serif",fontSize:22,fontWeight:300,color:Number(zdravi)>=2?"#059669":Number(zdravi)>=1?"#D97706":"#DC2626"}}>{zdravi}×</div>
+          <div style={{fontSize:10,color:"var(--mut)"}}>příjem / výdaje tento měsíc</div>
+        </div>
+        <div>
+          <div style={{fontSize:11,color:"var(--mut)",marginBottom:4}}>💸 Měsíční výdaje</div>
+          <div style={{fontFamily:"Fraunces,serif",fontSize:22,fontWeight:300,color:"var(--ink)"}}>{fmtKc(totalVyd)}</div>
+          <div style={{fontSize:10,color:"var(--mut)"}}>nutné + lusus</div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /* ─── DASHBOARD ─── */
+// Drag-and-drop panel IDs — pořadí a viditelnost karet na dashboardu
+const DEFAULT_PANELS = [
+  "c35","kpi","minisporak","majetek","firma",
+  "finance","chart","klienti","uschovy","fakturace","happylife"
+];
+function loadPanelState() {
+  try {
+    const s = localStorage.getItem("maux_panel_state");
+    if (s) { const p = JSON.parse(s); if (p.order && p.hidden) return p; }
+  } catch(e) {}
+  return { order: DEFAULT_PANELS, hidden: [] };
+}
+function savePanelState(state) {
+  try { localStorage.setItem("maux_panel_state", JSON.stringify(state)); } catch(e) {}
+}
+
 function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, loanTrackers, loanTransactions, escrows, onNav, onSaveFinance, onDeleteFinance, onDpfoToggle, onLoanTxAdd, onLoanTxToggle, onLoanTxDelete, onLoanUpdate }) {
   const [escrowAlertDismissed, setEscrowAlertDismissed] = useState(false);
+  const [editLayout, setEditLayout] = useState(false);
+  const [panelState, setPanelState] = useState(loadPanelState);
+  const [dragOver, setDragOver] = useState(null);
+  const dragId = useRef(null);
+
+  function handleDragStart(id) { dragId.current = id; }
+  function handleDragOver(e, id) { e.preventDefault(); setDragOver(id); }
+  function handleDrop(e, targetId) {
+    e.preventDefault();
+    const from = dragId.current;
+    if (!from || from === targetId) { setDragOver(null); return; }
+    const order = [...panelState.order];
+    const fi = order.indexOf(from);
+    const ti = order.indexOf(targetId);
+    if (fi < 0 || ti < 0) { setDragOver(null); return; }
+    order.splice(fi, 1);
+    order.splice(ti, 0, from);
+    const ns = { ...panelState, order };
+    setPanelState(ns); savePanelState(ns); setDragOver(null);
+  }
+  function toggleHide(id) {
+    const hidden = panelState.hidden.includes(id)
+      ? panelState.hidden.filter(h => h !== id)
+      : [...panelState.hidden, id];
+    const ns = { ...panelState, hidden };
+    setPanelState(ns); savePanelState(ns);
+  }
+  function resetLayout() {
+    const ns = { order: DEFAULT_PANELS, hidden: [] };
+    setPanelState(ns); savePanelState(ns);
+  }
+  function Panel({ id, children }) {
+    const hidden = panelState.hidden.includes(id);
+    const isOver = dragOver === id;
+    const cssOrder = panelState.order.indexOf(id);
+    if (hidden && !editLayout) return null;
+    return (
+      <div
+        draggable={editLayout}
+        onDragStart={() => handleDragStart(id)}
+        onDragOver={e => handleDragOver(e, id)}
+        onDrop={e => handleDrop(e, id)}
+        onDragLeave={() => setDragOver(null)}
+        style={{
+          order: cssOrder >= 0 ? cssOrder : 99,
+          outline: isOver ? "2px dashed #3518A5" : editLayout ? "2px dashed rgba(209,213,219,.7)" : "none",
+          outlineOffset: 4,
+          borderRadius: 16,
+          opacity: hidden ? 0.4 : 1,
+          position: "relative",
+          cursor: editLayout ? "grab" : "default",
+          transition: "outline .15s",
+        }}
+      >
+        {editLayout && (
+          <button
+            onClick={() => toggleHide(id)}
+            style={{position:"absolute",top:6,right:6,zIndex:10,background:hidden?"#059669":"#DC2626",color:"#fff",border:"none",borderRadius:"50%",width:22,height:22,fontSize:13,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",fontWeight:700,boxShadow:"0 1px 4px rgba(0,0,0,.25)"}}
+            title={hidden ? "Zobrazit" : "Skrýt"}
+          >{hidden ? "+" : "×"}</button>
+        )}
+        {children}
+      </div>
+    );
+  }
   const now = new Date();
   const thisMonth = now.toISOString().slice(0, 7);
   const prevMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1).toISOString().slice(0, 7);
@@ -2942,8 +3090,9 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
   // On the way = faktury vystaveny, dosud neuhrazeny
   const onTheWayInvs = invoices.filter(i => invoiceStatus(i) === "vystavena");
   const onTheWayAmt  = onTheWayInvs.reduce((s,i) => s+(i.subtotal||0), 0);
-  // C35 — Hlavní motor: příští měsíc projekce (na cestě + výkazy + radní + úschovy − výdaje)
-  const c35 = onTheWayAmt + unbilledAmt + mestoPodebrady + Math.round(escrowNetThisMonth) + totalVydaje;
+  // C35 — Hlavní motor: příští měsíc projekce (výkazy + radní + úschovy − výdaje)
+  // "Na cestě" NEZAHRNUJEME — to jsou peníze ještě z tohoto měsíce, ne příštího
+  const c35 = unbilledAmt + mestoPodebrady + Math.round(escrowNetThisMonth) + totalVydaje;
   const c35Pos = c35 >= 0;
   // Ratio: -1 = costs doubled (very bad), 0 = break-even, 1+ = full profit
   const c35Ratio = Math.abs(totalVydaje) > 0 ? c35 / Math.abs(totalVydaje) : 0;
@@ -3014,7 +3163,7 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
       })()}
 
       {/* Greeting */}
-      <div style={{display:"flex",alignItems:"baseline",justifyContent:"space-between"}}>
+      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:12}}>
         <div>
           <div style={{fontFamily:"Fraunces,serif",fontSize:28,fontWeight:300,color:"var(--txt)",letterSpacing:"-.01em"}}>{greeting}</div>
           <div style={{fontSize:12,color:"var(--mut)",marginTop:4,display:"flex",gap:14,flexWrap:"wrap"}}>
@@ -3024,9 +3173,29 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
             {dphReserved>0 && <span style={{color:"#D97706",fontWeight:500}}>DPH spořák: {fmtKc(dphReserved)}</span>}
           </div>
         </div>
+        <div style={{display:"flex",gap:8,alignItems:"center",flexShrink:0}}>
+          {editLayout && (
+            <button className="btn gho" style={{fontSize:11,padding:"6px 12px",color:"#DC2626",border:"1px solid #FECACA"}} onClick={resetLayout}>
+              ↺ Reset
+            </button>
+          )}
+          <button
+            className="btn gho"
+            style={{fontSize:11,padding:"6px 12px",background:editLayout?"#3518A5":"",color:editLayout?"#fff":"",border:editLayout?"none":""}}
+            onClick={()=>setEditLayout(v=>!v)}
+          >
+            {editLayout ? "✓ Hotovo" : "🔧 Upravit layout"}
+          </button>
+        </div>
       </div>
+      {editLayout && (
+        <div style={{background:"#EEF2FF",border:"1px dashed #3518A5",borderRadius:10,padding:"10px 16px",fontSize:12,color:"#3730A3"}}>
+          🖱 Přetáhni karty pro změnu pořadí · ✕ skryje kartu · + ji znovu zobrazí · klikni <strong>Hotovo</strong> pro uložení
+        </div>
+      )}
 
       {/* ── C35 MOTOR — hlavní motivační číslo ── */}
+      <Panel id="c35">
       <div style={{
         background: c35Bg,
         borderRadius: 16, padding: "20px 28px 18px", color: "#fff", position: "relative", overflow: "hidden"
@@ -3056,8 +3225,10 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
           <span>🎯 Lusus {fmtKc(Math.abs(totalLuxus))}</span>
         </div>
       </div>
+      </Panel>
 
-      {/* TOP ROW: 3+2 */}
+      {/* TOP ROW KPI */}
+      <Panel id="kpi">
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr 1fr",gap:10,marginBottom:2}}>
         <Card style={{position:"relative"}} title={`YTD: ${fmtKc(ytd)} · Průměr: ${fmtKc(Math.round(ytd/monthsElapsed))}/měsíc`}>
           <Lbl>◀ Vyfakturováno — {prevMonthName}</Lbl>
@@ -3066,11 +3237,8 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
         </Card>
         <Card style={{background:"#F0FDF4",border:"1px solid #BBF7D0"}}>
           <Lbl color="#065F46">▶ Přijde v {nextMonthName}</Lbl>
-          <Num size={22} color="#059669">+{fmtKc(Math.round(onTheWayAmt+unbilledAmt+mestoPodebrady+escrowNetThisMonth))}</Num>
-          <div style={{fontSize:11,color:"#065F46",marginTop:4,lineHeight:1.5}}>
-            {onTheWayAmt>0&&<span>💳 Na cestě {fmtKc(onTheWayAmt)} · </span>}
-            výkazy {fmtKc(unbilledAmt)} · radní · úschovy {fmtKc(Math.round(escrowNetThisMonth))}
-          </div>
+          <Num size={22} color="#059669">+{fmtKc(Math.round(unbilledAmt+mestoPodebrady+escrowNetThisMonth))}</Num>
+          <div style={{fontSize:11,color:"#065F46",marginTop:4,lineHeight:1.5}}>výkazy {fmtKc(unbilledAmt)} · radní {fmtKc(mestoPodebrady)} · úschovy {fmtKc(Math.round(escrowNetThisMonth))}</div>
         </Card>
         <Card>
           <Lbl>Vyfakturováno — {thisMonthName}</Lbl>
@@ -3088,20 +3256,30 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
           <div style={{fontSize:11,color:overdueAmt>0?"#991B1B":"#065F46",marginTop:4}}>{overdueAmt>0?`${overdue.length} faktur`:"vše OK ✓"}</div>
         </Card>
       </div>
+      </Panel>
 
-
-
-      {/* MINI SPOŘÁK BAR — kompaktně nad grafem */}
+      {/* MINI SPOŘÁK BAR */}
+      <Panel id="minisporak">
       <MiniSpořák
         financeItems={financeItems} invoices={invoices} dpfoMonths={dpfoMonths}
         loanTransactions={loanTransactions} escrows={escrows} onSaveFinance={onSaveFinance} />
+      </Panel>
 
-      {/* MAJETEK BAR — osobní majetek */}
+      {/* MAJETEK BAR */}
+      <Panel id="majetek">
       <MajetekBar financeItems={financeItems} onSaveFinance={onSaveFinance}
         invoices={invoices} dpfoMonths={dpfoMonths} loanTransactions={loanTransactions} escrows={escrows} />
+      </Panel>
 
-      {/* FINANCE SEKCE — nad grafem: Příjmy | [Nutné + Lusus combined] */}
-      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+      {/* FIRMA BAR */}
+      <Panel id="firma">
+      <FirmaBar financeItems={financeItems} invoices={invoices} dpfoMonths={dpfoMonths}
+        loanTransactions={loanTransactions} escrows={escrows} onSaveFinance={onSaveFinance} />
+      </Panel>
+
+      {/* FINANCE SEKCE — 3 sloupce: Příjmy | Výdaje | Cash Flow */}
+      <Panel id="finance">
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10}}>
         <FinanceSection title="Příjmy měsíční"
           items={(financeItems||[]).filter(i=>i.category==="prijem" && i.notes !== "TBD")}
           category="prijem" accent="#059669"
@@ -3146,12 +3324,39 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
             <span style={{fontFamily:"Fraunces,serif",fontSize:18,fontWeight:300,color:"var(--ink)"}}>{fmtKc(Math.abs(totalVydaje))}</span>
           </div>
         </Card>
+        {/* CASH FLOW — přesunuto sem, propojeno s Příjmy */}
+        <Card style={{padding:"18px 20px",display:"flex",flexDirection:"column",gap:0}}>
+          <div style={{fontSize:9,letterSpacing:".28em",textTransform:"uppercase",color:"var(--mut)",fontWeight:600,marginBottom:14}}>Cash flow — tento měsíc</div>
+          {[
+            { label: "Fakturováno (bez DPH)", value: mRev, color: "#059669", sign: "+" },
+            ...(onTheWayAmt > 0 ? [{ label: `Na cestě — ${onTheWayInvs.length}× faktura`, value: onTheWayAmt, color: "#D97706", sign: "+", sub: "čeká na úhradu" }] : []),
+            { label: "Nutné výdaje", value: Math.abs(totalNutne), color: "#DC2626", sign: "−" },
+            { label: "Lusus výdaje", value: Math.abs(totalLuxus), color: "#9333EA", sign: "−" },
+          ].map((row,i) => (
+            <div key={i} style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",padding:"9px 0",borderBottom:"1px solid var(--line)"}}>
+              <div>
+                <div style={{fontSize:12,color:"var(--txt)"}}>{row.label}</div>
+                {row.sub && <div style={{fontSize:9.5,color:"#D97706",marginTop:1}}>{row.sub}</div>}
+              </div>
+              <span style={{fontSize:14,fontFamily:"Fraunces,serif",fontWeight:300,color:row.color,flexShrink:0,marginLeft:8}}>
+                {row.sign}{fmtKc(row.value)}
+              </span>
+            </div>
+          ))}
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",padding:"12px 0 8px",borderTop:`2px solid ${cashflow>=0?"#059669":"#DC2626"}`,marginTop:4}}>
+            <span style={{fontSize:14,fontWeight:700,color:"var(--txt)"}}>Zůstatek</span>
+            <span style={{fontSize:26,fontFamily:"Fraunces,serif",fontWeight:300,color:cashflow>=0?"#059669":"#DC2626",lineHeight:1}}>
+              {cashflow>=0?"+":""}{fmtKc(cashflow)}
+            </span>
+          </div>
+          <button className="btn gho" style={{fontSize:11,marginTop:"auto",width:"100%"}} onClick={()=>onNav("vykaz")}>+ Nový výkaz práce</button>
+        </Card>
       </div>
+      </Panel>
 
-      {/* 2-COLUMN: PŘÍJEM MAUX LEGAL chart (3/5) + Cash Flow Tento Měsíc (2/5) */}
-      <div style={{display:"grid",gridTemplateColumns:"3fr 2fr",gap:12,alignItems:"stretch"}}>
-        {/* Col 1: PŘÍJEM MAUX LEGAL — fakturace + úschovy */}
-        <Card style={{padding:"16px 18px",display:"flex",flexDirection:"column"}}>
+      {/* PŘÍJEM MAUX LEGAL chart */}
+      <Panel id="chart">
+      <Card style={{padding:"16px 18px",display:"flex",flexDirection:"column"}}>
           {(() => {
             const W=480,H=110,padL=6,padR=6,padT=24,padB=24;
             const n=chartData.length;
@@ -3215,47 +3420,10 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
             );
           })()}
         </Card>
-        {/* Col 2: CASH FLOW — TENTO MĚSÍC (smart card s on-the-way) */}
-        <Card style={{padding:"18px 20px",display:"flex",flexDirection:"column",gap:0}}>
-          <div style={{fontSize:9,letterSpacing:".28em",textTransform:"uppercase",color:"var(--mut)",fontWeight:600,marginBottom:14}}>Cash flow — tento měsíc</div>
+      </Panel>
 
-          {/* Řádky */}
-          {[
-            { label: "Fakturováno (bez DPH)", value: mRev, color: "#059669", sign: "+" },
-            ...(onTheWayAmt > 0 ? [{ label: `Na cestě — ${onTheWayInvs.length}× faktura vystavena`, value: onTheWayAmt, color: "#D97706", sign: "+", sub: "čeká na úhradu od klienta" }] : []),
-            { label: "Nutné výdaje", value: Math.abs(totalNutne), color: "#DC2626", sign: "−" },
-            { label: "Lusus výdaje", value: Math.abs(totalLuxus), color: "#9333EA", sign: "−" },
-          ].map((row,i) => (
-            <div key={i} style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",padding:"10px 0",borderBottom:"1px solid var(--line)"}}>
-              <div>
-                <div style={{fontSize:12,color:"var(--txt)"}}>{row.label}</div>
-                {row.sub && <div style={{fontSize:9.5,color:"#D97706",marginTop:1}}>{row.sub}</div>}
-              </div>
-              <span style={{fontSize:14,fontFamily:"Fraunces,serif",fontWeight:300,color:row.color,flexShrink:0,marginLeft:8}}>
-                {row.sign}{fmtKc(row.value)}
-              </span>
-            </div>
-          ))}
-
-          {/* Zůstatek */}
-          <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",padding:"14px 0 10px",borderTop:`2px solid ${cashflow>=0?"#059669":"#DC2626"}`,marginTop:4}}>
-            <span style={{fontSize:14,fontWeight:700,color:"var(--txt)"}}>Zůstatek</span>
-            <span style={{fontSize:26,fontFamily:"Fraunces,serif",fontWeight:300,color:cashflow>=0?"#059669":"#DC2626",lineHeight:1}}>
-              {cashflow>=0?"+":""}{fmtKc(cashflow)}
-            </span>
-          </div>
-
-          {/* On the way explanation */}
-          {onTheWayAmt > 0 && (
-            <div style={{fontSize:10,color:"#D97706",background:"#FFFBEB",border:"1px solid #FDE68A",borderRadius:7,padding:"6px 10px",marginBottom:8}}>
-              💳 Celkem na cestě: <strong>+{fmtKc(onTheWayAmt)}</strong> — faktury vystaveny, čekají na úhradu
-            </div>
-          )}
-          <button className="btn gho" style={{fontSize:11,marginTop:"auto",width:"100%"}} onClick={()=>onNav("vykaz")}>+ Nový výkaz práce</button>
-        </Card>
-      </div>
-
-      {/* TOP KLIENTI — kompaktní řada pod grafem */}
+      {/* TOP KLIENTI */}
+      <Panel id="klienti">
       <Card style={{padding:"14px 18px"}}>
         <div style={{fontSize:9,letterSpacing:".2em",textTransform:"uppercase",color:"var(--mut)",fontWeight:600,marginBottom:10}}>Top klienti</div>
         <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
@@ -3268,13 +3436,15 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
           ))}
         </div>
       </Card>
+      </Panel>
 
-      {/* ── DPFO + LOANS ── */}
+      {/* ── DPFO + LOANS + ÚSCHOVY ── */}
+      <Panel id="uschovy">
       {dpfoMonths.length > 0 && (
         <DpfoTracker months={dpfoMonths} onToggle={onDpfoToggle} year={new Date().getFullYear()} />
       )}
       {(loanTrackers||[]).length > 0 && (
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(340px, 1fr))", gap: 14 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(340px, 1fr))", gap: 14, marginTop: dpfoMonths.length>0?12:0 }}>
           {(loanTrackers||[]).map(tracker => (
             <LoanDashTile key={tracker.id}
               tracker={tracker}
@@ -3287,120 +3457,7 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
           ))}
         </div>
       )}
-
-      {/* ── HAPPY LIFE SEKCE ── */}
-      {(financeItems||[]).some(i => ['sporaci','majetek','firma_kpi'].includes(i.category)) && (
-        <div>
-          <div style={{fontSize:9,letterSpacing:".3em",textTransform:"uppercase",color:"var(--mut)",fontWeight:600,margin:"8px 0 12px",opacity:.7}}>Happy Life · Přehled majetku & spořáku</div>
-
-          {/* Row: Spořák + Majetek + Firma */}
-          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:12}}>
-
-            {/* SPOŘÍCÍ ÚČET */}
-            {(() => {
-              const sporaci = (financeItems||[]).filter(i => i.category === "sporaci");
-              const zůstatek = sporaci.find(i => i.id === "fi_sp_99");
-              const obálky = sporaci.filter(i => i.id !== "fi_sp_99");
-              const dphAuto = invoices.filter(i => i.status === "uhrazena").reduce((s,i) => s+(i.vat_amount||0), 0);
-              const totalObálky = obálky.reduce((s,i) => s+(i.amount||0), 0) + dphAuto;
-              return (
-                <Card>
-                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:12}}>
-                    <Lbl color="#3518A5">Spořící účet · obálky</Lbl>
-                    <Num size={16} color="var(--ink)">{fmtKc(totalObálky)}</Num>
-                  </div>
-                  {/* DPH auto */}
-                  <div style={{display:"flex",justifyContent:"space-between",padding:"7px 0",borderBottom:"1px solid var(--line)"}}>
-                    <span style={{fontSize:12.5,color:"var(--txt)"}}>DPH</span>
-                    <div style={{display:"flex",alignItems:"center",gap:6}}>
-                      <span style={{fontSize:10,background:"#ECFDF5",color:"#065F46",padding:"1px 6px",borderRadius:4,fontWeight:600}}>auto</span>
-                      <span style={{fontFamily:"Fraunces,serif",fontSize:13,color:"var(--gold)"}}>{fmtKc(dphAuto)}</span>
-                    </div>
-                  </div>
-                  {obálky.map(item => (
-                    <EditRow key={item.id} item={item} onSave={onSaveFinance} onDelete={onDeleteFinance} />
-                  ))}
-                  {zůstatek && (
-                    <div style={{marginTop:8,paddingTop:8,borderTop:"2px solid var(--ink)"}}>
-                      <EditRow item={zůstatek} onSave={onSaveFinance} onDelete={onDeleteFinance} />
-                    </div>
-                  )}
-                </Card>
-              );
-            })()}
-
-            {/* OSOBNÍ MAJETEK + PIE */}
-            {(() => {
-              const majetek = (financeItems||[]).filter(i => i.category === "majetek");
-              const total = majetek.reduce((s,i) => s+(i.amount||0), 0);
-              return (
-                <Card>
-                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:12}}>
-                    <Lbl color="#7C3AED">Osobní majetek</Lbl>
-                    <Num size={16} color="#7C3AED">{fmtKc(total)}</Num>
-                  </div>
-                  <div style={{display:"flex",gap:16,alignItems:"center",marginBottom:12}}>
-                    <DonutChart items={majetek} size={100} />
-                    <div style={{flex:1}}>
-                      {majetek.map((item,i) => (
-                        <div key={item.id} style={{display:"flex",alignItems:"center",gap:6,marginBottom:5}}>
-                          <div style={{width:8,height:8,borderRadius:"50%",background:["#3518A5","#B8923D","#059669"][i%3],flexShrink:0}}/>
-                          <span style={{fontSize:11,color:"var(--txt)",flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{item.label}</span>
-                          <span style={{fontSize:11,fontFamily:"Fraunces,serif",color:"var(--mut)"}}>{Math.round((item.amount||0)/total*100)}%</span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                  {majetek.map(item => (
-                    <EditRow key={item.id} item={item} onSave={onSaveFinance} onDelete={onDeleteFinance} />
-                  ))}
-                </Card>
-              );
-            })()}
-
-            {/* FIRMA */}
-            {(() => {
-              const firmaRezerva = (financeItems||[]).find(i => i.id === "fi_ma_03")?.amount || 0;
-              const planovana = (financeItems||[]).find(i => i.id === "fi_fi_01");
-              const rozdil = firmaRezerva - (planovana?.amount || 0);
-              const onTheWay = invoices.filter(i => invoiceStatus(i) === "vystavena").reduce((s,i) => s+(i.subtotal||0), 0);
-              const monthlyBurn = Math.abs(totalVydaje);
-              const runway = monthlyBurn > 0 ? firmaRezerva / monthlyBurn : 0;
-              const runwayM = Math.floor(runway);
-              const runwayD = Math.round((runway - runwayM) * 30);
-              const zdravi = monthlyBurn > 0 ? (mRev / monthlyBurn).toFixed(2) : "—";
-              return (
-                <Card>
-                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:12}}>
-                    <Lbl color="#059669">Firma</Lbl>
-                    <Num size={16} color="#059669">{fmtKc(firmaRezerva)}</Num>
-                  </div>
-                  {planovana && <EditRow item={planovana} onSave={onSaveFinance} onDelete={onDeleteFinance} />}
-                  <div style={{display:"flex",justifyContent:"space-between",padding:"7px 0",borderBottom:"1px solid var(--line)"}}>
-                    <span style={{fontSize:12.5,color:"var(--txt)"}}>Rozdíl rezervy</span>
-                    <span style={{fontFamily:"Fraunces,serif",fontSize:13,color:rozdil>=0?"#059669":"#DC2626"}}>{rozdil>=0?"+":""}{fmtKc(rozdil)}</span>
-                  </div>
-                  <div style={{display:"flex",justifyContent:"space-between",padding:"7px 0",borderBottom:"1px solid var(--line)"}}>
-                    <span style={{fontSize:12.5,color:"var(--txt)"}}>On the way</span>
-                    <div style={{display:"flex",alignItems:"center",gap:5}}>
-                      <span style={{fontSize:10,background:"#EEF2FF",color:"#3730A3",padding:"1px 6px",borderRadius:4,fontWeight:600}}>auto</span>
-                      <span style={{fontFamily:"Fraunces,serif",fontSize:13,color:"var(--ink)"}}>{fmtKc(onTheWay)}</span>
-                    </div>
-                  </div>
-                  <div style={{display:"flex",justifyContent:"space-between",padding:"7px 0",borderBottom:"1px solid var(--line)"}}>
-                    <span style={{fontSize:12.5,color:"var(--txt)"}}>Runway</span>
-                    <span style={{fontFamily:"Fraunces,serif",fontSize:13,color:"var(--txt)"}}>{runwayM} měs. {runwayD} dní</span>
-                  </div>
-                  <div style={{display:"flex",justifyContent:"space-between",padding:"10px 0 0",borderTop:"2px solid var(--line2)",marginTop:4}}>
-                    <span style={{fontSize:12,fontWeight:600,color:"var(--txt)"}}>Zdraví skóre</span>
-                    <span style={{fontFamily:"Fraunces,serif",fontSize:18,color:Number(zdravi)>=2?"#059669":Number(zdravi)>=1?"#D97706":"#DC2626"}}>{zdravi}×</span>
-                  </div>
-                </Card>
-              );
-            })()}
-          </div>
-        </div>
-      )}
+      </Panel>
     </div>
   );
 }
