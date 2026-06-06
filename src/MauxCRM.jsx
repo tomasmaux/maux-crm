@@ -1698,6 +1698,158 @@ function escrowTotalTax(escrows) {
   }, 0);
 }
 
+// ─── Breakdown row generators ───────────────────────────────────────────────
+
+// Řádky pro "Dostanu 1. [měsíc]" — tranše s koncem v daném měsíci
+function escrowNetForMonthRows(escrows, year, month) {
+  const mStart = new Date(year, month, 1);
+  const mEnd = new Date(year, month + 1, 0);
+  const rows = [];
+  (escrows || []).forEach(e => {
+    if (!e.date_received || !e.interest_rate) return;
+    const from = new Date(e.date_received);
+    _escrowTranches(e).forEach(t => {
+      const endDate = _trancheEnd(t, e);
+      if (endDate < mStart || endDate > mEnd) return;
+      const effStart = new Date(Math.max(from.getTime(), mStart.getTime()));
+      if (endDate < effStart) return;
+      const days = Math.round((endDate - effStart) / 86400000) + 1;
+      const gross = (t.amount || 0) * e.interest_rate / 365 * days;
+      rows.push({
+        úschova: e.escrow_number,
+        oprávněný: t.party_name || "–",
+        částka: t.amount || 0,
+        dní: days,
+        hrubý: Math.round(gross),
+        daň: Math.round(gross * 0.15),
+        čistý: Math.round(gross * 0.85),
+      });
+    });
+  });
+  return rows;
+}
+
+// Řádky pro "Srážková daň" — po úschovách
+function escrowTaxRows(escrows) {
+  const today = new Date(); today.setHours(0,0,0,0);
+  const byEscrow = {};
+  (escrows || []).forEach(e => {
+    if (!e.date_received || !e.interest_rate) return;
+    const from = new Date(e.date_received);
+    _escrowTranches(e).forEach(t => {
+      const cap = new Date(Math.min(_trancheEnd(t, e).getTime(), today.getTime()));
+      if (cap < from) return;
+      const days = Math.round((cap - from) / 86400000) + 1;
+      const gross = (t.amount || 0) * e.interest_rate / 365 * days;
+      if (!byEscrow[e.escrow_number]) byEscrow[e.escrow_number] = { úschova: e.escrow_number, stav: e.status, hrubý: 0, daň: 0, čistý: 0 };
+      byEscrow[e.escrow_number].hrubý += gross;
+      byEscrow[e.escrow_number].daň += gross * 0.15;
+      byEscrow[e.escrow_number].čistý += gross * 0.85;
+    });
+  });
+  return Object.values(byEscrow).filter(r => r.daň > 0).map(r => ({
+    ...r, hrubý: Math.round(r.hrubý), daň: Math.round(r.daň), čistý: Math.round(r.čistý),
+  }));
+}
+
+// Řádky pro "Celkem vydělano" — po úschovách (všechny časy do dnes)
+function escrowTotalNetRows(escrows) {
+  const today = new Date(); today.setHours(0,0,0,0);
+  return (escrows || []).map(e => {
+    if (!e.date_received || !e.interest_rate) return null;
+    const from = new Date(e.date_received);
+    let gross = 0;
+    _escrowTranches(e).forEach(t => {
+      const cap = new Date(Math.min(_trancheEnd(t, e).getTime(), today.getTime()));
+      if (cap < from) return;
+      const days = Math.round((cap - from) / 86400000) + 1;
+      gross += (t.amount || 0) * e.interest_rate / 365 * days;
+    });
+    if (gross < 0.5) return null;
+    return {
+      úschova: e.escrow_number,
+      stav: e.status,
+      hrubý: Math.round(gross),
+      daň: Math.round(gross * 0.15),
+      čistý: Math.round(gross * 0.85),
+    };
+  }).filter(Boolean);
+}
+
+// ─── KpiBreakdown — rozbalovací tabulka pod KPI ─────────────────────────────
+const BREAKDOWN_COLS = {
+  nextMonth: [
+    { key:"úschova",    label:"Úschova" },
+    { key:"oprávněný",  label:"Oprávněný" },
+    { key:"částka",     label:"Jistina",    num:true },
+    { key:"dní",        label:"Dní",        num:true, plain:true },
+    { key:"hrubý",      label:"Hrubý úrok", num:true },
+    { key:"daň",        label:"Srážková daň (15%)", num:true },
+    { key:"čistý",      label:"Čistý úrok", num:true },
+  ],
+  tax: [
+    { key:"úschova",  label:"Úschova" },
+    { key:"stav",     label:"Stav" },
+    { key:"hrubý",    label:"Hrubý úrok celkem", num:true },
+    { key:"daň",      label:"Srážková daň",      num:true },
+    { key:"čistý",    label:"Čistý výdělek",     num:true },
+  ],
+  total: [
+    { key:"úschova",  label:"Úschova" },
+    { key:"stav",     label:"Stav" },
+    { key:"hrubý",    label:"Hrubý úrok celkem", num:true },
+    { key:"daň",      label:"Srážková daň",      num:true },
+    { key:"čistý",    label:"Čistý výdělek",     num:true },
+  ],
+};
+
+function KpiBreakdown({ rows, colSet, onClose }) {
+  if (!rows || rows.length === 0) return (
+    <div style={{padding:"14px 18px",fontSize:12,color:"var(--mut)",borderTop:"1px solid var(--line)"}}>
+      Žádné tranše v tomto období. <button onClick={onClose} style={{float:"right",border:"none",background:"none",cursor:"pointer",fontSize:13,color:"var(--mut)"}}>✕</button>
+    </div>
+  );
+  const cols = BREAKDOWN_COLS[colSet] || [];
+  const numKeys = cols.filter(c=>c.num&&!c.plain).map(c=>c.key);
+  const totals = {};
+  numKeys.forEach(k => { totals[k] = rows.reduce((s,r) => s+(r[k]||0), 0); });
+  return (
+    <div style={{borderTop:"1px solid var(--line)",overflow:"auto",maxHeight:280}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 14px",background:"var(--bg2)"}}>
+        <span style={{fontSize:11,color:"var(--mut)",fontWeight:500}}>Podrobný rozpis</span>
+        <button onClick={onClose} style={{border:"none",background:"none",cursor:"pointer",fontSize:13,color:"var(--mut)",lineHeight:1}}>✕</button>
+      </div>
+      <table style={{width:"100%",borderCollapse:"collapse",fontSize:11.5}}>
+        <thead>
+          <tr style={{background:"var(--bg2)"}}>
+            {cols.map(c=><th key={c.key} style={{textAlign:c.num?"right":"left",padding:"5px 12px",color:"var(--mut)",fontWeight:500,whiteSpace:"nowrap",borderBottom:"1px solid var(--line)"}}>{c.label}</th>)}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row,i)=>(
+            <tr key={i} style={{borderBottom:"1px solid var(--line)",background:i%2===0?"transparent":"rgba(0,0,0,0.018)"}}>
+              {cols.map(c=>(
+                <td key={c.key} style={{textAlign:c.num?"right":"left",padding:"5px 12px",fontVariantNumeric:"tabular-nums",whiteSpace:"nowrap"}}>
+                  {c.num&&!c.plain ? fmtKc(row[c.key]) : row[c.key]}
+                </td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+        {numKeys.length>0&&<tfoot>
+          <tr style={{borderTop:"2px solid var(--ink)",background:"var(--bg2)"}}>
+            {cols.map((c,i)=>(
+              <td key={c.key} style={{textAlign:c.num?"right":"left",padding:"6px 12px",fontWeight:600,fontVariantNumeric:"tabular-nums",whiteSpace:"nowrap"}}>
+                {c.num&&!c.plain ? fmtKc(totals[c.key]) : i===0?"Celkem":""}
+              </td>
+            ))}
+          </tr>
+        </tfoot>}
+      </table>
+    </div>
+  );
+}
+
 function EscrowCard({ escrow, onEdit, onDelete }) {
   const [showTranches, setShowTranches] = useState(false);
   const tranches = escrow.escrow_tranches || [];
@@ -1952,6 +2104,8 @@ function EscrowForm({ init, onSave, onCancel, saving }) {
 
 function EscrowList({ escrows, onNew, onEdit, onDelete, loading }) {
   const [filter, setFilter] = useState("probíhající");
+  const [openDetail, setOpenDetail] = useState(null); // klíč otevřeného rozpisu
+  const toggleDetail = (key) => setOpenDetail(prev => prev === key ? null : key);
   const FILTERS = [
     { key:"probíhající", label:"Probíhající", fn: e => e.status !== 'ukončeno' },
     { key:"vše",         label:"Vše",          fn: ()=> true },
@@ -1983,6 +2137,15 @@ function EscrowList({ escrows, onNew, onEdit, onDelete, loading }) {
     return diff >= 0 && diff <= 7;
   })());
 
+  // Precompute breakdown data
+  const rows1 = escrowNetForMonthRows(escrows, cy, cm);
+  const rows2 = escrowNetForMonthRows(escrows, cy, cm + 1);
+  const rowsTax = escrowTaxRows(escrows);
+  const rowsTotal = escrowTotalNetRows(escrows);
+
+  // KPI card style helper
+  const kpiClickable = { cursor:"pointer", userSelect:"none", transition:"box-shadow 0.15s" };
+
   return (
     <div style={{display:"flex",flexDirection:"column",gap:16}}>
       {/* Souhrn – řada 1 */}
@@ -1992,30 +2155,50 @@ function EscrowList({ escrows, onNew, onEdit, onDelete, loading }) {
           <div className="v">{fmtKc(totalInEscrow)}</div>
           <div className="s">{active.length} aktivních · celkem proteklo {fmtKc(totalFlowed)}</div>
         </div>
-        <div className="kpi" style={{background:"#FFFBEB",border:"1px solid #FDE68A"}}>
-          <div className="k" style={{color:"#92400E"}}>Dostanu {next1Label}</div>
-          <div className="v" style={{color:"#D97706"}}>{netNextMonth1 > 0 ? fmtKc(Math.round(netNextMonth1)) : "–"}</div>
-          <div className="s" style={{color:"#92400E"}}>čistý úrok · tranše končící v {MESICE[cm]}</div>
+        {/* Dostanu 1. příštího měsíce — klikatelné */}
+        <div className="kpi" style={{background:"#FFFBEB",border:`1px solid ${openDetail==="m1"?"#D97706":"#FDE68A"}`,padding:0,overflow:"hidden",...kpiClickable}}
+             onClick={()=>toggleDetail("m1")}>
+          <div style={{padding:"14px 18px 10px"}}>
+            <div className="k" style={{color:"#92400E"}}>Dostanu {next1Label} {openDetail==="m1"?"▲":"▼"}</div>
+            <div className="v" style={{color:"#D97706"}}>{netNextMonth1 > 0 ? fmtKc(Math.round(netNextMonth1)) : "–"}</div>
+            <div className="s" style={{color:"#92400E"}}>čistý úrok · tranše končící v {MESICE[cm]}</div>
+          </div>
+          {openDetail==="m1" && <KpiBreakdown rows={rows1} colSet="nextMonth" onClose={(e)=>{e.stopPropagation();setOpenDetail(null);}} />}
         </div>
-        <div className="kpi" style={{background:"#F0FDF4",border:"1px solid #BBF7D0"}}>
-          <div className="k" style={{color:"#065F46"}}>Dostanu {next2Label} (odhad)</div>
-          <div className="v" style={{color:"#059669"}}>{netNextMonth2 > 0 ? fmtKc(Math.round(netNextMonth2)) : "–"}</div>
-          <div className="s" style={{color:"#065F46"}}>tranše končící v {MESICE[(cm+1)%12]}</div>
+        {/* Dostanu 1. přespříštího měsíce */}
+        <div className="kpi" style={{background:"#F0FDF4",border:`1px solid ${openDetail==="m2"?"#059669":"#BBF7D0"}`,padding:0,overflow:"hidden",...kpiClickable}}
+             onClick={()=>toggleDetail("m2")}>
+          <div style={{padding:"14px 18px 10px"}}>
+            <div className="k" style={{color:"#065F46"}}>Dostanu {next2Label} (odhad) {openDetail==="m2"?"▲":"▼"}</div>
+            <div className="v" style={{color:"#059669"}}>{netNextMonth2 > 0 ? fmtKc(Math.round(netNextMonth2)) : "–"}</div>
+            <div className="s" style={{color:"#065F46"}}>tranše končící v {MESICE[(cm+1)%12]}</div>
+          </div>
+          {openDetail==="m2" && <KpiBreakdown rows={rows2} colSet="nextMonth" onClose={(e)=>{e.stopPropagation();setOpenDetail(null);}} />}
         </div>
       </div>
       {/* Souhrn – řada 2 */}
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:12}}>
-        <div className="kpi" style={{background:"#F5F3FF",border:"1px solid #DDD6FE"}}>
-          <div className="k" style={{color:"#5B21B6"}}>Celkem vydělano (čistý úrok)</div>
-          <div className="v" style={{color:"#7C3AED",fontSize:18}}>{fmtKc(Math.round(totalEarned))}</div>
-          <div className="s" style={{color:"#5B21B6"}}>
-            ukončené · {runningNet > 0 && <span style={{color:"#9333EA"}}>+ {fmtKc(Math.round(runningNet))} průběžné akumulované</span>}
+        {/* Celkem vydělano */}
+        <div className="kpi" style={{background:"#F5F3FF",border:`1px solid ${openDetail==="total"?"#7C3AED":"#DDD6FE"}`,padding:0,overflow:"hidden",...kpiClickable}}
+             onClick={()=>toggleDetail("total")}>
+          <div style={{padding:"14px 18px 10px"}}>
+            <div className="k" style={{color:"#5B21B6"}}>Celkem vydělano (čistý úrok) {openDetail==="total"?"▲":"▼"}</div>
+            <div className="v" style={{color:"#7C3AED",fontSize:18}}>{fmtKc(Math.round(totalEarned))}</div>
+            <div className="s" style={{color:"#5B21B6"}}>
+              ukončené {runningNet > 0 && <span>· +{fmtKc(Math.round(runningNet))} průběžné</span>}
+            </div>
           </div>
+          {openDetail==="total" && <KpiBreakdown rows={rowsTotal} colSet="total" onClose={(e)=>{e.stopPropagation();setOpenDetail(null);}} />}
         </div>
-        <div className="kpi" style={{background:"#FEF2F2",border:"1px solid #FECACA"}}>
-          <div className="k" style={{color:"#991B1B"}}>Srážková daň (stát)</div>
-          <div className="v" style={{color:"#DC2626",fontSize:18}}>{fmtKc(Math.round(escrowTotalTax(escrows)))}</div>
-          <div className="s" style={{color:"#991B1B"}}>15 % z hrubého úroku</div>
+        {/* Srážková daň */}
+        <div className="kpi" style={{background:"#FEF2F2",border:`1px solid ${openDetail==="tax"?"#DC2626":"#FECACA"}`,padding:0,overflow:"hidden",...kpiClickable}}
+             onClick={()=>toggleDetail("tax")}>
+          <div style={{padding:"14px 18px 10px"}}>
+            <div className="k" style={{color:"#991B1B"}}>Srážková daň (stát) {openDetail==="tax"?"▲":"▼"}</div>
+            <div className="v" style={{color:"#DC2626",fontSize:18}}>{fmtKc(Math.round(escrowTotalTax(escrows)))}</div>
+            <div className="s" style={{color:"#991B1B"}}>15 % z hrubého úroku · klikni pro rozpis</div>
+          </div>
+          {openDetail==="tax" && <KpiBreakdown rows={rowsTax} colSet="tax" onClose={(e)=>{e.stopPropagation();setOpenDetail(null);}} />}
         </div>
         <div className="kpi" style={{background:alerts.length>0?"#FEF3C7":"#F0FDF4",border:`1px solid ${alerts.length>0?"#FDE68A":"#BBF7D0"}`}}>
           <div className="k" style={{color:alerts.length>0?"#92400E":"#065F46"}}>Alerty</div>
