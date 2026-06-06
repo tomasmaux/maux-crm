@@ -2694,49 +2694,49 @@ function MiniSpořák({ financeItems, invoices, dpfoMonths, loanTransactions, es
   const Chip = ({children}) => <span style={{fontSize:7,background:"#EEF2FF",color:"#3730A3",padding:"1px 4px",borderRadius:3,fontWeight:700}}>{children}</span>;
 
   return (
-    <div style={{background:"#fff",border:"2px solid #3518A5",borderRadius:14,padding:"20px 28px",display:"flex",alignItems:"stretch",gap:20,flexWrap:"wrap"}}>
+    <div style={{background:"#fff",border:"2px solid #3518A5",borderRadius:14,padding:"32px 36px",display:"flex",alignItems:"stretch",gap:24,flexWrap:"wrap"}}>
       {/* === SPOŘÁK === */}
-      <div style={{minWidth:240,display:"flex",flexDirection:"column",justifyContent:"center"}}>
-        <div style={{fontSize:9,letterSpacing:".25em",textTransform:"uppercase",color:"#3518A5",fontWeight:700,marginBottom:8}}>SPOŘÍCÍ ÚČET · OBÁLKY</div>
+      <div style={{minWidth:280,display:"flex",flexDirection:"column",justifyContent:"center"}}>
+        <div style={{fontSize:11,letterSpacing:".22em",textTransform:"uppercase",color:"#3518A5",fontWeight:700,marginBottom:10}}>SPOŘÍCÍ ÚČET · OBÁLKY</div>
         {editBal ? (
-          <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:4}}>
+          <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:6}}>
             <input type="number" value={balInput} autoFocus
               onChange={e => setBalInput(Number(e.target.value))}
               onKeyDown={e => { if(e.key==="Enter") { onSaveFinance({...zItem,amount:balInput}); setEditBal(false); } if(e.key==="Escape") setEditBal(false); }}
-              style={{width:160,fontSize:24,padding:"5px 10px",border:"2px solid #3518A5",borderRadius:8,fontFamily:"Fraunces,serif",fontWeight:300,outline:"none"}} />
+              style={{width:180,fontSize:30,padding:"6px 12px",border:"2px solid #3518A5",borderRadius:8,fontFamily:"Fraunces,serif",fontWeight:300,outline:"none"}} />
             <button onClick={() => { onSaveFinance({...zItem,amount:balInput}); setEditBal(false); }}
-              style={{background:"#3518A5",color:"#fff",border:"none",borderRadius:7,padding:"8px 14px",fontSize:13,cursor:"pointer",fontWeight:700}}>✓</button>
+              style={{background:"#3518A5",color:"#fff",border:"none",borderRadius:7,padding:"10px 16px",fontSize:14,cursor:"pointer",fontWeight:700}}>✓</button>
             <button onClick={() => setEditBal(false)}
-              style={{background:"none",border:"1px solid var(--line)",borderRadius:7,padding:"8px 10px",fontSize:13,cursor:"pointer",color:"var(--mut)"}}>✕</button>
+              style={{background:"none",border:"1px solid var(--line)",borderRadius:7,padding:"10px 12px",fontSize:14,cursor:"pointer",color:"var(--mut)"}}>✕</button>
           </div>
         ) : (
-          <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:4}}>
-            <div style={{fontFamily:"Fraunces,serif",fontSize:32,fontWeight:300,color:"#3518A5",lineHeight:1}}>{fmtKc(actualBalance)}</div>
+          <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:6}}>
+            <div style={{fontFamily:"Fraunces,serif",fontSize:44,fontWeight:300,color:"#3518A5",lineHeight:1}}>{fmtKc(actualBalance)}</div>
             <button onClick={() => { setBalInput(actualBalance); setEditBal(true); }}
               title="Denně aktualizuj skutečný zůstatek bankovního účtu"
-              style={{background:"#3518A5",color:"#fff",border:"none",borderRadius:20,padding:"7px 16px",fontSize:12,cursor:"pointer",fontWeight:700,letterSpacing:".03em",whiteSpace:"nowrap",flexShrink:0}}>
+              style={{background:"#3518A5",color:"#fff",border:"none",borderRadius:20,padding:"9px 20px",fontSize:13,cursor:"pointer",fontWeight:700,letterSpacing:".03em",whiteSpace:"nowrap",flexShrink:0}}>
               ✎ Aktualizovat
             </button>
           </div>
         )}
-        <div style={{display:"flex",gap:10,alignItems:"center"}}>
-          <span style={{fontSize:13,color:volné>=0?"#059669":"#DC2626",fontWeight:700}}>{volné>=0?"+":""}{fmtKc(volné)} volného</span>
-          <span style={{fontSize:10,color:"var(--mut)"}}>z {fmtKc(totalEarmarked)} obálek</span>
+        <div style={{display:"flex",gap:12,alignItems:"center"}}>
+          <span style={{fontSize:15,color:volné>=0?"#059669":"#DC2626",fontWeight:700}}>{volné>=0?"+":""}{fmtKc(volné)} volného</span>
+          <span style={{fontSize:11,color:"var(--mut)"}}>z {fmtKc(totalEarmarked)} obálek</span>
         </div>
       </div>
 
       <Div />
 
       {/* === OBÁLKY === */}
-      <div style={{display:"flex",gap:16,flexWrap:"wrap",alignItems:"center"}}>
+      <div style={{display:"flex",gap:20,flexWrap:"wrap",alignItems:"center"}}>
         {allEnvelopes.map((e,i) => (
-          <div key={i} style={{display:"flex",alignItems:"center",gap:6}}>
-            <div style={{width:9,height:9,borderRadius:3,background:e.color,flexShrink:0}} />
+          <div key={i} style={{display:"flex",alignItems:"center",gap:8}}>
+            <div style={{width:11,height:11,borderRadius:3,background:e.color,flexShrink:0}} />
             <div>
-              <div style={{fontSize:10,color:"var(--mut)",display:"flex",gap:3,alignItems:"center"}}>
+              <div style={{fontSize:11,color:"var(--mut)",display:"flex",gap:3,alignItems:"center"}}>
                 {e.label} {e.auto && <Chip>auto</Chip>}
               </div>
-              <div style={{fontSize:16,fontFamily:"Fraunces,serif",fontWeight:300,color:e.color,lineHeight:1.2}}>{fmtKc(e.amount)}</div>
+              <div style={{fontSize:20,fontFamily:"Fraunces,serif",fontWeight:300,color:e.color,lineHeight:1.2}}>{fmtKc(e.amount)}</div>
             </div>
           </div>
         ))}
@@ -2744,30 +2744,65 @@ function MiniSpořák({ financeItems, invoices, dpfoMonths, loanTransactions, es
 
       <Div />
 
-      {/* === OSOBNÍ MAJETEK === */}
-      {majetek > 0 && (
-        <div style={{display:"flex",flexDirection:"column",justifyContent:"center"}}>
-          <div style={{fontSize:9,letterSpacing:".2em",textTransform:"uppercase",color:"var(--mut)",fontWeight:600,marginBottom:4}}>OSOBNÍ MAJETEK</div>
-          <div style={{fontFamily:"Fraunces,serif",fontSize:22,fontWeight:300,color:"var(--ink)",lineHeight:1,marginBottom:4}}>{fmtKc(majetek)}</div>
-          <div style={{display:"flex",gap:10,fontSize:10,color:"var(--mut)"}}>
-            {akcie > 0 && <span>Akcie <strong style={{color:"#10B981"}}>{Math.round(akcie/1000)}k</strong></span>}
-            {stavebko > 0 && <span>Stavebko <strong style={{color:"#D97706"}}>{Math.round(stavebko/1000)}k</strong></span>}
-            {firmaKap > 0 && <span>Firma <strong style={{color:"#8B5CF6"}}>{Math.round(firmaKap/1000)}k</strong></span>}
-          </div>
-        </div>
-      )}
-
-      <Div />
-
       {/* === FIRMA + RUNWAY === */}
       <div style={{display:"flex",flexDirection:"column",justifyContent:"center"}}>
-        <div style={{fontSize:9,letterSpacing:".2em",textTransform:"uppercase",color:"var(--mut)",fontWeight:600,marginBottom:4}}>FIRMA · RUNWAY</div>
-        <div style={{fontFamily:"Fraunces,serif",fontSize:22,fontWeight:300,color:"#7C3AED",lineHeight:1,marginBottom:4}}>{runwayM} měs. {runwayD} dní</div>
+        <div style={{fontSize:11,letterSpacing:".2em",textTransform:"uppercase",color:"var(--mut)",fontWeight:600,marginBottom:6}}>FIRMA · RUNWAY</div>
+        <div style={{fontFamily:"Fraunces,serif",fontSize:28,fontWeight:300,color:"#7C3AED",lineHeight:1,marginBottom:6}}>{runwayM} měs. {runwayD} dní</div>
         {firmaKap > 0 && (
-          <div style={{fontSize:10,color:firmaKap>=planKap?"#059669":"#DC2626"}}>
+          <div style={{fontSize:11,color:firmaKap>=planKap?"#059669":"#DC2626"}}>
             Rezerva {fmtKc(firmaKap)} / {fmtKc(planKap)} {firmaKap>=planKap?"✓ OK":"↓ chybí " + fmtKc(planKap-firmaKap)}
           </div>
         )}
+      </div>
+    </div>
+  );
+}
+
+/* ─── MAJETEK BAR (osobní majetek — dedikovaný řádek) ─── */
+function MajetekBar({ financeItems }) {
+  const akcie    = (financeItems||[]).find(i => i.id === "fi_ma_01")?.amount || 0;
+  const stavebko = (financeItems||[]).find(i => i.id === "fi_ma_02")?.amount || 0;
+  const firmaKap = (financeItems||[]).find(i => i.id === "fi_ma_03")?.amount || 0;
+  const total    = akcie + stavebko + firmaKap;
+  if (total === 0) return null;
+
+  const assets = [
+    { label: "Akcie / ETF",      amount: akcie,    color: "#10B981", icon: "📈" },
+    { label: "Stavební spoření", amount: stavebko, color: "#D97706", icon: "🏗" },
+    { label: "Firemní rezerva",  amount: firmaKap, color: "#8B5CF6", icon: "🏦" },
+  ].filter(a => a.amount > 0);
+
+  // Stacked bar widths
+  const barW = a => total > 0 ? (a.amount / total) * 100 : 0;
+
+  return (
+    <div style={{background:"#fff",border:"2px solid #B8923D",borderRadius:14,padding:"28px 36px",display:"flex",alignItems:"stretch",gap:24,flexWrap:"wrap"}}>
+      {/* === CELKOVÝ MAJETEK === */}
+      <div style={{minWidth:240,display:"flex",flexDirection:"column",justifyContent:"center"}}>
+        <div style={{fontSize:11,letterSpacing:".22em",textTransform:"uppercase",color:"#B8923D",fontWeight:700,marginBottom:10}}>OSOBNÍ MAJETEK</div>
+        <div style={{fontFamily:"Fraunces,serif",fontSize:44,fontWeight:300,color:"#B8923D",lineHeight:1,marginBottom:6}}>{fmtKc(total)}</div>
+        <div style={{fontSize:12,color:"var(--mut)"}}>{assets.length} složky · celkem</div>
+      </div>
+
+      {/* STACKED BAR */}
+      <div style={{display:"flex",flexDirection:"column",justifyContent:"center",flexGrow:1,minWidth:200}}>
+        <div style={{display:"flex",height:10,borderRadius:6,overflow:"hidden",gap:1,marginBottom:14}}>
+          {assets.map((a,i) => (
+            <div key={i} style={{width:`${barW(a)}%`,background:a.color,transition:"width .4s"}} title={`${a.label}: ${fmtKc(a.amount)}`} />
+          ))}
+        </div>
+        <div style={{display:"flex",gap:24,flexWrap:"wrap"}}>
+          {assets.map((a,i) => (
+            <div key={i} style={{display:"flex",alignItems:"center",gap:8}}>
+              <div style={{width:11,height:11,borderRadius:3,background:a.color,flexShrink:0}} />
+              <div>
+                <div style={{fontSize:11,color:"var(--mut)"}}>{a.icon} {a.label}</div>
+                <div style={{fontSize:22,fontFamily:"Fraunces,serif",fontWeight:300,color:a.color,lineHeight:1.2}}>{fmtKc(a.amount)}</div>
+                <div style={{fontSize:10,color:"var(--mut)"}}>{Math.round(barW(a))} % portfolia</div>
+              </div>
+            </div>
+          ))}
+        </div>
       </div>
     </div>
   );
@@ -2781,6 +2816,10 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
   const prevMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1).toISOString().slice(0, 7);
   const year = now.getFullYear();
   const H = now.getHours();
+  const MESICE_NOM_D = ["Leden","Únor","Březen","Duben","Květen","Červen","Červenec","Srpen","Září","Říjen","Listopad","Prosinec"];
+  const prevMonthName = MESICE_NOM_D[(now.getMonth() + 11) % 12];
+  const thisMonthName = MESICE_NOM_D[now.getMonth()];
+  const nextMonthName = MESICE_NOM_D[(now.getMonth() + 1) % 12];
 
   // Úschovy — výpočty pro dashboard
   const escrowNetThisMonth = escrowNetForMonth(escrows, now.getFullYear(), now.getMonth());
@@ -2828,6 +2867,13 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
   // C35 — Hlavní motor: příští měsíc projekce (výkazy + radní + úschovy − výdaje)
   const c35 = unbilledAmt + mestoPodebrady + Math.round(escrowNetThisMonth) + totalVydaje;
   const c35Pos = c35 >= 0;
+  // Ratio: -1 = costs doubled (very bad), 0 = break-even, 1+ = full profit
+  const c35Ratio = Math.abs(totalVydaje) > 0 ? c35 / Math.abs(totalVydaje) : 0;
+  const c35Bg = c35Ratio >= 1   ? "linear-gradient(135deg,#064E3B,#059669)"  // smrkově zelená — čistý zisk
+              : c35Ratio >= 0.3 ? "linear-gradient(135deg,#14532D,#4ADE80)"  // světle zelená — pokryto s přebytkem
+              : c35Ratio >= 0   ? "linear-gradient(135deg,#1E3A2F,#34D399)"  // ledvinka — těsně pokryto
+              : c35Ratio >= -0.5? "linear-gradient(135deg,#374151,#6B7280)"  // střední šedá — blíže k pokrytí
+              :                   "linear-gradient(135deg,#111827,#374151)"; // tmavě šedá — daleko od pokrytí
 
   // Chart data — PŘÍJEM MAUX LEGAL = fakturace + úschovy (cash-flow protokol: escrow credited 1. daného měsíce = earned prev month)
   const months = Array.from({length: now.getMonth()+1}, (_,i) => {
@@ -2904,7 +2950,7 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
 
       {/* ── C35 MOTOR — hlavní motivační číslo ── */}
       <div style={{
-        background: c35Pos ? "linear-gradient(135deg,#064E3B,#059669)" : "linear-gradient(135deg,#7F1D1D,#DC2626)",
+        background: c35Bg,
         borderRadius: 16, padding: "20px 28px 18px", color: "#fff", position: "relative", overflow: "hidden"
       }}>
         <div style={{position:"absolute",top:0,right:0,width:200,height:200,borderRadius:"50%",background:"rgba(255,255,255,.04)",transform:"translate(30%,-30%)"}} />
@@ -2935,19 +2981,19 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
       {/* TOP ROW: 3+2 */}
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr 1fr",gap:10,marginBottom:2}}>
         <Card style={{position:"relative"}} title={`YTD: ${fmtKc(ytd)} · Průměr: ${fmtKc(Math.round(ytd/monthsElapsed))}/měsíc`}>
-          <Lbl>◀ Minulý měsíc</Lbl>
+          <Lbl>◀ Vyfakturováno — {prevMonthName}</Lbl>
           <Num size={22}>{fmtKc(mRevPrev)}</Num>
-          {trend!==null&&<div style={{fontSize:11,color:trend>=0?"#059669":"#DC2626",fontWeight:500,marginTop:4}}>{trend>=0?"↑":"↓"} {Math.abs(trend)} % · základ</div>}
+          {trend!==null&&<div style={{fontSize:11,color:trend>=0?"#059669":"#DC2626",fontWeight:500,marginTop:4}}>{trend>=0?"↑":"↓"} {Math.abs(trend)} % vs {thisMonthName}</div>}
         </Card>
         <Card style={{background:"#F0FDF4",border:"1px solid #BBF7D0"}}>
-          <Lbl color="#065F46">▶ Příší měsíc</Lbl>
+          <Lbl color="#065F46">▶ Příjem — {nextMonthName}</Lbl>
           <Num size={22} color="#059669">+{fmtKc(Math.round(unbilledAmt+mestoPodebrady+escrowNetThisMonth))}</Num>
           <div style={{fontSize:11,color:"#065F46",marginTop:4}}>výkazy + Poděbrady + úschovy {fmtKc(Math.round(escrowNetThisMonth))}</div>
         </Card>
         <Card>
-          <Lbl>Tento měsíc</Lbl>
+          <Lbl>Vyfakturováno — {thisMonthName}</Lbl>
           <Num size={22}>{fmtKc(mRev)}</Num>
-          {trend!==null&&<div style={{fontSize:11,color:trend>=0?"#059669":"#DC2626",fontWeight:500,marginTop:4}}>{trend>=0?"↑":"↓"} {Math.abs(trend)} %</div>}
+          {trend!==null&&<div style={{fontSize:11,color:trend>=0?"#059669":"#DC2626",fontWeight:500,marginTop:4}}>{trend>=0?"↑":"↓"} {Math.abs(trend)} % vs {prevMonthName}</div>}
         </Card>
         <Card style={{cursor:"pointer"}} onClick={()=>onNav("fakturace")}>
           <Lbl color="var(--ink)">K vystavení</Lbl>
@@ -2968,8 +3014,11 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
         financeItems={financeItems} invoices={invoices} dpfoMonths={dpfoMonths}
         loanTransactions={loanTransactions} escrows={escrows} onSaveFinance={onSaveFinance} />
 
-      {/* FINANCE SEKCE — nad grafem */}
-      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10}}>
+      {/* MAJETEK BAR — osobní majetek */}
+      <MajetekBar financeItems={financeItems} />
+
+      {/* FINANCE SEKCE — nad grafem: Příjmy | [Nutné + Lusus combined] */}
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
         <FinanceSection title="Příjmy měsíční"
           items={(financeItems||[]).filter(i=>i.category==="prijem" && i.notes !== "TBD")}
           category="prijem" accent="#059669"
@@ -2979,8 +3028,41 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
             ...(escrowNetThisMonth>0 ? [{ label: `Úschovy — čistý úrok (k 1. ${["ledna","února","března","dubna","května","června","července","srpna","září","října","listopadu","prosince"][(now.getMonth()+1)%12]})`, amount: Math.round(escrowNetThisMonth) }] : []),
           ]}
         />
-        <FinanceSection title="Nutné výdaje" items={nutne} category="nutne" accent="#DC2626" onSave={onSaveFinance} onDelete={onDeleteFinance} />
-        <FinanceSection title="Lusus výdaje" items={luxus} category="luxus" accent="#9333EA" onSave={onSaveFinance} onDelete={onDeleteFinance} />
+        {/* Kombinovaná karta: Nutné + Lusus výdaje */}
+        <Card style={{padding:"16px 20px",display:"flex",flexDirection:"column",gap:0}}>
+          <div style={{fontSize:9,letterSpacing:".28em",textTransform:"uppercase",color:"var(--mut)",fontWeight:600,marginBottom:10}}>Výdaje měsíčně</div>
+          <div style={{display:"flex",gap:8,marginBottom:14}}>
+            <span style={{fontFamily:"Fraunces,serif",fontSize:26,fontWeight:300,color:"#DC2626"}}>{fmtKc(Math.abs(totalNutne))}</span>
+            <span style={{fontSize:11,color:"var(--mut)",alignSelf:"flex-end",marginBottom:4}}>nutné</span>
+            <span style={{fontSize:18,color:"var(--mut)",alignSelf:"flex-end",marginBottom:2,marginLeft:6}}>+</span>
+            <span style={{fontFamily:"Fraunces,serif",fontSize:26,fontWeight:300,color:"#9333EA",marginLeft:6}}>{fmtKc(Math.abs(totalLuxus))}</span>
+            <span style={{fontSize:11,color:"var(--mut)",alignSelf:"flex-end",marginBottom:4}}>lusus</span>
+          </div>
+          {/* NUTNÉ sekce */}
+          <div style={{borderTop:"1px solid var(--line)",paddingTop:8,marginBottom:6}}>
+            <div style={{fontSize:9,letterSpacing:".2em",textTransform:"uppercase",color:"#DC2626",fontWeight:600,marginBottom:6}}>Nutné</div>
+            {nutne.map((i,idx) => (
+              <div key={idx} style={{display:"flex",justifyContent:"space-between",fontSize:12,color:"var(--txt)",paddingBottom:3}}>
+                <span>{i.label}</span>
+                <span style={{fontFamily:"JetBrains Mono,monospace",color:"#DC2626",fontSize:11}}>{fmtKc(Math.abs(i.amount||0))}</span>
+              </div>
+            ))}
+          </div>
+          {/* LUSUS sekce */}
+          <div style={{borderTop:"1px solid var(--line)",paddingTop:8,marginTop:4}}>
+            <div style={{fontSize:9,letterSpacing:".2em",textTransform:"uppercase",color:"#9333EA",fontWeight:600,marginBottom:6}}>Lusus</div>
+            {luxus.map((i,idx) => (
+              <div key={idx} style={{display:"flex",justifyContent:"space-between",fontSize:12,color:"var(--txt)",paddingBottom:3}}>
+                <span>{i.label}</span>
+                <span style={{fontFamily:"JetBrains Mono,monospace",color:"#9333EA",fontSize:11}}>{fmtKc(Math.abs(i.amount||0))}</span>
+              </div>
+            ))}
+          </div>
+          <div style={{marginTop:10,borderTop:"2px solid var(--line)",paddingTop:8,display:"flex",justifyContent:"space-between",alignItems:"baseline"}}>
+            <span style={{fontSize:10,color:"var(--mut)",letterSpacing:".1em",textTransform:"uppercase"}}>Celkem výdaje</span>
+            <span style={{fontFamily:"Fraunces,serif",fontSize:18,fontWeight:300,color:"var(--ink)"}}>{fmtKc(Math.abs(totalVydaje))}</span>
+          </div>
+        </Card>
       </div>
 
       {/* 2-COLUMN: PŘÍJEM MAUX LEGAL chart (3/5) + Cash Flow Tento Měsíc (2/5) */}
@@ -3567,6 +3649,13 @@ function InvoiceList({ invoices, clients, workEntries, onOpen, onOpenClient, onT
   const total = useMemo(() => invoices.reduce((s, i) => s + (i.subtotal || 0), 0), [invoices]);
   const nezaplaceno = useMemo(() => invoices.filter(i => !["uhrazena","dph_odvedeno"].includes(invoiceStatus(i))).reduce((s, i) => s + (i.subtotal || 0), 0), [invoices]);
   const poSplatnosti = useMemo(() => invoices.filter(i => invoiceStatus(i) === "po_splatnosti").reduce((s, i) => s + (i.subtotal || 0), 0), [invoices]);
+  // Tento měsíc: Má přijít (vystaveny, neuhrazeny) + Už přišlo (uhrazeny)
+  const fakturaceThisMonth = new Date().toISOString().slice(0,7);
+  const invThisMonth = useMemo(() => invoices.filter(i => (i.issue_date||"").startsWith(fakturaceThisMonth)), [invoices]);
+  const maPrijitInvs = useMemo(() => invThisMonth.filter(i => invoiceStatus(i) === "vystavena"), [invThisMonth]);
+  const maPrijitAmt  = useMemo(() => maPrijitInvs.reduce((s,i) => s+(i.subtotal||0), 0), [maPrijitInvs]);
+  const uzPrisloInvs = useMemo(() => invThisMonth.filter(i => ["uhrazena","dph_odvedeno"].includes(invoiceStatus(i))), [invThisMonth]);
+  const uzPrisloAmt  = useMemo(() => uzPrisloInvs.reduce((s,i) => s+(i.subtotal||0), 0), [uzPrisloInvs]);
   const hasFilters = search || filterClient || filterStatus !== "vse" || dateFrom || dateTo;
 
   const clientName = (inv) => inv.clients?.name || inv.notes?.split(" - ")[0] || "—";
@@ -3677,6 +3766,18 @@ function InvoiceList({ invoices, clients, workEntries, onOpen, onOpenClient, onT
           <div className="k">Fakturováno celkem — bez DPH</div>
           <div className="v">{fmtKc(total)}</div>
           <div className="s">s DPH: {fmtKc(invoices.reduce((s,i)=>s+(i.total||0),0))} · {invoices.length} faktur</div>
+        </div>
+        {/* MÁ PŘIJÍT — tento měsíc, vystaveno, čeká na úhradu */}
+        <div className="kpi" style={{background:"#FFFBEB",border:`1px solid ${maPrijitAmt>0?"#FDE68A":"#E5E7EB"}`}}>
+          <div className="k" style={{color:"#92400E"}}>Má přijít — tento měsíc</div>
+          <div className="v" style={{color:maPrijitAmt>0?"#D97706":"var(--mut)"}}>{fmtKc(maPrijitAmt)}</div>
+          <div className="s" style={{color:"#92400E"}}>{maPrijitInvs.length > 0 ? `${maPrijitInvs.length}× faktura vystavena · čeká na úhradu` : "žádná nevyřízená"}</div>
+        </div>
+        {/* UŽ PŘIŠLO — tento měsíc, uhrazeno */}
+        <div className="kpi" style={{background:"#F0FDF4",border:`1px solid ${uzPrisloAmt>0?"#BBF7D0":"#E5E7EB"}`}}>
+          <div className="k" style={{color:"#065F46"}}>Už přišlo — tento měsíc</div>
+          <div className="v" style={{color:uzPrisloAmt>0?"#059669":"var(--mut)"}}>{fmtKc(uzPrisloAmt)}</div>
+          <div className="s" style={{color:"#065F46"}}>{uzPrisloInvs.length > 0 ? `${uzPrisloInvs.length}× faktura uhrazena ✓` : "zatím nic neuhrazeno"}</div>
         </div>
         <div className="kpi" style={{background:"#F0FDF4",border:"1px solid #BBF7D0"}}>
           <div className="k" style={{color:"#065F46"}}>Bude fakturováno — tento měsíc</div>
