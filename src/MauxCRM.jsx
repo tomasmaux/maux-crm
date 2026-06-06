@@ -2649,6 +2649,130 @@ function EscrowList({ escrows, onNew, onEdit, onDelete, loading }) {
   );
 }
 
+/* ─── MINI SPOŘÁK BAR (kompakt pro dashboard) ─── */
+function MiniSpořák({ financeItems, invoices, dpfoMonths, loanTransactions, escrows, onSaveFinance }) {
+  const sporaci = (financeItems||[]).filter(i => i.category === "sporaci" && i.notes !== "SKIP_DISPLAY");
+  const zItem = sporaci.find(i => i.id === "fi_sp_99");
+  const dphAuto = invoices.filter(i => i.status === "uhrazena").reduce((s,i) => s+(i.vat_amount||0), 0);
+  const dpfoAcc = (dpfoMonths||[]).filter(m => m.is_paid).reduce((s,m) => s+(m.amount||8050), 0);
+  const bobloanBal = (loanTransactions?.loan_bobnice||[]).reduce((s,t) => s+t.amount, 0);
+  const bobFb = (financeItems||[]).find(i => i.id === "fi_sp_02")?.amount || 0;
+  const bobBal = Math.max(bobloanBal > 0 ? bobloanBal : bobFb, 0);
+  const manualObálky = sporaci.filter(i => i.id !== "fi_sp_99" && i.id !== "fi_sp_01" && i.id !== "fi_sp_02");
+  const danUschov = Math.round(escrowTotalTax(escrows));
+  const allEnvelopes = [
+    { label: "DPH",          amount: dphAuto,   color: "#3518A5", auto: true },
+    { label: "DPFO 2026",    amount: dpfoAcc,   color: "#F59E0B", auto: true },
+    ...(bobBal > 0 ? [{ label: "Bobnice", amount: bobBal, color: "#059669", auto: true }] : []),
+    { label: "Daň z úschov", amount: danUschov, color: "#A8A29E", auto: true },
+    ...manualObálky.map((o,i) => ({ label: o.label, amount: o.amount||0, color: ["#7C3AED","#0EA5E9","#DC2626","#6B7280"][i%4], auto: false })),
+  ].filter(e => e.amount > 0);
+  const totalEarmarked = allEnvelopes.reduce((s,e) => s+e.amount, 0);
+  const actualBalance  = zItem?.amount || 0;
+  const volné = actualBalance - totalEarmarked;
+
+  // Majetek
+  const akcie     = (financeItems||[]).find(i => i.id === "fi_ma_01")?.amount || 0;
+  const stavebko  = (financeItems||[]).find(i => i.id === "fi_ma_02")?.amount || 0;
+  const firmaKap  = (financeItems||[]).find(i => i.id === "fi_ma_03")?.amount || 0;
+  const majetek   = akcie + stavebko + firmaKap;
+
+  // Firma / runway
+  const nutne      = (financeItems||[]).filter(i => i.category === "nutne");
+  const luxus      = (financeItems||[]).filter(i => i.category === "luxus");
+  const totalVydaje = Math.abs(nutne.reduce((s,i)=>s+(i.amount||0),0) + luxus.reduce((s,i)=>s+(i.amount||0),0));
+  const runway      = totalVydaje > 0 ? actualBalance / totalVydaje : 0;
+  const runwayM     = Math.floor(runway);
+  const runwayD     = Math.round((runway - runwayM) * 30);
+  const planKap     = (financeItems||[]).find(i => i.id === "fi_plan_kapital")?.amount || 130000;
+  const unbilledOTW = (financeItems||[]).find(i => i.id === "fi_otw")?.amount || 0;
+
+  const [editBal, setEditBal] = useState(false);
+  const [balInput, setBalInput] = useState(actualBalance);
+
+  const Div = () => <div style={{width:1,alignSelf:"stretch",background:"var(--line)",margin:"0 4px",flexShrink:0}} />;
+  const Chip = ({children}) => <span style={{fontSize:7,background:"#EEF2FF",color:"#3730A3",padding:"1px 4px",borderRadius:3,fontWeight:700}}>{children}</span>;
+
+  return (
+    <div style={{background:"#fff",border:"2px solid #3518A5",borderRadius:12,padding:"12px 18px",display:"flex",alignItems:"center",gap:14,flexWrap:"wrap",marginBottom:4}}>
+      {/* === SPOŘÁK === */}
+      <div style={{minWidth:200}}>
+        <div style={{fontSize:8,letterSpacing:".25em",textTransform:"uppercase",color:"#3518A5",fontWeight:700,marginBottom:4}}>SPOŘÍCÍ ÚČET · OBÁLKY</div>
+        {editBal ? (
+          <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:2}}>
+            <input type="number" value={balInput} autoFocus
+              onChange={e => setBalInput(Number(e.target.value))}
+              onKeyDown={e => { if(e.key==="Enter") { onSaveFinance({...zItem,amount:balInput}); setEditBal(false); } if(e.key==="Escape") setEditBal(false); }}
+              style={{width:130,fontSize:17,padding:"3px 8px",border:"2px solid #3518A5",borderRadius:7,fontFamily:"Fraunces,serif",fontWeight:300,outline:"none"}} />
+            <button onClick={() => { onSaveFinance({...zItem,amount:balInput}); setEditBal(false); }}
+              style={{background:"#3518A5",color:"#fff",border:"none",borderRadius:6,padding:"5px 10px",fontSize:11,cursor:"pointer",fontWeight:700}}>✓</button>
+            <button onClick={() => setEditBal(false)}
+              style={{background:"none",border:"1px solid var(--line)",borderRadius:6,padding:"5px 8px",fontSize:11,cursor:"pointer",color:"var(--mut)"}}>✕</button>
+          </div>
+        ) : (
+          <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:2}}>
+            <div style={{fontFamily:"Fraunces,serif",fontSize:20,fontWeight:300,color:"#3518A5"}}>{fmtKc(actualBalance)}</div>
+            <button onClick={() => { setBalInput(actualBalance); setEditBal(true); }}
+              title="Denně aktualizuj skutečný zůstatek bankovního účtu"
+              style={{background:"#3518A5",color:"#fff",border:"none",borderRadius:20,padding:"4px 11px",fontSize:10,cursor:"pointer",fontWeight:700,letterSpacing:".02em",whiteSpace:"nowrap"}}>
+              ✎ Aktualizovat
+            </button>
+          </div>
+        )}
+        <div style={{display:"flex",gap:8,alignItems:"center"}}>
+          <span style={{fontSize:10,color:volné>=0?"#059669":"#DC2626",fontWeight:600}}>{volné>=0?"+":""}{fmtKc(volné)} volného</span>
+          <span style={{fontSize:9,color:"var(--mut)"}}>z {fmtKc(totalEarmarked)} obálek</span>
+        </div>
+      </div>
+
+      <Div />
+
+      {/* === OBÁLKY === */}
+      <div style={{display:"flex",gap:12,flexWrap:"wrap"}}>
+        {allEnvelopes.map((e,i) => (
+          <div key={i} style={{display:"flex",alignItems:"center",gap:4}}>
+            <div style={{width:7,height:7,borderRadius:2,background:e.color,flexShrink:0}} />
+            <div>
+              <div style={{fontSize:8.5,color:"var(--mut)",display:"flex",gap:3,alignItems:"center"}}>
+                {e.label} {e.auto && <Chip>auto</Chip>}
+              </div>
+              <div style={{fontSize:12,fontFamily:"Fraunces,serif",fontWeight:300,color:e.color}}>{fmtKc(e.amount)}</div>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <Div />
+
+      {/* === OSOBNÍ MAJETEK === */}
+      {majetek > 0 && (
+        <div>
+          <div style={{fontSize:8,letterSpacing:".2em",textTransform:"uppercase",color:"var(--mut)",fontWeight:600,marginBottom:3}}>OSOBNÍ MAJETEK</div>
+          <div style={{fontFamily:"Fraunces,serif",fontSize:16,fontWeight:300,color:"var(--ink)",marginBottom:2}}>{fmtKc(majetek)}</div>
+          <div style={{display:"flex",gap:8,fontSize:9,color:"var(--mut)"}}>
+            {akcie > 0 && <span>Akcie {Math.round(akcie/1000)}k</span>}
+            {stavebko > 0 && <span>Stavebko {Math.round(stavebko/1000)}k</span>}
+            {firmaKap > 0 && <span>Firma {Math.round(firmaKap/1000)}k</span>}
+          </div>
+        </div>
+      )}
+
+      <Div />
+
+      {/* === FIRMA + RUNWAY === */}
+      <div>
+        <div style={{fontSize:8,letterSpacing:".2em",textTransform:"uppercase",color:"var(--mut)",fontWeight:600,marginBottom:3}}>FIRMA · RUNWAY</div>
+        <div style={{fontFamily:"Fraunces,serif",fontSize:16,fontWeight:300,color:"#7C3AED"}}>{runwayM} měs. {runwayD} dní</div>
+        {firmaKap > 0 && (
+          <div style={{fontSize:9,color:firmaKap>=planKap?"#059669":"#DC2626",marginTop:1}}>
+            Rezerva: {fmtKc(firmaKap)} / {fmtKc(planKap)} ({firmaKap>=planKap?"✓ OK":"↓ " + fmtKc(planKap-firmaKap) + " chybí"})
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 /* ─── DASHBOARD ─── */
 function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, loanTrackers, loanTransactions, escrows, onNav, onSaveFinance, onDeleteFinance, onDpfoToggle, onLoanTxAdd, onLoanTxToggle, onLoanTxDelete, onLoanUpdate }) {
   const [escrowAlertDismissed, setEscrowAlertDismissed] = useState(false);
@@ -2698,15 +2822,21 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
   const totalLuxus = luxus.reduce((s,i) => s+(i.amount||0), 0);
   const totalVydaje = totalNutne + totalLuxus;
   const cashflow = mRev + totalVydaje;
+  // C35 — Hlavní motor: příští měsíc projekce (výkazy + radní + úschovy − výdaje)
+  const c35 = unbilledAmt + mestoPodebrady + Math.round(escrowNetThisMonth) + totalVydaje;
+  const c35Pos = c35 >= 0;
 
-  // Chart data
+  // Chart data — PŘÍJEM MAUX LEGAL = fakturace + úschovy (cash-flow protokol: escrow credited 1. daného měsíce = earned prev month)
   const months = Array.from({length: now.getMonth()+1}, (_,i) => {
     const m = String(i+1).padStart(2,"0");
-    return { key: `${year}-${m}`, label: ["L","Ú","B","D","K","Č","Čv","S","Z","Ř","Li","P"][i] };
+    return { key: `${year}-${m}`, label: ["L","Ú","B","D","K","Č","Čv","S","Z","Ř","Li","P"][i], monthIdx: i };
   });
-  const chartData = months.map(({key,label}) => ({
-    label, v: invoices.filter(i=>(i.issue_date||"").startsWith(key)).reduce((s,i)=>s+(i.subtotal||0),0)
-  }));
+  const chartData = months.map(({key,label,monthIdx}) => {
+    const invRev = invoices.filter(i=>(i.issue_date||"").startsWith(key)).reduce((s,i)=>s+(i.subtotal||0),0);
+    // Escrow income credited 1st of this month = interest earned in PREVIOUS month
+    const escIncome = monthIdx > 0 ? Math.round(escrowNetForMonth(escrows, year, monthIdx-1)) : 0;
+    return { label, inv: invRev, escrow: escIncome, v: invRev + escIncome };
+  });
   const maxV = Math.max(...chartData.map(d=>d.v), 1);
 
   // Top clients
@@ -2769,6 +2899,36 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
         </div>
       </div>
 
+      {/* ── C35 MOTOR — hlavní motivační číslo ── */}
+      <div style={{
+        background: c35Pos ? "linear-gradient(135deg,#064E3B,#059669)" : "linear-gradient(135deg,#7F1D1D,#DC2626)",
+        borderRadius: 16, padding: "20px 28px 18px", color: "#fff", position: "relative", overflow: "hidden"
+      }}>
+        <div style={{position:"absolute",top:0,right:0,width:200,height:200,borderRadius:"50%",background:"rgba(255,255,255,.04)",transform:"translate(30%,-30%)"}} />
+        <div style={{fontSize:8,letterSpacing:".3em",textTransform:"uppercase",fontWeight:700,opacity:.7,marginBottom:6}}>
+          Příští měsíc — celkový přehled (projekce)
+        </div>
+        <div style={{display:"flex",alignItems:"baseline",gap:16,marginBottom:6}}>
+          <div style={{fontFamily:"Fraunces,serif",fontSize:48,fontWeight:300,lineHeight:1}}>
+            {c35Pos ? "+" : ""}{fmtKc(c35)}
+          </div>
+          <div style={{fontSize:12,opacity:.8,lineHeight:1.4}}>
+            {c35Pos
+              ? <>Náklady pokryty ✓<br /><strong>tohle je čisté — jen tvoje</strong></>
+              : <>Do pokrytí nákladů zbývá<br /><strong>{fmtKc(Math.abs(c35))}</strong></>
+            }
+          </div>
+        </div>
+        <div style={{display:"flex",gap:20,fontSize:11,opacity:.8,flexWrap:"wrap",borderTop:"1px solid rgba(255,255,255,.15)",paddingTop:10,marginTop:4}}>
+          <span>📋 Výkazy {fmtKc(unbilledAmt)}</span>
+          <span>🏛 Radní {fmtKc(mestoPodebrady)}</span>
+          <span>💰 Úschovy 1.{((now.getMonth()+2)%12)||12}. {fmtKc(Math.round(escrowNetThisMonth))}</span>
+          <span style={{opacity:.6}}>−</span>
+          <span>📉 Nutné {fmtKc(Math.abs(totalNutne))}</span>
+          <span>🎯 Lusus {fmtKc(Math.abs(totalLuxus))}</span>
+        </div>
+      </div>
+
       {/* TOP ROW: 3+2 */}
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr 1fr",gap:10,marginBottom:2}}>
         <Card style={{position:"relative"}} title={`YTD: ${fmtKc(ytd)} · Průměr: ${fmtKc(Math.round(ytd/monthsElapsed))}/měsíc`}>
@@ -2798,132 +2958,94 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
         </Card>
       </div>
 
-      {/* COMPACT SUMMARY */}
-      <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:10}}>
-        <Card style={{padding:"12px 16px",background:"#F0FDF4",border:"1px solid #BBF7D0"}}>
-          <Lbl color="#065F46">Příjmy měsíčně</Lbl>
-          <div style={{fontFamily:"Fraunces,serif",fontSize:19,fontWeight:300,color:"#059669",marginTop:3}}>+{fmtKc(Math.round(mestoPodebrady+unbilledAmt+escrowNetThisMonth))}</div>
-          {escrowNetThisMonth > 0 && <div style={{fontSize:10,color:"#065F46",marginTop:2}}>+ {fmtKc(Math.round(escrowNetThisMonth))} úschovy k 1. {["ledna","února","března","dubna","května","června","července","srpna","září","října","listopadu","prosince"][(now.getMonth()+1)%12]}</div>}
-        </Card>
-        <Card style={{padding:"12px 16px"}}>
-          <Lbl color="#DC2626">Nutné výdaje</Lbl>
-          <div style={{fontFamily:"Fraunces,serif",fontSize:19,fontWeight:300,color:"#DC2626",marginTop:3}}>{fmtKc(Math.abs(totalNutne))}</div>
-        </Card>
-        <Card style={{padding:"12px 16px"}}>
-          <Lbl color="#9333EA">Lusus výdaje</Lbl>
-          <div style={{fontFamily:"Fraunces,serif",fontSize:19,fontWeight:300,color:"#9333EA",marginTop:3}}>{fmtKc(Math.abs(totalLuxus))}</div>
-        </Card>
-        {(()=>{const z=mestoPodebrady+unbilledAmt+escrowNetThisMonth+totalVydaje;return(
-          <Card style={{padding:"12px 16px",background:z>=0?"#F0FDF4":"#FEF2F2",border:`1px solid ${z>=0?"#BBF7D0":"#FECACA"}`}}>
-            <Lbl color={z>=0?"#065F46":"#991B1B"}>Cash flow</Lbl>
-            <div style={{fontFamily:"Fraunces,serif",fontSize:19,fontWeight:300,color:z>=0?"#059669":"#DC2626",marginTop:3}}>{z>=0?"+":""}{fmtKc(z)}</div>
-          </Card>
-        );})()} 
-      </div>
 
 
+      {/* MINI SPOŘÁK BAR — kompaktně nad grafem */}
+      <MiniSpořák
+        financeItems={financeItems} invoices={invoices} dpfoMonths={dpfoMonths}
+        loanTransactions={loanTransactions} escrows={escrows} onSaveFinance={onSaveFinance} />
 
-
-
-      {/* 3-COLUMN: Donut (3/7) + Chart (2/7) + Klienti (2/7) */}
-      <div style={{display:"grid",gridTemplateColumns:"3fr 2fr 2fr",gap:12,alignItems:"start"}}>
-        {/* Col 1: WealthDonut */}
-        {/* WealthDonut */}
-        {(() => {
-          const sp2 = (financeItems||[]).filter(i => i.category === "sporaci" && i.notes !== "SKIP_DISPLAY");
-          const bal2 = sp2.find(i => i.id === "fi_sp_99")?.amount || 0;
-          const dph2 = invoices.filter(i => i.status === "uhrazena").reduce((s,i) => s+(i.vat_amount||0), 0);
-          const dpfo2 = (dpfoMonths||[]).filter(m => m.is_paid).reduce((s,m) => s+(m.amount||8050), 0);
-          const bobloan2 = (loanTransactions?.loan_bobnice||[]).reduce((s,t) => s+t.amount, 0);
-          const bobFb2 = (financeItems||[]).find(i => i.id === "fi_sp_02")?.amount || 0;
-          const bob2 = Math.max(bobloan2>0?bobloan2:bobFb2, 0);
-          const danUschov = Math.round(escrowTaxTotal); // srážková daň z úschov — reálné číslo
-          const man2 = sp2.filter(i=>i.id!=="fi_sp_99"&&i.id!=="fi_sp_01"&&i.id!=="fi_sp_02").reduce((s,o)=>s+(o.amount||0),0);
-          const zk = Math.max(bal2 - dph2 - dpfo2 - bob2 - man2 - danUschov, 0);
-          const akcie = (financeItems||[]).find(i=>i.id==="fi_ma_01")?.amount||0;
-          const stavebko = (financeItems||[]).find(i=>i.id==="fi_ma_02")?.amount||0;
-          const firmaKap = (financeItems||[]).find(i=>i.id==="fi_ma_03")?.amount||0;
-
-          const outerItems = [
-            {amount:akcie,    color:"#10B981", label:"Akcie"},
-            {amount:stavebko, color:"#D97706", label:"Stavebko"},
-            {amount:firmaKap, color:"#8B5CF6", label:"Firma (MAJETEK)"},
-            {amount:zk,       color:"#6EE7B7", label:"Základ. kap."},
-          ].filter(i=>i.amount>0);
-
-          const innerItems = [
-            {amount:bob2,      color:"#6B7280", label:"Bobnice"},
-            {amount:danUschov, color:"#A8A29E", label:"Daň z úschov"},
-            {amount:man2,      color:"#8B5CF6", label:"Firma (SPORÁK)"},
-            {amount:dpfo2,     color:"#6EE7B7", label:"DPFO 2026"},
-            {amount:dph2,      color:"#3518A5", label:"DPH"},
-          ].filter(i=>i.amount>0);
-          
-          const oTotal = outerItems.reduce((s,i)=>s+Math.abs(i.amount||0),0);
-          const iTotal = innerItems.reduce((s,i)=>s+Math.abs(i.amount||0),0);
-          return (
-            <div style={{background:"#fff",border:"1px solid var(--line)",borderRadius:16,padding:"24px 20px 16px",display:"flex",flexDirection:"column",alignItems:"center"}}>
-              <div style={{fontSize:9,letterSpacing:".3em",textTransform:"uppercase",color:"var(--mut)",fontWeight:600,marginBottom:16,alignSelf:"flex-start"}}>Přehled majetku & spořáku</div>
-              <WealthDonut outerItems={outerItems} innerItems={innerItems}
-                outerLabel="OSOBNÍ MAJETEK" innerLabel="SPOŘÍCÍ ÚČET"
-                outerTotal={oTotal} innerTotal={iTotal} />
-            </div>
-          );
-        })()}
-        {/* Col 2: Graf fakturace */}
-        <Card style={{padding:"14px 16px"}}>
-              {(() => {
-                const W=300,H=90,padL=6,padR=6,padT=20,padB=22;
-                const n=chartData.length;
-                if(n===0) return null;
-                const nz=chartData.filter(d=>d.v>0);
-                const minV=nz.length>1?Math.min(...nz.map(d=>d.v))*0.7:0;
-                const range=Math.max(maxV-minV,1);
-                const toY=v=>padT+H-((Math.max(v,0)-minV)/range)*H;
-                const xs=chartData.map((_,i)=>padL+i*((W-padL-padR)/Math.max(n-1,1)));
-                const pts=chartData.map((d,i)=>`${xs[i]},${toY(d.v)}`).join(" L ");
-                const area=`M ${xs[0]},${toY(0)} L ${pts} L ${xs[n-1]},${toY(0)} Z`;
-                const deltas=chartData.map((d,i)=>i===0?0:d.v-chartData[i-1].v);
-                return (
-                  <>
-                    <div style={{display:"flex",justifyContent:"space-between",marginBottom:6}}>
-                      <div style={{fontSize:9,letterSpacing:".2em",textTransform:"uppercase",color:"var(--mut)",fontWeight:600}}>Fakturace {year}</div>
-                      <div style={{fontSize:11,fontFamily:"Fraunces,serif",fontWeight:300,color:"var(--gold)"}}>{fmtKc(ytd)}</div>
+      {/* 2-COLUMN: PŘÍJEM MAUX LEGAL chart (3/5) + Top klienti (2/5) — stejná výška */}
+      <div style={{display:"grid",gridTemplateColumns:"3fr 2fr",gap:12,alignItems:"stretch"}}>
+        {/* Col 1: PŘÍJEM MAUX LEGAL — fakturace + úschovy */}
+        <Card style={{padding:"16px 18px",display:"flex",flexDirection:"column"}}>
+          {(() => {
+            const W=480,H=110,padL=6,padR=6,padT=24,padB=24;
+            const n=chartData.length;
+            if(n===0) return null;
+            const nz=chartData.filter(d=>d.v>0);
+            const ytdTotal = chartData.reduce((s,d) => s+d.inv, 0);
+            const ytdEscrow = chartData.reduce((s,d) => s+d.escrow, 0);
+            const minV=nz.length>1?Math.min(...nz.map(d=>d.v))*0.7:0;
+            const range=Math.max(maxV-minV,1);
+            const toY=v=>padT+H-((Math.max(v,0)-minV)/range)*H;
+            const xs=chartData.map((_,i)=>padL+i*((W-padL-padR)/Math.max(n-1,1)));
+            // Two lines: total (dark) and invoice-only (lighter)
+            const ptsTotal=chartData.map((d,i)=>`${xs[i]},${toY(d.v)}`).join(" L ");
+            const ptsInv=chartData.map((d,i)=>`${xs[i]},${toY(d.inv)}`).join(" L ");
+            const areaTotal=`M ${xs[0]},${toY(0)} L ${ptsTotal} L ${xs[n-1]},${toY(0)} Z`;
+            const deltas=chartData.map((d,i)=>i===0?0:d.v-chartData[i-1].v);
+            return (
+              <>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:8}}>
+                  <div>
+                    <div style={{fontSize:9,letterSpacing:".2em",textTransform:"uppercase",color:"var(--mut)",fontWeight:600}}>PŘÍJEM MAUX LEGAL {year}</div>
+                    <div style={{fontSize:9,color:"var(--mut)",marginTop:2,display:"flex",gap:10}}>
+                      <span><span style={{display:"inline-block",width:8,height:3,background:"#3518A5",borderRadius:1,marginRight:3,verticalAlign:"middle"}}/>Fakturace {fmtKc(ytdTotal)}</span>
+                      {ytdEscrow > 0 && <span><span style={{display:"inline-block",width:8,height:3,background:"#059669",borderRadius:1,marginRight:3,verticalAlign:"middle"}}/>Úschovy {fmtKc(ytdEscrow)}</span>}
                     </div>
-                    <svg width="100%" viewBox={`0 0 ${W} ${padT+H+padB}`} style={{overflow:"visible"}}>
-                      <defs><linearGradient id="ag2" x1="0" x2="0" y1="0" y2="1"><stop offset="0%" stopColor="#3518A5" stopOpacity=".5"/><stop offset="100%" stopColor="#3518A5" stopOpacity=".02"/></linearGradient></defs>
-                      {[0,.5,1].map(p=><line key={p} x1={padL} x2={W-padR} y1={padT+H*(1-p)} y2={padT+H*(1-p)} stroke="#F0EEF8" strokeWidth={1}/>)}
-                      <path d={area} fill="url(#ag2)" opacity={.4}/>
-                      <path d={`M ${pts}`} fill="none" stroke="#3518A5" strokeWidth={2} strokeLinejoin="round" strokeLinecap="round"/>
-                      {chartData.map((d,i)=>{
-                        if(!d.v) return null;
-                        const x=xs[i],y=toY(d.v),isNow=i===n-1,delta=deltas[i],up=delta>0;
-                        return <g key={i}>
-                          <circle cx={x} cy={y} r={isNow?4:2.5} fill={isNow?"#3518A5":"#fff"} stroke="#3518A5" strokeWidth={isNow?0:1.5}/>
-                          <text x={x} y={y-8} textAnchor="middle" fontSize={isNow?9:7.5} fontFamily="Fraunces,serif" fill={isNow?"#3518A5":"var(--mut)"}>{Math.round(d.v/1000)}k</text>
-                          {i>0&&delta!==0&&<text x={x} y={y-18} textAnchor="middle" fontSize={7} fontFamily="Inter" fontWeight="700" fill={up?"#059669":"#DC2626"}>{up?"↑":"↓"}{Math.round(Math.abs(delta)/1000)}k</text>}
-                          <text x={x} y={padT+H+padB-3} textAnchor="middle" fontSize={isNow?8.5:7.5} fontFamily="Inter" fontWeight={isNow?"700":"400"} fill={isNow?"#3518A5":"var(--mut)"}>{d.label}</text>
-                        </g>;
-                      })}
-                    </svg>
-                  </>
-                );
-              })()}
-        </Card>
-        {/* Col 3: Top 10 klientů */}
-        <Card style={{padding:"14px 16px"}}>
-              <div style={{fontSize:9,letterSpacing:".2em",textTransform:"uppercase",color:"var(--mut)",fontWeight:600,marginBottom:10}}>Top 10 klientů</div>
-              <div style={{display:"flex",flexDirection:"column",gap:5}}>
-                {topC.slice(0,10).map(({c,rev},i)=>(
-                  <div key={i} style={{display:"flex",alignItems:"center",gap:8,padding:"5px 8px",borderRadius:7,background:i===0?"var(--ink)":"transparent",border:`1px solid ${i===0?"var(--ink)":"var(--line)"}`,cursor:"default",transition:".12s"}}
-                    onMouseEnter={e=>{if(i>0)e.currentTarget.style.background="#F7F5FF"}}
-                    onMouseLeave={e=>{if(i>0)e.currentTarget.style.background="transparent"}}>
-                    <span style={{fontSize:9,color:i===0?"rgba(255,255,255,.5)":"var(--mut)",fontWeight:600,width:14,textAlign:"right",flexShrink:0}}>{i+1}</span>
-                    <span style={{fontSize:11,fontWeight:500,color:i===0?"#fff":"var(--txt)",flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{c.name}</span>
-                    <span style={{fontSize:11,fontFamily:"Fraunces,serif",fontWeight:300,color:i===0?"rgba(255,255,255,.8)":"var(--gold)",flexShrink:0}}>{fmtKc(rev)}</span>
                   </div>
-                ))}
+                  <div style={{textAlign:"right"}}>
+                    <div style={{fontSize:9,color:"var(--mut)"}}>Celkem YTD</div>
+                    <div style={{fontSize:15,fontFamily:"Fraunces,serif",fontWeight:300,color:"var(--gold)"}}>{fmtKc(ytdTotal + ytdEscrow)}</div>
+                  </div>
+                </div>
+                <svg width="100%" viewBox={`0 0 ${W} ${padT+H+padB}`} style={{overflow:"visible",flex:1}}>
+                  <defs>
+                    <linearGradient id="ag2" x1="0" x2="0" y1="0" y2="1">
+                      <stop offset="0%" stopColor="#3518A5" stopOpacity=".35"/>
+                      <stop offset="100%" stopColor="#3518A5" stopOpacity=".02"/>
+                    </linearGradient>
+                  </defs>
+                  {[0,.5,1].map(p=><line key={p} x1={padL} x2={W-padR} y1={padT+H*(1-p)} y2={padT+H*(1-p)} stroke="#F0EEF8" strokeWidth={1}/>)}
+                  {/* Area pro total */}
+                  <path d={areaTotal} fill="url(#ag2)" opacity={.5}/>
+                  {/* Line fakturace pouze */}
+                  {ytdEscrow > 0 && <path d={`M ${ptsInv}`} fill="none" stroke="#3518A5" strokeWidth={1.2} strokeDasharray="4 3" strokeLinejoin="round" strokeLinecap="round" opacity={.5}/>}
+                  {/* Line total */}
+                  <path d={`M ${ptsTotal}`} fill="none" stroke="#3518A5" strokeWidth={2.5} strokeLinejoin="round" strokeLinecap="round"/>
+                  {chartData.map((d,i)=>{
+                    if(!d.v) return null;
+                    const x=xs[i],y=toY(d.v),isNow=i===n-1,delta=deltas[i],up=delta>0;
+                    return <g key={i}>
+                      {/* Escrow marker */}
+                      {d.escrow > 0 && <circle cx={x} cy={toY(d.escrow)} r={2} fill="#059669" opacity={.6}/>}
+                      <circle cx={x} cy={y} r={isNow?5:3} fill={isNow?"#3518A5":"#fff"} stroke="#3518A5" strokeWidth={isNow?0:1.5}/>
+                      <text x={x} y={y-10} textAnchor="middle" fontSize={isNow?10:8} fontFamily="Fraunces,serif" fill={isNow?"#3518A5":"var(--mut)"}>{Math.round(d.v/1000)}k</text>
+                      {i>0&&delta!==0&&<text x={x} y={y-21} textAnchor="middle" fontSize={7.5} fontFamily="Inter" fontWeight="700" fill={up?"#059669":"#DC2626"}>{up?"↑":"↓"}{Math.round(Math.abs(delta)/1000)}k</text>}
+                      {d.escrow>0&&<text x={x} y={toY(d.escrow)-5} textAnchor="middle" fontSize={6.5} fontFamily="Inter" fill="#059669" opacity={.8}>+{Math.round(d.escrow/1000)}k</text>}
+                      <text x={x} y={padT+H+padB-3} textAnchor="middle" fontSize={isNow?9:8} fontFamily="Inter" fontWeight={isNow?"700":"400"} fill={isNow?"#3518A5":"var(--mut)"}>{d.label}</text>
+                    </g>;
+                  })}
+                </svg>
+              </>
+            );
+          })()}
+        </Card>
+        {/* Col 2: Top 10 klientů */}
+        <Card style={{padding:"16px 18px",display:"flex",flexDirection:"column"}}>
+          <div style={{fontSize:9,letterSpacing:".2em",textTransform:"uppercase",color:"var(--mut)",fontWeight:600,marginBottom:10}}>Top klienti</div>
+          <div style={{display:"flex",flexDirection:"column",gap:5,flex:1}}>
+            {topC.slice(0,10).map(({c,rev},i)=>(
+              <div key={i} style={{display:"flex",alignItems:"center",gap:8,padding:"5px 8px",borderRadius:7,background:i===0?"var(--ink)":"transparent",border:`1px solid ${i===0?"var(--ink)":"var(--line)"}`,cursor:"default",transition:".12s"}}
+                onMouseEnter={e=>{if(i>0)e.currentTarget.style.background="#F7F5FF"}}
+                onMouseLeave={e=>{if(i>0)e.currentTarget.style.background="transparent"}}>
+                <span style={{fontSize:9,color:i===0?"rgba(255,255,255,.5)":"var(--mut)",fontWeight:600,width:14,textAlign:"right",flexShrink:0}}>{i+1}</span>
+                <span style={{fontSize:11,fontWeight:500,color:i===0?"#fff":"var(--txt)",flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{c.name}</span>
+                <span style={{fontSize:11,fontFamily:"Fraunces,serif",fontWeight:300,color:i===0?"rgba(255,255,255,.8)":"var(--gold)",flexShrink:0}}>{fmtKc(rev)}</span>
               </div>
+            ))}
+          </div>
         </Card>
       </div>
 
