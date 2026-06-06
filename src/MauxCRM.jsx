@@ -3102,14 +3102,37 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
               : c35Ratio >= -0.5? "linear-gradient(135deg,#374151,#6B7280)"  // střední šedá — blíže k pokrytí
               :                   "linear-gradient(135deg,#111827,#374151)"; // tmavě šedá — daleko od pokrytí
 
-  // Chart data — PŘÍJEM MAUX LEGAL = fakturace + úschovy (cash-flow protokol: escrow credited 1. daného měsíce = earned prev month)
+  // Stacked bar chart — PŘÍJEM MAUX LEGAL: posledních 12 měsíců nebo od 09/2025
+  const CZ_M_SHORT = ["L","Ú","B","D","K","Č","Čv","S","Z","Ř","Li","P"];
+  const barData = (() => {
+    const result = [];
+    // Jdeme od nejstaršího ke current: od 09/2025 nebo max 12 měsíců zpátky
+    const startYear = 2025, startMonth = 8; // index 8 = září
+    const endYear = year, endMonth = now.getMonth(); // current month index
+    let y = startYear, m = startMonth;
+    while (y < endYear || (y === endYear && m <= endMonth)) {
+      const key = `${y}-${String(m+1).padStart(2,"0")}`;
+      const shortLabel = `${CZ_M_SHORT[m]}_${String(y).slice(2)}`;
+      const invRev = invoices.filter(i=>(i.issue_date||"").startsWith(key)).reduce((s,i)=>s+(i.subtotal||0),0);
+      // Cash-flow protokol: úschovy připsány 1. tohoto měsíce = úrok earned v předchozím
+      const prevM = m > 0 ? m - 1 : 11;
+      const prevY = m > 0 ? y : y - 1;
+      const escIncome = Math.round(escrowNetForMonth(escrows, prevY, prevM));
+      result.push({ key, label: shortLabel, inv: invRev, escrow: escIncome, total: invRev + escIncome, isCurrent: key === `${year}-${String(now.getMonth()+1).padStart(2,"0")}` });
+      m++;
+      if (m > 11) { m = 0; y++; }
+    }
+    return result;
+  })();
+  const maxBarV = Math.max(...barData.map(d=>d.total), 1);
+
+  // Chart data pro eventuelní použití jinde (kompatibilita)
   const months = Array.from({length: now.getMonth()+1}, (_,i) => {
     const m = String(i+1).padStart(2,"0");
-    return { key: `${year}-${m}`, label: ["L","Ú","B","D","K","Č","Čv","S","Z","Ř","Li","P"][i], monthIdx: i };
+    return { key: `${year}-${m}`, label: CZ_M_SHORT[i], monthIdx: i };
   });
   const chartData = months.map(({key,label,monthIdx}) => {
     const invRev = invoices.filter(i=>(i.issue_date||"").startsWith(key)).reduce((s,i)=>s+(i.subtotal||0),0);
-    // Escrow income credited 1st of this month = interest earned in PREVIOUS month
     const escIncome = monthIdx > 0 ? Math.round(escrowNetForMonth(escrows, year, monthIdx-1)) : 0;
     return { label, inv: invRev, escrow: escIncome, v: invRev + escIncome };
   });
@@ -3277,19 +3300,80 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
         loanTransactions={loanTransactions} escrows={escrows} onSaveFinance={onSaveFinance} />
       </Panel>
 
-      {/* FINANCE SEKCE — 3 sloupce: Příjmy | Výdaje | Cash Flow */}
+      {/* FINANCE SEKCE — 2 sloupce: [Příjmy + Cash Flow spojené] | Výdaje */}
       <Panel id="finance">
-      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10}}>
-        <FinanceSection title="Příjmy měsíční"
-          items={(financeItems||[]).filter(i=>i.category==="prijem" && i.notes !== "TBD")}
-          category="prijem" accent="#059669"
-          onSave={onSaveFinance} onDelete={onDeleteFinance}
-          autoItems={[
-            ...(unbilledAmt>0 ? [{ label: `MAUX Legal — nevyfakturováno`, amount: unbilledAmt }] : []),
-            ...(escrowNetThisMonth>0 ? [{ label: `Úschovy — čistý úrok (k 1. ${["ledna","února","března","dubna","května","června","července","srpna","září","října","listopadu","prosince"][(now.getMonth()+1)%12]})`, amount: Math.round(escrowNetThisMonth) }] : []),
-          ]}
-        />
-        {/* Kombinovaná karta: Nutné + Lusus výdaje */}
+      <div style={{display:"grid",gridTemplateColumns:"3fr 2fr",gap:10,alignItems:"stretch"}}>
+
+        {/* LEVÁ KARTA: Příjmy měsíční + Cash Flow — propojené v jedné kartě */}
+        <Card style={{padding:0,overflow:"hidden",display:"flex",flexDirection:"column"}}>
+          {/* Horní pruh — PŘÍJMY */}
+          <div style={{padding:"16px 20px 14px",borderBottom:"1px solid var(--line)"}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:10}}>
+              <div style={{fontSize:9,letterSpacing:".22em",textTransform:"uppercase",color:"#059669",fontWeight:700}}>Příjmy měsíční</div>
+              <div style={{fontFamily:"Fraunces,serif",fontSize:22,fontWeight:300,color:"#059669"}}>
+                {fmtKc(
+                  (financeItems||[]).filter(i=>i.category==="prijem"&&i.notes!=="TBD").reduce((s,i)=>s+(i.amount||0),0)
+                  + unbilledAmt + Math.round(escrowNetThisMonth)
+                )}&nbsp;<span style={{fontSize:10,color:"#065F46",fontWeight:400}}>/ měsíc</span>
+              </div>
+            </div>
+            {/* Auto položky */}
+            {unbilledAmt>0 && (
+              <div style={{display:"flex",justifyContent:"space-between",fontSize:12,color:"var(--txt)",padding:"3px 0"}}>
+                <span style={{display:"flex",alignItems:"center",gap:6}}>
+                  <span style={{fontSize:9,background:"#ECFDF5",color:"#065F46",padding:"1px 5px",borderRadius:3,fontWeight:600}}>auto</span>
+                  MAUX Legal — nevyfakturováno
+                </span>
+                <span style={{fontFamily:"JetBrains Mono,monospace",color:"#059669",fontSize:11}}>+{fmtKc(unbilledAmt)}</span>
+              </div>
+            )}
+            {escrowNetThisMonth>0 && (
+              <div style={{display:"flex",justifyContent:"space-between",fontSize:12,color:"var(--txt)",padding:"3px 0"}}>
+                <span style={{display:"flex",alignItems:"center",gap:6}}>
+                  <span style={{fontSize:9,background:"#ECFDF5",color:"#065F46",padding:"1px 5px",borderRadius:3,fontWeight:600}}>auto</span>
+                  Úschovy — čistý úrok (k 1. {["ledna","února","března","dubna","května","června","července","srpna","září","října","listopadu","prosince"][(now.getMonth()+1)%12]})
+                </span>
+                <span style={{fontFamily:"JetBrains Mono,monospace",color:"#059669",fontSize:11}}>+{fmtKc(Math.round(escrowNetThisMonth))}</span>
+              </div>
+            )}
+            {/* Manuální příjmové položky */}
+            {(financeItems||[]).filter(i=>i.category==="prijem"&&i.notes!=="TBD").map((item,idx)=>(
+              <div key={idx} style={{display:"flex",justifyContent:"space-between",fontSize:12,color:"var(--txt)",padding:"3px 0"}}>
+                <span>{item.label}</span>
+                <span style={{fontFamily:"JetBrains Mono,monospace",color:"#059669",fontSize:11}}>+{fmtKc(item.amount||0)}</span>
+              </div>
+            ))}
+          </div>
+
+          {/* Dolní část — CASH FLOW */}
+          <div style={{padding:"14px 20px 16px",flex:1,display:"flex",flexDirection:"column"}}>
+            <div style={{fontSize:9,letterSpacing:".22em",textTransform:"uppercase",color:"var(--mut)",fontWeight:700,marginBottom:10}}>Cash flow — tento měsíc</div>
+            {[
+              { label: "Fakturováno (bez DPH)", value: mRev, color: "#059669", sign: "+" },
+              ...(onTheWayAmt > 0 ? [{ label: `Na cestě — ${onTheWayInvs.length}× faktura`, value: onTheWayAmt, color: "#D97706", sign: "+", sub: "čeká na úhradu" }] : []),
+              { label: "Nutné výdaje", value: Math.abs(totalNutne), color: "#DC2626", sign: "−" },
+              { label: "Lusus výdaje", value: Math.abs(totalLuxus), color: "#9333EA", sign: "−" },
+            ].map((row,i) => (
+              <div key={i} style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",padding:"7px 0",borderBottom:"1px solid var(--line)"}}>
+                <div>
+                  <div style={{fontSize:12,color:"var(--txt)"}}>{row.label}</div>
+                  {row.sub && <div style={{fontSize:9.5,color:"#D97706",marginTop:1}}>{row.sub}</div>}
+                </div>
+                <span style={{fontSize:13,fontFamily:"Fraunces,serif",fontWeight:300,color:row.color,flexShrink:0,marginLeft:8}}>
+                  {row.sign}{fmtKc(row.value)}
+                </span>
+              </div>
+            ))}
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",padding:"11px 0 4px",borderTop:`2px solid ${cashflow>=0?"#059669":"#DC2626"}`,marginTop:4}}>
+              <span style={{fontSize:13,fontWeight:700,color:"var(--txt)"}}>Zůstatek</span>
+              <span style={{fontSize:24,fontFamily:"Fraunces,serif",fontWeight:300,color:cashflow>=0?"#059669":"#DC2626",lineHeight:1}}>
+                {cashflow>=0?"+":""}{fmtKc(cashflow)}
+              </span>
+            </div>
+          </div>
+        </Card>
+
+        {/* PRAVÁ KARTA: Výdaje */}
         <Card style={{padding:"16px 20px",display:"flex",flexDirection:"column",gap:0}}>
           <div style={{fontSize:9,letterSpacing:".28em",textTransform:"uppercase",color:"var(--mut)",fontWeight:600,marginBottom:10}}>Výdaje měsíčně</div>
           <div style={{display:"flex",gap:8,marginBottom:14}}>
@@ -3299,7 +3383,6 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
             <span style={{fontFamily:"Fraunces,serif",fontSize:26,fontWeight:300,color:"#9333EA",marginLeft:6}}>{fmtKc(Math.abs(totalLuxus))}</span>
             <span style={{fontSize:11,color:"var(--mut)",alignSelf:"flex-end",marginBottom:4}}>lusus</span>
           </div>
-          {/* NUTNÉ sekce */}
           <div style={{borderTop:"1px solid var(--line)",paddingTop:8,marginBottom:6}}>
             <div style={{fontSize:9,letterSpacing:".2em",textTransform:"uppercase",color:"#DC2626",fontWeight:600,marginBottom:6}}>Nutné</div>
             {nutne.map((i,idx) => (
@@ -3309,7 +3392,6 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
               </div>
             ))}
           </div>
-          {/* LUSUS sekce */}
           <div style={{borderTop:"1px solid var(--line)",paddingTop:8,marginTop:4}}>
             <div style={{fontSize:9,letterSpacing:".2em",textTransform:"uppercase",color:"#9333EA",fontWeight:600,marginBottom:6}}>Lusus</div>
             {luxus.map((i,idx) => (
@@ -3323,103 +3405,128 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
             <span style={{fontSize:10,color:"var(--mut)",letterSpacing:".1em",textTransform:"uppercase"}}>Celkem výdaje</span>
             <span style={{fontFamily:"Fraunces,serif",fontSize:18,fontWeight:300,color:"var(--ink)"}}>{fmtKc(Math.abs(totalVydaje))}</span>
           </div>
-        </Card>
-        {/* CASH FLOW — přesunuto sem, propojeno s Příjmy */}
-        <Card style={{padding:"18px 20px",display:"flex",flexDirection:"column",gap:0}}>
-          <div style={{fontSize:9,letterSpacing:".28em",textTransform:"uppercase",color:"var(--mut)",fontWeight:600,marginBottom:14}}>Cash flow — tento měsíc</div>
-          {[
-            { label: "Fakturováno (bez DPH)", value: mRev, color: "#059669", sign: "+" },
-            ...(onTheWayAmt > 0 ? [{ label: `Na cestě — ${onTheWayInvs.length}× faktura`, value: onTheWayAmt, color: "#D97706", sign: "+", sub: "čeká na úhradu" }] : []),
-            { label: "Nutné výdaje", value: Math.abs(totalNutne), color: "#DC2626", sign: "−" },
-            { label: "Lusus výdaje", value: Math.abs(totalLuxus), color: "#9333EA", sign: "−" },
-          ].map((row,i) => (
-            <div key={i} style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",padding:"9px 0",borderBottom:"1px solid var(--line)"}}>
-              <div>
-                <div style={{fontSize:12,color:"var(--txt)"}}>{row.label}</div>
-                {row.sub && <div style={{fontSize:9.5,color:"#D97706",marginTop:1}}>{row.sub}</div>}
-              </div>
-              <span style={{fontSize:14,fontFamily:"Fraunces,serif",fontWeight:300,color:row.color,flexShrink:0,marginLeft:8}}>
-                {row.sign}{fmtKc(row.value)}
-              </span>
-            </div>
-          ))}
-          <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",padding:"12px 0 8px",borderTop:`2px solid ${cashflow>=0?"#059669":"#DC2626"}`,marginTop:4}}>
-            <span style={{fontSize:14,fontWeight:700,color:"var(--txt)"}}>Zůstatek</span>
-            <span style={{fontSize:26,fontFamily:"Fraunces,serif",fontWeight:300,color:cashflow>=0?"#059669":"#DC2626",lineHeight:1}}>
-              {cashflow>=0?"+":""}{fmtKc(cashflow)}
-            </span>
-          </div>
-          <button className="btn gho" style={{fontSize:11,marginTop:"auto",width:"100%"}} onClick={()=>onNav("vykaz")}>+ Nový výkaz práce</button>
+          <button className="btn gho" style={{fontSize:11,marginTop:"auto",paddingTop:10,width:"100%"}} onClick={()=>onNav("vykaz")}>+ Nový výkaz práce</button>
         </Card>
       </div>
       </Panel>
 
-      {/* PŘÍJEM MAUX LEGAL chart */}
+      {/* STACKED BAR CHART — PŘÍJEM MAUX LEGAL: zelená faktury + oranžová úschovy */}
       <Panel id="chart">
-      <Card style={{padding:"16px 18px",display:"flex",flexDirection:"column"}}>
-          {(() => {
-            const W=480,H=110,padL=6,padR=6,padT=24,padB=24;
-            const n=chartData.length;
-            if(n===0) return null;
-            const nz=chartData.filter(d=>d.v>0);
-            const ytdTotal = chartData.reduce((s,d) => s+d.inv, 0);
-            const ytdEscrow = chartData.reduce((s,d) => s+d.escrow, 0);
-            const minV=nz.length>1?Math.min(...nz.map(d=>d.v))*0.7:0;
-            const range=Math.max(maxV-minV,1);
-            const toY=v=>padT+H-((Math.max(v,0)-minV)/range)*H;
-            const xs=chartData.map((_,i)=>padL+i*((W-padL-padR)/Math.max(n-1,1)));
-            // Two lines: total (dark) and invoice-only (lighter)
-            const ptsTotal=chartData.map((d,i)=>`${xs[i]},${toY(d.v)}`).join(" L ");
-            const ptsInv=chartData.map((d,i)=>`${xs[i]},${toY(d.inv)}`).join(" L ");
-            const areaTotal=`M ${xs[0]},${toY(0)} L ${ptsTotal} L ${xs[n-1]},${toY(0)} Z`;
-            const deltas=chartData.map((d,i)=>i===0?0:d.v-chartData[i-1].v);
-            return (
-              <>
-                <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:8}}>
-                  <div>
-                    <div style={{fontSize:9,letterSpacing:".2em",textTransform:"uppercase",color:"var(--mut)",fontWeight:600}}>PŘÍJEM MAUX LEGAL {year}</div>
-                    <div style={{fontSize:9,color:"var(--mut)",marginTop:2,display:"flex",gap:10}}>
-                      <span><span style={{display:"inline-block",width:8,height:3,background:"#3518A5",borderRadius:1,marginRight:3,verticalAlign:"middle"}}/>Fakturace {fmtKc(ytdTotal)}</span>
-                      {ytdEscrow > 0 && <span><span style={{display:"inline-block",width:8,height:3,background:"#059669",borderRadius:1,marginRight:3,verticalAlign:"middle"}}/>Úschovy {fmtKc(ytdEscrow)}</span>}
-                    </div>
-                  </div>
-                  <div style={{textAlign:"right"}}>
-                    <div style={{fontSize:9,color:"var(--mut)"}}>Celkem YTD</div>
-                    <div style={{fontSize:15,fontFamily:"Fraunces,serif",fontWeight:300,color:"var(--gold)"}}>{fmtKc(ytdTotal + ytdEscrow)}</div>
+      <Card style={{padding:"18px 20px 14px"}}>
+        {(() => {
+          const n = barData.length;
+          if (n === 0) return null;
+          const W = 900, BAR_AREA_H = 180, padL = 10, padR = 10, padT = 36, padB = 32;
+          const totalW = W - padL - padR;
+          const barW = Math.max(Math.floor(totalW / n * 0.62), 18);
+          const gap = (totalW - barW * n) / Math.max(n - 1, 1);
+          const barX = (i) => padL + i * (barW + gap);
+          const toBarH = (v) => (v / maxBarV) * BAR_AREA_H;
+          const ytdInv = barData.filter(d => d.key.startsWith(String(year))).reduce((s,d)=>s+d.inv,0);
+          const ytdEsc = barData.filter(d => d.key.startsWith(String(year))).reduce((s,d)=>s+d.escrow,0);
+          return (
+            <>
+              {/* Header */}
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:12}}>
+                <div>
+                  <div style={{fontSize:9,letterSpacing:".2em",textTransform:"uppercase",color:"var(--mut)",fontWeight:600}}>PŘÍJEM MAUX LEGAL · {year}</div>
+                  <div style={{fontSize:9,color:"var(--mut)",marginTop:3,display:"flex",gap:14}}>
+                    <span style={{display:"flex",alignItems:"center",gap:4}}>
+                      <span style={{display:"inline-block",width:10,height:10,borderRadius:2,background:"#4ADE80"}}/>
+                      Fakturace {fmtKc(ytdInv)}
+                    </span>
+                    {ytdEsc > 0 && (
+                      <span style={{display:"flex",alignItems:"center",gap:4}}>
+                        <span style={{display:"inline-block",width:10,height:10,borderRadius:2,background:"#FB923C"}}/>
+                        Úschovy {fmtKc(ytdEsc)}
+                      </span>
+                    )}
                   </div>
                 </div>
-                <svg width="100%" viewBox={`0 0 ${W} ${padT+H+padB}`} style={{overflow:"visible",flex:1}}>
-                  <defs>
-                    <linearGradient id="ag2" x1="0" x2="0" y1="0" y2="1">
-                      <stop offset="0%" stopColor="#3518A5" stopOpacity=".35"/>
-                      <stop offset="100%" stopColor="#3518A5" stopOpacity=".02"/>
-                    </linearGradient>
-                  </defs>
-                  {[0,.5,1].map(p=><line key={p} x1={padL} x2={W-padR} y1={padT+H*(1-p)} y2={padT+H*(1-p)} stroke="#F0EEF8" strokeWidth={1}/>)}
-                  {/* Area pro total */}
-                  <path d={areaTotal} fill="url(#ag2)" opacity={.5}/>
-                  {/* Line fakturace pouze */}
-                  {ytdEscrow > 0 && <path d={`M ${ptsInv}`} fill="none" stroke="#3518A5" strokeWidth={1.2} strokeDasharray="4 3" strokeLinejoin="round" strokeLinecap="round" opacity={.5}/>}
-                  {/* Line total */}
-                  <path d={`M ${ptsTotal}`} fill="none" stroke="#3518A5" strokeWidth={2.5} strokeLinejoin="round" strokeLinecap="round"/>
-                  {chartData.map((d,i)=>{
-                    if(!d.v) return null;
-                    const x=xs[i],y=toY(d.v),isNow=i===n-1,delta=deltas[i],up=delta>0;
-                    return <g key={i}>
-                      {/* Escrow marker */}
-                      {d.escrow > 0 && <circle cx={x} cy={toY(d.escrow)} r={2} fill="#059669" opacity={.6}/>}
-                      <circle cx={x} cy={y} r={isNow?5:3} fill={isNow?"#3518A5":"#fff"} stroke="#3518A5" strokeWidth={isNow?0:1.5}/>
-                      <text x={x} y={y-10} textAnchor="middle" fontSize={isNow?10:8} fontFamily="Fraunces,serif" fill={isNow?"#3518A5":"var(--mut)"}>{Math.round(d.v/1000)}k</text>
-                      {i>0&&delta!==0&&<text x={x} y={y-21} textAnchor="middle" fontSize={7.5} fontFamily="Inter" fontWeight="700" fill={up?"#059669":"#DC2626"}>{up?"↑":"↓"}{Math.round(Math.abs(delta)/1000)}k</text>}
-                      {d.escrow>0&&<text x={x} y={toY(d.escrow)-5} textAnchor="middle" fontSize={6.5} fontFamily="Inter" fill="#059669" opacity={.8}>+{Math.round(d.escrow/1000)}k</text>}
-                      <text x={x} y={padT+H+padB-3} textAnchor="middle" fontSize={isNow?9:8} fontFamily="Inter" fontWeight={isNow?"700":"400"} fill={isNow?"#3518A5":"var(--mut)"}>{d.label}</text>
-                    </g>;
-                  })}
-                </svg>
-              </>
-            );
-          })()}
-        </Card>
+                <div style={{textAlign:"right"}}>
+                  <div style={{fontSize:9,color:"var(--mut)"}}>Celkem YTD</div>
+                  <div style={{fontSize:17,fontFamily:"Fraunces,serif",fontWeight:300,color:"var(--gold)"}}>{fmtKc(ytdInv + ytdEsc)}</div>
+                </div>
+              </div>
+
+              {/* SVG bars */}
+              <svg width="100%" viewBox={`0 0 ${W} ${padT + BAR_AREA_H + padB}`} style={{overflow:"visible"}}>
+                {/* Grid lines */}
+                {[0, 0.25, 0.5, 0.75, 1].map(p => (
+                  <line key={p}
+                    x1={padL} x2={W-padR}
+                    y1={padT + BAR_AREA_H * (1-p)} y2={padT + BAR_AREA_H * (1-p)}
+                    stroke="#F3F4F6" strokeWidth={p===0?1.5:1}
+                  />
+                ))}
+
+                {barData.map((d, i) => {
+                  const x = barX(i);
+                  const invH = toBarH(d.inv);
+                  const escH = toBarH(d.escrow);
+                  const totalH = invH + escH;
+                  const baseY = padT + BAR_AREA_H;
+                  const isNow = d.isCurrent;
+                  return (
+                    <g key={i}>
+                      {/* Zelený bar — faktury */}
+                      {d.inv > 0 && (
+                        <rect
+                          x={x} y={baseY - invH} width={barW} height={invH}
+                          rx={d.escrow > 0 ? 0 : 4} ry={d.escrow > 0 ? 0 : 4}
+                          fill={isNow ? "#059669" : "#4ADE80"}
+                        />
+                      )}
+                      {/* Oranžový bar — úschovy (nahoře) */}
+                      {d.escrow > 0 && (
+                        <rect
+                          x={x} y={baseY - totalH} width={barW} height={escH}
+                          rx={4} ry={4}
+                          fill={isNow ? "#D97706" : "#FB923C"}
+                        />
+                      )}
+                      {/* Hodnota nahoře */}
+                      {d.total > 0 && (
+                        <text
+                          x={x + barW/2} y={baseY - totalH - 6}
+                          textAnchor="middle"
+                          fontSize={isNow ? 11 : 9}
+                          fontFamily="Fraunces,serif"
+                          fontWeight={isNow ? "600" : "300"}
+                          fill={isNow ? "var(--ink)" : "var(--mut)"}
+                        >
+                          {Math.round(d.total/1000)}k
+                        </text>
+                      )}
+                      {/* Úschovy label uvnitř oranž baru (pokud dost velký) */}
+                      {d.escrow > 0 && escH > 14 && (
+                        <text
+                          x={x + barW/2} y={baseY - invH - escH/2 + 4}
+                          textAnchor="middle" fontSize={8}
+                          fontFamily="Inter" fill="rgba(255,255,255,.9)" fontWeight="600"
+                        >
+                          +{Math.round(d.escrow/1000)}k
+                        </text>
+                      )}
+                      {/* X label */}
+                      <text
+                        x={x + barW/2} y={padT + BAR_AREA_H + padB - 4}
+                        textAnchor="middle"
+                        fontSize={isNow ? 9.5 : 8.5}
+                        fontFamily="Inter"
+                        fontWeight={isNow ? "700" : "400"}
+                        fill={isNow ? "#3518A5" : "var(--mut)"}
+                      >
+                        {d.label}
+                      </text>
+                    </g>
+                  );
+                })}
+              </svg>
+            </>
+          );
+        })()}
+      </Card>
       </Panel>
 
       {/* TOP KLIENTI */}
