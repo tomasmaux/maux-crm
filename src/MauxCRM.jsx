@@ -1700,32 +1700,86 @@ function escrowTotalTax(escrows) {
 
 // ─── Breakdown row generators ───────────────────────────────────────────────
 
-// Řádky pro "Dostanu 1. [měsíc]" — tranše s koncem v daném měsíci
+// Řádky pro breakdown měsíce — jisté (konec v měsíci) + průběžné (bez konce) + vyplacené jako info
 function escrowNetForMonthRows(escrows, year, month) {
   const mStart = new Date(year, month, 1);
-  const mEnd = new Date(year, month + 1, 0);
+  const mEnd   = new Date(year, month + 1, 0);
+  const today  = new Date(); today.setHours(0,0,0,0);
+  // Pro průběžné tranše: aktuální měsíc → cap na dnes; budoucí → cap na konec měsíce
+  const isCurrent = year === today.getFullYear() && month === today.getMonth();
+  const runningCap = isCurrent ? new Date(Math.min(today.getTime(), mEnd.getTime())) : mEnd;
   const rows = [];
   (escrows || []).forEach(e => {
     if (!e.date_received || !e.interest_rate) return;
     const from = new Date(e.date_received);
-    _escrowTranches(e).forEach(t => {
+    // Zobrazit i tranše složitelů pokud nejsou oprávnění — ale primárně oprávnění
+    const tranches = _escrowTranches(e);
+    // Navíc ukázat vyplacené oprávněné tranše jako info řádky (is_paid)
+    const allOpr = (e.escrow_tranches || []).filter(t => t.party_type === 'oprávněný');
+    const paidInPast = allOpr.filter(t => t.is_paid && t.paid_date && new Date(t.paid_date) < mStart);
+
+    tranches.forEach(t => {
       const endDate = _trancheEnd(t, e);
-      if (endDate < mStart || endDate > mEnd) return;
-      const effStart = new Date(Math.max(from.getTime(), mStart.getTime()));
-      if (endDate < effStart) return;
-      const days = Math.round((endDate - effStart) / 86400000) + 1;
-      const gross = (t.amount || 0) * e.interest_rate / 365 * days;
+      const isPurelyRunning = endDate.getFullYear() >= 9000;
+
+      if (isPurelyRunning) {
+        // Průběžná tranše — zobraz dny od začátku měsíce (nebo od přijetí) do dnes
+        const effStart = new Date(Math.max(from.getTime(), mStart.getTime()));
+        const effEnd   = runningCap;
+        if (effEnd < effStart || effEnd < mStart) return;
+        const days  = Math.round((effEnd - effStart) / 86400000) + 1;
+        const gross = (t.amount || 0) * e.interest_rate / 365 * days;
+        rows.push({
+          úschova:    e.escrow_number,
+          oprávněný:  t.party_name || "–",
+          částka:     t.amount || 0,
+          dní:        days,
+          hrubý:      Math.round(gross),
+          daň:        Math.round(gross * 0.15),
+          čistý:      Math.round(gross * 0.85),
+          typ:        "průběžné",
+          note:       isCurrent ? `akumuluje se (do dnes)` : `projekce celého měsíce`,
+        });
+      } else if (endDate >= mStart && endDate <= mEnd) {
+        // Jistá tranše — končí tento měsíc
+        const effStart = new Date(Math.max(from.getTime(), mStart.getTime()));
+        if (endDate < effStart) return;
+        const days  = Math.round((endDate - effStart) / 86400000) + 1;
+        const gross = (t.amount || 0) * e.interest_rate / 365 * days;
+        rows.push({
+          úschova:    e.escrow_number,
+          oprávněný:  t.party_name || "–",
+          částka:     t.amount || 0,
+          dní:        days,
+          hrubý:      Math.round(gross),
+          daň:        Math.round(gross * 0.15),
+          čistý:      Math.round(gross * 0.85),
+          typ:        "jisté",
+          note:       `konec ${endDate.getDate()}.${month+1}.`,
+        });
+      }
+      // Tranše s koncem mimo měsíc a bez aktivního běhu → přeskočit
+    });
+
+    // Vyplacené tranše z tohoto escrow — zobraz jako info (0 Kč v tomto měsíci)
+    paidInPast.forEach(t => {
+      const paidD = new Date(t.paid_date);
       rows.push({
-        úschova: e.escrow_number,
-        oprávněný: t.party_name || "–",
-        částka: t.amount || 0,
-        dní: days,
-        hrubý: Math.round(gross),
-        daň: Math.round(gross * 0.15),
-        čistý: Math.round(gross * 0.85),
+        úschova:    e.escrow_number,
+        oprávněný:  t.party_name || "–",
+        částka:     t.amount || 0,
+        dní:        0,
+        hrubý:      0,
+        daň:        0,
+        čistý:      0,
+        typ:        "vyplaceno",
+        note:       `vyplaceno ${paidD.getDate()}.${paidD.getMonth()+1}.${paidD.getFullYear()}`,
       });
     });
   });
+  // Seřadit: jisté → průběžné → vyplaceno
+  const order = { jisté:0, průběžné:1, vyplaceno:2 };
+  rows.sort((a,b) => (order[a.typ]||0)-(order[b.typ]||0));
   return rows;
 }
 
@@ -1777,15 +1831,23 @@ function escrowTotalNetRows(escrows) {
 }
 
 // ─── KpiBreakdown — rozbalovací tabulka pod KPI ─────────────────────────────
+const TYP_STYLE = {
+  jisté:     { bg:"transparent",          badge:"#065F46", badgeBg:"#D1FAE5", label:"jisté" },
+  průběžné:  { bg:"rgba(250,204,21,0.07)",badge:"#92400E", badgeBg:"#FEF3C7", label:"průběžné" },
+  vyplaceno: { bg:"rgba(0,0,0,0.025)",    badge:"#6B7280", badgeBg:"#F3F4F6", label:"vyplaceno" },
+};
+
 const BREAKDOWN_COLS = {
   nextMonth: [
+    { key:"typ",        label:"" },
     { key:"úschova",    label:"Úschova" },
     { key:"oprávněný",  label:"Oprávněný" },
     { key:"částka",     label:"Jistina",    num:true },
     { key:"dní",        label:"Dní",        num:true, plain:true },
-    { key:"hrubý",      label:"Hrubý úrok", num:true },
-    { key:"daň",        label:"Srážková daň (15%)", num:true },
-    { key:"čistý",      label:"Čistý úrok", num:true },
+    { key:"hrubý",      label:"Hrubý",      num:true },
+    { key:"daň",        label:"Daň 15 %",   num:true },
+    { key:"čistý",      label:"Čistý",      num:true },
+    { key:"note",       label:"Poznámka" },
   ],
   tax: [
     { key:"úschova",  label:"Úschova" },
@@ -1806,45 +1868,108 @@ const BREAKDOWN_COLS = {
 function KpiBreakdown({ rows, colSet, onClose }) {
   if (!rows || rows.length === 0) return (
     <div style={{padding:"14px 18px",fontSize:12,color:"var(--mut)",borderTop:"1px solid var(--line)"}}>
-      Žádné tranše v tomto období. <button onClick={onClose} style={{float:"right",border:"none",background:"none",cursor:"pointer",fontSize:13,color:"var(--mut)"}}>✕</button>
+      Žádné tranše v tomto období.
+      <button onClick={onClose} style={{float:"right",border:"none",background:"none",cursor:"pointer",fontSize:13,color:"var(--mut)"}}>✕</button>
     </div>
   );
   const cols = BREAKDOWN_COLS[colSet] || [];
   const numKeys = cols.filter(c=>c.num&&!c.plain).map(c=>c.key);
+  const isNextMonth = colSet === "nextMonth";
+
+  // Duální součty pro nextMonth
+  const jistéRows    = isNextMonth ? rows.filter(r=>r.typ==="jisté")    : [];
+  const průběžnéRows = isNextMonth ? rows.filter(r=>r.typ==="průběžné") : [];
+  const jistéTotal   = jistéRows.reduce((s,r)=>s+(r.čistý||0),0);
+  const průběžnéTotal= průběžnéRows.reduce((s,r)=>s+(r.čistý||0),0);
+
+  // Standardní součty pro ostatní
   const totals = {};
-  numKeys.forEach(k => { totals[k] = rows.reduce((s,r) => s+(r[k]||0), 0); });
+  if (!isNextMonth) numKeys.forEach(k => { totals[k] = rows.reduce((s,r)=>s+(r[k]||0),0); });
+
   return (
-    <div style={{borderTop:"1px solid var(--line)",overflow:"auto",maxHeight:280}}>
-      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 14px",background:"var(--bg2)"}}>
+    <div style={{borderTop:"1px solid var(--line)",overflow:"auto",maxHeight:320}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"7px 14px",background:"var(--bg2)"}}>
         <span style={{fontSize:11,color:"var(--mut)",fontWeight:500}}>Podrobný rozpis</span>
         <button onClick={onClose} style={{border:"none",background:"none",cursor:"pointer",fontSize:13,color:"var(--mut)",lineHeight:1}}>✕</button>
       </div>
       <table style={{width:"100%",borderCollapse:"collapse",fontSize:11.5}}>
         <thead>
           <tr style={{background:"var(--bg2)"}}>
-            {cols.map(c=><th key={c.key} style={{textAlign:c.num?"right":"left",padding:"5px 12px",color:"var(--mut)",fontWeight:500,whiteSpace:"nowrap",borderBottom:"1px solid var(--line)"}}>{c.label}</th>)}
+            {cols.map(c=>(
+              <th key={c.key} style={{textAlign:c.num?"right":"left",padding:"5px 10px",color:"var(--mut)",fontWeight:500,whiteSpace:"nowrap",borderBottom:"1px solid var(--line)"}}>
+                {c.label}
+              </th>
+            ))}
           </tr>
         </thead>
         <tbody>
-          {rows.map((row,i)=>(
-            <tr key={i} style={{borderBottom:"1px solid var(--line)",background:i%2===0?"transparent":"rgba(0,0,0,0.018)"}}>
-              {cols.map(c=>(
-                <td key={c.key} style={{textAlign:c.num?"right":"left",padding:"5px 12px",fontVariantNumeric:"tabular-nums",whiteSpace:"nowrap"}}>
-                  {c.num&&!c.plain ? fmtKc(row[c.key]) : row[c.key]}
-                </td>
-              ))}
-            </tr>
-          ))}
+          {rows.map((row,i)=>{
+            const ts = TYP_STYLE[row.typ] || TYP_STYLE.jisté;
+            const isVypl = row.typ === "vyplaceno";
+            return (
+              <tr key={i} style={{borderBottom:"1px solid var(--line)",background:ts.bg,opacity:isVypl?0.6:1}}>
+                {cols.map(c=>{
+                  if (c.key === "typ") return (
+                    <td key="typ" style={{padding:"5px 6px 5px 10px",whiteSpace:"nowrap"}}>
+                      <span style={{fontSize:9,fontWeight:600,padding:"2px 5px",borderRadius:4,background:ts.badgeBg,color:ts.badge,textTransform:"uppercase",letterSpacing:"0.04em"}}>
+                        {ts.label}
+                      </span>
+                    </td>
+                  );
+                  return (
+                    <td key={c.key} style={{textAlign:c.num?"right":"left",padding:"5px 10px",fontVariantNumeric:"tabular-nums",whiteSpace:"nowrap",color:isVypl&&c.num?"var(--mut)":undefined}}>
+                      {c.num&&!c.plain
+                        ? (isVypl && row[c.key]===0 ? "–" : fmtKc(row[c.key]))
+                        : row[c.key]}
+                    </td>
+                  );
+                })}
+              </tr>
+            );
+          })}
         </tbody>
-        {numKeys.length>0&&<tfoot>
-          <tr style={{borderTop:"2px solid var(--ink)",background:"var(--bg2)"}}>
-            {cols.map((c,i)=>(
-              <td key={c.key} style={{textAlign:c.num?"right":"left",padding:"6px 12px",fontWeight:600,fontVariantNumeric:"tabular-nums",whiteSpace:"nowrap"}}>
-                {c.num&&!c.plain ? fmtKc(totals[c.key]) : i===0?"Celkem":""}
-              </td>
-            ))}
-          </tr>
-        </tfoot>}
+        <tfoot>
+          {isNextMonth ? (
+            <>
+              {jistéRows.length > 0 && (
+                <tr style={{borderTop:"2px solid var(--ink)",background:"#ECFDF5"}}>
+                  {cols.map((c,i)=>(
+                    <td key={c.key} style={{textAlign:c.num?"right":"left",padding:"6px 10px",fontWeight:600,fontVariantNumeric:"tabular-nums",whiteSpace:"nowrap",color:"#065F46"}}>
+                      {c.key==="typ" ? <span style={{fontSize:9,fontWeight:700,padding:"2px 5px",borderRadius:4,background:"#D1FAE5",color:"#065F46",textTransform:"uppercase"}}>jisté</span>
+                       : c.key==="čistý" ? fmtKc(jistéTotal)
+                       : c.key==="hrubý" ? fmtKc(jistéRows.reduce((s,r)=>s+(r.hrubý||0),0))
+                       : c.key==="daň"   ? fmtKc(jistéRows.reduce((s,r)=>s+(r.daň||0),0))
+                       : i===1 ? "Celkem k výplatě" : ""}
+                    </td>
+                  ))}
+                </tr>
+              )}
+              {průběžnéRows.length > 0 && (
+                <tr style={{borderTop:"1px solid var(--line)",background:"#FFFBEB"}}>
+                  {cols.map((c,i)=>(
+                    <td key={c.key} style={{textAlign:c.num?"right":"left",padding:"6px 10px",fontWeight:600,fontVariantNumeric:"tabular-nums",whiteSpace:"nowrap",color:"#92400E"}}>
+                      {c.key==="typ" ? <span style={{fontSize:9,fontWeight:700,padding:"2px 5px",borderRadius:4,background:"#FEF3C7",color:"#92400E",textTransform:"uppercase"}}>průběžné</span>
+                       : c.key==="čistý" ? fmtKc(průběžnéTotal)
+                       : c.key==="hrubý" ? fmtKc(průběžnéRows.reduce((s,r)=>s+(r.hrubý||0),0))
+                       : c.key==="daň"   ? fmtKc(průběžnéRows.reduce((s,r)=>s+(r.daň||0),0))
+                       : i===1 ? "Akumuluje se" : ""}
+                    </td>
+                  ))}
+                </tr>
+              )}
+            </>
+          ) : (
+            numKeys.length > 0 && (
+              <tr style={{borderTop:"2px solid var(--ink)",background:"var(--bg2)"}}>
+                {cols.map((c,i)=>(
+                  <td key={c.key} style={{textAlign:c.num?"right":"left",padding:"6px 10px",fontWeight:600,fontVariantNumeric:"tabular-nums",whiteSpace:"nowrap"}}>
+                    {c.num&&!c.plain ? fmtKc(totals[c.key]) : i===0?"Celkem":""}
+                  </td>
+                ))}
+              </tr>
+            )
+          )}
+        </tfoot>
       </table>
     </div>
   );
