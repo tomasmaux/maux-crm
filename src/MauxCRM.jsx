@@ -1618,6 +1618,41 @@ function calcEscrowInterest(amount, rate, dateFrom, dateTo) {
   return { months, totalGross: months.reduce((s,m)=>s+m.gross,0), totalNet: months.reduce((s,m)=>s+m.net,0) };
 }
 
+// Čistý úrok z úschov pro konkrétní kalendářní měsíc (month = 0-based)
+function escrowNetForMonth(escrows, year, month) {
+  const mStart = new Date(year, month, 1);
+  const mEnd = new Date(year, month + 1, 0);
+  return (escrows || []).reduce((sum, e) => {
+    const deposits = (e.escrow_tranches || []).filter(t => t.party_type === 'složitel').reduce((s,t)=>s+(t.amount||0), 0);
+    if (!deposits || !e.date_received || !e.interest_rate) return sum;
+    const from = new Date(e.date_received);
+    const to = e.date_paid ? new Date(e.date_paid) : new Date(9999, 0, 1);
+    const effStart = new Date(Math.max(from.getTime(), mStart.getTime()));
+    const effEnd = new Date(Math.min(to.getTime(), mEnd.getTime()));
+    if (effEnd < effStart) return sum;
+    const days = Math.round((effEnd - effStart) / 86400000) + 1;
+    return sum + deposits * e.interest_rate / 365 * days * 0.85;
+  }, 0);
+}
+// Celkový čistý úrok ze všech úschov (historicky)
+function escrowTotalNet(escrows) {
+  return (escrows || []).reduce((sum, e) => {
+    const deposits = (e.escrow_tranches || []).filter(t => t.party_type === 'složitel').reduce((s,t)=>s+(t.amount||0), 0);
+    const end = e.date_paid || new Date().toISOString().slice(0,10);
+    const r = calcEscrowInterest(deposits, e.interest_rate, e.date_received, end);
+    return sum + r.totalNet;
+  }, 0);
+}
+// Celkový srážkový daň ze všech úschov (historicky) = gross - net
+function escrowTotalTax(escrows) {
+  return (escrows || []).reduce((sum, e) => {
+    const deposits = (e.escrow_tranches || []).filter(t => t.party_type === 'složitel').reduce((s,t)=>s+(t.amount||0), 0);
+    const end = e.date_paid || new Date().toISOString().slice(0,10);
+    const r = calcEscrowInterest(deposits, e.interest_rate, e.date_received, end);
+    return sum + (r.totalGross - r.totalNet);
+  }, 0);
+}
+
 function EscrowCard({ escrow, onEdit, onDelete }) {
   const [showTranches, setShowTranches] = useState(false);
   const tranches = escrow.escrow_tranches || [];
@@ -1636,7 +1671,7 @@ function EscrowCard({ escrow, onEdit, onDelete }) {
     'čeká_na_plombu': { bg:'#FEF3C7', border:'#FDE68A', text:'#92400E' },
     'čeká_na_přijetí': { bg:'#EEF2FF', border:'#C7D2FE', text:'#3730A3' },
     'částečně_vyplaceno': { bg:'#F0F9FF', border:'#BAE6FD', text:'#0369A1' },
-    'ukončeno': { bg:'#F9FAFB', border:'#E5E7EB', text:'#6B7280' },
+    'ukončeno': { bg:'#ECFDF5', border:'#6EE7B7', text:'#065F46' },
   };
   const sc = statusColors[escrow.status] || statusColors['aktivní'];
   const statusLabel = {
@@ -1877,17 +1912,25 @@ function EscrowList({ escrows, onNew, onEdit, onDelete, loading }) {
     { key:"vše",         label:"Vše",          fn: ()=> true },
     { key:"ukončeno",    label:"Ukončené",     fn: e => e.status === 'ukončeno' },
   ];
+  const now = new Date();
+  const cy = now.getFullYear(), cm = now.getMonth();
+  const MESICE = ["ledna","února","března","dubna","května","června","července","srpna","září","října","listopadu","prosince"];
   const active = escrows.filter(e => e.status !== 'ukončeno');
   const totalInEscrow = active.reduce((s,e) => {
-    const t = e.escrow_tranches||[];
-    return s + t.filter(tr=>tr.party_type==='složitel').reduce((ss,tr)=>ss+(tr.amount||0),0);
+    return s + (e.escrow_tranches||[]).filter(t=>t.party_type==='složitel').reduce((ss,t)=>ss+(t.amount||0),0);
   }, 0);
-  const monthlyNet = active.reduce((s,e) => {
-    const depositTotal = (e.escrow_tranches||[]).filter(t=>t.party_type==='složitel').reduce((ss,t)=>ss+(t.amount||0),0);
-    const today = new Date();
-    const thisMonthDays = new Date(today.getFullYear(), today.getMonth()+1, 0).getDate();
-    return s + depositTotal * (e.interest_rate||0.035) / 365 * thisMonthDays * 0.85;
+  // Historický celkový tok (všechny úschovy, složitelé)
+  const totalFlowed = escrows.reduce((s,e) => {
+    return s + (e.escrow_tranches||[]).filter(t=>t.party_type==='složitel').reduce((ss,t)=>ss+(t.amount||0),0);
   }, 0);
+  // Celkový čistý výdělek ze všech úschov
+  const totalEarned = escrowTotalNet(escrows);
+  // Úrok k 1. příštího měsíce (za aktuální měsíc)
+  const netNextMonth1 = escrowNetForMonth(escrows, cy, cm);
+  // Úrok k 1. přespříštího měsíce (za příští měsíc)
+  const netNextMonth2 = escrowNetForMonth(escrows, cy, cm + 1);
+  const next1Label = `1. ${MESICE[(cm+1)%12]}`;
+  const next2Label = `1. ${MESICE[(cm+2)%12]}`;
   const alerts = active.filter(e => e.date_plomba_end && (() => {
     const diff = (new Date(e.date_plomba_end) - new Date()) / 86400000;
     return diff >= 0 && diff <= 7;
@@ -1895,23 +1938,41 @@ function EscrowList({ escrows, onNew, onEdit, onDelete, loading }) {
 
   return (
     <div style={{display:"flex",flexDirection:"column",gap:16}}>
-      {/* Souhrn */}
-      <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:12}}>
+      {/* Souhrn – řada 1 */}
+      <div style={{display:"grid",gridTemplateColumns:"2fr 1fr 1fr",gap:12}}>
         <div className="kpi hi">
           <div className="k">V úschově celkem</div>
           <div className="v">{fmtKc(totalInEscrow)}</div>
-          <div className="s">{active.length} aktivních úschov</div>
+          <div className="s">{active.length} aktivních · celkem proteklo {fmtKc(totalFlowed)}</div>
         </div>
         <div className="kpi" style={{background:"#FFFBEB",border:"1px solid #FDE68A"}}>
-          <div className="k" style={{color:"#92400E"}}>Příjem tento měsíc (čistý)</div>
-          <div className="v" style={{color:"#D97706"}}>{fmtKc(Math.round(monthlyNet))}</div>
-          <div className="s" style={{color:"#92400E"}}>připíše se 1. příštího měsíce</div>
+          <div className="k" style={{color:"#92400E"}}>Dostanu {next1Label}</div>
+          <div className="v" style={{color:"#D97706"}}>{fmtKc(Math.round(netNextMonth1))}</div>
+          <div className="s" style={{color:"#92400E"}}>čistý úrok za {MESICE[cm].replace("a","").replace("e","").replace("i","").replace("u","") || "tento měsíc"}</div>
+        </div>
+        <div className="kpi" style={{background:"#F0FDF4",border:"1px solid #BBF7D0"}}>
+          <div className="k" style={{color:"#065F46"}}>Dostanu {next2Label} (odhad)</div>
+          <div className="v" style={{color:"#059669"}}>{fmtKc(Math.round(netNextMonth2))}</div>
+          <div className="s" style={{color:"#065F46"}}>projekce · aktivní úschovy</div>
+        </div>
+      </div>
+      {/* Souhrn – řada 2 */}
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:12}}>
+        <div className="kpi" style={{background:"#F5F3FF",border:"1px solid #DDD6FE"}}>
+          <div className="k" style={{color:"#5B21B6"}}>Celkem vydělano (čistý úrok)</div>
+          <div className="v" style={{color:"#7C3AED",fontSize:18}}>{fmtKc(Math.round(totalEarned))}</div>
+          <div className="s" style={{color:"#5B21B6"}}>ze všech {escrows.length} úschov</div>
+        </div>
+        <div className="kpi" style={{background:"#FEF2F2",border:"1px solid #FECACA"}}>
+          <div className="k" style={{color:"#991B1B"}}>Srážková daň (stát)</div>
+          <div className="v" style={{color:"#DC2626",fontSize:18}}>{fmtKc(Math.round(escrowTotalTax(escrows)))}</div>
+          <div className="s" style={{color:"#991B1B"}}>15 % z hrubého úroku</div>
         </div>
         <div className="kpi" style={{background:alerts.length>0?"#FEF3C7":"#F0FDF4",border:`1px solid ${alerts.length>0?"#FDE68A":"#BBF7D0"}`}}>
           <div className="k" style={{color:alerts.length>0?"#92400E":"#065F46"}}>Alerty</div>
           <div className="v" style={{color:alerts.length>0?"#D97706":"#059669"}}>{alerts.length > 0 ? `${alerts.length}× ⚠` : "Vše OK"}</div>
           <div className="s" style={{color:alerts.length>0?"#92400E":"#065F46"}}>
-            {alerts.length > 0 ? alerts.map(e=>e.escrow_number).join(", ") : "Žádná úschova se neblíží"}
+            {alerts.length > 0 ? alerts.map(e=>e.escrow_number).join(", ") : "Žádná plomba se neblíží"}
           </div>
         </div>
       </div>
@@ -1948,11 +2009,17 @@ function EscrowList({ escrows, onNew, onEdit, onDelete, loading }) {
 
 /* ─── DASHBOARD ─── */
 function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, loanTrackers, loanTransactions, escrows, onNav, onSaveFinance, onDeleteFinance, onDpfoToggle, onLoanTxAdd, onLoanTxToggle, onLoanTxDelete, onLoanUpdate }) {
+  const [escrowAlertDismissed, setEscrowAlertDismissed] = useState(false);
   const now = new Date();
   const thisMonth = now.toISOString().slice(0, 7);
   const prevMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1).toISOString().slice(0, 7);
   const year = now.getFullYear();
   const H = now.getHours();
+
+  // Úschovy — výpočty pro dashboard
+  const escrowNetThisMonth = escrowNetForMonth(escrows, now.getFullYear(), now.getMonth());
+  const escrowNetNextMonth = escrowNetForMonth(escrows, now.getFullYear(), now.getMonth() + 1);
+  const escrowTaxTotal = escrowTotalTax(escrows);
 
   // Příjmy měsíční
   const mestoPodebrady = (financeItems||[]).find(i => i.id === "fi_pr_02")?.amount || 7245;
@@ -2022,29 +2089,30 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
     <div style={{display:"flex",flexDirection:"column",gap:16}}>
 
       {/* Escrow Alerts */}
-      {(escrows||[]).filter(e => {
-        if (!e.date_plomba_end) return false;
-        const diff = (new Date(e.date_plomba_end) - new Date()) / 86400000;
-        return diff >= 0 && diff <= 3;
-      }).length > 0 && (
-        <div style={{background:"#FEF3C7",border:"1px solid #F59E0B",borderRadius:10,padding:"12px 18px",display:"flex",alignItems:"center",gap:12,cursor:"pointer"}} onClick={()=>onNav("uschovy")}>
-          <span style={{fontSize:18}}>⚠️</span>
-          <div>
-            <div style={{fontWeight:600,color:"#92400E",fontSize:13}}>Blíží se konec plomby</div>
-            <div style={{fontSize:12,color:"#B45309",marginTop:2}}>
-              {(escrows||[]).filter(e => {
-                if (!e.date_plomba_end) return false;
-                const diff = (new Date(e.date_plomba_end) - new Date()) / 86400000;
-                return diff >= 0 && diff <= 3;
-              }).map(e => {
-                const days = Math.ceil((new Date(e.date_plomba_end) - new Date()) / 86400000);
-                return `${e.escrow_number} — za ${days} ${days===1?"den":days<=4?"dny":"dní"}`;
-              }).join(" · ")}
+      {!escrowAlertDismissed && (() => {
+        const alertEscrows = (escrows||[]).filter(e => {
+          if (!e.date_plomba_end) return false;
+          const diff = (new Date(e.date_plomba_end) - new Date()) / 86400000;
+          return diff >= 0 && diff <= 3;
+        });
+        if (alertEscrows.length === 0) return null;
+        return (
+          <div style={{background:"#FEF3C7",border:"1px solid #F59E0B",borderRadius:10,padding:"12px 18px",display:"flex",alignItems:"center",gap:12}}>
+            <span style={{fontSize:18}}>⚠️</span>
+            <div style={{flex:1,cursor:"pointer"}} onClick={()=>onNav("uschovy")}>
+              <div style={{fontWeight:600,color:"#92400E",fontSize:13}}>Blíží se konec plomby</div>
+              <div style={{fontSize:12,color:"#B45309",marginTop:2}}>
+                {alertEscrows.map(e => {
+                  const days = Math.ceil((new Date(e.date_plomba_end) - new Date()) / 86400000);
+                  return `${e.escrow_number} — za ${days} ${days===1?"den":days<=4?"dny":"dní"}`;
+                }).join(" · ")}
+              </div>
             </div>
+            <span style={{fontSize:11,color:"#92400E",textDecoration:"underline",cursor:"pointer"}} onClick={()=>onNav("uschovy")}>Přejít na Úschovy →</span>
+            <button onClick={()=>setEscrowAlertDismissed(true)} style={{marginLeft:8,background:"none",border:"none",fontSize:16,color:"#92400E",cursor:"pointer",padding:"0 4px",lineHeight:1}}>✕</button>
           </div>
-          <span style={{marginLeft:"auto",fontSize:11,color:"#92400E",textDecoration:"underline"}}>Přejít na Úschovy →</span>
-        </div>
-      )}
+        );
+      })()}
 
       {/* Greeting */}
       <div style={{display:"flex",alignItems:"baseline",justifyContent:"space-between"}}>
@@ -2068,8 +2136,8 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
         </Card>
         <Card style={{background:"#F0FDF4",border:"1px solid #BBF7D0"}}>
           <Lbl color="#065F46">▶ Příší měsíc</Lbl>
-          <Num size={22} color="#059669">+{fmtKc(unbilledAmt+mestoPodebrady)}</Num>
-          <div style={{fontSize:11,color:"#065F46",marginTop:4}}>výkazy + Poděbrady</div>
+          <Num size={22} color="#059669">+{fmtKc(Math.round(unbilledAmt+mestoPodebrady+escrowNetThisMonth))}</Num>
+          <div style={{fontSize:11,color:"#065F46",marginTop:4}}>výkazy + Poděbrady + úschovy {fmtKc(Math.round(escrowNetThisMonth))}</div>
         </Card>
         <Card>
           <Lbl>Tento měsíc</Lbl>
@@ -2092,7 +2160,8 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
       <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:10}}>
         <Card style={{padding:"12px 16px",background:"#F0FDF4",border:"1px solid #BBF7D0"}}>
           <Lbl color="#065F46">Příjmy měsíčně</Lbl>
-          <div style={{fontFamily:"Fraunces,serif",fontSize:19,fontWeight:300,color:"#059669",marginTop:3}}>+{fmtKc(mestoPodebrady+unbilledAmt)}</div>
+          <div style={{fontFamily:"Fraunces,serif",fontSize:19,fontWeight:300,color:"#059669",marginTop:3}}>+{fmtKc(Math.round(mestoPodebrady+unbilledAmt+escrowNetThisMonth))}</div>
+          {escrowNetThisMonth > 0 && <div style={{fontSize:10,color:"#065F46",marginTop:2}}>+ {fmtKc(Math.round(escrowNetThisMonth))} úschovy k 1. {["ledna","února","března","dubna","května","června","července","srpna","září","října","listopadu","prosince"][(now.getMonth()+1)%12]}</div>}
         </Card>
         <Card style={{padding:"12px 16px"}}>
           <Lbl color="#DC2626">Nutné výdaje</Lbl>
@@ -2126,23 +2195,26 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
           const bobloan2 = (loanTransactions?.loan_bobnice||[]).reduce((s,t) => s+t.amount, 0);
           const bobFb2 = (financeItems||[]).find(i => i.id === "fi_sp_02")?.amount || 0;
           const bob2 = Math.max(bobloan2>0?bobloan2:bobFb2, 0);
+          const danUschov = Math.round(escrowTaxTotal); // srážková daň z úschov — reálné číslo
           const man2 = sp2.filter(i=>i.id!=="fi_sp_99"&&i.id!=="fi_sp_01"&&i.id!=="fi_sp_02").reduce((s,o)=>s+(o.amount||0),0);
-          const zk = Math.max(bal2 - dph2 - dpfo2 - bob2 - man2, 0);
+          const zk = Math.max(bal2 - dph2 - dpfo2 - bob2 - man2 - danUschov, 0);
           const akcie = (financeItems||[]).find(i=>i.id==="fi_ma_01")?.amount||0;
           const stavebko = (financeItems||[]).find(i=>i.id==="fi_ma_02")?.amount||0;
-          
+          const firmaKap = (financeItems||[]).find(i=>i.id==="fi_ma_03")?.amount||0;
+
           const outerItems = [
             {amount:akcie,    color:"#10B981", label:"Akcie"},
             {amount:stavebko, color:"#D97706", label:"Stavebko"},
+            {amount:firmaKap, color:"#8B5CF6", label:"Firma (MAJETEK)"},
             {amount:zk,       color:"#6EE7B7", label:"Základ. kap."},
           ].filter(i=>i.amount>0);
-          
+
           const innerItems = [
-            {amount:dpfo2,   color:"#F59E0B", label:"DPFO 2026"},
-            {amount:dph2,    color:"#3518A5", label:"DPH"},
-            {amount:bob2,    color:"#059669", label:"Bobnice"},
-            {amount:man2,    color:"#7C3AED", label:"Daň z úschov"},
-            {amount:zk,      color:"#C4B5FD", label:"Základ. kap."},
+            {amount:bob2,      color:"#6B7280", label:"Bobnice"},
+            {amount:danUschov, color:"#A8A29E", label:"Daň z úschov"},
+            {amount:man2,      color:"#8B5CF6", label:"Firma (SPORÁK)"},
+            {amount:dpfo2,     color:"#6EE7B7", label:"DPFO 2026"},
+            {amount:dph2,      color:"#3518A5", label:"DPH"},
           ].filter(i=>i.amount>0);
           
           const oTotal = outerItems.reduce((s,i)=>s+Math.abs(i.amount||0),0);
