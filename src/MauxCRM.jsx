@@ -1669,14 +1669,41 @@ function EscrowCard({ escrow, onEdit, onDelete }) {
         </div>
       </div>
       {escrow.notes && <div style={{padding:"8px 18px",fontSize:12,color:"var(--mut)",borderBottom:"1px solid var(--line)",background:"#FAFAFA"}}>{escrow.notes}</div>}
-      <div style={{padding:"10px 18px",display:"flex",gap:8,flexWrap:"wrap",borderBottom:"1px solid var(--line)"}}>
-        {tranches.slice(0,6).map((t,i)=>(
-          <span key={i} style={{fontSize:11,padding:"3px 10px",borderRadius:20,background:t.party_type==='složitel'?"#EEF2FF":"#F0FDF4",color:t.party_type==='složitel'?"#3730A3":"#065F46",fontWeight:400}}>
-            {t.party_type==='složitel'?"↓":"↑"} {t.party_name?.split(' ')[0]} · {fmtKc(t.amount)}
-            {t.is_paid && " ✓"}
-          </span>
-        ))}
-      </div>
+      {/* Flow: Složitelé → Oprávnění */}
+      {tranches.length > 0 && (() => {
+        const sloz = tranches.filter(t=>t.party_type==='složitel');
+        const opr = tranches.filter(t=>t.party_type==='oprávněný');
+        return (
+          <div style={{padding:"12px 18px",display:"grid",gridTemplateColumns:"1fr 28px 1fr",gap:0,borderBottom:"1px solid var(--line)"}}>
+            {/* Složitelé */}
+            <div>
+              <div style={{fontSize:9,letterSpacing:".12em",textTransform:"uppercase",color:"#3730A3",fontWeight:700,marginBottom:6}}>Složitelé — vkládají</div>
+              {sloz.map((t,i)=>(
+                <div key={i} style={{paddingBottom:6,marginBottom:i<sloz.length-1?6:0,borderBottom:i<sloz.length-1?"1px solid #E0E7FF":"none"}}>
+                  <div style={{fontSize:12,fontWeight:500,color:"var(--ink)",lineHeight:1.3}}>{t.party_name}</div>
+                  <div style={{fontFamily:"Fraunces,serif",fontWeight:300,fontSize:14,color:"var(--gold)"}}>{fmtKc(t.amount)}</div>
+                </div>
+              ))}
+            </div>
+            {/* Šipka */}
+            <div style={{display:"flex",alignItems:"center",justifyContent:"center",color:"var(--mut)",fontSize:16,paddingTop:18}}>→</div>
+            {/* Oprávnění */}
+            <div>
+              <div style={{fontSize:9,letterSpacing:".12em",textTransform:"uppercase",color:"#065F46",fontWeight:700,marginBottom:6}}>Oprávnění — dostávají</div>
+              {opr.map((t,i)=>(
+                <div key={i} style={{paddingBottom:6,marginBottom:i<opr.length-1?6:0,borderBottom:i<opr.length-1?"1px solid #DCFCE7":"none"}}>
+                  <div style={{fontSize:12,fontWeight:500,color:"var(--ink)",lineHeight:1.3}}>{t.party_name}</div>
+                  <div style={{display:"flex",alignItems:"center",gap:6}}>
+                    <span style={{fontFamily:"Fraunces,serif",fontWeight:300,fontSize:14,color:"var(--gold)"}}>{fmtKc(t.amount)}</span>
+                    <span style={{fontSize:12}}>{t.is_paid ? "✅" : "⬜"}</span>
+                    {t.paid_date && <span style={{fontSize:10,color:"var(--mut)"}}>{fmtDate(t.paid_date)}</span>}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      })()}
       <div style={{padding:"8px 14px",display:"flex",gap:8,background:"#FAFAFA"}}>
         <button className="btn gho" style={{fontSize:11}} onClick={()=>setShowTranches(p=>!p)}>
           {showTranches?"Skrýt detail":"Zobrazit detail + úroky"}
@@ -1844,6 +1871,12 @@ function EscrowForm({ init, onSave, onCancel, saving }) {
 }
 
 function EscrowList({ escrows, onNew, onEdit, onDelete, loading }) {
+  const [filter, setFilter] = useState("probíhající");
+  const FILTERS = [
+    { key:"probíhající", label:"Probíhající", fn: e => e.status !== 'ukončeno' },
+    { key:"vše",         label:"Vše",          fn: ()=> true },
+    { key:"ukončeno",    label:"Ukončené",     fn: e => e.status === 'ukončeno' },
+  ];
   const active = escrows.filter(e => e.status !== 'ukončeno');
   const totalInEscrow = active.reduce((s,e) => {
     const t = e.escrow_tranches||[];
@@ -1883,17 +1916,30 @@ function EscrowList({ escrows, onNew, onEdit, onDelete, loading }) {
         </div>
       </div>
       {/* Toolbar */}
-      <div style={{display:"flex",justifyContent:"flex-end"}}>
+      <div style={{display:"flex",alignItems:"center",gap:8,justifyContent:"space-between"}}>
+        <div style={{display:"flex",gap:4}}>
+          {FILTERS.map(f=>(
+            <button key={f.key} onClick={()=>setFilter(f.key)} style={{
+              padding:"5px 14px",borderRadius:20,fontSize:12,border:"1px solid",cursor:"pointer",fontWeight:filter===f.key?600:400,
+              background:filter===f.key?"var(--ink)":"transparent",
+              color:filter===f.key?"#fff":"var(--mut)",
+              borderColor:filter===f.key?"var(--ink)":"var(--line)"
+            }}>{f.label} ({escrows.filter(FILTERS.find(x=>x.key===f.key).fn).length})</button>
+          ))}
+        </div>
         <button className="btn pri" onClick={onNew}>+ Nová úschova</button>
       </div>
       {/* List */}
       {loading ? <div className="loading">Načítám úschovy…</div> : (
         <div style={{display:"flex",flexDirection:"column",gap:10}}>
-          {escrows.length === 0 ? (
-            <div className="ph"><h2 className="serif">Žádné úschovy</h2><p>Přidej první úschovu tlačítkem výše.</p></div>
-          ) : (
-            escrows.map(e => <EscrowCard key={e.id} escrow={e} onEdit={onEdit} onDelete={onDelete} />)
-          )}
+          {(() => {
+            const shown = escrows.filter(FILTERS.find(f=>f.key===filter).fn);
+            return shown.length === 0 ? (
+              <div className="ph"><h2 className="serif">Žádné úschovy</h2><p>Přidej první úschovu tlačítkem výše.</p></div>
+            ) : (
+              shown.map(e => <EscrowCard key={e.id} escrow={e} onEdit={onEdit} onDelete={onDelete} />)
+            );
+          })()}
         </div>
       )}
     </div>
