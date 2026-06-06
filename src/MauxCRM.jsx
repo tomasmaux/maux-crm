@@ -2764,15 +2764,31 @@ function MiniSpořák({ financeItems, invoices, dpfoMonths, loanTransactions, es
 }
 
 /* ─── MAJETEK BAR (osobní majetek — dedikovaný řádek) ─── */
-function MajetekBar({ financeItems, onSaveFinance }) {
+function MajetekBar({ financeItems, onSaveFinance, invoices, dpfoMonths, loanTransactions, escrows }) {
   const akcieItem    = (financeItems||[]).find(i => i.id === "fi_ma_01");
   const stavebkoItem = (financeItems||[]).find(i => i.id === "fi_ma_02");
-  const firmaKapItem = (financeItems||[]).find(i => i.id === "fi_ma_03");
   const extraItems   = (financeItems||[]).filter(i => i.category === "majetek" && !["fi_ma_01","fi_ma_02","fi_ma_03"].includes(i.id));
   const akcie    = akcieItem?.amount    || 0;
   const stavebko = stavebkoItem?.amount || 0;
-  const firmaKap = firmaKapItem?.amount || 0;
-  const total    = akcie + stavebko + firmaKap + extraItems.reduce((s,i) => s+(i.amount||0), 0);
+
+  // Firemní rezerva = vše co zbyde na spořáku po odečtení obálek (= volné)
+  const sporBal    = (financeItems||[]).find(i => i.id === "fi_sp_99")?.amount || 0;
+  const dphAutoM   = (invoices||[]).filter(i => i.status === "uhrazena").reduce((s,i) => s+(i.vat_amount||0), 0);
+  const dpfoAccM   = (dpfoMonths||[]).filter(m => m.is_paid).reduce((s,m) => s+(m.amount||8050), 0);
+  const bobloanM   = (loanTransactions?.loan_bobnice||[]).reduce((s,t) => s+t.amount, 0);
+  const bobFbM     = (financeItems||[]).find(i => i.id === "fi_sp_02")?.amount || 0;
+  const bobBalM    = Math.max(bobloanM > 0 ? bobloanM : bobFbM, 0);
+  const danUschovM = Math.round(escrowTotalTax(escrows||[]));
+  const autoLabelsM = new Set(["dph","dpfo 2026","bobnice","daň z úschov"]);
+  const manualEnvM = (financeItems||[]).filter(i =>
+    i.category === "sporaci" && i.notes !== "SKIP_DISPLAY"
+    && i.id !== "fi_sp_99" && i.id !== "fi_sp_01" && i.id !== "fi_sp_02"
+    && !autoLabelsM.has((i.label||"").toLowerCase().trim())
+  );
+  const totalEarmarkedM = dphAutoM + dpfoAccM + (bobBalM > 0 ? bobBalM : 0) + danUschovM + manualEnvM.reduce((s,i)=>s+(i.amount||0),0);
+  const firmaKap = Math.max(sporBal - totalEarmarkedM, 0);
+
+  const total = akcie + stavebko + firmaKap + extraItems.reduce((s,i) => s+(i.amount||0), 0);
 
   const [editId,    setEditId]    = useState(null);   // which item is being edited
   const [editVal,   setEditVal]   = useState(0);
@@ -2791,7 +2807,7 @@ function MajetekBar({ financeItems, onSaveFinance }) {
   const allAssets = [
     akcieItem    && { item: akcieItem,    label: "Akcie / ETF",      amount: akcie,    color: "#10B981", editable: true  },
     stavebkoItem && { item: stavebkoItem, label: "Stavební spoření", amount: stavebko, color: "#D97706", editable: true  },
-    firmaKapItem && { item: firmaKapItem, label: "Firemní rezerva",  amount: firmaKap, color: "#8B5CF6", editable: false },
+    firmaKap > 0  && { item: null,         label: "Firemní rezerva",  amount: firmaKap, color: "#8B5CF6", editable: false, autoNote: "= spořák − obálky" },
     ...extraItems.map((it,idx) => ({ item: it, label: it.label, amount: it.amount||0, color: COLORS[(3+idx)%COLORS.length], editable: true })),
   ].filter(Boolean).filter(a => a.amount > 0 || a.editable);
 
@@ -2822,6 +2838,7 @@ function MajetekBar({ financeItems, onSaveFinance }) {
                 <div style={{fontSize:11,color:"var(--mut)",marginBottom:2}}>
                   {a.label}
                   {!a.editable && <span style={{fontSize:9,background:"#EEF2FF",color:"#3730A3",padding:"1px 4px",borderRadius:3,fontWeight:700,marginLeft:5}}>auto</span>}
+                  {a.autoNote && <span style={{fontSize:9,color:"var(--mut)",marginLeft:4,opacity:.7}}>{a.autoNote}</span>}
                 </div>
                 {editId === a.item?.id ? (
                   <div style={{display:"flex",alignItems:"center",gap:5}}>
@@ -3080,7 +3097,8 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
         loanTransactions={loanTransactions} escrows={escrows} onSaveFinance={onSaveFinance} />
 
       {/* MAJETEK BAR — osobní majetek */}
-      <MajetekBar financeItems={financeItems} onSaveFinance={onSaveFinance} />
+      <MajetekBar financeItems={financeItems} onSaveFinance={onSaveFinance}
+        invoices={invoices} dpfoMonths={dpfoMonths} loanTransactions={loanTransactions} escrows={escrows} />
 
       {/* FINANCE SEKCE — nad grafem: Příjmy | [Nutné + Lusus combined] */}
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
