@@ -50,7 +50,7 @@ const addDays = (d, n) => { const dt = new Date(d); dt.setDate(dt.getDate() + n)
 const CSS = `
 @import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,300;9..144,400;9..144,500&family=Inter:wght@300;400;500;600&display=swap');
 *{box-sizing:border-box;margin:0;padding:0}
-html,body,#root{height:100%;background:#F3F2F9}
+html,body,#root{height:100%;background:#FAFAFA}
 .mx{--ink:#3518A5;--ink2:#2810a0;--ink3:#4a2bc4;--gold:#B8923D;--gold2:#CF9B3E;--green:#059669;--red:#DC2626;
     --bg:#F3F2F9;--surface:#FFFFFF;--line:#ECEAF5;--line2:#D5D2EA;--mut:#9896B0;--txt:#16142A;
     --mono:'SF Mono',Menlo,monospace;
@@ -1700,8 +1700,9 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
 
 
 
-      {/* VELKÝ INTERAKTIVNÍ DONUT — centrální vizuál */}
-      <div style={{display:"grid",gridTemplateColumns:"1fr 260px",gap:14,alignItems:"start"}}>
+      {/* 3-COLUMN: Donut (3/7) + Chart (2/7) + Klienti (2/7) */}
+      <div style={{display:"grid",gridTemplateColumns:"3fr 2fr 2fr",gap:12,alignItems:"start"}}>
+        {/* Col 1: WealthDonut */}
         {/* WealthDonut */}
         {(() => {
           const sp2 = (financeItems||[]).filter(i => i.category === "sporaci" && i.notes !== "SKIP_DISPLAY");
@@ -1741,12 +1742,9 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
             </div>
           );
         })()}
-        
-        {/* Right: Chart + Top klienti */}
-        <div style={{display:"flex",flexDirection:"column",gap:12}}>
-          {/* Mini chart + top klienti */}
-          <div style={{display:"grid",gridTemplateColumns:"1.4fr 1fr",gap:10}}>
-            <Card style={{padding:"14px 16px"}}>
+        {/* Col 2: Graf fakturace */}
+        <Card style={{padding:"14px 16px"}}>
+          <Card style={{padding:"14px 16px"}}>
               {(() => {
                 const W=300,H=90,padL=6,padR=6,padT=20,padB=22;
                 const n=chartData.length;
@@ -1784,8 +1782,10 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
                   </>
                 );
               })()}
-            </Card>
-            <Card style={{padding:"14px 16px"}}>
+        </Card>
+        {/* Col 3: Top 10 klientů */}
+        <Card style={{padding:"14px 16px"}}>
+          <Card style={{padding:"14px 16px"}}>
               <div style={{fontSize:9,letterSpacing:".2em",textTransform:"uppercase",color:"var(--mut)",fontWeight:600,marginBottom:10}}>Top 10 klientů</div>
               <div style={{display:"flex",flexDirection:"column",gap:5}}>
                 {topC.slice(0,10).map(({c,rev},i)=>(
@@ -1799,9 +1799,9 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
                 ))}
               </div>
             </Card>
-          </div>
-        </div>
+        </Card>
       </div>
+
       {/* Příjmy + Výdaje + Cash flow */}
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 220px",gap:10}}>
         <FinanceSection title="Příjmy měsíční"
