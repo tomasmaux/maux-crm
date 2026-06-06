@@ -1589,28 +1589,36 @@ function LoanTrackerCard({ tracker, transactions, onUpdateTracker, onAddTransact
 
 
 /* ─── ÚSCHOVY (Escrow) MODULE ─── */
-function calcEscrowInterest(amount, rate, dateFrom, dateTo) {
-  // Interest credited 1st of each month FOR previous calendar month
-  // Daily rate = amount * annual_rate / 365
-  // Net = gross * 0.85 (15% withholding tax)
-  if (!dateFrom || !amount || !rate) return { months: [], totalGross: 0, totalNet: 0 };
-  const from = new Date(dateFrom);
-  const to = dateTo ? new Date(dateTo) : new Date();
+// Per-tranšový výpočet — sedí s bankou (ČSOB):
+//   • úrok od dne PO přijetí (date_received + 1)
+//   • end tranše = paid_date VČETNĚ (den výplaty stále vydělává)
+//   • credited = poslední den měsíce (30.4., 31.5., …)
+function calcEscrowInterest(escrow) {
+  if (!escrow.date_received || !escrow.interest_rate) return { months: [], totalGross: 0, totalNet: 0 };
+  const from = _escrowFrom(escrow); // den AFTER přijetí
+  const today = new Date(); today.setHours(0,0,0,0);
+  const tranches = _escrowTranches(escrow);
   const months = [];
   let d = new Date(from.getFullYear(), from.getMonth(), 1);
-  while (d <= to) {
-    const monthStart = new Date(Math.max(from.getTime(), d.getTime()));
-    const monthEnd = new Date(d.getFullYear(), d.getMonth() + 1, 0);
-    const effectiveEnd = new Date(Math.min(to.getTime(), monthEnd.getTime()));
-    const days = Math.max(0, Math.round((effectiveEnd - monthStart) / 86400000) + 1);
-    const gross = amount * rate / 365 * days;
-    const net = gross * 0.85;
-    if (days > 0) {
+  while (d <= today) {
+    const mStart = new Date(d.getFullYear(), d.getMonth(), 1);
+    const mEnd   = new Date(d.getFullYear(), d.getMonth() + 1, 0);
+    let gross = 0;
+    tranches.forEach(t => {
+      const endDate = _trancheEnd(t, escrow); // paid_date inclusive
+      const effStart = new Date(Math.max(from.getTime(), mStart.getTime()));
+      const effEnd   = new Date(Math.min(endDate.getTime(), mEnd.getTime()));
+      if (effEnd < effStart) return;
+      const days = Math.round((effEnd - effStart) / 86400000) + 1;
+      gross += (t.amount || 0) * escrow.interest_rate / 365 * days;
+    });
+    if (gross > 0.5) {
       months.push({
         month: `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`,
         label: `${['Led','Úno','Bře','Dub','Kvě','Čer','Čvn','Srp','Zář','Říj','Lis','Pro'][d.getMonth()]} ${d.getFullYear()}`,
-        days, gross: Math.round(gross*100)/100, net: Math.round(net*100)/100,
-        creditedOn: `${d.getMonth()+2 > 12 ? d.getFullYear()+1 : d.getFullYear()}-${String((d.getMonth()+2)>12?1:d.getMonth()+2).padStart(2,'0')}-01`
+        gross: Math.round(gross*100)/100,
+        net:   Math.round(gross*0.85*100)/100,
+        creditedOn: mEnd.toISOString().slice(0,10), // bank credits LAST DAY of month
       });
     }
     d = new Date(d.getFullYear(), d.getMonth() + 1, 1);
@@ -1618,19 +1626,29 @@ function calcEscrowInterest(amount, rate, dateFrom, dateTo) {
   return { months, totalGross: months.reduce((s,m)=>s+m.gross,0), totalNet: months.reduce((s,m)=>s+m.net,0) };
 }
 
-// Čistý úrok z úschov pro konkrétní kalendářní měsíc (month = 0-based)
-// Konec urokoveho obdobi pro transi (vcetne — posledni den kdyz jeste plati uroky)
+// Konec úrokového období tranše (VČETNĚ — poslední den, kdy tranše stále vydělává).
+// Pravidla potvrzená bankou (ČSOB):
+//   • paid_date     = den výplaty VČETNĚ (peníze odešly v průběhu dne, ale stále vydělávaly)
+//   • plomba_end    = den uvolnění plomby VČETNĚ
+//   • ongoing       = 9999-01-01 (běžící, bez konce)
 function _trancheEnd(tranche, escrow) {
   if (tranche.is_paid && tranche.paid_date) {
-    const d = new Date(tranche.paid_date); d.setDate(d.getDate() - 1); return d;
+    return new Date(tranche.paid_date); // VČETNĚ — např. 11.5. vydělává, 12.5. ne
   }
   if (escrow.status === 'ukonceno' || escrow.status === 'ukončeno') {
-    if (escrow.date_paid) { const d = new Date(escrow.date_paid); d.setDate(d.getDate() - 1); return d; }
+    if (escrow.date_paid) { return new Date(escrow.date_paid); }
   }
   if (escrow.date_plomba_end && escrow.status === 'čeká_na_plombu') {
-    const d = new Date(escrow.date_plomba_end); d.setDate(d.getDate() - 1); return d;
+    return new Date(escrow.date_plomba_end); // VČETNĚ
   }
   return new Date(9999, 0, 1);
+}
+// Úrok začíná DEN PO přijetí (date_received + 1) — potvrzeno bankou (ČSOB):
+//   přijaté 28.4. → první úrokový den = 29.4. → duben = 2 dny = 2 100 Kč ✓
+function _escrowFrom(e) {
+  const d = new Date(e.date_received);
+  d.setDate(d.getDate() + 1);
+  return d;
 }
 function _escrowTranches(e) {
   const opr = (e.escrow_tranches || []).filter(t => t.party_type === 'oprávněný');
@@ -1653,7 +1671,7 @@ function escrowNetForMonth(escrows, year, month) {
     : mEnd;
   return (escrows || []).reduce((sum, e) => {
     if (!e.date_received || !e.interest_rate) return sum;
-    const from = new Date(e.date_received);
+    const from = _escrowFrom(e); // den PO přijetí
     return sum + _escrowTranches(e).reduce((ts, t) => {
       const endDate = _trancheEnd(t, e);
       const isRunning = endDate.getFullYear() >= 9000;
@@ -1680,7 +1698,7 @@ function escrowRunningNet(escrows) {
   const today = new Date(); today.setHours(0,0,0,0);
   return (escrows || []).reduce((sum, e) => {
     if (!e.date_received || !e.interest_rate) return sum;
-    const from = new Date(e.date_received);
+    const from = _escrowFrom(e);
     return sum + _escrowTranches(e).reduce((ts, t) => {
       const endDate = _trancheEnd(t, e);
       if (endDate.getFullYear() < 9000) return ts; // má definitivní konec → patří do escrowNetForMonth
@@ -1695,7 +1713,7 @@ function escrowTotalNet(escrows) {
   const today = new Date(); today.setHours(0,0,0,0);
   return (escrows || []).reduce((sum, e) => {
     if (!e.date_received || !e.interest_rate) return sum;
-    const from = new Date(e.date_received);
+    const from = _escrowFrom(e);
     return sum + _escrowTranches(e).reduce((ts, t) => {
       const cap = new Date(Math.min(_trancheEnd(t, e).getTime(), today.getTime()));
       if (cap < from) return ts;
@@ -1708,7 +1726,7 @@ function escrowTotalTax(escrows) {
   const today = new Date(); today.setHours(0,0,0,0);
   return (escrows || []).reduce((sum, e) => {
     if (!e.date_received || !e.interest_rate) return sum;
-    const from = new Date(e.date_received);
+    const from = _escrowFrom(e);
     return sum + _escrowTranches(e).reduce((ts, t) => {
       const cap = new Date(Math.min(_trancheEnd(t, e).getTime(), today.getTime()));
       if (cap < from) return ts;
@@ -1731,7 +1749,7 @@ function escrowNetForMonthRows(escrows, year, month) {
   const rows = [];
   (escrows || []).forEach(e => {
     if (!e.date_received || !e.interest_rate) return;
-    const from = new Date(e.date_received);
+    const from = _escrowFrom(e);
     // Zobrazit i tranše složitelů pokud nejsou oprávnění — ale primárně oprávnění
     const tranches = _escrowTranches(e);
     // Navíc ukázat vyplacené oprávněné tranše jako info řádky (is_paid)
@@ -1809,7 +1827,7 @@ function escrowTaxRows(escrows) {
   const byEscrow = {};
   (escrows || []).forEach(e => {
     if (!e.date_received || !e.interest_rate) return;
-    const from = new Date(e.date_received);
+    const from = _escrowFrom(e);
     _escrowTranches(e).forEach(t => {
       const cap = new Date(Math.min(_trancheEnd(t, e).getTime(), today.getTime()));
       if (cap < from) return;
@@ -1831,7 +1849,7 @@ function escrowTotalNetRows(escrows) {
   const today = new Date(); today.setHours(0,0,0,0);
   return (escrows || []).map(e => {
     if (!e.date_received || !e.interest_rate) return null;
-    const from = new Date(e.date_received);
+    const from = _escrowFrom(e);
     let gross = 0;
     _escrowTranches(e).forEach(t => {
       const cap = new Date(Math.min(_trancheEnd(t, e).getTime(), today.getTime()));
@@ -2000,7 +2018,7 @@ function EscrowCard({ escrow, onEdit, onDelete }) {
   const tranches = escrow.escrow_tranches || [];
   const total = tranches.reduce((s,t) => s + (t.amount||0), 0);
   const depositTotal = tranches.filter(t=>t.party_type==='složitel').reduce((s,t)=>s+(t.amount||0),0);
-  const interest = calcEscrowInterest(depositTotal, escrow.interest_rate, escrow.date_received, escrow.date_paid);
+  const interest = calcEscrowInterest(escrow); // per-tranšový výpočet, sedí s ČSOB
   const isActive = !['ukončeno'].includes(escrow.status);
   const needsAlert = escrow.date_plomba_end && (() => {
     const d = new Date(escrow.date_plomba_end);
@@ -2115,16 +2133,14 @@ function EscrowCard({ escrow, onEdit, onDelete }) {
               <table style={{width:"100%",borderCollapse:"collapse",fontSize:11}}>
                 <thead><tr style={{background:"#FEF9C3"}}>
                   <th style={{padding:"5px 8px",textAlign:"left",color:"#92400E",fontWeight:500}}>Měsíc</th>
-                  <th style={{padding:"5px 8px",textAlign:"right",color:"#92400E",fontWeight:500}}>Dní</th>
                   <th style={{padding:"5px 8px",textAlign:"right",color:"#92400E",fontWeight:500}}>Hrubý</th>
-                  <th style={{padding:"5px 8px",textAlign:"right",color:"#92400E",fontWeight:500}}>Čistý</th>
-                  <th style={{padding:"5px 8px",textAlign:"left",color:"#92400E",fontWeight:500}}>Připíše se</th>
+                  <th style={{padding:"5px 8px",textAlign:"right",color:"#92400E",fontWeight:500}}>Čistý (−15 %)</th>
+                  <th style={{padding:"5px 8px",textAlign:"left",color:"#92400E",fontWeight:500}}>Připsáno bankou</th>
                 </tr></thead>
                 <tbody>
                   {interest.months.map((m,i)=>(
                     <tr key={i} style={{borderTop:"1px solid #FDE68A"}}>
                       <td style={{padding:"5px 8px"}}>{m.label}</td>
-                      <td style={{padding:"5px 8px",textAlign:"right",color:"var(--mut)"}}>{m.days}</td>
                       <td style={{padding:"5px 8px",textAlign:"right"}}>{fmtKc(m.gross)}</td>
                       <td style={{padding:"5px 8px",textAlign:"right",color:"#059669",fontWeight:500}}>{fmtKc(m.net)}</td>
                       <td style={{padding:"5px 8px",color:"var(--mut)",fontSize:10}}>{m.creditedOn}</td>
@@ -2132,7 +2148,6 @@ function EscrowCard({ escrow, onEdit, onDelete }) {
                   ))}
                   <tr style={{borderTop:"2px solid #F59E0B",background:"#FFFBEB"}}>
                     <td style={{padding:"6px 8px",fontWeight:600}}>Celkem</td>
-                    <td></td>
                     <td style={{padding:"6px 8px",textAlign:"right",fontWeight:500}}>{fmtKc(interest.totalGross)}</td>
                     <td style={{padding:"6px 8px",textAlign:"right",color:"#059669",fontWeight:700}}>{fmtKc(interest.totalNet)}</td>
                     <td></td>
