@@ -1619,37 +1619,82 @@ function calcEscrowInterest(amount, rate, dateFrom, dateTo) {
 }
 
 // Čistý úrok z úschov pro konkrétní kalendářní měsíc (month = 0-based)
+// Konec urokoveho obdobi pro transi (vcetne — posledni den kdyz jeste plati uroky)
+function _trancheEnd(tranche, escrow) {
+  if (tranche.is_paid && tranche.paid_date) {
+    const d = new Date(tranche.paid_date); d.setDate(d.getDate() - 1); return d;
+  }
+  if (escrow.status === 'ukonceno' || escrow.status === 'ukončeno') {
+    if (escrow.date_paid) { const d = new Date(escrow.date_paid); d.setDate(d.getDate() - 1); return d; }
+  }
+  if (escrow.date_plomba_end && escrow.status === 'čeká_na_plombu') {
+    const d = new Date(escrow.date_plomba_end); d.setDate(d.getDate() - 1); return d;
+  }
+  return new Date(9999, 0, 1);
+}
+function _escrowTranches(e) {
+  const opr = (e.escrow_tranches || []).filter(t => t.party_type === 'oprávněný');
+  return opr.length > 0 ? opr : (e.escrow_tranches || []).filter(t => t.party_type === 'složitel');
+}
+// Čistý úrok z úschov pro měsíc — POUZE tranše s definitivním koncem v daném měsíci.
+// Odpovídá Excelu: 007 ZBYTEK (bez plomby = konec 9999) se nezahrnuje.
 function escrowNetForMonth(escrows, year, month) {
   const mStart = new Date(year, month, 1);
   const mEnd = new Date(year, month + 1, 0);
   return (escrows || []).reduce((sum, e) => {
-    const deposits = (e.escrow_tranches || []).filter(t => t.party_type === 'složitel').reduce((s,t)=>s+(t.amount||0), 0);
-    if (!deposits || !e.date_received || !e.interest_rate) return sum;
+    if (!e.date_received || !e.interest_rate) return sum;
     const from = new Date(e.date_received);
-    const to = e.date_paid ? new Date(e.date_paid) : new Date(9999, 0, 1);
-    const effStart = new Date(Math.max(from.getTime(), mStart.getTime()));
-    const effEnd = new Date(Math.min(to.getTime(), mEnd.getTime()));
-    if (effEnd < effStart) return sum;
-    const days = Math.round((effEnd - effStart) / 86400000) + 1;
-    return sum + deposits * e.interest_rate / 365 * days * 0.85;
+    return sum + _escrowTranches(e).reduce((ts, t) => {
+      const endDate = _trancheEnd(t, e);
+      // Pouze tranše, jejichž konec padne DO tohoto měsíce (ne průběžné)
+      if (endDate < mStart || endDate > mEnd) return ts;
+      const effStart = new Date(Math.max(from.getTime(), mStart.getTime()));
+      if (endDate < effStart) return ts;
+      const days = Math.round((endDate - effStart) / 86400000) + 1;
+      return ts + (t.amount || 0) * e.interest_rate / 365 * days * 0.85;
+    }, 0);
   }, 0);
 }
-// Celkový čistý úrok ze všech úschov (historicky)
+// Průběžný čistý úrok z otevřených tranší bez definitivního konce (007 ZBYTEK apod.)
+function escrowRunningNet(escrows) {
+  const today = new Date(); today.setHours(0,0,0,0);
+  return (escrows || []).reduce((sum, e) => {
+    if (!e.date_received || !e.interest_rate) return sum;
+    const from = new Date(e.date_received);
+    return sum + _escrowTranches(e).reduce((ts, t) => {
+      const endDate = _trancheEnd(t, e);
+      if (endDate.getFullYear() < 9000) return ts; // má definitivní konec → patří do escrowNetForMonth
+      const cap = new Date(Math.min(endDate.getTime(), today.getTime()));
+      if (cap < from) return ts;
+      const days = Math.round((cap - from) / 86400000) + 1;
+      return ts + (t.amount || 0) * e.interest_rate / 365 * days * 0.85;
+    }, 0);
+  }, 0);
+}
 function escrowTotalNet(escrows) {
+  const today = new Date(); today.setHours(0,0,0,0);
   return (escrows || []).reduce((sum, e) => {
-    const deposits = (e.escrow_tranches || []).filter(t => t.party_type === 'složitel').reduce((s,t)=>s+(t.amount||0), 0);
-    const end = e.date_paid || new Date().toISOString().slice(0,10);
-    const r = calcEscrowInterest(deposits, e.interest_rate, e.date_received, end);
-    return sum + r.totalNet;
+    if (!e.date_received || !e.interest_rate) return sum;
+    const from = new Date(e.date_received);
+    return sum + _escrowTranches(e).reduce((ts, t) => {
+      const cap = new Date(Math.min(_trancheEnd(t, e).getTime(), today.getTime()));
+      if (cap < from) return ts;
+      const days = Math.round((cap - from) / 86400000) + 1;
+      return ts + (t.amount || 0) * e.interest_rate / 365 * days * 0.85;
+    }, 0);
   }, 0);
 }
-// Celkový srážkový daň ze všech úschov (historicky) = gross - net
 function escrowTotalTax(escrows) {
+  const today = new Date(); today.setHours(0,0,0,0);
   return (escrows || []).reduce((sum, e) => {
-    const deposits = (e.escrow_tranches || []).filter(t => t.party_type === 'složitel').reduce((s,t)=>s+(t.amount||0), 0);
-    const end = e.date_paid || new Date().toISOString().slice(0,10);
-    const r = calcEscrowInterest(deposits, e.interest_rate, e.date_received, end);
-    return sum + (r.totalGross - r.totalNet);
+    if (!e.date_received || !e.interest_rate) return sum;
+    const from = new Date(e.date_received);
+    return sum + _escrowTranches(e).reduce((ts, t) => {
+      const cap = new Date(Math.min(_trancheEnd(t, e).getTime(), today.getTime()));
+      if (cap < from) return ts;
+      const days = Math.round((cap - from) / 86400000) + 1;
+      return ts + (t.amount || 0) * e.interest_rate / 365 * days * 0.15;
+    }, 0);
   }, 0);
 }
 
@@ -1925,10 +1970,12 @@ function EscrowList({ escrows, onNew, onEdit, onDelete, loading }) {
   }, 0);
   // Celkový čistý výdělek ze všech úschov
   const totalEarned = escrowTotalNet(escrows);
-  // Úrok k 1. příštího měsíce (za aktuální měsíc)
+  // Úrok k 1. příštího měsíce — POUZE tranše dokončující se tento měsíc (odpovídá Excelu)
   const netNextMonth1 = escrowNetForMonth(escrows, cy, cm);
-  // Úrok k 1. přespříštího měsíce (za příští měsíc)
+  // Úrok k 1. přespříštího měsíce — tranše dokončující se příští měsíc
   const netNextMonth2 = escrowNetForMonth(escrows, cy, cm + 1);
+  // Průběžné úschovy bez definitivního konce (007 ZBYTEK apod.) — akumulují se
+  const runningNet = escrowRunningNet(escrows);
   const next1Label = `1. ${MESICE[(cm+1)%12]}`;
   const next2Label = `1. ${MESICE[(cm+2)%12]}`;
   const alerts = active.filter(e => e.date_plomba_end && (() => {
@@ -1947,13 +1994,13 @@ function EscrowList({ escrows, onNew, onEdit, onDelete, loading }) {
         </div>
         <div className="kpi" style={{background:"#FFFBEB",border:"1px solid #FDE68A"}}>
           <div className="k" style={{color:"#92400E"}}>Dostanu {next1Label}</div>
-          <div className="v" style={{color:"#D97706"}}>{fmtKc(Math.round(netNextMonth1))}</div>
-          <div className="s" style={{color:"#92400E"}}>čistý úrok za {MESICE[cm].replace("a","").replace("e","").replace("i","").replace("u","") || "tento měsíc"}</div>
+          <div className="v" style={{color:"#D97706"}}>{netNextMonth1 > 0 ? fmtKc(Math.round(netNextMonth1)) : "–"}</div>
+          <div className="s" style={{color:"#92400E"}}>čistý úrok · tranše končící v {MESICE[cm]}</div>
         </div>
         <div className="kpi" style={{background:"#F0FDF4",border:"1px solid #BBF7D0"}}>
           <div className="k" style={{color:"#065F46"}}>Dostanu {next2Label} (odhad)</div>
-          <div className="v" style={{color:"#059669"}}>{fmtKc(Math.round(netNextMonth2))}</div>
-          <div className="s" style={{color:"#065F46"}}>projekce · aktivní úschovy</div>
+          <div className="v" style={{color:"#059669"}}>{netNextMonth2 > 0 ? fmtKc(Math.round(netNextMonth2)) : "–"}</div>
+          <div className="s" style={{color:"#065F46"}}>tranše končící v {MESICE[(cm+1)%12]}</div>
         </div>
       </div>
       {/* Souhrn – řada 2 */}
@@ -1961,7 +2008,9 @@ function EscrowList({ escrows, onNew, onEdit, onDelete, loading }) {
         <div className="kpi" style={{background:"#F5F3FF",border:"1px solid #DDD6FE"}}>
           <div className="k" style={{color:"#5B21B6"}}>Celkem vydělano (čistý úrok)</div>
           <div className="v" style={{color:"#7C3AED",fontSize:18}}>{fmtKc(Math.round(totalEarned))}</div>
-          <div className="s" style={{color:"#5B21B6"}}>ze všech {escrows.length} úschov</div>
+          <div className="s" style={{color:"#5B21B6"}}>
+            ukončené · {runningNet > 0 && <span style={{color:"#9333EA"}}>+ {fmtKc(Math.round(runningNet))} průběžné akumulované</span>}
+          </div>
         </div>
         <div className="kpi" style={{background:"#FEF2F2",border:"1px solid #FECACA"}}>
           <div className="k" style={{color:"#991B1B"}}>Srážková daň (stát)</div>
@@ -2171,7 +2220,7 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
           <Lbl color="#9333EA">Lusus výdaje</Lbl>
           <div style={{fontFamily:"Fraunces,serif",fontSize:19,fontWeight:300,color:"#9333EA",marginTop:3}}>{fmtKc(Math.abs(totalLuxus))}</div>
         </Card>
-        {(()=>{const z=mestoPodebrady+unbilledAmt+totalVydaje;return(
+        {(()=>{const z=mestoPodebrady+unbilledAmt+escrowNetThisMonth+totalVydaje;return(
           <Card style={{padding:"12px 16px",background:z>=0?"#F0FDF4":"#FEF2F2",border:`1px solid ${z>=0?"#BBF7D0":"#FECACA"}`}}>
             <Lbl color={z>=0?"#065F46":"#991B1B"}>Cash flow</Lbl>
             <div style={{fontFamily:"Fraunces,serif",fontSize:19,fontWeight:300,color:z>=0?"#059669":"#DC2626",marginTop:3}}>{z>=0?"+":""}{fmtKc(z)}</div>
@@ -2291,7 +2340,10 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
           items={(financeItems||[]).filter(i=>i.category==="prijem")}
           category="prijem" accent="#059669"
           onSave={onSaveFinance} onDelete={onDeleteFinance}
-          autoItems={unbilledAmt>0 ? [{ label: `MAUX Legal — nevyfakturováno`, amount: unbilledAmt }] : []}
+          autoItems={[
+            ...(unbilledAmt>0 ? [{ label: `MAUX Legal — nevyfakturováno`, amount: unbilledAmt }] : []),
+            ...(escrowNetThisMonth>0 ? [{ label: `Úschovy — čistý úrok (k 1. ${["ledna","února","března","dubna","května","června","července","srpna","září","října","listopadu","prosince"][(now.getMonth()+1)%12]})`, amount: Math.round(escrowNetThisMonth) }] : []),
+          ]}
         />
         <FinanceSection title="Nutné výdaje" items={nutne} category="nutne" accent="#DC2626" onSave={onSaveFinance} onDelete={onDeleteFinance} />
         <FinanceSection title="Lusus výdaje" items={luxus} category="luxus" accent="#9333EA" onSave={onSaveFinance} onDelete={onDeleteFinance} />
