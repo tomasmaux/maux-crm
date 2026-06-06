@@ -2658,8 +2658,13 @@ function MiniSpořák({ financeItems, invoices, dpfoMonths, loanTransactions, es
   const bobloanBal = (loanTransactions?.loan_bobnice||[]).reduce((s,t) => s+t.amount, 0);
   const bobFb = (financeItems||[]).find(i => i.id === "fi_sp_02")?.amount || 0;
   const bobBal = Math.max(bobloanBal > 0 ? bobloanBal : bobFb, 0);
-  const manualObálky = sporaci.filter(i => i.id !== "fi_sp_99" && i.id !== "fi_sp_01" && i.id !== "fi_sp_02");
   const danUschov = Math.round(escrowTotalTax(escrows));
+  // Exclude auto-computed envelopes from manual list to avoid duplicates
+  const autoEnvLabels = new Set(["dph","dpfo 2026","bobnice","daň z úschov"]);
+  const manualObálky = sporaci.filter(i =>
+    i.id !== "fi_sp_99" && i.id !== "fi_sp_01" && i.id !== "fi_sp_02"
+    && !autoEnvLabels.has((i.label||"").toLowerCase().trim())
+  );
   const allEnvelopes = [
     { label: "DPH",          amount: dphAuto,   color: "#3518A5", auto: true },
     { label: "DPFO 2026",    amount: dpfoAcc,   color: "#F59E0B", auto: true },
@@ -2759,49 +2764,105 @@ function MiniSpořák({ financeItems, invoices, dpfoMonths, loanTransactions, es
 }
 
 /* ─── MAJETEK BAR (osobní majetek — dedikovaný řádek) ─── */
-function MajetekBar({ financeItems }) {
-  const akcie    = (financeItems||[]).find(i => i.id === "fi_ma_01")?.amount || 0;
-  const stavebko = (financeItems||[]).find(i => i.id === "fi_ma_02")?.amount || 0;
-  const firmaKap = (financeItems||[]).find(i => i.id === "fi_ma_03")?.amount || 0;
-  const total    = akcie + stavebko + firmaKap;
-  if (total === 0) return null;
+function MajetekBar({ financeItems, onSaveFinance }) {
+  const akcieItem    = (financeItems||[]).find(i => i.id === "fi_ma_01");
+  const stavebkoItem = (financeItems||[]).find(i => i.id === "fi_ma_02");
+  const firmaKapItem = (financeItems||[]).find(i => i.id === "fi_ma_03");
+  const extraItems   = (financeItems||[]).filter(i => i.category === "majetek" && !["fi_ma_01","fi_ma_02","fi_ma_03"].includes(i.id));
+  const akcie    = akcieItem?.amount    || 0;
+  const stavebko = stavebkoItem?.amount || 0;
+  const firmaKap = firmaKapItem?.amount || 0;
+  const total    = akcie + stavebko + firmaKap + extraItems.reduce((s,i) => s+(i.amount||0), 0);
 
-  const assets = [
-    { label: "Akcie / ETF",      amount: akcie,    color: "#10B981", icon: "📈" },
-    { label: "Stavební spoření", amount: stavebko, color: "#D97706", icon: "🏗" },
-    { label: "Firemní rezerva",  amount: firmaKap, color: "#8B5CF6", icon: "🏦" },
-  ].filter(a => a.amount > 0);
+  const [editId,    setEditId]    = useState(null);   // which item is being edited
+  const [editVal,   setEditVal]   = useState(0);
+  const [adding,    setAdding]    = useState(false);
+  const [newLabel,  setNewLabel]  = useState("");
+  const [newAmount, setNewAmount] = useState(0);
 
-  // Stacked bar widths
+  const saveEdit = (item) => { onSaveFinance({...item, amount: editVal}); setEditId(null); };
+  const saveNew  = () => {
+    if (!newLabel.trim()) return;
+    onSaveFinance({ id: `fi_ma_${Date.now()}`, category: "majetek", label: newLabel.trim(), amount: newAmount });
+    setNewLabel(""); setNewAmount(0); setAdding(false);
+  };
+
+  const COLORS = ["#10B981","#D97706","#8B5CF6","#0EA5E9","#F43F5E","#6366F1"];
+  const allAssets = [
+    akcieItem    && { item: akcieItem,    label: "Akcie / ETF",      amount: akcie,    color: "#10B981", editable: true  },
+    stavebkoItem && { item: stavebkoItem, label: "Stavební spoření", amount: stavebko, color: "#D97706", editable: true  },
+    firmaKapItem && { item: firmaKapItem, label: "Firemní rezerva",  amount: firmaKap, color: "#8B5CF6", editable: false },
+    ...extraItems.map((it,idx) => ({ item: it, label: it.label, amount: it.amount||0, color: COLORS[(3+idx)%COLORS.length], editable: true })),
+  ].filter(Boolean).filter(a => a.amount > 0 || a.editable);
+
   const barW = a => total > 0 ? (a.amount / total) * 100 : 0;
+  const btnStyle = {background:"#B8923D",color:"#fff",border:"none",borderRadius:16,padding:"5px 12px",fontSize:11,cursor:"pointer",fontWeight:700,whiteSpace:"nowrap"};
 
   return (
     <div style={{background:"#fff",border:"2px solid #B8923D",borderRadius:14,padding:"28px 36px",display:"flex",alignItems:"stretch",gap:24,flexWrap:"wrap"}}>
       {/* === CELKOVÝ MAJETEK === */}
-      <div style={{minWidth:240,display:"flex",flexDirection:"column",justifyContent:"center"}}>
+      <div style={{minWidth:220,display:"flex",flexDirection:"column",justifyContent:"center"}}>
         <div style={{fontSize:11,letterSpacing:".22em",textTransform:"uppercase",color:"#B8923D",fontWeight:700,marginBottom:10}}>OSOBNÍ MAJETEK</div>
         <div style={{fontFamily:"Fraunces,serif",fontSize:44,fontWeight:300,color:"#B8923D",lineHeight:1,marginBottom:6}}>{fmtKc(total)}</div>
-        <div style={{fontSize:12,color:"var(--mut)"}}>{assets.length} složky · celkem</div>
+        <div style={{fontSize:12,color:"var(--mut)"}}>{allAssets.length} složky · celkem</div>
       </div>
 
-      {/* STACKED BAR */}
+      {/* STACKED BAR + POLOŽKY */}
       <div style={{display:"flex",flexDirection:"column",justifyContent:"center",flexGrow:1,minWidth:200}}>
-        <div style={{display:"flex",height:10,borderRadius:6,overflow:"hidden",gap:1,marginBottom:14}}>
-          {assets.map((a,i) => (
+        <div style={{display:"flex",height:10,borderRadius:6,overflow:"hidden",gap:1,marginBottom:16}}>
+          {allAssets.map((a,i) => (
             <div key={i} style={{width:`${barW(a)}%`,background:a.color,transition:"width .4s"}} title={`${a.label}: ${fmtKc(a.amount)}`} />
           ))}
         </div>
-        <div style={{display:"flex",gap:24,flexWrap:"wrap"}}>
-          {assets.map((a,i) => (
-            <div key={i} style={{display:"flex",alignItems:"center",gap:8}}>
-              <div style={{width:11,height:11,borderRadius:3,background:a.color,flexShrink:0}} />
+        <div style={{display:"flex",gap:24,flexWrap:"wrap",alignItems:"flex-start"}}>
+          {allAssets.map((a,i) => (
+            <div key={i} style={{display:"flex",alignItems:"flex-start",gap:8}}>
+              <div style={{width:11,height:11,borderRadius:3,background:a.color,flexShrink:0,marginTop:3}} />
               <div>
-                <div style={{fontSize:11,color:"var(--mut)"}}>{a.icon} {a.label}</div>
-                <div style={{fontSize:22,fontFamily:"Fraunces,serif",fontWeight:300,color:a.color,lineHeight:1.2}}>{fmtKc(a.amount)}</div>
+                <div style={{fontSize:11,color:"var(--mut)",marginBottom:2}}>
+                  {a.label}
+                  {!a.editable && <span style={{fontSize:9,background:"#EEF2FF",color:"#3730A3",padding:"1px 4px",borderRadius:3,fontWeight:700,marginLeft:5}}>auto</span>}
+                </div>
+                {editId === a.item?.id ? (
+                  <div style={{display:"flex",alignItems:"center",gap:5}}>
+                    <input type="number" value={editVal} autoFocus onChange={e => setEditVal(Number(e.target.value))}
+                      onKeyDown={e => { if(e.key==="Enter") saveEdit(a.item); if(e.key==="Escape") setEditId(null); }}
+                      style={{width:110,fontSize:16,padding:"3px 7px",border:`2px solid ${a.color}`,borderRadius:6,fontFamily:"Fraunces,serif",fontWeight:300,outline:"none"}} />
+                    <button onClick={() => saveEdit(a.item)} style={{...btnStyle,background:a.color}}>✓</button>
+                    <button onClick={() => setEditId(null)} style={{background:"none",border:"1px solid var(--line)",borderRadius:12,padding:"4px 8px",fontSize:11,cursor:"pointer",color:"var(--mut)"}}>✕</button>
+                  </div>
+                ) : (
+                  <div style={{display:"flex",alignItems:"baseline",gap:8}}>
+                    <div style={{fontSize:22,fontFamily:"Fraunces,serif",fontWeight:300,color:a.color,lineHeight:1.2}}>{fmtKc(a.amount)}</div>
+                    {a.editable && (
+                      <button onClick={() => { setEditVal(a.amount); setEditId(a.item?.id); }}
+                        style={{background:"none",border:"none",cursor:"pointer",fontSize:12,color:a.color,padding:0,opacity:.7}}>✎</button>
+                    )}
+                  </div>
+                )}
                 <div style={{fontSize:10,color:"var(--mut)"}}>{Math.round(barW(a))} % portfolia</div>
               </div>
             </div>
           ))}
+
+          {/* + PŘIDAT DALŠÍ */}
+          {!adding ? (
+            <div style={{display:"flex",alignItems:"center"}}>
+              <button onClick={() => setAdding(true)} style={{...btnStyle,background:"#B8923D",fontSize:12,padding:"7px 16px",borderRadius:20}}>
+                + Přidat složku
+              </button>
+            </div>
+          ) : (
+            <div style={{display:"flex",alignItems:"center",gap:6,flexWrap:"wrap"}}>
+              <input placeholder="Název (např. Krypto)" value={newLabel} onChange={e => setNewLabel(e.target.value)}
+                style={{width:150,fontSize:13,padding:"5px 10px",border:"2px solid #B8923D",borderRadius:7,outline:"none"}} />
+              <input type="number" placeholder="Částka" value={newAmount||""} onChange={e => setNewAmount(Number(e.target.value))}
+                onKeyDown={e => { if(e.key==="Enter") saveNew(); if(e.key==="Escape") setAdding(false); }}
+                style={{width:110,fontSize:13,padding:"5px 10px",border:"2px solid #B8923D",borderRadius:7,outline:"none"}} />
+              <button onClick={saveNew} style={btnStyle}>✓ Uložit</button>
+              <button onClick={() => setAdding(false)} style={{background:"none",border:"1px solid var(--line)",borderRadius:12,padding:"5px 10px",fontSize:12,cursor:"pointer",color:"var(--mut)"}}>✕</button>
+            </div>
+          )}
         </div>
       </div>
     </div>
@@ -2864,8 +2925,8 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
   // On the way = faktury vystaveny, dosud neuhrazeny
   const onTheWayInvs = invoices.filter(i => invoiceStatus(i) === "vystavena");
   const onTheWayAmt  = onTheWayInvs.reduce((s,i) => s+(i.subtotal||0), 0);
-  // C35 — Hlavní motor: příští měsíc projekce (výkazy + radní + úschovy − výdaje)
-  const c35 = unbilledAmt + mestoPodebrady + Math.round(escrowNetThisMonth) + totalVydaje;
+  // C35 — Hlavní motor: příští měsíc projekce (na cestě + výkazy + radní + úschovy − výdaje)
+  const c35 = onTheWayAmt + unbilledAmt + mestoPodebrady + Math.round(escrowNetThisMonth) + totalVydaje;
   const c35Pos = c35 >= 0;
   // Ratio: -1 = costs doubled (very bad), 0 = break-even, 1+ = full profit
   const c35Ratio = Math.abs(totalVydaje) > 0 ? c35 / Math.abs(totalVydaje) : 0;
@@ -2969,6 +3030,7 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
           </div>
         </div>
         <div style={{display:"flex",gap:20,fontSize:11,opacity:.8,flexWrap:"wrap",borderTop:"1px solid rgba(255,255,255,.15)",paddingTop:10,marginTop:4}}>
+          {onTheWayAmt>0&&<span>💳 Na cestě {fmtKc(onTheWayAmt)}</span>}
           <span>📋 Výkazy {fmtKc(unbilledAmt)}</span>
           <span>🏛 Radní {fmtKc(mestoPodebrady)}</span>
           <span>💰 Úschovy 1.{((now.getMonth()+2)%12)||12}. {fmtKc(Math.round(escrowNetThisMonth))}</span>
@@ -2986,9 +3048,12 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
           {trend!==null&&<div style={{fontSize:11,color:trend>=0?"#059669":"#DC2626",fontWeight:500,marginTop:4}}>{trend>=0?"↑":"↓"} {Math.abs(trend)} % vs {thisMonthName}</div>}
         </Card>
         <Card style={{background:"#F0FDF4",border:"1px solid #BBF7D0"}}>
-          <Lbl color="#065F46">▶ Příjem — {nextMonthName}</Lbl>
-          <Num size={22} color="#059669">+{fmtKc(Math.round(unbilledAmt+mestoPodebrady+escrowNetThisMonth))}</Num>
-          <div style={{fontSize:11,color:"#065F46",marginTop:4}}>výkazy + Poděbrady + úschovy {fmtKc(Math.round(escrowNetThisMonth))}</div>
+          <Lbl color="#065F46">▶ Přijde v {nextMonthName}</Lbl>
+          <Num size={22} color="#059669">+{fmtKc(Math.round(onTheWayAmt+unbilledAmt+mestoPodebrady+escrowNetThisMonth))}</Num>
+          <div style={{fontSize:11,color:"#065F46",marginTop:4,lineHeight:1.5}}>
+            {onTheWayAmt>0&&<span>💳 Na cestě {fmtKc(onTheWayAmt)} · </span>}
+            výkazy {fmtKc(unbilledAmt)} · radní · úschovy {fmtKc(Math.round(escrowNetThisMonth))}
+          </div>
         </Card>
         <Card>
           <Lbl>Vyfakturováno — {thisMonthName}</Lbl>
@@ -3015,7 +3080,7 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
         loanTransactions={loanTransactions} escrows={escrows} onSaveFinance={onSaveFinance} />
 
       {/* MAJETEK BAR — osobní majetek */}
-      <MajetekBar financeItems={financeItems} />
+      <MajetekBar financeItems={financeItems} onSaveFinance={onSaveFinance} />
 
       {/* FINANCE SEKCE — nad grafem: Příjmy | [Nutné + Lusus combined] */}
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
