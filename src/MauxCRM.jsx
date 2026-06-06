@@ -1638,19 +1638,39 @@ function _escrowTranches(e) {
 }
 // Čistý úrok z úschov pro měsíc — POUZE tranše s definitivním koncem v daném měsíci.
 // Odpovídá Excelu: 007 ZBYTEK (bez plomby = konec 9999) se nezahrnuje.
+// Čistý úrok k 1. příštího měsíce — zahrnuje VŠECHNY aktivní tranše:
+//   • jisté:    tranše s definitivním koncem v tomto měsíci (plomba/výplata)
+//   • průběžné: tranše bez konce (007 ZBYTEK) — cap na dnes (aktuální měsíc) nebo konec měsíce (budoucí)
+// Číslo roste každý den, dokud tranše nezísKá datum výplaty.
 function escrowNetForMonth(escrows, year, month) {
   const mStart = new Date(year, month, 1);
-  const mEnd = new Date(year, month + 1, 0);
+  const mEnd   = new Date(year, month + 1, 0);
+  const today  = new Date(); today.setHours(0,0,0,0);
+  const isCurrent = year === today.getFullYear() && month === today.getMonth();
+  // Průběžné: dnes (live) pro aktuální měsíc, konec měsíce pro budoucí (projekce)
+  const runningCap = isCurrent
+    ? new Date(Math.min(today.getTime(), mEnd.getTime()))
+    : mEnd;
   return (escrows || []).reduce((sum, e) => {
     if (!e.date_received || !e.interest_rate) return sum;
     const from = new Date(e.date_received);
     return sum + _escrowTranches(e).reduce((ts, t) => {
       const endDate = _trancheEnd(t, e);
-      // Pouze tranše, jejichž konec padne DO tohoto měsíce (ne průběžné)
-      if (endDate < mStart || endDate > mEnd) return ts;
-      const effStart = new Date(Math.max(from.getTime(), mStart.getTime()));
-      if (endDate < effStart) return ts;
-      const days = Math.round((endDate - effStart) / 86400000) + 1;
+      const isRunning = endDate.getFullYear() >= 9000;
+      let effStart, effEnd;
+      if (isRunning) {
+        // Průběžná tranše — od začátku měsíce (nebo přijetí) do dnešního dne
+        effStart = new Date(Math.max(from.getTime(), mStart.getTime()));
+        effEnd   = runningCap;
+      } else if (endDate >= mStart && endDate <= mEnd) {
+        // Jistá tranše — končí tento měsíc
+        effStart = new Date(Math.max(from.getTime(), mStart.getTime()));
+        effEnd   = endDate;
+      } else {
+        return ts; // mimo měsíc
+      }
+      if (effEnd < effStart || effEnd < mStart) return ts;
+      const days = Math.round((effEnd - effStart) / 86400000) + 1;
       return ts + (t.amount || 0) * e.interest_rate / 365 * days * 0.85;
     }, 0);
   }, 0);
@@ -2227,10 +2247,175 @@ function EscrowForm({ init, onSave, onCancel, saving }) {
   );
 }
 
+/* ─── ESCROW INSIGHTS — živý panel výnosů ─── */
+function EscrowInsights({ escrows }) {
+  const [tick, setTick] = useState(0);
+  useEffect(() => {
+    const iv = setInterval(() => setTick(t => t + 1), 1000);
+    return () => clearInterval(iv);
+  }, []);
+
+  const now = new Date();
+  const today = new Date(now); today.setHours(0,0,0,0);
+  const MESICE_2 = ["1.","2.","3.","4.","5.","6.","7.","8.","9.","10.","11.","12."];
+
+  // Aktivní tranše s denní sazbou
+  const active = [];
+  (escrows || []).forEach(e => {
+    if (!e.date_received || !e.interest_rate || e.status === 'ukončeno') return;
+    _escrowTranches(e).forEach(t => {
+      const endDate = _trancheEnd(t, e);
+      if (endDate <= today) return;
+      const daily = (t.amount || 0) * e.interest_rate / 365 * 0.85;
+      active.push({
+        escrow: e.escrow_number,
+        name: t.party_name || '–',
+        amount: t.amount || 0,
+        rate: e.interest_rate,
+        daily,
+        isRunning: endDate.getFullYear() >= 9000,
+        endDate,
+        daysLeft: endDate.getFullYear() >= 9000 ? null : Math.round((endDate - today) / 86400000),
+      });
+    });
+  });
+
+  const totalDaily = active.reduce((s, t) => s + t.daily, 0);
+  const perSec = totalDaily / 86400;
+  const midnight = new Date(now); midnight.setHours(0,0,0,0);
+  const sinceMidnight = perSec * (now - midnight) / 1000;
+
+  const K = (n) => Math.round(n).toLocaleString('cs-CZ') + ' Kč';
+  const Kd = (n) => n.toLocaleString('cs-CZ', {minimumFractionDigits:2,maximumFractionDigits:2}) + ' Kč';
+
+  const cardSt = (bg, border) => ({
+    background: bg, border: `1px solid ${border}`,
+    borderRadius: 12, padding: "14px 18px",
+  });
+  const lbl = (color) => ({ fontSize: 11, fontWeight: 500, color, marginBottom: 4 });
+  const val = (size, color) => ({ fontFamily: "Fraunces,serif", fontSize: size, fontWeight: 300, color, fontVariantNumeric: "tabular-nums" });
+
+  return (
+    <div style={{display:"flex",flexDirection:"column",gap:12}}>
+      {/* Živý počítač */}
+      <div style={{...cardSt("#1E1B4B","#3730A3"), display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:1}}>
+        {[
+          { label:"Od půlnoci přibylo", value: Kd(sinceMidnight), sub: "roste každou sekundu" },
+          { label:"Za minutu", value: Kd(perSec * 60), sub: "průběžný přírůstek" },
+          { label:"Za hodinu", value: Kd(perSec * 3600), sub: "ze všech aktivních" },
+        ].map((item, i) => (
+          <div key={i} style={{padding:"12px 16px", borderLeft: i>0?"1px solid rgba(255,255,255,0.1)":undefined}}>
+            <div style={{fontSize:11,color:"rgba(255,255,255,0.55)",marginBottom:3}}>{item.label}</div>
+            <div style={{fontFamily:"Fraunces,serif",fontSize:18,fontWeight:300,color:"#fff",fontVariantNumeric:"tabular-nums"}}>{item.value}</div>
+            <div style={{fontSize:10,color:"rgba(255,255,255,0.38)",marginTop:2}}>{item.sub}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* KPI řada */}
+      <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:10}}>
+        <div style={cardSt("#F5F3FF","#DDD6FE")}>
+          <div style={lbl("#5B21B6")}>Dnes celkem přibyde</div>
+          <div style={val(20,"#7C3AED")}>{K(totalDaily)}</div>
+          <div style={{fontSize:11,color:"#7C3AED",marginTop:3}}>{active.length} aktivních tranší</div>
+        </div>
+        <div style={cardSt("#FFFBEB","#FDE68A")}>
+          <div style={lbl("#92400E")}>Za týden</div>
+          <div style={val(20,"#D97706")}>{K(totalDaily * 7)}</div>
+          <div style={{fontSize:11,color:"#92400E",marginTop:3}}>při zachování stavů</div>
+        </div>
+        <div style={cardSt("#F0FDF4","#BBF7D0")}>
+          <div style={lbl("#065F46")}>Za měsíc (30 dní)</div>
+          <div style={val(20,"#059669")}>{K(totalDaily * 30)}</div>
+          <div style={{fontSize:11,color:"#065F46",marginTop:3}}>průběžný odhad</div>
+        </div>
+        <div style={cardSt("#FEF2F2","#FECACA")}>
+          <div style={lbl("#991B1B")}>Srážková daň / den</div>
+          <div style={val(20,"#DC2626")}>{Kd(totalDaily / 0.85 * 0.15)}</div>
+          <div style={{fontSize:11,color:"#991B1B",marginTop:3}}>odvádí banka automaticky</div>
+        </div>
+      </div>
+
+      {/* Kdo vydělává kolik */}
+      <div style={{background:"var(--surface)",border:"1px solid var(--line)",borderRadius:12,overflow:"hidden"}}>
+        <div style={{padding:"10px 16px",background:"var(--bg2)",fontSize:11,fontWeight:500,color:"var(--mut)",display:"flex",justifyContent:"space-between"}}>
+          <span>Kdo vydělává kolik</span>
+          <span>denní přírůstek · čistý</span>
+        </div>
+        {active.sort((a,b)=>b.daily-a.daily).map((t, i) => {
+          const pct = totalDaily > 0 ? t.daily / totalDaily * 100 : 0;
+          return (
+            <div key={i} style={{padding:"10px 16px",borderTop:"1px solid var(--line)",display:"flex",alignItems:"center",gap:12}}>
+              <div style={{flex:1,minWidth:0}}>
+                <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:4}}>
+                  <span style={{fontSize:12,fontWeight:500,color:"var(--ink)"}}>{t.escrow} · {t.name}</span>
+                  {t.isRunning
+                    ? <span style={{fontSize:9,padding:"1px 6px",borderRadius:4,background:"#FEF3C7",color:"#92400E",fontWeight:600}}>průběžné</span>
+                    : <span style={{fontSize:9,padding:"1px 6px",borderRadius:4,background:"#FEE2E2",color:"#991B1B",fontWeight:600}}>do {t.endDate.getDate()}.{t.endDate.getMonth()+1}. ({t.daysLeft}d)</span>
+                  }
+                </div>
+                <div style={{height:4,borderRadius:2,background:"var(--line)",overflow:"hidden"}}>
+                  <div style={{height:"100%",width:`${pct}%`,background:t.isRunning?"#D97706":"#059669",borderRadius:2,transition:"width 0.3s"}}></div>
+                </div>
+              </div>
+              <div style={{textAlign:"right",minWidth:90}}>
+                <div style={{fontSize:13,fontWeight:500,color:"var(--ink)",fontVariantNumeric:"tabular-nums"}}>{K(t.daily)}/den</div>
+                <div style={{fontSize:10,color:"var(--mut)"}}>{(t.amount||0).toLocaleString('cs-CZ')} × {((t.rate||0)*100).toFixed(1)} %</div>
+              </div>
+            </div>
+          );
+        })}
+        <div style={{padding:"10px 16px",borderTop:"2px solid var(--ink)",background:"var(--bg2)",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+          <span style={{fontSize:12,fontWeight:500,color:"var(--mut)"}}>Celkem denně</span>
+          <span style={{fontSize:14,fontWeight:600,fontVariantNumeric:"tabular-nums",color:"var(--ink)"}}>{K(totalDaily)}/den</span>
+        </div>
+      </div>
+
+      {/* Kdybys držel o déle */}
+      <div style={{background:"var(--surface)",border:"1px solid var(--line)",borderRadius:12,overflow:"hidden"}}>
+        <div style={{padding:"10px 16px",background:"var(--bg2)",fontSize:11,fontWeight:500,color:"var(--mut)"}}>
+          Kdybys držel o déle… (ušlý výnos)
+        </div>
+        {active.filter(t => !t.isRunning).map((t, i) => (
+          <div key={i} style={{padding:"10px 16px",borderTop:"1px solid var(--line)",display:"flex",justifyContent:"space-between",alignItems:"center",gap:8}}>
+            <div>
+              <div style={{fontSize:12,fontWeight:500,color:"var(--ink)"}}>{t.escrow} {t.name} — o měsíc déle</div>
+              <div style={{fontSize:11,color:"var(--mut)",marginTop:2}}>+30 dní × {K(t.daily)}/den</div>
+            </div>
+            <div style={{fontSize:15,fontWeight:500,color:"#059669",whiteSpace:"nowrap"}}>+ {K(t.daily * 30)}</div>
+          </div>
+        ))}
+        {active.filter(t => t.isRunning).map((t, i) => (
+          <div key={"r"+i} style={{background:"rgba(250,204,21,0.05)"}}>
+            <div style={{padding:"10px 16px",borderTop:"1px solid var(--line)",display:"flex",justifyContent:"space-between",alignItems:"center",gap:8}}>
+              <div>
+                <div style={{fontSize:12,fontWeight:500,color:"var(--ink)"}}>{t.escrow} {t.name} — každý týden čekání</div>
+                <div style={{fontSize:11,color:"var(--mut)",marginTop:2}}>7 dní × {K(t.daily)}/den</div>
+              </div>
+              <div style={{fontSize:15,fontWeight:500,color:"#D97706",whiteSpace:"nowrap"}}>+ {K(t.daily * 7)}</div>
+            </div>
+            <div style={{padding:"10px 16px",borderTop:"1px solid var(--line)",display:"flex",justifyContent:"space-between",alignItems:"center",gap:8}}>
+              <div>
+                <div style={{fontSize:12,fontWeight:500,color:"var(--ink)"}}>{t.escrow} {t.name} — celý rok navíc</div>
+                <div style={{fontSize:11,color:"var(--mut)",marginTop:2}}>365 dní × {K(t.daily)}/den</div>
+              </div>
+              <div style={{fontSize:16,fontWeight:500,color:"#7C3AED",whiteSpace:"nowrap"}}>+ {K(t.daily * 365)}</div>
+            </div>
+          </div>
+        ))}
+        {active.length === 0 && (
+          <div style={{padding:"18px 16px",color:"var(--mut)",fontSize:13,textAlign:"center"}}>Žádné aktivní tranše.</div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function EscrowList({ escrows, onNew, onEdit, onDelete, loading }) {
   const [filter, setFilter] = useState("probíhající");
   const [openDetail, setOpenDetail] = useState(null); // klíč otevřeného rozpisu
   const toggleDetail = (key) => setOpenDetail(prev => prev === key ? null : key);
+  const [showInsights, setShowInsights] = useState(false);
   const FILTERS = [
     { key:"probíhající", label:"Probíhající", fn: e => e.status !== 'ukončeno' },
     { key:"vše",         label:"Vše",          fn: ()=> true },
@@ -2286,7 +2471,7 @@ function EscrowList({ escrows, onNew, onEdit, onDelete, loading }) {
           <div style={{padding:"14px 18px 10px"}}>
             <div className="k" style={{color:"#92400E"}}>Dostanu {next1Label} {openDetail==="m1"?"▲":"▼"}</div>
             <div className="v" style={{color:"#D97706"}}>{netNextMonth1 > 0 ? fmtKc(Math.round(netNextMonth1)) : "–"}</div>
-            <div className="s" style={{color:"#92400E"}}>čistý úrok · tranše končící v {MESICE[cm]}</div>
+            <div className="s" style={{color:"#92400E"}}>čistý úrok · narůstá každý den · klikni pro rozpis</div>
           </div>
           {openDetail==="m1" && <KpiBreakdown rows={rows1} colSet="nextMonth" onClose={(e)=>{e.stopPropagation();setOpenDetail(null);}} />}
         </div>
@@ -2333,6 +2518,9 @@ function EscrowList({ escrows, onNew, onEdit, onDelete, loading }) {
           </div>
         </div>
       </div>
+      {/* Insights panel */}
+      {showInsights && <EscrowInsights escrows={escrows} />}
+
       {/* Toolbar */}
       <div style={{display:"flex",alignItems:"center",gap:8,justifyContent:"space-between"}}>
         <div style={{display:"flex",gap:4}}>
@@ -2344,6 +2532,13 @@ function EscrowList({ escrows, onNew, onEdit, onDelete, loading }) {
               borderColor:filter===f.key?"var(--ink)":"var(--line)"
             }}>{f.label} ({escrows.filter(FILTERS.find(x=>x.key===f.key).fn).length})</button>
           ))}
+          <button onClick={()=>setShowInsights(s=>!s)} style={{
+            padding:"5px 14px",borderRadius:20,fontSize:12,border:"1px solid",cursor:"pointer",
+            background:showInsights?"#1E1B4B":"transparent",
+            color:showInsights?"#fff":"var(--mut)",
+            borderColor:showInsights?"#3730A3":"var(--line)",
+            fontWeight: showInsights?600:400,
+          }}>⚡ Zajímavosti</button>
         </div>
         <button className="btn pri" onClick={onNew}>+ Nová úschova</button>
       </div>
