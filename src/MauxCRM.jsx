@@ -92,8 +92,9 @@ html,body,#root{height:100%;background:#F3F2F9}
 .pill:hover{border-color:var(--ink);color:var(--ink)}
 .pill.on{background:var(--ink);color:#fff;border-color:var(--ink)}
 .kpi-row{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:32px}
-.kpi{padding:20px 22px;border:1px solid var(--line);border-radius:12px;background:var(--surface);transition:.2s}
-.kpi:hover{border-color:var(--line2);box-shadow:0 2px 12px rgba(0,0,0,.06)}
+.kpi{padding:20px 22px;border:1px solid var(--line);border-radius:12px;background:var(--surface);transition:all .18s;cursor:default}
+.kpi:hover{border-color:var(--ink);box-shadow:0 4px 20px rgba(53,24,165,.12);transform:translateY(-2px)}
+.kpi.hi:hover{box-shadow:0 6px 28px rgba(53,24,165,.45);transform:translateY(-2px)}
 .kpi .k{font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--mut);font-weight:500;margin-bottom:10px}
 .kpi .v{font-family:'Fraunces',serif;font-size:24px;font-weight:300;color:var(--txt);line-height:1}
 .kpi .s{font-size:11.5px;color:var(--mut);margin-top:6px}
@@ -1101,9 +1102,9 @@ function AutoBadge() {
 /* ─── INTERACTIVE WEALTH DONUT ─── */
 function WealthDonut({ outerItems, innerItems, outerLabel, innerLabel, outerTotal, innerTotal }) {
   const [hovered, setHovered] = useState(null);
-  const W = 700, H = 560, cx = W/2, cy = H/2;
-  const OR = 210, ORi = 150;   // outer = osobni majetek
-  const IR = 142, IRi = 92;    // inner = sporaci ucet
+  const W = 760, H = 560, cx = W/2, cy = H/2;
+  const OR = 215, ORi = 155;   // outer = osobni majetek
+  const IR = 147, IRi = 96;    // inner = sporaci ucet
 
   const arc = (outerR, innerR, startA, endA) => {
     if (Math.abs(endA - startA) < 0.001) return "";
@@ -1147,11 +1148,11 @@ function WealthDonut({ outerItems, innerItems, outerLabel, innerLabel, outerTota
   const isHov = (s) => hovered && hovered.label === s.label && hovered.ring === s.ring;
 
   return (
-    <div style={{width:"100%", background:"#fff", borderRadius:16, border:"1px solid var(--line)", padding:"16px 8px 20px", display:"flex", flexDirection:"column", alignItems:"center"}}>
+    <div style={{width:"100%", background:"#fff", borderRadius:16, border:"1px solid var(--line)", padding:"12px 4px 12px", display:"flex", flexDirection:"column", alignItems:"center"}}>
       <div style={{fontSize:9,letterSpacing:".3em",textTransform:"uppercase",color:"var(--mut)",fontWeight:600,marginBottom:12,alignSelf:"flex-start",paddingLeft:16}}>
         Majetek & Spořák · najeď pro detail
       </div>
-      <svg width="100%" viewBox={`-10 0 ${W+20} ${H}`} style={{overflow:"visible", maxWidth:560}}>
+      <svg width="100%" viewBox={`0 0 ${W} ${H}`} style={{overflow:"visible"}}>
         <defs>
           <filter id="segGlow" x="-20%" y="-20%" width="140%" height="140%">
             <feGaussianBlur stdDeviation="4" result="blur"/>
@@ -1315,14 +1316,14 @@ function FinanceSection({ title, items, category, onSave, onDelete, accent, auto
       </div>
       <div>
         {(autoItems||[]).map((item, i) => (
-          <div key={i} style={{ display: "flex", alignItems: "center", padding: "9px 18px", borderBottom: "1px solid var(--line)", gap: 10 }}>
+          <div key={i} style={{ display: "flex", alignItems: "center", padding: "7px 14px", borderBottom: "1px solid var(--line)", gap: 10 }}>
             <div style={{ flex: 1, fontSize: 12.5, color: "var(--txt)" }}>{item.label}</div>
             <span style={{ fontSize: 7, background: "#EEF2FF", color: "#3730A3", padding: "1px 4px", borderRadius: 3, fontWeight: 700 }}>auto</span>
             <div style={{ fontSize: 13, fontFamily: "var(--mono)", color: amtColor }}>+{item.amount.toLocaleString("cs-CZ")} Kč</div>
           </div>
         ))}
         {items.map(item => item.notes === "TBD" ? (
-          <div key={item.id} style={{ display: "flex", alignItems: "center", padding: "9px 18px", borderBottom: "1px solid var(--line)", gap: 10 }}>
+          <div key={item.id} style={{ display: "flex", alignItems: "center", padding: "7px 14px", borderBottom: "1px solid var(--line)", gap: 10 }}>
             <div style={{ flex: 1, fontSize: 12.5, color: "var(--mut)", fontStyle: "italic" }}>{item.label}</div>
             <span style={{ fontSize: 10, color: "var(--mut)", background: "#F5F5F5", padding: "2px 8px", borderRadius: 4 }}>k doplnění</span>
           </div>
@@ -1646,7 +1647,7 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
 
       {/* TOP ROW: 3+2 */}
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr 1fr",gap:10,marginBottom:2}}>
-        <Card>
+        <Card style={{position:"relative"}} title={`YTD: ${fmtKc(ytd)} · Průměr: ${fmtKc(Math.round(ytd/monthsElapsed))}/měsíc`}>
           <Lbl>◀ Minulý měsíc</Lbl>
           <Num size={22}>{fmtKc(mRevPrev)}</Num>
           {trend!==null&&<div style={{fontSize:11,color:trend>=0?"#059669":"#DC2626",fontWeight:500,marginTop:4}}>{trend>=0?"↑":"↓"} {Math.abs(trend)} % · základ</div>}
@@ -1716,17 +1717,17 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
           const stavebko = (financeItems||[]).find(i=>i.id==="fi_ma_02")?.amount||0;
           
           const outerItems = [
-            {amount:akcie,    color:"#10B981"},
-            {amount:stavebko, color:"#D97706"},
-            {amount:zk,       color:"#6EE7B7"},
+            {amount:akcie,    color:"#10B981", label:"Akcie"},
+            {amount:stavebko, color:"#D97706", label:"Stavebko"},
+            {amount:zk,       color:"#6EE7B7", label:"Základ. kap."},
           ].filter(i=>i.amount>0);
           
           const innerItems = [
-            {amount:dpfo2,   color:"#F59E0B"},
-            {amount:dph2,    color:"#3518A5"},
-            {amount:bob2,    color:"#059669"},
-            {amount:man2,    color:"#7C3AED"},
-            {amount:zk,      color:"#C4B5FD"},
+            {amount:dpfo2,   color:"#F59E0B", label:"DPFO 2026"},
+            {amount:dph2,    color:"#3518A5", label:"DPH"},
+            {amount:bob2,    color:"#059669", label:"Bobnice"},
+            {amount:man2,    color:"#7C3AED", label:"Daň z úschov"},
+            {amount:zk,      color:"#C4B5FD", label:"Základ. kap."},
           ].filter(i=>i.amount>0);
           
           const oTotal = outerItems.reduce((s,i)=>s+Math.abs(i.amount||0),0);
@@ -1744,10 +1745,10 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
         {/* Right: Chart + Top klienti */}
         <div style={{display:"flex",flexDirection:"column",gap:12}}>
           {/* Mini chart + top klienti */}
-          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
+          <div style={{display:"grid",gridTemplateColumns:"1.4fr 1fr",gap:10}}>
             <Card style={{padding:"14px 16px"}}>
               {(() => {
-                const W=260,H=70,padL=6,padR=6,padT=18,padB=20;
+                const W=300,H=90,padL=6,padR=6,padT=20,padB=22;
                 const n=chartData.length;
                 if(n===0) return null;
                 const nz=chartData.filter(d=>d.v>0);
@@ -1785,12 +1786,15 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
               })()}
             </Card>
             <Card style={{padding:"14px 16px"}}>
-              <div style={{fontSize:9,letterSpacing:".2em",textTransform:"uppercase",color:"var(--mut)",fontWeight:600,marginBottom:10}}>Top klienti</div>
-              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6}}>
-                {topC.slice(0,6).map(({c,rev},i)=>(
-                  <div key={i} style={{background:i===0?"var(--ink)":"#F7F5FF",borderRadius:8,padding:"8px 10px",border:`1px solid ${i===0?"var(--ink)":"var(--line)"}`}}>
-                    <div style={{fontSize:10.5,fontWeight:500,color:i===0?"#fff":"var(--txt)",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",marginBottom:3}}>{c.name.split(" ")[0]}</div>
-                    <div style={{fontSize:12,fontFamily:"Fraunces,serif",fontWeight:300,color:i===0?"rgba(255,255,255,.8)":"var(--gold)"}}>{Math.round(rev/1000)}k</div>
+              <div style={{fontSize:9,letterSpacing:".2em",textTransform:"uppercase",color:"var(--mut)",fontWeight:600,marginBottom:10}}>Top 10 klientů</div>
+              <div style={{display:"flex",flexDirection:"column",gap:5}}>
+                {topC.slice(0,10).map(({c,rev},i)=>(
+                  <div key={i} style={{display:"flex",alignItems:"center",gap:8,padding:"5px 8px",borderRadius:7,background:i===0?"var(--ink)":"transparent",border:`1px solid ${i===0?"var(--ink)":"var(--line)"}`,cursor:"default",transition:".12s"}}
+                    onMouseEnter={e=>{if(i>0)e.currentTarget.style.background="#F7F5FF"}}
+                    onMouseLeave={e=>{if(i>0)e.currentTarget.style.background="transparent"}}>
+                    <span style={{fontSize:9,color:i===0?"rgba(255,255,255,.5)":"var(--mut)",fontWeight:600,width:14,textAlign:"right",flexShrink:0}}>{i+1}</span>
+                    <span style={{fontSize:11,fontWeight:500,color:i===0?"#fff":"var(--txt)",flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{c.name}</span>
+                    <span style={{fontSize:11,fontFamily:"Fraunces,serif",fontWeight:300,color:i===0?"rgba(255,255,255,.8)":"var(--gold)",flexShrink:0}}>{fmtKc(rev)}</span>
                   </div>
                 ))}
               </div>
@@ -1799,7 +1803,7 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
         </div>
       </div>
       {/* Příjmy + Výdaje + Cash flow */}
-      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 240px",gap:12}}>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 220px",gap:10}}>
         <FinanceSection title="Příjmy měsíční"
           items={(financeItems||[]).filter(i=>i.category==="prijem")}
           category="prijem" accent="#059669"
