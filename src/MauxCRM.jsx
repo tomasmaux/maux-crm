@@ -285,8 +285,16 @@ async function deleteLoanTransaction(id) {
 }
 
 async function fetchEscrows() {
-  const { data, error } = await supabase.from("escrows").select("*, escrow_tranches(*)").order("escrow_number");
-  if (error) throw error;
+  // Try nested join first
+  let { data, error } = await supabase.from("escrows").select("*, escrow_tranches(*)").order("escrow_number");
+  if (error) {
+    console.error("fetchEscrows join error:", error.message, "— retrying without join");
+    // Fallback: fetch separately
+    const { data: esc, error: e2 } = await supabase.from("escrows").select("*").order("escrow_number");
+    if (e2) { console.error("fetchEscrows fallback error:", e2.message); return []; }
+    const { data: tr } = await supabase.from("escrow_tranches").select("*").order("sort_order");
+    return (esc || []).map(e => ({ ...e, escrow_tranches: (tr || []).filter(t => t.escrow_id === e.id) }));
+  }
   return data || [];
 }
 async function upsertEscrow(e) {
@@ -3335,7 +3343,7 @@ export default function MauxCRM() {
       fetchFinanceItems().catch(e => { console.error("finance:", e); return []; }),
       ensureDpfoYear(new Date().getFullYear()).catch(() => []),
       fetchLoanTrackers().catch(() => []),
-      fetchEscrows().catch(() => []),
+      fetchEscrows().catch(e => { console.error("escrows load:", e); return []; }),
     ])
       .then(async ([c, i, w, f, dpfo, loans]) => {
         setClients(c); setInvoices(i); setWorkEntries(w); setFinanceItems(f);
