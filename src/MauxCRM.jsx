@@ -310,6 +310,25 @@ async function ensureTaxYear(year) {
   return changed ? fetchTaxRecords(year) : existing;
 }
 
+// ── CHECKLIST MĚSÍČNÍCH VÝDAJŮ — odškrtávání zaplacených položek (V.03) ──
+// Záznam je vázaný na (položka × rok × měsíc) → nový měsíc = čistý list, samo se "resetuje"
+// 1. v měsíci, aniž by se cokoliv mazalo (historie zůstává v tabulce pro pozdější přehled).
+async function fetchExpenseChecks(year, month) {
+  const { data, error } = await supabase.from("expense_checklist").select("*").eq("year", year).eq("month", month);
+  if (error) throw error;
+  return data || [];
+}
+async function setExpenseCheck(itemId, year, month, paid) {
+  const id = `${itemId}_${year}_${month}`;
+  const { error } = await supabase.from("expense_checklist").upsert({
+    id, item_id: itemId, year, month, paid,
+    paid_at: paid ? new Date().toISOString() : null,
+    updated_at: new Date().toISOString(),
+  });
+  if (error) throw error;
+  return fetchExpenseChecks(year, month);
+}
+
 // ── LOANS ──
 async function fetchLoanTrackers() {
   const { data, error } = await supabase.from("loan_trackers").select("*");
@@ -2782,6 +2801,14 @@ function MiniSpořák({ financeItems, invoices, dpfoMonths, loanTransactions, es
           <span style={{fontSize:15,color:volné>=0?"#059669":"#DC2626",fontWeight:700}}>{volné>=0?"+":""}{fmtKc(volné)} volného</span>
           <span style={{fontSize:11,color:"var(--mut)"}}>z {fmtKc(totalEarmarked)} obálek</span>
         </div>
+        {volné > 0 && (
+          <div style={{display:"flex",alignItems:"center",gap:6,marginTop:7,padding:"5px 10px",background:"#F5F3FF",border:"1px solid #DDD6FE",borderRadius:8,maxWidth:340}}>
+            <span style={{width:8,height:8,borderRadius:2,background:"#8B5CF6",flexShrink:0}} />
+            <span style={{fontSize:10,color:"#6D28D9",lineHeight:1.4}}>
+              ↳ totéž jsou peníze: <strong>Firemní rezerva</strong> ({fmtKc(volné)}) v Osobním majetku — fyzicky leží přímo zde, na tomto účtu
+            </span>
+          </div>
+        )}
       </div>
 
       <Div />
@@ -2801,6 +2828,60 @@ function MiniSpořák({ financeItems, invoices, dpfoMonths, loanTransactions, es
         ))}
       </div>
 
+    </div>
+  );
+}
+
+/* ─── LIQUID TANK (interaktivní "dolévající se" vizualizace k cíli — V.03) ─── */
+function LiquidTank({ pct, color, value, goal, onSetGoal, size = 46 }) {
+  const p = Math.max(0, Math.min(pct, 1));
+  const W = Math.round(size * 0.62);
+  const H = size;
+  const [editGoal, setEditGoal] = useState(false);
+  const [goalInput, setGoalInput] = useState(goal);
+  const full = p >= 1;
+
+  const commitGoal = () => { if (onSetGoal) onSetGoal(Math.max(0, Math.round(goalInput||0))); setEditGoal(false); };
+  const openEdit = (e) => { if (!onSetGoal) return; e.stopPropagation(); setGoalInput(goal); setEditGoal(true); };
+
+  return (
+    <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:4}}>
+      <style>{`
+        @keyframes mauxLiquidShimmer { 0% { transform: translateX(-60%); opacity:0; } 18% { opacity:.85; } 50% { transform: translateX(55%); opacity:.85; } 75% { opacity:0; } 100% { transform: translateX(55%); opacity:0; } }
+        @keyframes mauxLiquidGlow { 0%,100% { box-shadow: 0 0 0 0 rgba(139,92,246,0); } 50% { box-shadow: 0 0 10px 1px rgba(139,92,246,.45); } }
+        .maux-liquid-shimmer { animation: mauxLiquidShimmer 3.4s ease-in-out infinite; }
+        .maux-liquid-full { animation: mauxLiquidGlow 2.2s ease-in-out infinite; }
+      `}</style>
+      <div
+        title={`${Math.round(p*100)} % cíle · ${fmtKc(value)} z ${fmtKc(goal)} Kč${onSetGoal ? " · klikni pro úpravu cíle" : ""}`}
+        className={full ? "maux-liquid-full" : ""}
+        style={{position:"relative",width:W,height:H,borderRadius:8,border:`1.5px solid ${color}`,overflow:"hidden",background:"#F8FAFC",cursor:onSetGoal?"pointer":"default",flexShrink:0}}
+        onClick={openEdit}
+      >
+        {/* hladina kapaliny — stoupá k cíli */}
+        <div style={{position:"absolute",left:0,right:0,bottom:0,height:`${p*100}%`,background:`linear-gradient(180deg, ${color}BB 0%, ${color} 88%)`,transition:"height 1.1s cubic-bezier(.4,0,.2,1)",overflow:"hidden"}}>
+          {/* jemná lesklá vlna probublávající přes hladinu */}
+          <div className="maux-liquid-shimmer" style={{position:"absolute",top:1,left:"-40%",width:"170%",height:5,borderRadius:3,background:"linear-gradient(90deg, transparent, rgba(255,255,255,.6), transparent)"}} />
+        </div>
+        {/* % popisek */}
+        <div style={{position:"absolute",inset:0,display:"flex",alignItems:"center",justifyContent:"center"}}>
+          <span style={{fontSize:10,fontWeight:800,color: p > 0.5 ? "#fff" : color, textShadow: p > 0.5 ? "0 1px 3px rgba(0,0,0,.3)" : "none"}}>
+            {full ? "🎉" : `${Math.round(p*100)}%`}
+          </span>
+        </div>
+      </div>
+      {editGoal ? (
+        <div style={{display:"flex",alignItems:"center",gap:3}} onClick={e=>e.stopPropagation()}>
+          <input type="number" value={goalInput} autoFocus onChange={e=>setGoalInput(Number(e.target.value))}
+            onKeyDown={e=>{ if(e.key==="Enter") commitGoal(); if(e.key==="Escape") setEditGoal(false); }}
+            style={{width:70,fontSize:10,padding:"2px 5px",border:`1.5px solid ${color}`,borderRadius:5,outline:"none"}} />
+          <button onClick={commitGoal} style={{background:color,color:"#fff",border:"none",borderRadius:5,padding:"2px 6px",fontSize:10,cursor:"pointer",fontWeight:700}}>✓</button>
+        </div>
+      ) : (
+        <span onClick={openEdit} style={{fontSize:8.5,color:"var(--mut)",cursor:onSetGoal?"pointer":"default"}}>
+          cíl {fmtKc(goal)}{onSetGoal ? " ✎" : ""}
+        </span>
+      )}
     </div>
   );
 }
@@ -2830,6 +2911,10 @@ function MajetekBar({ financeItems, onSaveFinance, invoices, dpfoMonths, loanTra
   const totalEarmarkedM = dphAutoM + dpfoAccM + (bobBalM > 0 ? bobBalM : 0) + danUschovM + manualEnvM.reduce((s,i)=>s+(i.amount||0),0);
   const firmaKap = Math.max(sporBal - totalEarmarkedM, 0);
 
+  // Cíl firemní rezervy — interaktivně nastavitelný (V.03 — "tekutina" stoupající k metě)
+  const reserveGoal = (financeItems||[]).find(i => i.id === "fi_ma_03_goal")?.amount || 100000;
+  const setReserveGoal = (val) => onSaveFinance({ id: "fi_ma_03_goal", category: "majetek_goal", label: "Cíl — firemní rezerva", amount: val });
+
   const total = akcie + stavebko + firmaKap + extraItems.reduce((s,i) => s+(i.amount||0), 0);
 
   const [editId,    setEditId]    = useState(null);   // which item is being edited
@@ -2849,7 +2934,7 @@ function MajetekBar({ financeItems, onSaveFinance, invoices, dpfoMonths, loanTra
   const allAssets = [
     akcieItem    && { item: akcieItem,    label: "Akcie / ETF",      amount: akcie,    color: "#10B981", editable: true  },
     stavebkoItem && { item: stavebkoItem, label: "Stavební spoření", amount: stavebko, color: "#D97706", editable: true  },
-    firmaKap > 0  && { item: null,         label: "Firemní rezerva",  amount: firmaKap, color: "#8B5CF6", editable: false, autoNote: "= spořák − obálky" },
+    firmaKap > 0  && { item: null,         label: "Firemní rezerva",  amount: firmaKap, color: "#8B5CF6", editable: false, liquid: true, goal: reserveGoal, autoNote: "= spořák − obálky · fyzicky leží na spořicím účtu (volné)" },
     ...extraItems.map((it,idx) => ({ item: it, label: it.label, amount: it.amount||0, color: COLORS[(3+idx)%COLORS.length], editable: true })),
   ].filter(Boolean).filter(a => a.amount > 0 || a.editable);
 
@@ -2875,12 +2960,21 @@ function MajetekBar({ financeItems, onSaveFinance, invoices, dpfoMonths, loanTra
         <div style={{display:"flex",gap:24,flexWrap:"wrap",alignItems:"flex-start"}}>
           {allAssets.map((a,i) => (
             <div key={i} style={{display:"flex",alignItems:"flex-start",gap:8}}>
-              <div style={{width:11,height:11,borderRadius:3,background:a.color,flexShrink:0,marginTop:3}} />
+              {a.liquid ? (
+                <LiquidTank pct={a.goal > 0 ? a.amount / a.goal : 0} color={a.color} value={a.amount} goal={a.goal} onSetGoal={setReserveGoal} size={48} />
+              ) : (
+                <div style={{width:11,height:11,borderRadius:3,background:a.color,flexShrink:0,marginTop:3}} />
+              )}
               <div>
                 <div style={{fontSize:11,color:"var(--mut)",marginBottom:2}}>
                   {a.label}
                   {!a.editable && <span style={{fontSize:9,background:"#EEF2FF",color:"#3730A3",padding:"1px 4px",borderRadius:3,fontWeight:700,marginLeft:5}}>auto</span>}
                   {a.autoNote && <span style={{fontSize:9,color:"var(--mut)",marginLeft:4,opacity:.7}}>{a.autoNote}</span>}
+                  {a.liquid && (
+                    <span style={{fontSize:9,marginLeft:5,fontWeight:700,color: a.amount >= a.goal ? "#059669" : "#8B5CF6"}}>
+                      {a.amount >= a.goal ? "🎉 cíl splněn" : `· ${Math.round((a.amount/Math.max(a.goal,1))*100)} % k cíli`}
+                    </span>
+                  )}
                 </div>
                 {editId === a.item?.id ? (
                   <div style={{display:"flex",alignItems:"center",gap:5}}>
@@ -3057,7 +3151,7 @@ function EditableMoney({ item, onSave, color = "var(--txt)", sign = "", abs = fa
   );
 }
 
-function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, loanTrackers, loanTransactions, escrows, onNav, onSaveFinance, onDeleteFinance, onDpfoToggle, onLoanTxAdd, onLoanTxToggle, onLoanTxDelete, onLoanUpdate }) {
+function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, loanTrackers, loanTransactions, escrows, expenseChecks, onToggleExpenseCheck, onNav, onSaveFinance, onDeleteFinance, onDpfoToggle, onLoanTxAdd, onLoanTxToggle, onLoanTxDelete, onLoanUpdate }) {
   const [escrowAlertDismissed, setEscrowAlertDismissed] = useState(false);
   const [editLayout, setEditLayout] = useState(false);
   const [panelState, setPanelState] = useState(loadPanelState);
@@ -3175,6 +3269,10 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
   const totalLuxus = luxus.reduce((s,i) => s+(i.amount||0), 0);
   const totalVydaje = totalNutne + totalLuxus;
   const cashflow = mRev + totalVydaje;
+  // Runway — kolik měsíců firma "ujede" ze zůstatku na spořáku při současných výdajích (V.03 — pro Pulz firmy)
+  const sporBalPulz = (financeItems||[]).find(i => i.id === "fi_sp_99")?.amount || 0;
+  const runwayPulz  = Math.abs(totalVydaje) > 0 ? sporBalPulz / Math.abs(totalVydaje) : 0;
+  const runwayMPulz = Math.floor(runwayPulz);
   // On the way = faktury vystaveny, dosud neuhrazeny
   const onTheWayInvs = invoices.filter(i => invoiceStatus(i) === "vystavena");
   const onTheWayAmt  = onTheWayInvs.reduce((s,i) => s+(i.subtotal||0), 0);
@@ -3404,6 +3502,68 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
         loanTransactions={loanTransactions} escrows={escrows} onSaveFinance={onSaveFinance} />
       </Panel>
 
+      {/* ─── PULZ FIRMY — překvapivá novinka V.03: jeden pohled, který spojí vše dohromady ─── */}
+      <Panel id="pulz">
+      <Card style={{padding:"18px 24px"}}>
+        {(() => {
+          // 4 dílčí ukazatele (každý 0–25 bodů), spojené z různých modulů — "dokonalé propojení" v praxi
+          const sCash = cashflow >= 0 ? 25 : Math.max(25 + Math.round((cashflow / Math.max(Math.abs(mRev),1)) * 25), 0);
+          const sRunway = runwayMPulz >= 6 ? 25 : runwayMPulz >= 3 ? 19 : runwayMPulz >= 1 ? 12 : 4;
+          const sNext = c35Ratio >= 1 ? 25 : c35Ratio >= 0.3 ? 20 : c35Ratio >= 0 ? 14 : c35Ratio >= -0.5 ? 7 : 2;
+          const expAll = [...nutne, ...luxus];
+          const expPaid = expAll.filter(i => (expenseChecks||[]).find(c => c.item_id === i.id && c.paid)).length;
+          const sPlatby = expAll.length > 0 ? Math.round((expPaid/expAll.length)*25) : 18;
+          const score = sCash + sRunway + sNext + sPlatby;
+          const verdict = score >= 85 ? { t: "Firma jede na plné obrátky", e: "🚀", c: "#059669" }
+                        : score >= 65 ? { t: "Pevně na nohou", e: "💪", c: "#16A34A" }
+                        : score >= 45 ? { t: "Stabilní — jen hlídej tempo", e: "👀", c: "#D97706" }
+                        : score >= 25 ? { t: "Vyžaduje pozornost", e: "⚠️", c: "#EA580C" }
+                        :               { t: "Čas zpomalit a přeskupit síly", e: "🧭", c: "#DC2626" };
+          const Bar = ({label, val, max, color}) => (
+            <div style={{minWidth:108}}>
+              <div style={{fontSize:9,color:"var(--mut)",marginBottom:3,display:"flex",justifyContent:"space-between"}}>
+                <span>{label}</span><span style={{fontWeight:700,color}}>{val}/{max}</span>
+              </div>
+              <div style={{height:4,borderRadius:2,background:"var(--line)",overflow:"hidden"}}>
+                <div style={{height:"100%",width:`${(val/max)*100}%`,background:color,transition:"width .6s cubic-bezier(.4,0,.2,1)"}} />
+              </div>
+            </div>
+          );
+          return (
+            <div style={{display:"flex",alignItems:"center",gap:28,flexWrap:"wrap"}}>
+              <div style={{display:"flex",alignItems:"center",gap:14,minWidth:230}}>
+                <div style={{position:"relative",width:64,height:64,flexShrink:0}}>
+                  <svg width="64" height="64" viewBox="0 0 64 64">
+                    <circle cx="32" cy="32" r="27" fill="none" stroke="var(--line)" strokeWidth="6" />
+                    <circle cx="32" cy="32" r="27" fill="none" stroke={verdict.c} strokeWidth="6" strokeLinecap="round"
+                      strokeDasharray={`${(score/100)*169.6} 169.6`} transform="rotate(-90 32 32)" style={{transition:"stroke-dasharray 1s cubic-bezier(.4,0,.2,1)"}} />
+                  </svg>
+                  <div style={{position:"absolute",inset:0,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center"}}>
+                    <span style={{fontFamily:"Fraunces,serif",fontSize:18,fontWeight:300,color:verdict.c,lineHeight:1}}>{score}</span>
+                    <span style={{fontSize:7,color:"var(--mut)",letterSpacing:".1em"}}>PULZ</span>
+                  </div>
+                </div>
+                <div>
+                  <div style={{fontSize:9,letterSpacing:".22em",textTransform:"uppercase",color:"var(--mut)",fontWeight:700,marginBottom:3}}>Pulz firmy · dnes</div>
+                  <div style={{fontSize:15,fontWeight:600,color:verdict.c,display:"flex",alignItems:"center",gap:6}}>
+                    {verdict.e} {verdict.t}
+                  </div>
+                  <div style={{fontSize:9.5,color:"var(--mut)",marginTop:2}}>spočteno ze 4 ukazatelů napříč appkou — živě, při každé návštěvě</div>
+                </div>
+              </div>
+              <div style={{width:1,alignSelf:"stretch",background:"var(--line)",margin:"0 2px",flexShrink:0}} />
+              <div style={{display:"flex",gap:18,flexWrap:"wrap",flex:1}}>
+                <Bar label="Cash flow tento měsíc" val={sCash} max={25} color="#059669" />
+                <Bar label={`Běh na rezervách (${runwayMPulz} měs.)`} val={sRunway} max={25} color="#7C3AED" />
+                <Bar label="Projekce příští měsíc" val={sNext} max={25} color="#0EA5E9" />
+                <Bar label="Odškrtnuté platby" val={sPlatby} max={25} color="#B8923D" />
+              </div>
+            </div>
+          );
+        })()}
+      </Card>
+      </Panel>
+
       {/* FINANCE SEKCE — 2 sloupce: [Příjmy + Cash Flow spojené] | Výdaje */}
       <Panel id="finance">
       <div style={{display:"grid",gridTemplateColumns:"3fr 2fr",gap:10,alignItems:"stretch"}}>
@@ -3453,8 +3613,6 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
           <div style={{padding:"14px 20px 16px",flex:1,display:"flex",flexDirection:"column"}}>
             <div style={{fontSize:9,letterSpacing:".22em",textTransform:"uppercase",color:"var(--mut)",fontWeight:700,marginBottom:10}}>Cash flow — tento měsíc</div>
             {[
-              { label: "Fakturováno (bez DPH)", value: mRev, color: "#059669", sign: "+" },
-              ...(onTheWayAmt > 0 ? [{ label: `Na cestě — ${onTheWayInvs.length}× faktura`, value: onTheWayAmt, color: "#D97706", sign: "+", sub: "čeká na úhradu" }] : []),
               { label: "Nutné výdaje", value: Math.abs(totalNutne), color: "#DC2626", sign: "−" },
               { label: "Lusus výdaje", value: Math.abs(totalLuxus), color: "#9333EA", sign: "−" },
             ].map((row,i) => (
@@ -3477,31 +3635,72 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
           </div>
         </Card>
 
-        {/* PRAVÁ KARTA: Výdaje */}
+        {/* PRAVÁ KARTA: Výdaje — s checklistem plateb (V.03, samo se resetuje 1. v měsíci) */}
         <Card style={{padding:"16px 20px",display:"flex",flexDirection:"column",gap:0}}>
-          <div style={{fontSize:9,letterSpacing:".28em",textTransform:"uppercase",color:"var(--mut)",fontWeight:600,marginBottom:10}}>Výdaje měsíčně</div>
-          <div style={{display:"flex",gap:8,marginBottom:14}}>
+          {(() => {
+            const isPaid = (id) => !!(expenseChecks||[]).find(c => c.item_id === id && c.paid);
+            const all = [...nutne.map(i=>({...i,_c:"#DC2626"})), ...luxus.map(i=>({...i,_c:"#9333EA"}))];
+            const paidItems = all.filter(i => isPaid(i.id));
+            const paidCount = paidItems.length;
+            const paidSum   = paidItems.reduce((s,i)=>s+Math.abs(i.amount||0),0);
+            const pct = all.length > 0 ? Math.round((paidCount/all.length)*100) : 0;
+            const Check = ({item, color}) => {
+              const p = isPaid(item.id);
+              return (
+                <span onClick={() => onToggleExpenseCheck && onToggleExpenseCheck(item.id, !p)}
+                  title={p ? "Zaplaceno — klikni pro zrušení" : "Označit jako zaplacené"}
+                  style={{width:15,height:15,borderRadius:4,border:`1.6px solid ${p?color:"var(--line)"}`,background:p?color:"transparent",
+                    display:"inline-flex",alignItems:"center",justifyContent:"center",cursor:onToggleExpenseCheck?"pointer":"default",
+                    flexShrink:0,marginRight:7,transition:"all .15s",fontSize:10,color:"#fff",lineHeight:1}}>
+                  {p ? "✓" : ""}
+                </span>
+              );
+            };
+            return (<>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:10}}>
+            <div style={{fontSize:9,letterSpacing:".28em",textTransform:"uppercase",color:"var(--mut)",fontWeight:600}}>Výdaje měsíčně</div>
+            {all.length > 0 && (
+              <div style={{fontSize:9.5,color:pct===100?"#059669":"var(--mut)",fontWeight:700}}>
+                {pct===100 ? "🎉 vše zaplaceno" : `✓ ${paidCount}/${all.length} zaplaceno`}
+              </div>
+            )}
+          </div>
+          <div style={{display:"flex",gap:8,marginBottom:10}}>
             <span style={{fontFamily:"Fraunces,serif",fontSize:26,fontWeight:300,color:"#DC2626"}}>{fmtKc(Math.abs(totalNutne))}</span>
             <span style={{fontSize:11,color:"var(--mut)",alignSelf:"flex-end",marginBottom:4}}>nutné</span>
             <span style={{fontSize:18,color:"var(--mut)",alignSelf:"flex-end",marginBottom:2,marginLeft:6}}>+</span>
             <span style={{fontFamily:"Fraunces,serif",fontSize:26,fontWeight:300,color:"#9333EA",marginLeft:6}}>{fmtKc(Math.abs(totalLuxus))}</span>
             <span style={{fontSize:11,color:"var(--mut)",alignSelf:"flex-end",marginBottom:4}}>lusus</span>
           </div>
+          {all.length > 0 && (
+            <div style={{marginBottom:12}}>
+              <div style={{height:5,borderRadius:3,background:"var(--line)",overflow:"hidden"}}>
+                <div style={{height:"100%",width:`${pct}%`,background:pct===100?"#059669":"#B8923D",transition:"width .5s cubic-bezier(.4,0,.2,1)"}} />
+              </div>
+              <div style={{fontSize:9.5,color:"var(--mut)",marginTop:4}}>
+                odškrtnuto {fmtKc(paidSum)} · zbývá uhradit {fmtKc(Math.max(Math.abs(totalVydaje)-paidSum,0))}
+              </div>
+            </div>
+          )}
           <div style={{borderTop:"1px solid var(--line)",paddingTop:8,marginBottom:6}}>
             <div style={{fontSize:9,letterSpacing:".2em",textTransform:"uppercase",color:"#DC2626",fontWeight:600,marginBottom:6}}>Nutné</div>
             {nutne.map((i,idx) => (
-              <div key={idx} style={{display:"flex",justifyContent:"space-between",fontSize:12,color:"var(--txt)",paddingBottom:3}}>
-                <span>{i.label}</span>
-                <EditableMoney item={i} onSave={onSaveFinance} color="#DC2626" abs />
+              <div key={idx} style={{display:"flex",justifyContent:"space-between",alignItems:"center",fontSize:12,color:isPaid(i.id)?"var(--mut)":"var(--txt)",paddingBottom:3}}>
+                <span style={{display:"flex",alignItems:"center",textDecoration:isPaid(i.id)?"line-through":"none"}}>
+                  <Check item={i} color="#DC2626" />{i.label}
+                </span>
+                <span style={{opacity:isPaid(i.id)?.55:1}}><EditableMoney item={i} onSave={onSaveFinance} color="#DC2626" abs /></span>
               </div>
             ))}
           </div>
           <div style={{borderTop:"1px solid var(--line)",paddingTop:8,marginTop:4}}>
             <div style={{fontSize:9,letterSpacing:".2em",textTransform:"uppercase",color:"#9333EA",fontWeight:600,marginBottom:6}}>Lusus</div>
             {luxus.map((i,idx) => (
-              <div key={idx} style={{display:"flex",justifyContent:"space-between",fontSize:12,color:"var(--txt)",paddingBottom:3}}>
-                <span>{i.label}</span>
-                <EditableMoney item={i} onSave={onSaveFinance} color="#9333EA" abs />
+              <div key={idx} style={{display:"flex",justifyContent:"space-between",alignItems:"center",fontSize:12,color:isPaid(i.id)?"var(--mut)":"var(--txt)",paddingBottom:3}}>
+                <span style={{display:"flex",alignItems:"center",textDecoration:isPaid(i.id)?"line-through":"none"}}>
+                  <Check item={i} color="#9333EA" />{i.label}
+                </span>
+                <span style={{opacity:isPaid(i.id)?.55:1}}><EditableMoney item={i} onSave={onSaveFinance} color="#9333EA" abs /></span>
               </div>
             ))}
           </div>
@@ -3510,6 +3709,8 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
             <span style={{fontFamily:"Fraunces,serif",fontSize:18,fontWeight:300,color:"var(--ink)"}}>{fmtKc(Math.abs(totalVydaje))}</span>
           </div>
           <button className="btn gho" style={{fontSize:11,marginTop:"auto",paddingTop:10,width:"100%"}} onClick={()=>onNav("vykaz")}>+ Nový výkaz práce</button>
+            </>);
+          })()}
         </Card>
       </div>
       </Panel>
@@ -5062,6 +5263,7 @@ export default function MauxCRM() {
   const [financeItems, setFinanceItems] = useState([]);
   const [dpfoMonths, setDpfoMonths] = useState([]);
   const [taxRecords, setTaxRecords] = useState([]);
+  const [expenseChecks, setExpenseChecks] = useState([]);
   const [loanTrackers, setLoanTrackers] = useState([]);
   const [loanTransactions, setLoanTransactions] = useState({}); // { loanId: [] }
   const [escrows, setEscrows] = useState([]);
@@ -5102,13 +5304,15 @@ export default function MauxCRM() {
       fetchFinanceItems().catch(e => { console.error("finance:", e); return []; }),
       ensureDpfoYear(new Date().getFullYear()).catch(() => []),
       ensureTaxYear(new Date().getFullYear()).catch(() => []),
+      fetchExpenseChecks(new Date().getFullYear(), new Date().getMonth()+1).catch(() => []),
       fetchLoanTrackers().catch(() => []),
       fetchEscrows().catch(e => { console.error("escrows load:", e); return []; }),
     ])
-      .then(async ([c, i, w, f, dpfo, tax, loans, esc]) => {
+      .then(async ([c, i, w, f, dpfo, tax, checks, loans, esc]) => {
         setClients(c); setInvoices(i); setWorkEntries(w); setFinanceItems(f);
         setDpfoMonths(dpfo);
         setTaxRecords(tax);
+        setExpenseChecks(checks);
         setLoanTrackers(loans);
         setEscrows(esc || []);
         const txMap = {};
@@ -5132,6 +5336,11 @@ export default function MauxCRM() {
   };
   const saveTaxRecord = async (rec) => {
     try { await upsertTaxRecord(rec); setTaxRecords(await fetchTaxRecords(rec.year)); }
+    catch(e) { alert("Chyba: " + e.message); }
+  };
+  const toggleExpenseCheck = async (itemId, paid) => {
+    const now = new Date();
+    try { setExpenseChecks(await setExpenseCheck(itemId, now.getFullYear(), now.getMonth()+1, paid)); }
     catch(e) { alert("Chyba: " + e.message); }
   };
   const handleLoanTxAdd = async (tx) => {
@@ -5367,6 +5576,8 @@ export default function MauxCRM() {
               onLoanTxDelete={(loanId, txId) => handleLoanTxDelete(loanId, txId)}
               onLoanUpdate={handleLoanUpdate}
               escrows={escrows}
+              expenseChecks={expenseChecks}
+              onToggleExpenseCheck={toggleExpenseCheck}
               onNav={k => { setMod(k); setMode("list"); setSel(null); }} />
           )}
 
