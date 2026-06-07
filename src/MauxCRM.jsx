@@ -1777,6 +1777,17 @@ function _grossForPeriod(intervals, rate, periodFrom, periodTo, capDate) {
   }, 0);
 }
 
+// Čistý denní úrokový přírůstek ze všech úschov pro KONKRÉTNÍ den (balance toho dne × sazba/365 × 0.85)
+function _dailyNetOnDate(escrows, date) {
+  return (escrows || []).reduce((sum, e) => {
+    if (!e.interest_rate) return sum;
+    const ivs = _buildBalanceIntervals(e);
+    const iv = ivs.find(iv => iv.from <= date && iv.to >= date);
+    if (!iv) return sum;
+    return sum + iv.balance * e.interest_rate / 365 * 0.85;
+  }, 0);
+}
+
 // — Zachováme starší helpers pro EscrowCard legacy tabulku a EscrowInsights —
 function _trancheEnd(tranche, escrow) {
   if (tranche.is_paid && tranche.paid_date) return new Date(tranche.paid_date);
@@ -2854,10 +2865,6 @@ function MiniSpořák({ financeItems, invoices, dpfoMonths, loanTransactions, es
             </button>
           </div>
         )}
-        <div style={{display:"flex",gap:12,alignItems:"center"}}>
-          <span style={{fontSize:15,color:volné>=0?"#059669":"#DC2626",fontWeight:700}}>{volné>=0?"+":""}{fmtKc(volné)} volného</span>
-          <span style={{fontSize:11,color:"var(--mut)"}}>z {fmtKc(totalEarmarked)} obálek</span>
-        </div>
         {/* === GRAF — poměrné rozložení zůstatku jako plně vyplněné, vzdušné bloky (barva = obálka) === */}
         {actualBalance > 0 && (
           <div style={{display:"flex",gap:7,marginTop:16}}>
@@ -3097,6 +3104,60 @@ function MajetekBar({ financeItems, onSaveFinance, invoices, dpfoMonths, loanTra
   );
 }
 
+/* ─── ŽIVÝ VÝDĚLEK Z ÚSCHOV — náhrada za RUNWAY (dnes / včera / předevčírem / 7 dní) ─── */
+function EscrowLiveTile({ escrows }) {
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    const iv = setInterval(() => setTick(t => t + 1), 1000);
+    return () => clearInterval(iv);
+  }, []);
+
+  const now   = new Date();
+  const today = new Date(now); today.setHours(0,0,0,0);
+
+  const days = [];
+  for (let i = 6; i >= 0; i--) {
+    const d = new Date(today); d.setDate(d.getDate() - i);
+    days.push({ date: d, amount: _dailyNetOnDate(escrows, d) });
+  }
+  const dailyToday = days[6].amount;
+  const yesterday  = days[5].amount;
+  const dayBefore  = days[4].amount;
+  const perSec        = dailyToday / 86400;
+  const sinceMidnight = perSec * (now - today) / 1000;
+  const maxDay = Math.max(...days.map(d => d.amount), 1);
+
+  const K  = (n) => maskNum(Math.round(n).toLocaleString('cs-CZ')) + ' Kč';
+  const Kd = (n) => maskNum(n.toLocaleString('cs-CZ', {minimumFractionDigits:2,maximumFractionDigits:2})) + ' Kč';
+  const DNY = ["Ne","Po","Út","St","Čt","Pá","So"];
+
+  return (
+    <div style={{display:"flex",flexDirection:"column",justifyContent:"center",minWidth:190}}>
+      <div style={{fontSize:11,letterSpacing:".15em",textTransform:"uppercase",color:"var(--mut)",fontWeight:600,marginBottom:8}}>VYDĚLÁVÁŠ Z ÚSCHOV</div>
+      <div style={{fontFamily:"Fraunces,serif",fontSize:27,fontWeight:300,color:"#7C3AED",lineHeight:1,marginBottom:4,fontVariantNumeric:"tabular-nums"}}>{Kd(sinceMidnight)}</div>
+      <div style={{fontSize:11,color:"var(--mut)",marginBottom:11}}>dnes · roste o {Kd(perSec)} každou sekundu</div>
+      <div style={{display:"flex",gap:18,marginBottom:11}}>
+        <div>
+          <div style={{fontSize:10,color:"var(--mut)"}}>Včera</div>
+          <div style={{fontSize:13,fontWeight:500,color:"var(--ink)",fontVariantNumeric:"tabular-nums"}}>{K(yesterday)}</div>
+        </div>
+        <div>
+          <div style={{fontSize:10,color:"var(--mut)"}}>Předevčírem</div>
+          <div style={{fontSize:13,fontWeight:500,color:"var(--ink)",fontVariantNumeric:"tabular-nums"}}>{K(dayBefore)}</div>
+        </div>
+      </div>
+      <div style={{display:"flex",alignItems:"flex-end",gap:5,height:36}}>
+        {days.map((d,i) => (
+          <div key={i} style={{display:"flex",flexDirection:"column",alignItems:"center",gap:3,flex:1}} title={`${d.date.getDate()}.${d.date.getMonth()+1}. — ${K(d.amount)}`}>
+            <div style={{width:"100%",height:Math.max(4,(d.amount/maxDay)*26),borderRadius:3,background:i===6?"#7C3AED":"#DDD6FE"}} />
+            <span style={{fontSize:9,color:"var(--mut)"}}>{DNY[d.date.getDay()]}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 /* ─── FIRMA BAR (firemní přehled — dedikovaný třetí řádek) ─── */
 function FirmaBar({ financeItems, invoices, dpfoMonths, loanTransactions, escrows, onSaveFinance }) {
   // Firemní rezerva = spořák − obálky (stejná logika jako MajetekBar)
@@ -3119,9 +3180,6 @@ function FirmaBar({ financeItems, invoices, dpfoMonths, loanTransactions, escrow
   const nutne      = (financeItems||[]).filter(i => i.category === "nutne");
   const luxus      = (financeItems||[]).filter(i => i.category === "luxus");
   const totalVyd   = Math.abs(nutne.reduce((s,i)=>s+(i.amount||0),0) + luxus.reduce((s,i)=>s+(i.amount||0),0));
-  const runway     = totalVyd > 0 ? sporBal / totalVyd : 0;
-  const runwayM    = Math.floor(runway);
-  const runwayD    = Math.round((runway - runwayM) * 30);
   const planKapItem = (financeItems||[]).find(i => i.id === "fi_plan_kapital");
   const planKap    = planKapItem?.amount || 130000;
   const setPlanKap = (val) => onSaveFinance({ ...(planKapItem||{category:"plan",label:"Cíl — kapitál"}), id: "fi_plan_kapital", amount: val });
@@ -3150,12 +3208,8 @@ function FirmaBar({ financeItems, invoices, dpfoMonths, loanTransactions, escrow
 
       <div style={{width:1,alignSelf:"stretch",background:"var(--line)",margin:"0 4px",flexShrink:0}} />
 
-      {/* === RUNWAY === */}
-      <div style={{display:"flex",flexDirection:"column",justifyContent:"center",minWidth:150}}>
-        <div style={{fontSize:11,letterSpacing:".15em",textTransform:"uppercase",color:"var(--mut)",fontWeight:600,marginBottom:8}}>RUNWAY</div>
-        <div style={{fontFamily:"Fraunces,serif",fontSize:32,fontWeight:300,color:"#7C3AED",lineHeight:1,marginBottom:4}}>{runwayM} měs. {runwayD} dní</div>
-        <div style={{fontSize:11,color:"var(--mut)"}}>z celkového zůstatku spořáku</div>
-      </div>
+      {/* === ŽIVÝ VÝDĚLEK Z ÚSCHOV (náhrada za RUNWAY) === */}
+      <EscrowLiveTile escrows={escrows} />
 
       <div style={{width:1,alignSelf:"stretch",background:"var(--line)",margin:"0 4px",flexShrink:0}} />
 
