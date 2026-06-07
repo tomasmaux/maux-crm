@@ -2991,6 +2991,39 @@ function savePanelState(state) {
   try { localStorage.setItem("maux_panel_state", JSON.stringify(state)); } catch(e) {}
 }
 
+// Klikatelná částka pro ručně zadávané (neautomatizované) finanční položky —
+// klik otevře malé inline pole, Enter/✓ uloží přes onSaveFinance, Esc zruší.
+// Automatizované položky (MAUX Legal, Úschovy…) tuto komponentu nepoužívají.
+function EditableMoney({ item, onSave, color = "var(--txt)", sign = "", abs = false }) {
+  const [editing, setEditing] = useState(false);
+  // Pole vždy ukazuje kladnou hodnotu pro pohodlí; znaménko uloženého čísla
+  // zachováme stejné, jaké mělo původně (výdaje bývají uložené jako záporné).
+  const [val, setVal] = useState(Math.abs(item.amount || 0));
+  const commit = () => {
+    const mag = Math.abs(Number(val) || 0);
+    const signed = (item.amount || 0) < 0 ? -mag : mag;
+    onSave({ ...item, amount: signed });
+    setEditing(false);
+  };
+  if (editing) {
+    return (
+      <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+        <input type="number" autoFocus value={val}
+          onChange={e => setVal(e.target.value)}
+          onKeyDown={e => { if (e.key === "Enter") commit(); if (e.key === "Escape") setEditing(false); }}
+          style={{ width: 78, fontSize: 11, fontFamily: "JetBrains Mono,monospace", padding: "1px 4px", border: `1px solid ${color}`, borderRadius: 4, color }} />
+        <button onClick={commit} title="Uložit" style={{ fontSize: 11, color, border: "none", background: "none", cursor: "pointer", padding: 0 }}>✓</button>
+      </span>
+    );
+  }
+  return (
+    <span onClick={() => { setVal(Math.abs(item.amount || 0)); setEditing(true); }} title="Klikni pro ruční úpravu"
+      style={{ fontFamily: "JetBrains Mono,monospace", color, fontSize: 11, cursor: "pointer", borderBottom: `1px dotted ${color}66` }}>
+      {sign}{fmtKc(abs ? Math.abs(item.amount || 0) : (item.amount || 0))}
+    </span>
+  );
+}
+
 function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, loanTrackers, loanTransactions, escrows, onNav, onSaveFinance, onDeleteFinance, onDpfoToggle, onLoanTxAdd, onLoanTxToggle, onLoanTxDelete, onLoanUpdate }) {
   const [escrowAlertDismissed, setEscrowAlertDismissed] = useState(false);
   const [editLayout, setEditLayout] = useState(false);
@@ -3144,6 +3177,22 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
       m++;
       if (m > 11) { m = 0; y++; }
     }
+    // ── Živý odhad příštího měsíce ──
+    // Roste průběžně s daty, která už v appce jsou: nevyfakturovaná práce
+    // (výkazy, co se 1. příštího měsíce promění ve fakturu), pravidelná
+    // platba od města a nahromaděný čistý úrok z úschov k dnešnímu dni
+    // (ten se na účet připisuje taky 1. příštího měsíce). Žádný odhad nazdařbůh —
+    // čistě souhrn dat, co Tom už má v appce, podobně jako progress bar ve hře.
+    const nextM = endMonth < 11 ? endMonth + 1 : 0;
+    const nextY = endMonth < 11 ? endYear : endYear + 1;
+    const liveInv = unbilledAmt + mestoPodebrady;
+    const liveEsc = Math.round(escrowNetThisMonth);
+    result.push({
+      key: `${nextY}-${String(nextM+1).padStart(2,"0")}`,
+      label: `${CZ_M_SHORT[nextM]}_${String(nextY).slice(2)}`,
+      inv: liveInv, escrow: liveEsc, total: liveInv + liveEsc,
+      isCurrent: false, isLive: true,
+    });
     return result;
   })();
   const maxBarV = Math.max(...barData.map(d=>d.total), 1);
@@ -3358,11 +3407,11 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
                 <span style={{fontFamily:"JetBrains Mono,monospace",color:"#059669",fontSize:11}}>+{fmtKc(Math.round(escrowNetThisMonth))}</span>
               </div>
             )}
-            {/* Manuální příjmové položky */}
+            {/* Manuální příjmové položky — částka je klikací a ručně upravitelná */}
             {(financeItems||[]).filter(i=>i.category==="prijem"&&i.notes!=="TBD").map((item,idx)=>(
               <div key={idx} style={{display:"flex",justifyContent:"space-between",fontSize:12,color:"var(--txt)",padding:"3px 0"}}>
                 <span>{item.label}</span>
-                <span style={{fontFamily:"JetBrains Mono,monospace",color:"#059669",fontSize:11}}>+{fmtKc(item.amount||0)}</span>
+                <EditableMoney item={item} onSave={onSaveFinance} color="#059669" sign="+" />
               </div>
             ))}
           </div>
@@ -3410,7 +3459,7 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
             {nutne.map((i,idx) => (
               <div key={idx} style={{display:"flex",justifyContent:"space-between",fontSize:12,color:"var(--txt)",paddingBottom:3}}>
                 <span>{i.label}</span>
-                <span style={{fontFamily:"JetBrains Mono,monospace",color:"#DC2626",fontSize:11}}>{fmtKc(Math.abs(i.amount||0))}</span>
+                <EditableMoney item={i} onSave={onSaveFinance} color="#DC2626" abs />
               </div>
             ))}
           </div>
@@ -3419,7 +3468,7 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
             {luxus.map((i,idx) => (
               <div key={idx} style={{display:"flex",justifyContent:"space-between",fontSize:12,color:"var(--txt)",paddingBottom:3}}>
                 <span>{i.label}</span>
-                <span style={{fontFamily:"JetBrains Mono,monospace",color:"#9333EA",fontSize:11}}>{fmtKc(Math.abs(i.amount||0))}</span>
+                <EditableMoney item={i} onSave={onSaveFinance} color="#9333EA" abs />
               </div>
             ))}
           </div>
@@ -3451,8 +3500,9 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
           const range = Math.max(maxBarV - baseline, 1);
           const toBarH = (v) => v <= 0 ? 0 : ((v - baseline) / range) * BAR_AREA_H;
           const baseY = padT + BAR_AREA_H;
-          const ytdInv = barData.filter(d => d.key.startsWith(String(year))).reduce((s,d)=>s+d.inv,0);
-          const ytdEsc = barData.filter(d => d.key.startsWith(String(year))).reduce((s,d)=>s+d.escrow,0);
+          // Živý odhad příštího měsíce do YTD nepočítáme — to je projekce, ne fakturovaný fakt.
+          const ytdInv = barData.filter(d => !d.isLive && d.key.startsWith(String(year))).reduce((s,d)=>s+d.inv,0);
+          const ytdEsc = barData.filter(d => !d.isLive && d.key.startsWith(String(year))).reduce((s,d)=>s+d.escrow,0);
           const hov = hoverBar != null ? barData[hoverBar] : null;
           const hovPrev = hoverBar != null && hoverBar > 0 ? barData[hoverBar-1] : null;
           const hovDelta = hov && hovPrev ? hov.total - hovPrev.total : null;
@@ -3502,6 +3552,24 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
                   );
                 })}
 
+                {/* Náklady jako tichá referenční linka — nestresující připomínka, kde je "nula":
+                    vše nad ní je čistý zisk. Žádná velká červená čísla, jen jemný orientační pruh. */}
+                {totalVydaje > 0 && (() => {
+                  const costClamped = Math.min(Math.max(totalVydaje, baseline), baseline + range);
+                  const costY = baseY - toBarH(costClamped);
+                  return (
+                    <g style={{ pointerEvents: "none" }}>
+                      <rect x={padL} y={padT} width={W-padL-padR} height={Math.max(costY-padT,0)}
+                        fill="#059669" opacity={0.04} />
+                      <line x1={padL} x2={W-padR} y1={costY} y2={costY}
+                        stroke="#9CA3AF" strokeWidth={1} strokeDasharray="2,3" opacity={0.55} />
+                      <text x={W-padR} y={costY-4} textAnchor="end" fontSize={7} fontFamily="Inter" fill="#9CA3AF">
+                        měsíční náklady ≈ {Math.round(totalVydaje/1000)}k · výš už je čistý zisk
+                      </text>
+                    </g>
+                  );
+                })()}
+
                 {/* Trend linka — spojnice vrcholů sloupců, zvýrazňuje růstovou trajektorii */}
                 {n > 1 && (
                   <polyline
@@ -3510,12 +3578,19 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
                   />
                 )}
 
+                {/* Jemná pulzující animace pro "živý" sloupec příštího měsíce */}
+                <style>{`
+                  @keyframes mauxLivePulse { 0%,100% { opacity: .4; } 50% { opacity: 1; } }
+                  .maux-live-badge { animation: mauxLivePulse 1.8s ease-in-out infinite; }
+                `}</style>
+
                 {barData.map((d, i) => {
                   const x = barX(i);
                   const invH = toBarH(d.inv);
                   const escH = d.escrow > 0 ? Math.max(toBarH(d.inv + d.escrow) - invH, 6) : 0;
                   const totalH = invH + escH;
                   const isNow = d.isCurrent;
+                  const isLive = !!d.isLive;
                   const isHov = hoverBar === i;
                   const prev = i > 0 ? barData[i-1] : null;
                   const delta = prev ? d.total - prev.total : null;
@@ -3527,13 +3602,16 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
                       {/* Neviditelný hit-box přes celý sloupec — usnadňuje hover */}
                       <rect x={x-gap/2} y={padT-10} width={barW+gap} height={BAR_AREA_H+22} fill="transparent" />
 
-                      {/* Zelený bar — faktury */}
+                      {/* Zelený bar — faktury (živý sloupec má fialový nádech a přerušovaný obrys — "ještě se počítá") */}
                       {d.inv > 0 && (
                         <rect
                           x={x} y={baseY - invH} width={barW} height={invH}
                           rx={d.escrow > 0 ? 0 : 4} ry={d.escrow > 0 ? 0 : 4}
-                          fill={isNow ? "#059669" : "#4ADE80"}
-                          opacity={isHov ? 1 : (hoverBar != null ? 0.45 : 1)}
+                          fill={isLive ? "#A78BFA" : (isNow ? "#059669" : "#4ADE80")}
+                          stroke={isLive ? "#7C3AED" : "none"}
+                          strokeWidth={isLive ? 1.2 : 0}
+                          strokeDasharray={isLive ? "4,3" : "none"}
+                          opacity={isLive ? (isHov ? 0.95 : 0.62) : (isHov ? 1 : (hoverBar != null ? 0.45 : 1))}
                           style={{ transition: "opacity .12s" }}
                         />
                       )}
@@ -3542,15 +3620,28 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
                         <rect
                           x={x} y={baseY - totalH} width={barW} height={escH}
                           rx={4} ry={4}
-                          fill={isNow ? "#D97706" : "#FB923C"}
-                          opacity={isHov ? 1 : (hoverBar != null ? 0.45 : 1)}
+                          fill={isLive ? "#C4B5FD" : (isNow ? "#D97706" : "#FB923C")}
+                          stroke={isLive ? "#7C3AED" : "none"}
+                          strokeWidth={isLive ? 1.2 : 0}
+                          strokeDasharray={isLive ? "4,3" : "none"}
+                          opacity={isLive ? (isHov ? 0.95 : 0.62) : (isHov ? 1 : (hoverBar != null ? 0.45 : 1))}
                           style={{ transition: "opacity .12s" }}
                         />
                       )}
                       {/* Obrys při hoveru */}
-                      {isHov && (
+                      {isHov && !isLive && (
                         <rect x={x-2} y={baseY-totalH-2} width={barW+4} height={totalH+4}
                           rx={5} fill="none" stroke="#3518A5" strokeWidth={1.4} opacity={0.5}/>
+                      )}
+                      {/* Pulzující odznak "ŽIVĚ" — sloupec roste s každým novým výkazem a denním úrokem,
+                          jako herní progress bar, který Tom může honit */}
+                      {isLive && (
+                        <g className="maux-live-badge">
+                          <circle cx={x + barW/2 - 22} cy={baseY - totalH - 40} r={2.6} fill="#7C3AED" />
+                          <text x={x + barW/2 - 16} y={baseY - totalH - 37}
+                            fontSize={6.5} fontFamily="Inter" fontWeight="700" letterSpacing=".08em"
+                            fill="#7C3AED">ŽIVĚ ROSTE</text>
+                        </g>
                       )}
 
                       {/* Popisek fakturace — vždy viditelný */}
@@ -3588,15 +3679,18 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
                           {Math.round(d.total/1000)}k
                         </text>
                       )}
-                      {/* Delta vs. předchozí měsíc — malá šipka nad celkovou hodnotou */}
+                      {/* Delta vs. předchozí měsíc — malá šipka nad celkovou hodnotou.
+                          U živého sloupce je to přesně ta "honička" s minulým měsícem, kterou chce Tom vidět. */}
                       {delta != null && d.total > 0 && (
                         <text
                           x={x + barW/2} y={baseY - totalH - 28}
                           textAnchor="middle" fontSize={7}
                           fontFamily="Inter" fontWeight="700"
-                          fill={delta > 0 ? "#059669" : delta < 0 ? "#DC2626" : "var(--mut)"}
+                          fill={isLive ? "#7C3AED" : (delta > 0 ? "#059669" : delta < 0 ? "#DC2626" : "var(--mut)")}
                         >
-                          {delta > 0 ? "▲" : delta < 0 ? "▼" : "—"} {delta !== 0 ? `${delta>0?"+":""}${Math.round(delta/1000)}k` : ""}
+                          {isLive
+                            ? (delta < 0 ? `ještě ${Math.round(Math.abs(delta)/1000)}k do mety` : `+${Math.round(delta/1000)}k navrch — máš to!`)
+                            : `${delta > 0 ? "▲" : delta < 0 ? "▼" : "—"} ${delta !== 0 ? `${delta>0?"+":""}${Math.round(delta/1000)}k` : ""}`}
                         </text>
                       )}
                       {/* X label */}
@@ -3606,9 +3700,9 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
                         fontSize={isNow ? 9.5 : 8.5}
                         fontFamily="Inter"
                         fontWeight={isNow ? "700" : "400"}
-                        fill={isNow ? "#3518A5" : "var(--mut)"}
+                        fill={isLive ? "#7C3AED" : (isNow ? "#3518A5" : "var(--mut)")}
                       >
-                        {d.label}
+                        {d.label}{isLive ? " ›" : ""}
                       </text>
                     </g>
                   );
@@ -3619,7 +3713,16 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
                   const i = hoverBar;
                   const tx = Math.min(Math.max(barX(i) + barW/2, 86), W - 86);
                   const ty = padT - 14;
-                  const lines = [
+                  const lines = hov.isLive ? [
+                    `${CZ_MONTHS[hovM]} ${hovY} · živý odhad`,
+                    `Z výkazů + úschov k dnešku: ${fmtKc(hov.inv)}`,
+                    ...(hov.escrow > 0 ? [`+ narostlý úrok z úschov: ${fmtKc(hov.escrow)}`] : []),
+                    `Zatím napočítáno: ${fmtKc(hov.total)}`,
+                    ...(hovDelta != null ? [hovDelta < 0
+                      ? `Do mety minulého měsíce: ${fmtKc(Math.abs(hovDelta))}`
+                      : `Minulý měsíc už trumfnuto o ${fmtKc(hovDelta)} 🎉`] : []),
+                    `Roste s každým výkazem a dnem →`,
+                  ] : [
                     `${CZ_MONTHS[hovM]} ${hovY}`,
                     `Fakturace: ${fmtKc(hov.inv)}`,
                     ...(hov.escrow > 0 ? [`Úschovy: ${fmtKc(hov.escrow)}`] : []),
@@ -3627,7 +3730,11 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
                     ...(hovDelta != null ? [`Změna: ${hovDelta>=0?"+":""}${fmtKc(hovDelta)}${hovPct!=null ? ` (${hovDelta>=0?"+":""}${hovPct.toFixed(1)} %)` : ""}`] : []),
                   ];
                   const boxH = 14 + lines.length * 13;
-                  const boxW = 158;
+                  const boxW = hov.isLive ? 198 : 158;
+                  // Index řádku, který se zvýrazní barvou (zelená/červená podle vývoje) —
+                  // u živého sloupce je to řádek "do mety / trumfnuto", u ostatních poslední řádek se "Změna".
+                  const highlightIdx = hovDelta == null ? -1 : (hov.isLive ? lines.length - 2 : lines.length - 1);
+                  const highlightGood = hov.isLive ? (hovDelta >= 0) : (hovDelta >= 0);
                   return (
                     <g style={{ pointerEvents: "none" }}>
                       <rect x={tx-boxW/2} y={ty-boxH} width={boxW} height={boxH} rx={8}
@@ -3636,8 +3743,8 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
                         <text key={li} x={tx} y={ty - boxH + 16 + li*13}
                           textAnchor="middle" fontSize={li===0?9:8.5}
                           fontFamily={li===0?"Fraunces,serif":"Inter"}
-                          fontWeight={li===0?"600":(li===lines.length-1 && hovDelta!=null ? "700":"400")}
-                          fill={li===0 ? "#fff" : (li===lines.length-1 && hovDelta!=null ? (hovDelta>=0?"#6EE7B7":"#FCA5A5") : "rgba(255,255,255,.78)")}>
+                          fontWeight={li===0?"600":(li===highlightIdx ? "700":"400")}
+                          fill={li===0 ? "#fff" : (li===highlightIdx ? (highlightGood?"#6EE7B7":"#FCA5A5") : "rgba(255,255,255,.78)")}>
                           {ln}
                         </text>
                       ))}
