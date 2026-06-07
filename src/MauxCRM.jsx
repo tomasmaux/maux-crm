@@ -5350,6 +5350,31 @@ const APRIL_2026_RECEIPTS = [
   { id: "imp_apr26_04", date: "2026-04-23", label: "Notářka Svobodová – založení Podruhovi, s.r.o.", gross: 5711, rate: 21, vat: 991 },
   { id: "imp_apr26_05", date: "2026-04-29", label: "Notářka Svobodová – založení GEBAUER & STEIN alfa s.r.o.", gross: 5675, rate: 21, vat: 985 },
   { id: "imp_apr26_06", date: "2026-04-29", label: "Notářka Svobodová – založení GEBAUER & STEIN beta s.r.o.", gross: 5675, rate: 21, vat: 985 },
+  // — doplněno z druhé dávky podkladů (složka „Bez názvu") —
+  { id: "imp_apr26_07", date: "2026-04-02", label: "Papírnictví Zbraněk – odpadkové pytle", gross: 22, rate: 21, vat: 4 },
+  { id: "imp_apr26_08", date: "2026-04-12", label: "Alza – držák na monitor AlzaErgo Arm S50B", gross: 2102, rate: 21, vat: 365 },
+  { id: "imp_apr26_09", date: "2026-04-17", label: "FotoK-RÁM Poděbrady – rámování (2×)", gross: 6980, rate: 21, vat: 1211 },
+  { id: "imp_apr26_10", date: "2026-04-20", label: "Alza – napájecí kabel PremiumCord 230V 5m", gross: 252, rate: 21, vat: 44 },
+  { id: "imp_apr26_11", date: "2026-04-22", label: "Microsoft 365 Business Standard – předplatné", gross: 2849, rate: 21, vat: 494 },
+  { id: "imp_apr26_12", date: "2026-04-23", label: "Notářka Svobodová – GEBAUER & STEIN s.r.o. (mateřská)", gross: 5711, rate: 21, vat: 991 },
+  { id: "imp_apr26_13", date: "2026-04-24", label: "Teta drogerie – úklidové a hygienické potřeby", gross: 314, rate: 21, vat: 55 },
+  { id: "imp_apr26_14", date: "2026-04-24", label: "Alza – brčka nápojová ORION nerez", gross: 89, rate: 21, vat: 15 },
+  { id: "imp_apr26_15", date: "2026-04-25", label: "Alza – hrnky ORION Decora cappuccino + espresso", gross: 1386, rate: 21, vat: 241 },
+  { id: "imp_apr26_16", date: "2026-04-30", label: "PODA a.s. – internet (vyúčtování za duben)", gross: 403, rate: 21, vat: 70 },
+];
+
+// Účtenky a faktury za květen 2026 — druhá dávka z téže složky, doklady s DUZP/datem v květnu.
+// Stejný dedup-safe import princip jako u dubna (pevná ID, lze spustit opakovaně).
+const MAY_2026_RECEIPTS = [
+  { id: "imp_maj26_01", date: "2026-05-12", label: "Alza – LED pásek Philips Hue Play Gradient", gross: 4349, rate: 21, vat: 755 },
+  { id: "imp_maj26_02", date: "2026-05-14", label: "Papírnictví Zbraněk – náplně do kuličkového pera", gross: 507, rate: 21, vat: 88 },
+  { id: "imp_maj26_03", date: "2026-05-16", label: "dm drogerie – kosmetika a drogerie", gross: 348, rate: 21, vat: 60 },
+  { id: "imp_maj26_04", date: "2026-05-16", label: "Action – drobnosti do kanceláře (2×)", gross: 924, rate: 21, vat: 160 },
+  { id: "imp_maj26_05", date: "2026-05-17", label: "Alza – Bridge Philips Hue Bridge Pro", gross: 2309, rate: 21, vat: 401 },
+  { id: "imp_maj26_06", date: "2026-05-19", label: "T-Mobile – vyúčtování služeb (20.4.–19.5.)", gross: 398, rate: 21, vat: 69 },
+  { id: "imp_maj26_07", date: "2026-05-21", label: "Alza – leštidlo do myčky MIELE", gross: 433, rate: 21, vat: 75 },
+  { id: "imp_maj26_08", date: "2026-05-22", label: "Alza – řemínek Apple Watch Ocean", gross: 2161, rate: 21, vat: 375 },
+  { id: "imp_maj26_09", date: "2026-05-30", label: "PODA a.s. – internet (vyúčtování za květen)", gross: 499, rate: 21, vat: 87 },
 ];
 
 function DphKalkulacka({ odpItem, onSaveFinance }) {
@@ -5427,6 +5452,17 @@ function DphKalkulacka({ odpItem, onSaveFinance }) {
     });
   };
 
+  const missingImportMay = MAY_2026_RECEIPTS.filter(r => !log.some(e => e.id === r.id));
+  const importMay = () => {
+    if (missingImportMay.length === 0) return;
+    const addedVat = missingImportMay.reduce((s, e) => s + (e.vat || 0), 0);
+    onSaveFinance({
+      ...odpItem,
+      amount: (odpItem.amount || 0) + addedVat,
+      notes: JSON.stringify({ log: [...missingImportMay, ...log] }),
+    });
+  };
+
   return (
     <div style={{ marginTop: 16, paddingTop: 14, borderTop: "1px solid var(--line)" }}>
       <div style={{ fontSize: 9, letterSpacing: ".2em", textTransform: "uppercase", color: "var(--mut)", fontWeight: 600, marginBottom: 8 }}>
@@ -5434,7 +5470,13 @@ function DphKalkulacka({ odpItem, onSaveFinance }) {
       </div>
       {missingImport.length > 0 && (
         <div onClick={importApril} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, fontSize: 11, color: "#3518A5", background: "#F5F3FF", border: "1px solid #DDD6FE", borderRadius: 8, padding: "8px 12px", marginBottom: 10, cursor: "pointer" }}>
-          <span>📥 Naimportovat {missingImport.length} účtenek z dubna 2026, co jsi poslal Čechmanové (Alza, T-Mobile, notářka Svobodová) — DPH celkem {fmtKc(missingImport.reduce((s,e)=>s+(e.vat||0),0))}</span>
+          <span>📥 Naimportovat {missingImport.length} účtenek z dubna 2026, co jsi poslal Čechmanové (Alza, T-Mobile, notářka Svobodová, FotoK-RÁM, Microsoft, Teta drogerie, Papírnictví Zbraněk, PODA…) — DPH celkem {fmtKc(missingImport.reduce((s,e)=>s+(e.vat||0),0))}</span>
+          <b style={{ whiteSpace: "nowrap" }}>importovat →</b>
+        </div>
+      )}
+      {missingImportMay.length > 0 && (
+        <div onClick={importMay} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, fontSize: 11, color: "#9D174D", background: "#FDF2F8", border: "1px solid #FBCFE8", borderRadius: 8, padding: "8px 12px", marginBottom: 10, cursor: "pointer" }}>
+          <span>📥 Naimportovat {missingImportMay.length} účtenek z května 2026 (Alza, dm drogerie, Action, Papírnictví Zbraněk, T-Mobile, PODA…) — DPH celkem {fmtKc(missingImportMay.reduce((s,e)=>s+(e.vat||0),0))}</span>
           <b style={{ whiteSpace: "nowrap" }}>importovat →</b>
         </div>
       )}
@@ -5467,6 +5509,41 @@ function DphKalkulacka({ odpItem, onSaveFinance }) {
           <button onClick={() => setOpen(false)} title="Zrušit" style={{ fontSize: 12, color: "var(--mut)", border: "none", background: "none", cursor: "pointer", padding: "0 2px" }}>✕</button>
         </div>
       )}
+
+      {groups.length > 1 && (() => {
+        const chartGroups = [...groups].slice(0, 12).reverse();
+        const maxSum = Math.max(...chartGroups.map(g => g.sum), 1);
+        return (
+          <div style={{ marginTop: 14 }}>
+            <div style={{ fontSize: 9, letterSpacing: ".2em", textTransform: "uppercase", color: "var(--mut)", fontWeight: 600, marginBottom: 8 }}>
+              Vývoj uplatněných odpočtů — které náklady ti v kterém měsíci snížily platbu DPH
+            </div>
+            <div style={{ display: "flex", alignItems: "flex-end", gap: 8, height: 116, padding: "0 4px" }}>
+              {chartGroups.map(grp => {
+                const h = Math.max(6, Math.round((grp.sum / maxSum) * 84));
+                const isOpen = expanded === grp.key || (expanded === null && groups[0] && groups[0].key === grp.key);
+                return (
+                  <div key={grp.key} onClick={() => setExpanded(grp.key)}
+                    title={`${grp.items.length}× účtenek/faktur · uplatněno ${fmtKc(grp.sum)}`}
+                    style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 4, flex: 1, cursor: "pointer" }}>
+                    <span style={{ fontSize: 9.5, color: "#3518A5", fontWeight: 600, whiteSpace: "nowrap" }}>{fmtKc(grp.sum)}</span>
+                    <div style={{
+                      width: "100%", maxWidth: 28, height: h,
+                      background: isOpen ? "linear-gradient(180deg,#C4B5FD,#3518A5)" : "linear-gradient(180deg,#DDD6FE,#A78BFA)",
+                      borderRadius: "4px 4px 2px 2px",
+                    }} />
+                    <span style={{ fontSize: 9, color: "var(--mut)" }}>{groupLabel(grp.key).split(" ")[0].slice(0, 3)} {grp.key.slice(2, 4)}</span>
+                  </div>
+                );
+              })}
+            </div>
+            <div style={{ fontSize: 10, color: "var(--mut)", marginTop: 8, lineHeight: 1.5 }}>
+              Výška sloupce = součet DPH z účtenek a faktur uplatněných v daném měsíci, tedy o kolik ti to skutečně snížilo
+              platbu Čechmanové za to období. Klikni na sloupec a archiv níže se rozbalí na vybraný měsíc.
+            </div>
+          </div>
+        );
+      })()}
 
       {groups.length > 0 && (
         <div style={{ marginTop: 14 }}>
