@@ -3349,11 +3349,19 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
   const totalLuxus = luxus.reduce((s,i) => s+(i.amount||0), 0);
   const totalVydaje = totalNutne + totalLuxus;
   const cashflow = mRev + totalVydaje;
+  // DPH — nadměrný odpočet (na žádost): kolik mi reálně ZŮSTANE díky účtenkám, které posílám Čechmanové
+  // jako odpočet proti DPH z vystavených faktur. Nemění se tím "to číslo shrnující daň" v modulu Daně —
+  // je to čistě nová položka v příjmech, doplňující obrázek o tom, kolik fakticky zaplatím / kolik mi zbude.
+  // dphFaktury (tento měsíc) − odpočet z účtenek = reálně uhrazeno Čechmanové; co je z odpočtu "navíc", to mi zůstává.
+  const dphFakturyMesic = invoices.filter(i => (i.issue_date||"").startsWith(thisMonth)).reduce((s,i)=>s+(i.vat_amount||0),0);
+  const dphOdpItem = (financeItems||[]).find(i => i.id === "fi_dph_odpocet");
+  const dphOdpocet = dphOdpItem?.amount || 0;
+  const nadmernyOdpocet = Math.min(dphOdpocet, dphFakturyMesic);
   // "Finance v následujícím měsíci" — SOUČET položek skutečně zobrazených v "Příjmy měsíční"
-  // (manuální příjmy + nevyfakturováno + čistý úrok z úschov) MÍNUS výdaje zobrazené v Cash flow.
+  // (manuální příjmy + nevyfakturováno + čistý úrok z úschov + nadměrný odpočet DPH) MÍNUS výdaje zobrazené v Cash flow.
   // Záporný výsledek je v pořádku — říká, kolik je potřeba dovydělat na nulu.
   const projectedIncome = (financeItems||[]).filter(i=>i.category==="prijem"&&i.notes!=="TBD").reduce((s,i)=>s+(i.amount||0),0)
-    + unbilledAmt + Math.round(escrowNetThisMonth);
+    + unbilledAmt + Math.round(escrowNetThisMonth) + nadmernyOdpocet;
   const nextMonthBalance = projectedIncome + totalVydaje;
   // Runway — kolik měsíců firma "ujede" ze zůstatku na spořáku při současných výdajích (V.03 — pro Pulz firmy)
   const sporBalPulz = (financeItems||[]).find(i => i.id === "fi_sp_99")?.amount || 0;
@@ -3630,11 +3638,20 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
               <div style={{fontFamily:"Fraunces,serif",fontSize:22,fontWeight:300,color:"#059669"}}>
                 {fmtKc(
                   (financeItems||[]).filter(i=>i.category==="prijem"&&i.notes!=="TBD").reduce((s,i)=>s+(i.amount||0),0)
-                  + unbilledAmt + Math.round(escrowNetThisMonth)
+                  + unbilledAmt + Math.round(escrowNetThisMonth) + nadmernyOdpocet
                 )}&nbsp;<span style={{fontSize:10,color:"#065F46",fontWeight:400}}>/ měsíc</span>
               </div>
             </div>
             {/* Auto položky */}
+            {nadmernyOdpocet>0 && (
+              <div style={{display:"flex",justifyContent:"space-between",fontSize:12,color:"var(--txt)",padding:"3px 0"}}>
+                <span style={{display:"flex",alignItems:"center",gap:6}}>
+                  <span style={{fontSize:9,background:"#ECFDF5",color:"#065F46",padding:"1px 5px",borderRadius:3,fontWeight:600}}>auto</span>
+                  Nadměrný odpočet DPH — zůstane po úhradě Čechmanové
+                </span>
+                <span style={{fontFamily:"JetBrains Mono,monospace",color:"#059669",fontSize:11}}>+{fmtKc(nadmernyOdpocet)}</span>
+              </div>
+            )}
             {unbilledAmt>0 && (
               <div style={{display:"flex",justifyContent:"space-between",fontSize:12,color:"var(--txt)",padding:"3px 0"}}>
                 <span style={{display:"flex",alignItems:"center",gap:6}}>
@@ -4964,7 +4981,70 @@ function SroOptimizationPanel({ year, invoices }) {
   );
 }
 
-function DaneModule({ year, taxRecords, financeItems, invoices, dpfoMonths, escrows, onSaveTax }) {
+/* ─── DPH — MĚSÍČNÍ ODPOČET (na žádost): kolik na konci měsíce zaplatím Čechmanové po odečtení účtenek ───
+   Princip: DPH z vystavených faktur (tento měsíc) − DPH z účtenek, které posílám jako odpočet = reálně
+   uhrazená částka. Co z odpočtu "přebývá", to mi fakticky zůstává — a promítá se i jako nová položka
+   v měsíčním přehledu příjmů ("Nadměrný odpočet DPH"). Nemění se tím stávající souhrnné číslo daně. */
+function DphOdpocetTile({ invoices, financeItems, onSaveFinance }) {
+  const now = new Date();
+  const thisMonthKey = now.toISOString().slice(0,7);
+  const CZM = ["ledna","února","března","dubna","května","června","července","srpna","září","října","listopadu","prosince"];
+
+  const dphFaktury = (invoices||[]).filter(i => (i.issue_date||"").startsWith(thisMonthKey)).reduce((s,i)=>s+(i.vat_amount||0),0);
+  const odpItem = (financeItems||[]).find(i => i.id === "fi_dph_odpocet")
+    || { id:"fi_dph_odpocet", category:"dph", label:"Odpočet z účtenek (DPH)", amount:0, notes:"SKIP_DISPLAY" };
+  const odpocet = odpItem.amount || 0;
+
+  const kUhrade = Math.max(dphFaktury - odpocet, 0);
+  const zustane = Math.min(odpocet, dphFaktury);       // = "Nadměrný odpočet" v příjmech — fakticky mi zůstává
+  const prevod  = Math.max(odpocet - dphFaktury, 0);   // přesah odpočtu nad DPH z faktur — převádí se do dalšího měsíce
+
+  if (dphFaktury <= 0 && odpocet <= 0) return null;
+
+  return (
+    <div style={{ background:"#fff", border:"1px solid var(--line)", borderRadius:14, padding:"20px 22px" }}>
+      <div style={{ fontSize:9, letterSpacing:".28em", textTransform:"uppercase", fontWeight:600, color:"var(--mut)", marginBottom:12 }}>
+        DPH — výzva k úhradě (Čechmanová, konec {CZM[now.getMonth()]}) · odpočet z účtenek
+      </div>
+      <div style={{ display:"flex", gap:32, flexWrap:"wrap", alignItems:"flex-start" }}>
+        <div>
+          <div style={{ fontSize:10, color:"var(--mut)" }}>DPH z vystavených faktur (tento měsíc)</div>
+          <div style={{ fontFamily:"Fraunces,serif", fontSize:24, fontWeight:300, color:"var(--txt)" }}>{fmtKc(dphFaktury)}</div>
+        </div>
+        <div>
+          <div style={{ fontSize:10, color:"var(--mut)" }}>Odpočet z účtenek <span style={{opacity:.7}}>(zadáváš ručně)</span></div>
+          <div style={{ marginTop:3 }}><EditableMoney item={odpItem} onSave={onSaveFinance} color="#3518A5" sign="−" abs /></div>
+        </div>
+        <div>
+          <div style={{ fontSize:10, color:"var(--mut)" }}>K úhradě Čechmanové (konec měsíce)</div>
+          <div style={{ fontFamily:"Fraunces,serif", fontSize:26, fontWeight:500, color: kUhrade>0 ? "#DC2626" : "#059669" }}>
+            {kUhrade>0 ? fmtKc(kUhrade) : "✓ kryto odpočtem"}
+          </div>
+        </div>
+        {zustane > 0 && (
+          <div>
+            <div style={{ fontSize:10, color:"var(--mut)" }}>Zůstane mi díky odpočtu <span style={{fontSize:8,background:"#ECFDF5",color:"#065F46",padding:"1px 5px",borderRadius:3,fontWeight:600,marginLeft:2}}>→ příjmy</span></div>
+            <div style={{ fontFamily:"Fraunces,serif", fontSize:24, fontWeight:300, color:"#059669" }}>{fmtKc(zustane)}</div>
+          </div>
+        )}
+        {prevod > 0 && (
+          <div>
+            <div style={{ fontSize:10, color:"var(--mut)" }}>Přesah odpočtu (převádí se do dalšího měsíce)</div>
+            <div style={{ fontFamily:"Fraunces,serif", fontSize:24, fontWeight:300, color:"#7C3AED" }}>{fmtKc(prevod)}</div>
+          </div>
+        )}
+      </div>
+      <div style={{ fontSize:10.5, color:"var(--mut)", marginTop:14, lineHeight:1.55, maxWidth:740 }}>
+        Princip: DPH vybrané z vystavených faktur snižuješ o DPH z účtenek, které posíláš Čechmanové jako odpočet —
+        Čechmanové reálně uhradíš jen rozdíl. Co z odpočtu „přebývá" (nadměrný odpočet), to ti fakticky zůstává —
+        a appka to automaticky započítá jako novou položku v měsíčním přehledu příjmů, aniž by se tím měnilo
+        stávající souhrnné číslo daně výše.
+      </div>
+    </div>
+  );
+}
+
+function DaneModule({ year, taxRecords, financeItems, invoices, dpfoMonths, escrows, onSaveTax, onSaveFinance }) {
   const now = new Date();
   const monthsElapsed = (year === now.getFullYear()) ? now.getMonth() + 1 : 12;
 
@@ -5006,6 +5086,9 @@ function DaneModule({ year, taxRecords, financeItems, invoices, dpfoMonths, escr
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
       {/* Závažné daňové upozornění — OSVČ vs. s.r.o. (na základě fakturace a sazeb 21 % / 23 %) */}
       <SroOptimizationPanel year={year} invoices={invoices} />
+
+      {/* DPH — měsíční odpočet: kolik na konci měsíce zaplatím Čechmanové po odečtení účtenek (na žádost) */}
+      <DphOdpocetTile invoices={invoices} financeItems={financeItems} onSaveFinance={onSaveFinance} />
 
       {/* Souhrnná karta — daňový přehled roku */}
       <div style={{ background: "#fff", border: "1px solid var(--line)", borderRadius: 14, padding: "20px 22px" }}>
@@ -5839,6 +5922,7 @@ export default function MauxCRM() {
               dpfoMonths={dpfoMonths}
               escrows={escrows}
               onSaveTax={saveTaxRecord}
+              onSaveFinance={saveFinanceItem}
             />
           )}
         </div>
