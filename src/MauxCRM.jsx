@@ -1901,6 +1901,9 @@ function escrowNetForMonthRows(escrows, year, month) {
         note:      isRunning
           ? (isCurrent ? 'akumuluje se (do dnes)' : 'projekce celého měsíce')
           : `konec ${effTo.getDate()}.${month + 1}.`,
+        // — pro tlačítko "✓ Provedl jsem výplatu" přímo ze souhrnu (jen když je jednoznačně jeden oprávněný)
+        escrowId:  e.id,
+        tranche:   opr.length === 1 ? opr[0] : null,
       });
     });
 
@@ -1979,6 +1982,7 @@ const BREAKDOWN_COLS = {
     { key:"daň",        label:"Daň 15 %",   num:true },
     { key:"čistý",      label:"Čistý",      num:true },
     { key:"note",       label:"Poznámka" },
+    { key:"akce",       label:"" },
   ],
   tax: [
     { key:"úschova",  label:"Úschova" },
@@ -1996,7 +2000,7 @@ const BREAKDOWN_COLS = {
   ],
 };
 
-function KpiBreakdown({ rows, colSet, onClose, earnLabel, incLabel }) {
+function KpiBreakdown({ rows, colSet, onClose, earnLabel, incLabel, onMarkPaid }) {
   if (!rows || rows.length === 0) return (
     <div style={{padding:"14px 18px",fontSize:12,color:"var(--mut)",borderTop:"1px solid var(--line)"}}>
       Žádné tranše v tomto období.
@@ -2052,6 +2056,19 @@ function KpiBreakdown({ rows, colSet, onClose, earnLabel, incLabel }) {
                       <span style={{fontSize:9,fontWeight:600,padding:"2px 5px",borderRadius:4,background:ts.badgeBg,color:ts.badge,textTransform:"uppercase",letterSpacing:"0.04em"}}>
                         {ts.label}
                       </span>
+                    </td>
+                  );
+                  if (c.key === "akce") return (
+                    <td key="akce" style={{padding:"5px 10px",whiteSpace:"nowrap"}}>
+                      {row.tranche && !row.tranche.is_paid && onMarkPaid && (
+                        <button
+                          onClick={(e)=>{ e.stopPropagation(); onMarkPaid(row.escrowId, row.tranche); }}
+                          style={{fontSize:10,fontWeight:700,color:"#fff",background:"#059669",border:"none",borderRadius:6,padding:"4px 9px",cursor:"pointer",whiteSpace:"nowrap"}}
+                          title="Označí výplatu jako provedenou — promítne se do úroků v celé appce"
+                        >
+                          ✓ Provedl jsem výplatu
+                        </button>
+                      )}
                     </td>
                   );
                   return (
@@ -2113,7 +2130,22 @@ function KpiBreakdown({ rows, colSet, onClose, earnLabel, incLabel }) {
   );
 }
 
-function EscrowCard({ escrow, onEdit, onDelete }) {
+// Malé zelené tlačítko "provedl jsem výplatu" — zapíše is_paid + paid_date (dnes),
+// promítne se okamžitě do úroků v celé appce (interest engine bere paid_date jako mezník).
+function MarkPaidBtn({ escrowId, tranche, onMarkPaid }) {
+  if (!onMarkPaid || !tranche || tranche.is_paid) return null;
+  return (
+    <button
+      onClick={(e)=>{ e.stopPropagation(); onMarkPaid(escrowId, tranche); }}
+      style={{fontSize:9,fontWeight:700,color:"#fff",background:"#059669",border:"none",borderRadius:5,padding:"2px 7px",cursor:"pointer",whiteSpace:"nowrap",marginLeft:6}}
+      title="Označí výplatu jako provedenou — promítne se do úroků v celé appce"
+    >
+      ✓ Provedl jsem výplatu
+    </button>
+  );
+}
+
+function EscrowCard({ escrow, onEdit, onDelete, onMarkPaid }) {
   const [showTranches, setShowTranches] = useState(false);
   const tranches = escrow.escrow_tranches || [];
   const total = tranches.reduce((s,t) => s + (t.amount||0), 0);
@@ -2188,10 +2220,11 @@ function EscrowCard({ escrow, onEdit, onDelete }) {
               {opr.map((t,i)=>(
                 <div key={i} style={{paddingBottom:6,marginBottom:i<opr.length-1?6:0,borderBottom:i<opr.length-1?"1px solid #DCFCE7":"none"}}>
                   <div style={{fontSize:12,fontWeight:500,color:"var(--ink)",lineHeight:1.3}}>{t.party_name}</div>
-                  <div style={{display:"flex",alignItems:"center",gap:6}}>
+                  <div style={{display:"flex",alignItems:"center",gap:6,flexWrap:"wrap"}}>
                     <span style={{fontFamily:"Fraunces,serif",fontWeight:300,fontSize:14,color:"var(--gold)"}}>{fmtKc(t.amount)}</span>
                     <span style={{fontSize:12}}>{t.is_paid ? "✅" : "⬜"}</span>
                     {t.paid_date && <span style={{fontSize:10,color:"var(--mut)"}}>{fmtDate(t.paid_date)}</span>}
+                    <MarkPaidBtn escrowId={escrow.id} tranche={t} onMarkPaid={onMarkPaid} />
                   </div>
                 </div>
               ))}
@@ -2225,7 +2258,12 @@ function EscrowCard({ escrow, onEdit, onDelete }) {
                   {t.party_type==='složitel' && t.received_date
                     ? <td style={{padding:"7px 10px",fontSize:11,color:"var(--mut)"}}>{fmtDate(t.received_date)}</td>
                     : <td/>}
-                  <td style={{padding:"7px 10px",textAlign:"center",fontSize:14}}>{t.is_paid ? "✅" : "⬜"}</td>
+                  <td style={{padding:"7px 10px",textAlign:"center",fontSize:14}}>
+                    <div style={{display:"flex",alignItems:"center",justifyContent:"center",gap:4,flexWrap:"wrap"}}>
+                      <span>{t.is_paid ? "✅" : "⬜"}</span>
+                      {t.party_type === 'oprávněný' && <MarkPaidBtn escrowId={escrow.id} tranche={t} onMarkPaid={onMarkPaid} />}
+                    </div>
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -2545,7 +2583,7 @@ function EscrowInsights({ escrows }) {
   );
 }
 
-function EscrowList({ escrows, onNew, onEdit, onDelete, loading }) {
+function EscrowList({ escrows, onNew, onEdit, onDelete, onMarkPaid, loading }) {
   const [filter, setFilter] = useState("probíhající");
   const [openDetail, setOpenDetail] = useState(null); // klíč otevřeného rozpisu
   const toggleDetail = (key) => setOpenDetail(prev => prev === key ? null : key);
@@ -2623,7 +2661,7 @@ function EscrowList({ escrows, onNew, onEdit, onDelete, loading }) {
               <div style={{padding:"6px 14px 0",fontSize:10.5,color:"#92400E",borderTop:"1px solid #FDE68A",background:"#FFFBEB"}}>
                 📋 Úroky za <strong>{earnLabel1} {cy}</strong> → připsány banka 30./31.{cm+1}. → příjem <strong>1.{cm+2}. = {incLabel1} {(cm+2)>12?cy+1:cy}</strong>
               </div>
-              <KpiBreakdown rows={rows1} colSet="nextMonth" earnLabel={earnLabel1} incLabel={`1. ${incLabel1}`} onClose={(e)=>{e.stopPropagation();setOpenDetail(null);}} />
+              <KpiBreakdown rows={rows1} colSet="nextMonth" earnLabel={earnLabel1} incLabel={`1. ${incLabel1}`} onMarkPaid={onMarkPaid} onClose={(e)=>{e.stopPropagation();setOpenDetail(null);}} />
             </>
           )}
         </div>
@@ -2644,7 +2682,7 @@ function EscrowList({ escrows, onNew, onEdit, onDelete, loading }) {
               <div style={{padding:"6px 14px 0",fontSize:10.5,color:"#065F46",borderTop:"1px solid #BBF7D0",background:"#F0FDF4"}}>
                 📋 Úroky za <strong>{earnLabel2} {(cm+1)>11?cy+1:cy}</strong> → připsány banka 30./31.{(cm+2)%12+1}. → příjem <strong>1.{(cm+3)%12+1}. = {incLabel2}</strong>
               </div>
-              <KpiBreakdown rows={rows2} colSet="nextMonth" earnLabel={earnLabel2} incLabel={`1. ${incLabel2}`} onClose={(e)=>{e.stopPropagation();setOpenDetail(null);}} />
+              <KpiBreakdown rows={rows2} colSet="nextMonth" earnLabel={earnLabel2} incLabel={`1. ${incLabel2}`} onMarkPaid={onMarkPaid} onClose={(e)=>{e.stopPropagation();setOpenDetail(null);}} />
             </>
           )}
         </div>
@@ -2713,7 +2751,7 @@ function EscrowList({ escrows, onNew, onEdit, onDelete, loading }) {
             return shown.length === 0 ? (
               <div className="ph"><h2 className="serif">Žádné úschovy</h2><p>Přidej první úschovu tlačítkem výše.</p></div>
             ) : (
-              shown.map(e => <EscrowCard key={e.id} escrow={e} onEdit={onEdit} onDelete={onDelete} />)
+              shown.map(e => <EscrowCard key={e.id} escrow={e} onEdit={onEdit} onDelete={onDelete} onMarkPaid={onMarkPaid} />)
             );
           })()}
         </div>
@@ -2801,20 +2839,24 @@ function MiniSpořák({ financeItems, invoices, dpfoMonths, loanTransactions, es
           <span style={{fontSize:15,color:volné>=0?"#059669":"#DC2626",fontWeight:700}}>{volné>=0?"+":""}{fmtKc(volné)} volného</span>
           <span style={{fontSize:11,color:"var(--mut)"}}>z {fmtKc(totalEarmarked)} obálek</span>
         </div>
-        {volné > 0 && (
-          <div style={{display:"flex",alignItems:"center",gap:6,marginTop:7,padding:"5px 10px",background:"#F5F3FF",border:"1px solid #DDD6FE",borderRadius:8,maxWidth:340}}>
-            <span style={{width:8,height:8,borderRadius:2,background:"#8B5CF6",flexShrink:0}} />
-            <span style={{fontSize:10,color:"#6D28D9",lineHeight:1.4}}>
-              ↳ totéž jsou peníze: <strong>Firemní rezerva</strong> ({fmtKc(volné)}) v Osobním majetku — fyzicky leží přímo zde, na tomto účtu
-            </span>
-          </div>
-        )}
       </div>
 
       <Div />
 
-      {/* === OBÁLKY === */}
+      {/* === OBÁLKY (+ Firemní rezerva = totéž co "volné", jen jako běžná položka — propojení s Osobním majetkem) === */}
       <div style={{display:"flex",gap:20,flexWrap:"wrap",alignItems:"center"}}>
+        {volné > 0 && (
+          <div style={{display:"flex",alignItems:"center",gap:8}}>
+            <div style={{width:11,height:11,borderRadius:3,background:"#B8923D",flexShrink:0,boxShadow:"0 0 6px 1px rgba(184,146,61,.45)"}} />
+            <div>
+              <div style={{fontSize:11,color:"var(--mut)",display:"flex",gap:3,alignItems:"center"}}>
+                Firemní rezerva <Chip>auto</Chip>
+              </div>
+              <div style={{fontSize:20,fontFamily:"Fraunces,serif",fontWeight:300,color:"#B8923D",lineHeight:1.2,textShadow:"0 0 14px rgba(184,146,61,.35)"}}>{fmtKc(volné)}</div>
+              <div style={{fontSize:9,color:"var(--mut)",opacity:.75}}>= volné · v Osobním majetku</div>
+            </div>
+          </div>
+        )}
         {allEnvelopes.map((e,i) => (
           <div key={i} style={{display:"flex",alignItems:"center",gap:8}}>
             <div style={{width:11,height:11,borderRadius:3,background:e.color,flexShrink:0}} />
@@ -2912,8 +2954,10 @@ function MajetekBar({ financeItems, onSaveFinance, invoices, dpfoMonths, loanTra
   const firmaKap = Math.max(sporBal - totalEarmarkedM, 0);
 
   // Cíl firemní rezervy — interaktivně nastavitelný (V.03 — "tekutina" stoupající k metě)
-  const reserveGoal = (financeItems||[]).find(i => i.id === "fi_ma_03_goal")?.amount || 100000;
-  const setReserveGoal = (val) => onSaveFinance({ id: "fi_ma_03_goal", category: "majetek_goal", label: "Cíl — firemní rezerva", amount: val });
+  // Sjednoceno s FirmaBar: JEDEN zdroj pravdy = fi_plan_kapital (dříve dva rozdílné cíle, opraveno na žádost)
+  const reserveGoalItem = (financeItems||[]).find(i => i.id === "fi_plan_kapital");
+  const reserveGoal = reserveGoalItem?.amount || 130000;
+  const setReserveGoal = (val) => onSaveFinance({ ...(reserveGoalItem||{category:"plan",label:"Cíl — kapitál"}), id: "fi_plan_kapital", amount: val });
 
   const total = akcie + stavebko + firmaKap + extraItems.reduce((s,i) => s+(i.amount||0), 0);
 
@@ -3047,7 +3091,9 @@ function FirmaBar({ financeItems, invoices, dpfoMonths, loanTransactions, escrow
   const runway     = totalVyd > 0 ? sporBal / totalVyd : 0;
   const runwayM    = Math.floor(runway);
   const runwayD    = Math.round((runway - runwayM) * 30);
-  const planKap    = (financeItems||[]).find(i => i.id === "fi_plan_kapital")?.amount || 130000;
+  const planKapItem = (financeItems||[]).find(i => i.id === "fi_plan_kapital");
+  const planKap    = planKapItem?.amount || 130000;
+  const setPlanKap = (val) => onSaveFinance({ ...(planKapItem||{category:"plan",label:"Cíl — kapitál"}), id: "fi_plan_kapital", amount: val });
   const onTheWayF  = (invoices||[]).filter(i => invoiceStatus(i) === "vystavena").reduce((s,i)=>s+(i.subtotal||0),0);
   const mRevF      = (invoices||[]).filter(i=>(i.issue_date||"").startsWith(new Date().toISOString().slice(0,7))).reduce((s,i)=>s+(i.subtotal||0),0);
   const zdravi     = totalVyd > 0 ? (mRevF / totalVyd).toFixed(2) : "—";
@@ -3059,13 +3105,16 @@ function FirmaBar({ financeItems, invoices, dpfoMonths, loanTransactions, escrow
   return (
     <div style={{background:"#fff",border:"2px solid #059669",borderRadius:14,padding:"28px 36px",display:"flex",alignItems:"stretch",gap:24,flexWrap:"wrap"}}>
       {/* === FIRMA REZERVA === */}
-      <div style={{minWidth:220,display:"flex",flexDirection:"column",justifyContent:"center"}}>
-        <div style={{fontSize:11,letterSpacing:".22em",textTransform:"uppercase",color:"#059669",fontWeight:700,marginBottom:10}}>FIREMNÍ REZERVA · RUNWAY</div>
-        <div style={{fontFamily:"Fraunces,serif",fontSize:44,fontWeight:300,color:"#059669",lineHeight:1,marginBottom:6}}>{fmtKc(firmaRez)}</div>
-        <div style={{fontSize:11,color:rezervaDiff>=0?"#059669":"#DC2626",fontWeight:600}}>
-          {rezervaDiff>=0 ? `✓ Cíl splněn +${fmtKc(rezervaDiff)}` : `↓ Do cíle chybí ${fmtKc(Math.abs(rezervaDiff))}`}
+      <div style={{minWidth:220,display:"flex",alignItems:"center",gap:18}}>
+        <LiquidTank pct={planKap > 0 ? firmaRez / planKap : 0} color="#059669" value={firmaRez} goal={planKap} onSetGoal={setPlanKap} size={56} />
+        <div style={{display:"flex",flexDirection:"column",justifyContent:"center"}}>
+          <div style={{fontSize:11,letterSpacing:".22em",textTransform:"uppercase",color:"#059669",fontWeight:700,marginBottom:10}}>FIREMNÍ REZERVA · RUNWAY</div>
+          <div style={{fontFamily:"Fraunces,serif",fontSize:44,fontWeight:300,color:"#059669",lineHeight:1,marginBottom:6}}>{fmtKc(firmaRez)}</div>
+          <div style={{fontSize:11,color:rezervaDiff>=0?"#059669":"#DC2626",fontWeight:600}}>
+            {rezervaDiff>=0 ? `✓ Cíl splněn +${fmtKc(rezervaDiff)}` : `↓ Do cíle chybí ${fmtKc(Math.abs(rezervaDiff))}`}
+          </div>
+          <div style={{fontSize:10,color:"var(--mut)",marginTop:2}}>Cíl: {fmtKc(planKap)} <span style={{opacity:.6}}>(klikni na nádržku pro úpravu)</span></div>
         </div>
-        <div style={{fontSize:10,color:"var(--mut)",marginTop:2}}>Cíl: {fmtKc(planKap)}</div>
       </div>
 
       <div style={{width:1,alignSelf:"stretch",background:"var(--line)",margin:"0 4px",flexShrink:0}} />
@@ -3269,6 +3318,12 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
   const totalLuxus = luxus.reduce((s,i) => s+(i.amount||0), 0);
   const totalVydaje = totalNutne + totalLuxus;
   const cashflow = mRev + totalVydaje;
+  // "Finance v následujícím měsíci" — SOUČET položek skutečně zobrazených v "Příjmy měsíční"
+  // (manuální příjmy + nevyfakturováno + čistý úrok z úschov) MÍNUS výdaje zobrazené v Cash flow.
+  // Záporný výsledek je v pořádku — říká, kolik je potřeba dovydělat na nulu.
+  const projectedIncome = (financeItems||[]).filter(i=>i.category==="prijem"&&i.notes!=="TBD").reduce((s,i)=>s+(i.amount||0),0)
+    + unbilledAmt + Math.round(escrowNetThisMonth);
+  const nextMonthBalance = projectedIncome + totalVydaje;
   // Runway — kolik měsíců firma "ujede" ze zůstatku na spořáku při současných výdajích (V.03 — pro Pulz firmy)
   const sporBalPulz = (financeItems||[]).find(i => i.id === "fi_sp_99")?.amount || 0;
   const runwayPulz  = Math.abs(totalVydaje) > 0 ? sporBalPulz / Math.abs(totalVydaje) : 0;
@@ -3569,7 +3624,7 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
       <div style={{display:"grid",gridTemplateColumns:"3fr 2fr",gap:10,alignItems:"stretch"}}>
 
         {/* LEVÁ KARTA: Příjmy měsíční + Cash Flow — propojené v jedné kartě */}
-        <Card style={{padding:0,overflow:"hidden",display:"flex",flexDirection:"column"}}>
+        <Card style={{padding:0,overflow:"hidden",display:"flex",flexDirection:"column",border:"1.5px solid #111"}}>
           {/* Horní pruh — PŘÍJMY */}
           <div style={{padding:"16px 20px 14px",borderBottom:"1px solid var(--line)"}}>
             <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:10}}>
@@ -3626,10 +3681,13 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
                 </span>
               </div>
             ))}
-            <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",padding:"11px 0 4px",borderTop:`2px solid ${cashflow>=0?"#059669":"#DC2626"}`,marginTop:4}}>
-              <span style={{fontSize:13,fontWeight:700,color:"var(--txt)"}}>Zůstatek</span>
-              <span style={{fontSize:24,fontFamily:"Fraunces,serif",fontWeight:300,color:cashflow>=0?"#059669":"#DC2626",lineHeight:1}}>
-                {cashflow>=0?"+":""}{fmtKc(cashflow)}
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",padding:"11px 0 4px",borderTop:`2px solid ${nextMonthBalance>=0?"#059669":"#DC2626"}`,marginTop:4}}>
+              <div>
+                <div style={{fontSize:13,fontWeight:700,color:"var(--txt)"}}>Finance v následujícím měsíci</div>
+                <div style={{fontSize:9.5,color:"var(--mut)",marginTop:1}}>příjmy výše − výdaje výše · záporné = kolik chybí dovydělat na nulu</div>
+              </div>
+              <span style={{fontSize:24,fontFamily:"Fraunces,serif",fontWeight:300,color:nextMonthBalance>=0?"#059669":"#DC2626",lineHeight:1,flexShrink:0,marginLeft:10}}>
+                {nextMonthBalance>=0?"+":"−"}{fmtKc(Math.abs(nextMonthBalance))}
               </span>
             </div>
           </div>
@@ -4805,6 +4863,109 @@ function InvoiceForm({ init, clients, invoices, onSave, onCancel, saving }) {
    Pravý blok (skutečné vyúčtování + poznámka k optimalizaci) doplňuje Tom ručně po
    podání přiznání/přehledů — appka sama dopočítá přeplatek/nedoplatek. Základ pro
    budoucí přesný výpočet a optimalizaci záloh, beze ztráty jediného procesu nebo dat. */
+// ─── SRO OPTIMIZATION — "závažné daňové upozornění": kdy už se vyplatí s.r.o. ──
+// Sazby a hranice pro rok 2026 (zdroj: Finanční správa ČR — Daňové novinky pro rok 2026,
+// portal.gov.cz — sazba daně z příjmů právnických osob):
+//   • OSVČ / fyzická osoba: 15 % do základu daně 1 762 812 Kč ročně (= 36× průměrná mzda),
+//     nad tuto hranici 23 % z přesahu (tzv. "vyšší sazba")
+//   • s.r.o.: daň z příjmu právnických osob 21 % ze zisku
+//   • výplata zisku společníkovi (podíl na zisku): dalších 15 % srážkové daně z dividendy
+// Toto je ORIENTAČNÍ porovnání efektivních sazeb na hrubý obrat z fakturace (ne přesný
+// základ daně — ten závisí na skutečných/paušálních výdajích). Slouží jako "budík", kdy
+// dává smysl probrat přechod na s.r.o. s daňovým poradcem — appka nenahrazuje poradenství.
+const SRO_TH_23   = 1762812;   // hranice pro 23% sazbu DPFO v roce 2026 (36× průměrná mzda)
+const SRO_RATE_LO = 0.15;      // DPFO — základní sazba
+const SRO_RATE_HI = 0.23;      // DPFO — zvýšená sazba nad hranicí
+const SRO_RATE_CO = 0.21;      // s.r.o. — daň z příjmu právnických osob
+const SRO_RATE_DIV= 0.15;      // srážková daň z vyplacených podílů na zisku
+
+function SroOptimizationPanel({ year, invoices }) {
+  const now = new Date();
+  const isCurrentYear = year === now.getFullYear();
+  const monthsElapsed = isCurrentYear ? Math.max(now.getMonth() + 1, 1) : 12;
+
+  const ytdSubtotal = invoices.filter(i => (i.issue_date||"").startsWith(String(year)))
+                              .reduce((s,i) => s + (i.subtotal||0), 0);
+  const projectedAnnual = isCurrentYear ? Math.round(ytdSubtotal / monthsElapsed * 12) : ytdSubtotal;
+
+  const overTh   = Math.max(projectedAnnual - SRO_TH_23, 0);
+  const triggered = overTh > 0;
+
+  // Efektivní DPFO (OSVČ) na celý odhadovaný základ
+  const taxOsvc        = Math.round(Math.min(projectedAnnual, SRO_TH_23) * SRO_RATE_LO + overTh * SRO_RATE_HI);
+  const effOsvcPct     = projectedAnnual > 0 ? (taxOsvc / projectedAnnual) * 100 : 0;
+  // s.r.o. — zisk ponechaný ve firmě (jen 21 %), vs. zisk vyplacený jako podíl (21 % + 15 % z dividendy)
+  const taxSroRetained    = Math.round(projectedAnnual * SRO_RATE_CO);
+  const taxSroDistributed = Math.round(projectedAnnual * SRO_RATE_CO + projectedAnnual * (1 - SRO_RATE_CO) * SRO_RATE_DIV);
+  const effSroDistPct     = projectedAnnual > 0 ? (taxSroDistributed / projectedAnnual) * 100 : 0;
+
+  const saving = taxOsvc - taxSroRetained; // možná úspora, pokud zisk zůstane ve firmě
+
+  if (projectedAnnual <= 0) return null;
+
+  return (
+    <div style={{
+      background: triggered ? "#FFFBEB" : "#fff",
+      border: `1.5px solid ${triggered ? "#F59E0B" : "var(--line)"}`,
+      borderRadius: 14, padding: "20px 22px"
+    }}>
+      <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:10}}>
+        {triggered && <span style={{fontSize:16}}>⚠️</span>}
+        <div style={{fontSize:9,letterSpacing:".24em",textTransform:"uppercase",fontWeight:700,color:triggered?"#92400E":"var(--mut)"}}>
+          {triggered ? "Závažné daňové upozornění — zvaž s.r.o." : "Optimalizace — OSVČ vs. s.r.o."}
+        </div>
+      </div>
+
+      <div style={{fontSize:12.5,color:"var(--txt)",lineHeight:1.6,marginBottom:14,maxWidth:760}}>
+        {triggered ? (
+          <>Při odhadovaném ročním obratu <strong>{fmtKc(projectedAnnual)}</strong> (extrapolace z fakturace {monthsElapsed}/12 měsíců {year})
+          přesahuješ hranici <strong>{fmtKc(SRO_TH_23)}</strong>, od které se na OSVČ uplatňuje <strong>zvýšená sazba 23 %</strong> místo 15 %.
+          Z přesahu <strong>{fmtKc(overTh)}</strong> tak navíc odvádíš o {fmtKc(Math.round(overTh*(SRO_RATE_HI-SRO_RATE_LO)))} víc, než kdyby platila jen 15% sazba.
+          Společnost s ručením omezeným naproti tomu platí jednotných <strong>21 %</strong> z celého zisku — při tomto objemu se vyplatí nechat si od daňového poradce
+          spočítat přesný přechod na s.r.o.</>
+        ) : (
+          <>Při odhadovaném ročním obratu <strong>{fmtKc(projectedAnnual)}</strong> (extrapolace z fakturace {monthsElapsed}/12 měsíců {year}) zatím nepřesahuješ hranici
+          pro zvýšenou sazbu 23 % (<strong>{fmtKc(SRO_TH_23)}</strong>). OSVČ s paušálem 15 % zůstává sazbou výhodná — appka tě upozorní, jakmile se přiblížíš.</>
+        )}
+      </div>
+
+      <div style={{display:"flex",gap:28,flexWrap:"wrap",marginBottom:12}}>
+        <div>
+          <div style={{fontSize:10,color:"var(--mut)"}}>OSVČ — DPFO (15 % / 23 %)</div>
+          <div style={{fontFamily:"Fraunces,serif",fontSize:22,fontWeight:300,color:triggered?"#DC2626":"var(--txt)"}}>{fmtKc(taxOsvc)}</div>
+          <div style={{fontSize:9.5,color:"var(--mut)"}}>efektivně {effOsvcPct.toFixed(1)} % z obratu</div>
+        </div>
+        <div>
+          <div style={{fontSize:10,color:"var(--mut)"}}>s.r.o. — zisk zůstává ve firmě (21 %)</div>
+          <div style={{fontFamily:"Fraunces,serif",fontSize:22,fontWeight:300,color:"#059669"}}>{fmtKc(taxSroRetained)}</div>
+          <div style={{fontSize:9.5,color:"var(--mut)"}}>efektivně 21,0 % z obratu</div>
+        </div>
+        <div>
+          <div style={{fontSize:10,color:"var(--mut)"}}>s.r.o. — zisk vyplacen (21 % + 15 % z podílu)</div>
+          <div style={{fontFamily:"Fraunces,serif",fontSize:22,fontWeight:300,color:"var(--txt)"}}>{fmtKc(taxSroDistributed)}</div>
+          <div style={{fontSize:9.5,color:"var(--mut)"}}>efektivně {effSroDistPct.toFixed(1)} % z obratu</div>
+        </div>
+        {triggered && (
+          <div>
+            <div style={{fontSize:10,color:"var(--mut)"}}>Možná úspora (zisk ve firmě vs. OSVČ)</div>
+            <div style={{fontFamily:"Fraunces,serif",fontSize:22,fontWeight:500,color:saving>0?"#059669":"#DC2626"}}>
+              {saving>0?"až +":""}{fmtKc(Math.abs(saving))}
+            </div>
+            <div style={{fontSize:9.5,color:"var(--mut)"}}>ročně, orientačně</div>
+          </div>
+        )}
+      </div>
+
+      <div style={{fontSize:9.5,color:"var(--mut)",lineHeight:1.6,maxWidth:760,borderTop:"1px solid rgba(0,0,0,.06)",paddingTop:10}}>
+        ℹ️ Orientační porovnání efektivních sazeb na <strong>hrubý obrat z fakturace</strong> — skutečný základ daně závisí na reálných/paušálních výdajích,
+        sociálním a zdravotním pojištění a způsobu výplaty zisku (mzda vs. podíl). Sazby a hranice odpovídají roku {year} dle Finanční správy ČR
+        (DPFO 15 % / 23 % nad {fmtKc(SRO_TH_23)}, daň z příjmu právnických osob 21 %, srážková daň z podílů na zisku 15 %).
+        Nejde o daňové poradenství — pro přesný přepočet a rozhodnutí o přechodu na s.r.o. je třeba probrat konkrétní čísla s daňovým poradcem.
+      </div>
+    </div>
+  );
+}
+
 function DaneModule({ year, taxRecords, financeItems, invoices, dpfoMonths, escrows, onSaveTax }) {
   const now = new Date();
   const monthsElapsed = (year === now.getFullYear()) ? now.getMonth() + 1 : 12;
@@ -4845,6 +5006,9 @@ function DaneModule({ year, taxRecords, financeItems, invoices, dpfoMonths, escr
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+      {/* Závažné daňové upozornění — OSVČ vs. s.r.o. (na základě fakturace a sazeb 21 % / 23 %) */}
+      <SroOptimizationPanel year={year} invoices={invoices} />
+
       {/* Souhrnná karta — daňový přehled roku */}
       <div style={{ background: "#fff", border: "1px solid var(--line)", borderRadius: 14, padding: "20px 22px" }}>
         <div style={{ fontSize: 9, letterSpacing: ".28em", textTransform: "uppercase", fontWeight: 600, color: "var(--mut)", marginBottom: 10 }}>
@@ -5334,6 +5498,14 @@ export default function MauxCRM() {
     const updated = await toggleDpfoMonth(row);
     setDpfoMonths(p => p.map(m => m.id === row.id ? updated : m));
   };
+  // Označení tranše jako vyplacené — promítne se do úroků v celé appce (interest engine čte paid_date)
+  const markTranchePaid = async (escrowId, tranche) => {
+    try {
+      const today = new Date().toISOString().slice(0,10);
+      await upsertEscrowTranche({ ...tranche, escrow_id: escrowId, is_paid: true, paid_date: today });
+      setEscrows(await fetchEscrows());
+    } catch(e) { alert("Chyba: " + e.message); }
+  };
   const saveTaxRecord = async (rec) => {
     try { await upsertTaxRecord(rec); setTaxRecords(await fetchTaxRecords(rec.year)); }
     catch(e) { alert("Chyba: " + e.message); }
@@ -5647,6 +5819,7 @@ export default function MauxCRM() {
               onNew={() => { setSelEscrow(null); setEscrowMode("new"); }}
               onEdit={e => { setSelEscrow(e); setEscrowMode("edit"); }}
               onDelete={doDeleteEscrow}
+              onMarkPaid={markTranchePaid}
             />
           )}
           {mod === "uschovy" && (escrowMode === "new" || escrowMode === "edit") && (
