@@ -5338,11 +5338,15 @@ function SroOptimizationPanel({ year, invoices }) {
 /* Mini-kalkulačka účtenek: zadáš částku faktury (např. notářka), appka spočítá DPH a základ
    podle zvolené sazby a jedním klikem přičte vypočítané DPH do "Odpočet z účtenek" výše —
    bez ručního počítání. Loguje si i historii přidaných účtenek (lze i odebrat). */
+const CZ_MONTHS_FULL = ["leden","únor","březen","duben","květen","červen","červenec","srpen","září","říjen","listopad","prosinec"];
+
 function DphKalkulacka({ odpItem, onSaveFinance }) {
   const [open, setOpen] = useState(false);
   const [label, setLabel] = useState("");
   const [gross, setGross] = useState("");
   const [rate, setRate] = useState(21);
+  const [date, setDate] = useState(today());
+  const [expanded, setExpanded] = useState(null); // klíč "YYYY-MM" rozbaleného měsíce v archivu (null = nejnovější)
 
   const parseLog = (notes) => {
     try { const p = JSON.parse(notes || "{}"); return Array.isArray(p.log) ? p.log : []; }
@@ -5354,16 +5358,38 @@ function DphKalkulacka({ odpItem, onSaveFinance }) {
   const vat = g > 0 ? Math.round(g - g / (1 + rate / 100)) : 0;
   const base = g - vat;
 
+  // Archiv — žádné mazání starých záznamů, vše se schovává seskupené podle měsíce a roku,
+  // takže lze kdykoliv zpětně dohledat historii (i víceleté).
+  const groups = useMemo(() => {
+    const map = {};
+    for (const e of log) {
+      const key = (e.date || "").slice(0, 7) || "neznámo";
+      (map[key] = map[key] || []).push(e);
+    }
+    return Object.entries(map)
+      .sort((a, b) => b[0].localeCompare(a[0]))
+      .map(([key, items]) => ({
+        key,
+        items: [...items].sort((a, b) => (b.date || "").localeCompare(a.date || "")),
+        sum: items.reduce((s, e) => s + (e.vat || 0), 0),
+      }));
+  }, [log]);
+  const groupLabel = (key) => {
+    const [y, m] = key.split("-");
+    const mi = Number(m) - 1;
+    return (mi >= 0 && mi < 12) ? `${CZ_MONTHS_FULL[mi]} ${y}` : key;
+  };
+
   const add = () => {
     const lbl = label.trim();
     if (!lbl || g <= 0) return;
-    const entry = { id: uid(), date: today(), label: lbl, gross: g, rate, vat };
+    const entry = { id: uid(), date: date || today(), label: lbl, gross: g, rate, vat };
     onSaveFinance({
       ...odpItem,
       amount: (odpItem.amount || 0) + vat,
-      notes: JSON.stringify({ log: [entry, ...log].slice(0, 30) }),
+      notes: JSON.stringify({ log: [entry, ...log] }),
     });
-    setLabel(""); setGross(""); setOpen(false);
+    setLabel(""); setGross(""); setDate(today()); setOpen(false);
   };
 
   const removeEntry = (id) => {
@@ -5379,7 +5405,7 @@ function DphKalkulacka({ odpItem, onSaveFinance }) {
   return (
     <div style={{ marginTop: 16, paddingTop: 14, borderTop: "1px solid var(--line)" }}>
       <div style={{ fontSize: 9, letterSpacing: ".2em", textTransform: "uppercase", color: "var(--mut)", fontWeight: 600, marginBottom: 8 }}>
-        Kalkulačka účtenek → rovnou do odpočtu DPH
+        Kalkulačka účtenek → rovnou do odpočtu DPH (a do archivu)
       </div>
       {!open ? (
         <div onClick={() => setOpen(true)} style={{ fontSize: 11, color: "#3518A5", cursor: "pointer", opacity: .8 }}>
@@ -5399,6 +5425,8 @@ function DphKalkulacka({ odpItem, onSaveFinance }) {
             <option value={12}>12 %</option>
             <option value={0}>0 %</option>
           </select>
+          <input type="date" value={date} onChange={e => setDate(e.target.value)} title="Datum účtenky (pro zařazení do správného měsíce v archivu)"
+            style={{ fontSize: 11, padding: "5px 8px", border: "1px solid var(--line2)", borderRadius: 6, width: 130 }} />
           {g > 0 && (
             <span style={{ fontSize: 10.5, color: "var(--mut)" }}>
               základ {fmtKc(base)} · DPH <b style={{ color: "#3518A5" }}>{fmtKc(vat)}</b>
@@ -5408,17 +5436,39 @@ function DphKalkulacka({ odpItem, onSaveFinance }) {
           <button onClick={() => setOpen(false)} title="Zrušit" style={{ fontSize: 12, color: "var(--mut)", border: "none", background: "none", cursor: "pointer", padding: "0 2px" }}>✕</button>
         </div>
       )}
-      {log.length > 0 && (
-        <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 4 }}>
-          {log.slice(0, 6).map(e => (
-            <div key={e.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 11, color: "var(--mut)" }}>
-              <span>{fmtDate(e.date)} · {e.label} · {fmtKc(e.gross)} ({e.rate} % DPH)</span>
-              <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                <b style={{ color: "#3518A5" }}>+{fmtKc(e.vat)}</b>
-                <button onClick={() => removeEntry(e.id)} title="Odebrat z odpočtu" style={{ background: "none", border: "none", color: "var(--mut)", cursor: "pointer", fontSize: 10, opacity: .7 }}>✕</button>
-              </span>
-            </div>
-          ))}
+
+      {groups.length > 0 && (
+        <div style={{ marginTop: 14 }}>
+          <div style={{ fontSize: 9, letterSpacing: ".2em", textTransform: "uppercase", color: "var(--mut)", fontWeight: 600, marginBottom: 8 }}>
+            Archiv účtenek podle období — historie napříč měsíci a roky
+          </div>
+          {groups.map((grp, gi) => {
+            const isOpen = expanded === grp.key || (expanded === null && gi === 0);
+            return (
+              <div key={grp.key} style={{ marginBottom: 6, border: "1px solid var(--line2)", borderRadius: 8, overflow: "hidden" }}>
+                <div onClick={() => setExpanded(isOpen ? "_zaviti_" : grp.key)}
+                  style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 12px", cursor: "pointer", background: "#FAFAFC" }}>
+                  <span style={{ fontSize: 11.5, color: "var(--txt)", fontWeight: 500 }}>
+                    {isOpen ? "▾" : "▸"} {groupLabel(grp.key)} <span style={{ color: "var(--mut)", fontWeight: 400 }}>· {grp.items.length}×</span>
+                  </span>
+                  <b style={{ fontSize: 11.5, color: "#3518A5" }}>{fmtKc(grp.sum)}</b>
+                </div>
+                {isOpen && (
+                  <div style={{ padding: "6px 12px 10px", display: "flex", flexDirection: "column", gap: 4 }}>
+                    {grp.items.map(e => (
+                      <div key={e.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 11, color: "var(--mut)" }}>
+                        <span>{fmtDate(e.date)} · {e.label} · {fmtKc(e.gross)} ({e.rate} % DPH)</span>
+                        <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                          <b style={{ color: "#3518A5" }}>+{fmtKc(e.vat)}</b>
+                          <button onClick={() => removeEntry(e.id)} title="Odebrat z odpočtu i z archivu" style={{ background: "none", border: "none", color: "var(--mut)", cursor: "pointer", fontSize: 10, opacity: .7 }}>✕</button>
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })}
         </div>
       )}
     </div>
@@ -5469,6 +5519,9 @@ function DphOdpocetTile({ invoices, financeItems, onSaveFinance }) {
           <div>
             <div style={{ fontSize:10, color:"var(--mut)" }}>Zůstane mi díky odpočtu <span style={{fontSize:8,background:"#ECFDF5",color:"#065F46",padding:"1px 5px",borderRadius:3,fontWeight:600,marginLeft:2}}>→ příjmy</span></div>
             <div style={{ fontFamily:"Fraunces,serif", fontSize:24, fontWeight:300, color:"#059669" }}>{fmtKc(zustane)}</div>
+            <div style={{ fontSize:9.5, color:"var(--mut)", marginTop:4, maxWidth:200, lineHeight:1.4 }}>
+              Kdy to „přijde": až ve vyúčtování za <b>{CZM[now.getMonth()]}</b> — Čechmanová to zpracuje a vyrovná v rámci platby splatné <b>do 25. {dueMonthName}</b>. Dřív se to fakticky neprojeví.
+            </div>
           </div>
         )}
         {prevod > 0 && (
