@@ -3730,10 +3730,20 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
   // DPH — nadměrný odpočet (na žádost): kolik mi reálně ZŮSTANE díky účtenkám, které posílám Čechmanové
   // jako odpočet proti DPH z vystavených faktur. Nemění se tím "to číslo shrnující daň" v modulu Daně —
   // je to čistě nová položka v příjmech, doplňující obrázek o tom, kolik fakticky zaplatím / kolik mi zbude.
-  // dphFaktury (tento měsíc) − odpočet z účtenek = reálně uhrazeno Čechmanové; co je z odpočtu "navíc", to mi zůstává.
-  const dphFakturyMesic = invoices.filter(i => (i.issue_date||"").startsWith(thisMonth)).reduce((s,i)=>s+(i.vat_amount||0),0);
+  //
+  // DŮLEŽITÉ — DPH se platí ZPĚTNĚ: vyúčtování za PŘEDCHOZÍ měsíc je splatné Čechmanové až 25. dne
+  // měsíce aktuálního (přesně jak vysvětluje dlaždice Odpočet DPH — "DPH za května... počítá se do
+  // příjmů června"). Proto v červnových Příjmech NEPOČÍTÁME červnové doklady (ty se teprve tvoří
+  // a zúčtují se až v červenci), ale květnové — to je ta částka, co se v červnu reálně řeší a "usadí".
+  // dphFaktury (za předchozí měsíc) − odpočet z účtenek (za předchozí měsíc) = reálně uhrazeno
+  // Čechmanové; co je z odpočtu "navíc", to mi zůstává jako příjem tohoto měsíce.
+  const dphFakturyMesic = invoices.filter(i => (i.issue_date||"").startsWith(prevMonth)).reduce((s,i)=>s+(i.vat_amount||0),0);
   const dphOdpItem = (financeItems||[]).find(i => i.id === "fi_dph_odpocet");
-  const dphOdpocet = dphOdpItem?.amount || 0;
+  const dphOdpocetLogVse = (() => {
+    try { const p = JSON.parse(dphOdpItem?.notes || "{}"); return Array.isArray(p.log) ? p.log : []; }
+    catch { return []; }
+  })();
+  const dphOdpocet = dphOdpocetLogVse.filter(e => (e.date||"").startsWith(prevMonth)).reduce((s,e)=>s+(e.vat||0),0);
   const nadmernyOdpocet = Math.min(dphOdpocet, dphFakturyMesic);
   // "Finance v následujícím měsíci" — SOUČET položek skutečně zobrazených v "Příjmy měsíční"
   // (manuální příjmy + nevyfakturováno + čistý úrok z úschov + nadměrný odpočet DPH) MÍNUS výdaje zobrazené v Cash flow.
@@ -4015,7 +4025,7 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
               <div style={{display:"flex",justifyContent:"space-between",fontSize:12,color:"var(--txt)",padding:"3px 0"}}>
                 <span style={{display:"flex",alignItems:"center",gap:6}}>
                   <span style={{fontSize:9,background:"#ECFDF5",color:"#065F46",padding:"1px 5px",borderRadius:3,fontWeight:600}}>auto</span>
-                  Nadměrný odpočet DPH — zůstane po úhradě Čechmanové
+                  Nadměrný odpočet DPH za {prevMonthName.toLowerCase()} — zůstane po úhradě Čechmanové
                 </span>
                 <span style={{fontFamily:"JetBrains Mono,monospace",color:"#059669",fontSize:11}}>+{fmtKc(nadmernyOdpocet)}</span>
               </div>
