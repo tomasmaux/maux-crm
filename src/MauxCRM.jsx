@@ -39,7 +39,18 @@ const MODULES = [
   { key: "happy",      label: "Happy Life",   live: false, desc: "Osobní finance — spoření, majetek, přehledy." },
 ];
 
-const fmtKc = (n) => new Intl.NumberFormat("cs-CZ").format(Math.round(n || 0)) + " Kč";
+// ── Privacy mode: čistě zobrazovací maska částek, NIKDY nepřepisuje reálná data ──
+let PRIVACY_MODE = false;
+const PRIVACY_DOTS = "• • • •";
+const maskNum = (s) => (PRIVACY_MODE ? PRIVACY_DOTS : s);
+function loadPrivacyMode() {
+  try { return localStorage.getItem("maux_privacy") === "1"; } catch (e) { return false; }
+}
+function savePrivacyMode(v) {
+  try { localStorage.setItem("maux_privacy", v ? "1" : "0"); } catch (e) {}
+}
+
+const fmtKc = (n) => maskNum(new Intl.NumberFormat("cs-CZ").format(Math.round(n || 0))) + " Kč";
 const fmtDate = (d) => d ? new Date(d).toLocaleDateString("cs-CZ", { day: "numeric", month: "numeric", year: "numeric" }) : "—";
 const uid = () => "id_" + Math.random().toString(36).slice(2, 10);
 const today = () => new Date().toISOString().slice(0, 10);
@@ -790,7 +801,7 @@ function ServiceDots({ list, max = 3 }) {
   );
 }
 
-function Sidebar({ mod, setMod, onLogout }) {
+function Sidebar({ mod, setMod, onLogout, privacyMode, onTogglePrivacy }) {
   return (
     <aside className="sb">
       <div className="brand">
@@ -816,6 +827,12 @@ function Sidebar({ mod, setMod, onLogout }) {
       <div className="sbfoot">
         Mgr. Tomáš Maux<br />
         Poděbrady · {new Date().getFullYear()}<br />
+        <button onClick={onTogglePrivacy} title={privacyMode ? "Zobrazit částky" : "Skrýt částky (režim soukromí)"}
+          style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+          <span style={{ fontSize: 11, opacity: .8 }}>{privacyMode ? "🙈" : "👁"}</span>
+          {privacyMode ? "Zobrazit částky" : "Skrýt částky"}
+        </button>
+        {" · "}
         <button onClick={onLogout}>Odhlásit se</button>
       </div>
     </aside>
@@ -1162,7 +1179,7 @@ function WealthDonut({ outerItems, innerItems, outerLabel, innerLabel, outerTota
 
   const oSegs = makeSegs(outerItems, OR, ORi, "outer");
   const iSegs = makeSegs(innerItems, IR, IRi, "inner");
-  const fmtN = n => new Intl.NumberFormat("cs-CZ").format(Math.round(n));
+  const fmtN = n => maskNum(new Intl.NumberFormat("cs-CZ").format(Math.round(n)));
 
   // Label line endpoint outside the ring
   const labelAnchor = (seg, ringR, offset=28) => {
@@ -1299,7 +1316,7 @@ function EditRow({ item, onSave, onDelete, valuePrefix = "", valueSuffix = " Kč
         </>
       ) : (
         <div style={{ fontSize: 13, fontFamily: "Fraunces,serif", fontWeight: 300, color: isCalculated ? "var(--mut)" : "var(--gold)", whiteSpace: "nowrap" }}>
-          {isCalculated ? <span style={{ fontSize: 11, color: "#059669" }}>auto</span> : ""} {valuePrefix}{new Intl.NumberFormat("cs-CZ").format(Math.round(displayVal))}{valueSuffix}
+          {isCalculated ? <span style={{ fontSize: 11, color: "#059669" }}>auto</span> : ""} {valuePrefix}{maskNum(new Intl.NumberFormat("cs-CZ").format(Math.round(displayVal)))}{valueSuffix}
         </div>
       )}
       {!isCalculated && !editing && <span style={{ fontSize: 9, color: "var(--mut)", opacity: .4 }}>✎</span>}
@@ -1351,7 +1368,7 @@ function FinanceSection({ title, items, category, onSave, onDelete, accent, auto
           <div key={i} style={{ display: "flex", alignItems: "center", padding: "7px 14px", borderBottom: "1px solid var(--line)", gap: 10 }}>
             <div style={{ flex: 1, fontSize: 12.5, color: "var(--txt)" }}>{item.label}</div>
             <span style={{ fontSize: 7, background: "#EEF2FF", color: "#3730A3", padding: "1px 4px", borderRadius: 3, fontWeight: 700 }}>auto</span>
-            <div style={{ fontSize: 13, fontFamily: "var(--mono)", color: amtColor }}>+{item.amount.toLocaleString("cs-CZ")} Kč</div>
+            <div style={{ fontSize: 13, fontFamily: "var(--mono)", color: amtColor }}>+{maskNum(item.amount.toLocaleString("cs-CZ"))} Kč</div>
           </div>
         ))}
         {items.map(item => item.notes === "TBD" ? (
@@ -1377,7 +1394,7 @@ function FinanceSection({ title, items, category, onSave, onDelete, accent, auto
             ) : (
               <>
                 <div style={{ flex: 1, fontSize: 13, color: "var(--txt)" }}>{item.label}</div>
-                <div style={{ fontSize: 13, fontFamily: "var(--mono)", color: amtColor }}>{signStr}{Math.abs(item.amount).toLocaleString("cs-CZ")} Kč</div>
+                <div style={{ fontSize: 13, fontFamily: "var(--mono)", color: amtColor }}>{signStr}{maskNum(Math.abs(item.amount).toLocaleString("cs-CZ"))} Kč</div>
                 <div style={{ fontSize: 10, color: "var(--mut)", opacity: .5 }}>✎</div>
               </>
             )}
@@ -2346,8 +2363,8 @@ function EscrowInsights({ escrows }) {
   const midnight = new Date(now); midnight.setHours(0,0,0,0);
   const sinceMidnight = perSec * (now - midnight) / 1000;
 
-  const K = (n) => Math.round(n).toLocaleString('cs-CZ') + ' Kč';
-  const Kd = (n) => n.toLocaleString('cs-CZ', {minimumFractionDigits:2,maximumFractionDigits:2}) + ' Kč';
+  const K = (n) => maskNum(Math.round(n).toLocaleString('cs-CZ')) + ' Kč';
+  const Kd = (n) => maskNum(n.toLocaleString('cs-CZ', {minimumFractionDigits:2,maximumFractionDigits:2})) + ' Kč';
 
   const cardSt = (bg, border) => ({
     background: bg, border: `1px solid ${border}`,
@@ -2421,7 +2438,7 @@ function EscrowInsights({ escrows }) {
               </div>
               <div style={{textAlign:"right",minWidth:90}}>
                 <div style={{fontSize:13,fontWeight:500,color:"var(--ink)",fontVariantNumeric:"tabular-nums"}}>{K(t.daily)}/den</div>
-                <div style={{fontSize:10,color:"var(--mut)"}}>{(t.amount||0).toLocaleString('cs-CZ')} × {((t.rate||0)*100).toFixed(1)} %</div>
+                <div style={{fontSize:10,color:"var(--mut)"}}>{maskNum((t.amount||0).toLocaleString('cs-CZ'))} × {((t.rate||0)*100).toFixed(1)} %</div>
               </div>
             </div>
           );
@@ -3635,7 +3652,7 @@ function WorkEntryForm({ init, clients, onSave, onCancel, saving }) {
           </div>
           <div className="frow" style={{ marginBottom: 0 }}>
             <label>Celkem bez DPH</label>
-            <input readOnly value={`${new Intl.NumberFormat("cs-CZ").format(amount)} Kč`}
+            <input readOnly value={`${maskNum(new Intl.NumberFormat("cs-CZ").format(amount))} Kč`}
               style={{ background: "#fff", color: "var(--ink)", fontFamily: "Fraunces, serif", fontWeight: 300, fontSize: 15 }} />
           </div>
         </div>
@@ -3662,7 +3679,7 @@ function WorkEntryForm({ init, clients, onSave, onCancel, saving }) {
       </div>
       {client && <div style={{ fontSize: 12, color: "var(--mut)", marginBottom: 14 }}>
         Klient: <strong style={{ color: "var(--ink)" }}>{client.name}</strong>
-        {client.hourly_rate > 0 && <span> · sazba {new Intl.NumberFormat("cs-CZ").format(client.hourly_rate)} Kč/h</span>}
+        {client.hourly_rate > 0 && <span> · sazba {maskNum(new Intl.NumberFormat("cs-CZ").format(client.hourly_rate))} Kč/h</span>}
       </div>}
       <div className="actions" style={{ borderTop: "none", paddingTop: 0, marginTop: 4 }}>
         <button className="btn gho" onClick={onCancel}>Zrušit</button>
@@ -3703,7 +3720,7 @@ function WorkEntryList({ entries, clients, invoices, onNew, onEdit, onDelete, on
       <div className="kpi-row">
         <div className="kpi hi">
           <div className="k">Nevyfakturováno</div>
-          <div className="v">{new Intl.NumberFormat("cs-CZ").format(Math.round(totalAmount * 1.21))} Kč</div>
+          <div className="v">{maskNum(new Intl.NumberFormat("cs-CZ").format(Math.round(totalAmount * 1.21)))} Kč</div>
           <div className="s">{unbilled.length} záznamů · {totalHours.toFixed(1)} h</div>
         </div>
         <div className="kpi">
@@ -3752,7 +3769,7 @@ function WorkEntryList({ entries, clients, invoices, onNew, onEdit, onDelete, on
               <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
                 <span style={{ fontFamily: "Fraunces, serif", fontSize: 17, fontWeight: 400, color: "var(--txt)" }}>{monthLabel(month)}</span>
                 <span style={{ fontSize: 11, color: "var(--mut)" }}>{mHours.toFixed(1)} h · {monthEntries.length} záznamů</span>
-                <span style={{ fontSize: 13, fontFamily: "Fraunces, serif", fontWeight: 300, color: "var(--gold)" }}>{new Intl.NumberFormat("cs-CZ").format(mTotal)} Kč</span>
+                <span style={{ fontSize: 13, fontFamily: "Fraunces, serif", fontWeight: 300, color: "var(--gold)" }}>{maskNum(new Intl.NumberFormat("cs-CZ").format(mTotal))} Kč</span>
               </div>
               <div style={{ display: "flex", gap: 8 }}>
                 {filterClient ? (
@@ -3794,10 +3811,10 @@ function WorkEntryList({ entries, clients, invoices, onNew, onEdit, onDelete, on
                     </td>
                     <td className="t-date">{e.hours > 0 ? `${e.hours} h` : "—"}</td>
                     <td className="t-date" style={{ fontSize: 11 }}>
-                      {e.notary_fee > 0 && <div>Notář: {new Intl.NumberFormat("cs-CZ").format(e.notary_fee)} Kč</div>}
-                      {e.admin_fee > 0 && <div>Sp.pop.: {new Intl.NumberFormat("cs-CZ").format(e.admin_fee)} Kč</div>}
+                      {e.notary_fee > 0 && <div>Notář: {maskNum(new Intl.NumberFormat("cs-CZ").format(e.notary_fee))} Kč</div>}
+                      {e.admin_fee > 0 && <div>Sp.pop.: {maskNum(new Intl.NumberFormat("cs-CZ").format(e.admin_fee))} Kč</div>}
                     </td>
-                    <td className="t-amt">{new Intl.NumberFormat("cs-CZ").format((e.amount||0) + (e.notary_fee||0) + (e.admin_fee||0))} Kč</td>
+                    <td className="t-amt">{maskNum(new Intl.NumberFormat("cs-CZ").format((e.amount||0) + (e.notary_fee||0) + (e.admin_fee||0)))} Kč</td>
                     <td style={{ textAlign: "right" }} onClick={ev => ev.stopPropagation()}>
                       <button className="btn gho" style={{ fontSize: 11, padding: "4px 8px", color: "#DC2626" }}
                         onClick={() => onDelete(e.id)}>✕</button>
@@ -3825,7 +3842,7 @@ function WorkEntryList({ entries, clients, invoices, onNew, onEdit, onDelete, on
                   <td className="t-date">{clientName(e)}</td>
                   <td style={{ fontSize: 13 }}>{e.description?.slice(0,80)}</td>
                   <td className="t-date">{e.hours > 0 ? `${e.hours} h` : "—"}</td>
-                  <td className="t-amt">{new Intl.NumberFormat("cs-CZ").format((e.amount||0) + (e.notary_fee||0) + (e.admin_fee||0))} Kč</td>
+                  <td className="t-amt">{maskNum(new Intl.NumberFormat("cs-CZ").format((e.amount||0) + (e.notary_fee||0) + (e.admin_fee||0)))} Kč</td>
                 </tr>
               ))}
             </tbody>
@@ -4566,6 +4583,11 @@ export default function MauxCRM() {
   const [escrowMode, setEscrowMode] = useState("list"); // list | edit | new
   const [selEscrow, setSelEscrow] = useState(null);
   const [dataLoading, setDataLoading] = useState(false);
+  const [privacyMode, setPrivacyMode] = useState(loadPrivacyMode);
+  // Nastavujeme modulovou proměnnou přímo v render fázi (před vykreslením potomků,
+  // kteří volají fmtKc/fmtN/K/Kd) — žádná reálná data se tím nemění, jde čistě o masku zobrazení.
+  PRIVACY_MODE = privacyMode;
+  const togglePrivacy = () => { setPrivacyMode(p => { savePrivacyMode(!p); return !p; }); };
   const [mod, setMod] = useState("dashboard");
   const [mode, setMode] = useState("list");
   const [sel, setSel] = useState(null);
@@ -4799,7 +4821,8 @@ export default function MauxCRM() {
   return (
     <div className="mx">
       <style>{CSS}</style>
-      <Sidebar mod={mod} setMod={k => { setMod(k); setMode("list"); setSel(null); setEscrowMode("list"); setSelEscrow(null); }} onLogout={handleLogout} />
+      <Sidebar mod={mod} setMod={k => { setMod(k); setMode("list"); setSel(null); setEscrowMode("list"); setSelEscrow(null); }} onLogout={handleLogout}
+        privacyMode={privacyMode} onTogglePrivacy={togglePrivacy} />
       <div className="main">
         <div className="top">
           <div className="top-l">
