@@ -5335,6 +5335,96 @@ function SroOptimizationPanel({ year, invoices }) {
    Princip: DPH z vystavených faktur (tento měsíc) − DPH z účtenek, které posílám jako odpočet = reálně
    uhrazená částka. Co z odpočtu "přebývá", to mi fakticky zůstává — a promítá se i jako nová položka
    v měsíčním přehledu příjmů ("Nadměrný odpočet DPH"). Nemění se tím stávající souhrnné číslo daně. */
+/* Mini-kalkulačka účtenek: zadáš částku faktury (např. notářka), appka spočítá DPH a základ
+   podle zvolené sazby a jedním klikem přičte vypočítané DPH do "Odpočet z účtenek" výše —
+   bez ručního počítání. Loguje si i historii přidaných účtenek (lze i odebrat). */
+function DphKalkulacka({ odpItem, onSaveFinance }) {
+  const [open, setOpen] = useState(false);
+  const [label, setLabel] = useState("");
+  const [gross, setGross] = useState("");
+  const [rate, setRate] = useState(21);
+
+  const parseLog = (notes) => {
+    try { const p = JSON.parse(notes || "{}"); return Array.isArray(p.log) ? p.log : []; }
+    catch { return []; }
+  };
+  const log = parseLog(odpItem.notes);
+
+  const g = Number(gross) || 0;
+  const vat = g > 0 ? Math.round(g - g / (1 + rate / 100)) : 0;
+  const base = g - vat;
+
+  const add = () => {
+    const lbl = label.trim();
+    if (!lbl || g <= 0) return;
+    const entry = { id: uid(), date: today(), label: lbl, gross: g, rate, vat };
+    onSaveFinance({
+      ...odpItem,
+      amount: (odpItem.amount || 0) + vat,
+      notes: JSON.stringify({ log: [entry, ...log].slice(0, 30) }),
+    });
+    setLabel(""); setGross(""); setOpen(false);
+  };
+
+  const removeEntry = (id) => {
+    const entry = log.find(e => e.id === id);
+    if (!entry) return;
+    onSaveFinance({
+      ...odpItem,
+      amount: Math.max((odpItem.amount || 0) - (entry.vat || 0), 0),
+      notes: JSON.stringify({ log: log.filter(e => e.id !== id) }),
+    });
+  };
+
+  return (
+    <div style={{ marginTop: 16, paddingTop: 14, borderTop: "1px solid var(--line)" }}>
+      <div style={{ fontSize: 9, letterSpacing: ".2em", textTransform: "uppercase", color: "var(--mut)", fontWeight: 600, marginBottom: 8 }}>
+        Kalkulačka účtenek → rovnou do odpočtu DPH
+      </div>
+      {!open ? (
+        <div onClick={() => setOpen(true)} style={{ fontSize: 11, color: "#3518A5", cursor: "pointer", opacity: .8 }}>
+          + spočítat účtenku (např. faktura notářky) a přičíst DPH do odpočtu
+        </div>
+      ) : (
+        <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+          <input autoFocus value={label} onChange={e => setLabel(e.target.value)} placeholder="Za co (např. Notářka)"
+            onKeyDown={e => { if (e.key === "Enter" && g > 0) add(); if (e.key === "Escape") setOpen(false); }}
+            style={{ fontSize: 11, padding: "5px 8px", border: "1px solid var(--line2)", borderRadius: 6, flex: 1, minWidth: 130 }} />
+          <input type="number" value={gross} onChange={e => setGross(e.target.value)} placeholder="Částka s DPH"
+            onKeyDown={e => { if (e.key === "Enter" && label.trim()) add(); if (e.key === "Escape") setOpen(false); }}
+            style={{ fontSize: 11, padding: "5px 8px", border: "1px solid var(--line2)", borderRadius: 6, width: 110 }} />
+          <select value={rate} onChange={e => setRate(Number(e.target.value))}
+            style={{ fontSize: 11, padding: "5px 6px", border: "1px solid var(--line2)", borderRadius: 6 }}>
+            <option value={21}>21 %</option>
+            <option value={12}>12 %</option>
+            <option value={0}>0 %</option>
+          </select>
+          {g > 0 && (
+            <span style={{ fontSize: 10.5, color: "var(--mut)" }}>
+              základ {fmtKc(base)} · DPH <b style={{ color: "#3518A5" }}>{fmtKc(vat)}</b>
+            </span>
+          )}
+          <button onClick={add} title="Přičíst do odpočtu DPH" style={{ fontSize: 13, color: "#059669", border: "none", background: "none", cursor: "pointer", padding: "0 2px" }}>✓</button>
+          <button onClick={() => setOpen(false)} title="Zrušit" style={{ fontSize: 12, color: "var(--mut)", border: "none", background: "none", cursor: "pointer", padding: "0 2px" }}>✕</button>
+        </div>
+      )}
+      {log.length > 0 && (
+        <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 4 }}>
+          {log.slice(0, 6).map(e => (
+            <div key={e.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 11, color: "var(--mut)" }}>
+              <span>{fmtDate(e.date)} · {e.label} · {fmtKc(e.gross)} ({e.rate} % DPH)</span>
+              <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                <b style={{ color: "#3518A5" }}>+{fmtKc(e.vat)}</b>
+                <button onClick={() => removeEntry(e.id)} title="Odebrat z odpočtu" style={{ background: "none", border: "none", color: "var(--mut)", cursor: "pointer", fontSize: 10, opacity: .7 }}>✕</button>
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function DphOdpocetTile({ invoices, financeItems, onSaveFinance }) {
   const now = new Date();
   const thisMonthKey = now.toISOString().slice(0,7);
@@ -5348,8 +5438,6 @@ function DphOdpocetTile({ invoices, financeItems, onSaveFinance }) {
   const kUhrade = Math.max(dphFaktury - odpocet, 0);
   const zustane = Math.min(odpocet, dphFaktury);       // = "Nadměrný odpočet" v příjmech — fakticky mi zůstává
   const prevod  = Math.max(odpocet - dphFaktury, 0);   // přesah odpočtu nad DPH z faktur — převádí se do dalšího měsíce
-
-  if (dphFaktury <= 0 && odpocet <= 0) return null;
 
   return (
     <div style={{ background:"#fff", border:"1px solid var(--line)", borderRadius:14, padding:"20px 22px" }}>
@@ -5390,6 +5478,8 @@ function DphOdpocetTile({ invoices, financeItems, onSaveFinance }) {
         a appka to automaticky započítá jako novou položku v měsíčním přehledu příjmů, aniž by se tím měnilo
         stávající souhrnné číslo daně výše.
       </div>
+
+      <DphKalkulacka odpItem={odpItem} onSaveFinance={onSaveFinance} />
     </div>
   );
 }
