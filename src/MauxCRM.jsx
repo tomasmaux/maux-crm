@@ -36,6 +36,7 @@ const MODULES = [
   { key: "fakturace",  label: "Fakturace",    live: true },
   { key: "klienti",    label: "Klienti",      live: true },
   { key: "uschovy",    label: "Úschovy",      live: true },
+  { key: "dane",       label: "Daně",         live: true },
   { key: "happy",      label: "Happy Life",   live: false, desc: "Osobní finance — spoření, majetek, přehledy." },
 ];
 
@@ -275,6 +276,38 @@ async function ensureDpfoYear(year) {
     }
   }
   return fetchDpfoMonths(year);
+}
+
+// ── DANĚ — kombinace automatiky (data, co appka už zná) a ručního vyúčtování ──
+// Cílem je "dokonalá účetní evidence": vidíme, kolik jsme na zálohách za rok zaplatili
+// (auto z appky), a k tomu si Tom doplní skutečné vyúčtování po podání přiznání/přehledů —
+// appka pak sama dopočítá přeplatek/nedoplatek a uchová poznámky k optimalizaci záloh
+// pro příští rok. Žádná data se tím neztrácí, jen se nad nimi staví nová vrstva přehledu.
+async function fetchTaxRecords(year) {
+  const { data, error } = await supabase.from("tax_records").select("*").eq("year", year).order("category");
+  if (error) throw error;
+  return data || [];
+}
+async function upsertTaxRecord(rec) {
+  const { error } = await supabase.from("tax_records").upsert({ ...rec, updated_at: new Date().toISOString() });
+  if (error) throw error;
+}
+async function ensureTaxYear(year) {
+  const existing = await fetchTaxRecords(year);
+  const need = [
+    { category: "dpfo",      label: "DPFO — záloha na daň z příjmu" },
+    { category: "socialni",  label: "Sociální pojištění (OSVČ)" },
+    { category: "zdravotni", label: "Zdravotní pojištění (VZP)" },
+    { category: "dph",       label: "DPH" },
+  ];
+  let changed = false;
+  for (const n of need) {
+    if (!existing.find(r => r.category === n.category)) {
+      await supabase.from("tax_records").insert({ id: `tax_${year}_${n.category}`, year, category: n.category, label: n.label, actual_settlement: null, note: "" });
+      changed = true;
+    }
+  }
+  return changed ? fetchTaxRecords(year) : existing;
 }
 
 // ── LOANS ──
@@ -4564,6 +4597,170 @@ function InvoiceForm({ init, clients, invoices, onSave, onCancel, saving }) {
   );
 }
 
+/* ─── DANĚ — kombinace automatiky a ručního vyúčtování: dokonalá účetní evidence ───
+   Levý blok (zaplaceno na zálohách) se počítá živě z dat, která appka už zná —
+   DPFO tracker, uhrazené faktury (DPH), úschovy (daň z výnosu) a pravidelné výdaje
+   (sociální/zdravotní pojištění, pokud jsou v appce zavedené pod rozpoznatelným názvem).
+   Pravý blok (skutečné vyúčtování + poznámka k optimalizaci) doplňuje Tom ručně po
+   podání přiznání/přehledů — appka sama dopočítá přeplatek/nedoplatek. Základ pro
+   budoucí přesný výpočet a optimalizaci záloh, beze ztráty jediného procesu nebo dat. */
+function DaneModule({ year, taxRecords, financeItems, invoices, dpfoMonths, escrows, onSaveTax }) {
+  const now = new Date();
+  const monthsElapsed = (year === now.getFullYear()) ? now.getMonth() + 1 : 12;
+
+  const dphAuto = invoices.filter(i => i.status === "uhrazena" && (i.issue_date||"").startsWith(String(year)))
+                          .reduce((s,i) => s + (i.vat_amount||0), 0);
+  const dpfoYear = (dpfoMonths||[]).filter(m => m.year === year);
+  const dpfoPaid = dpfoYear.filter(m => m.is_paid);
+  const dpfoAcc  = dpfoPaid.reduce((s,m) => s + (m.amount||8050), 0);
+  const danUschov = Math.round(escrowTotalTax(escrows));
+
+  // Sociální/zdravotní pojištění zatím nemá appka vlastní evidenci jako DPFO —
+  // dohledáváme je mezi pravidelnými výdaji podle názvu a odhadujeme zaplaceno
+  // za uplynulé měsíce. Až budou mít vlastní tracker, stačí tu vyměnit zdroj dat.
+  const findMonthly = (re) => (financeItems||[]).filter(i => (i.category === "nutne" || i.category === "luxus") && re.test(i.label||""))
+                                                 .reduce((s,i) => s + Math.abs(i.amount||0), 0);
+  const socialMonthly = findMonthly(/sociáln/i);
+  const zdravMonthly  = findMonthly(/zdravot|vzp/i);
+  const socialEst = Math.round(socialMonthly * monthsElapsed);
+  const zdravEst  = Math.round(zdravMonthly * monthsElapsed);
+
+  const AUTO = {
+    dpfo:      { paid: dpfoAcc,   basis: `${dpfoPaid.length} / 12 měsíců zaplaceno × ${fmtKc(dpfoYear[0]?.amount||8050)}`, hasData: true },
+    socialni:  { paid: socialEst, basis: socialMonthly > 0 ? `odhad: ${monthsElapsed} měs. × ${fmtKc(socialMonthly)} z evidence výdajů` : "položku jsem v appce nenašel — doplň skutečnost ručně", hasData: socialMonthly > 0 },
+    zdravotni: { paid: zdravEst,  basis: zdravMonthly > 0 ? `odhad: ${monthsElapsed} měs. × ${fmtKc(zdravMonthly)} z evidence výdajů` : "položku jsem v appce nenašel — doplň skutečnost ručně", hasData: zdravMonthly > 0 },
+    dph:       { paid: dphAuto,   basis: "součet DPH z uhrazených faktur", hasData: true },
+  };
+
+  const records = useMemo(() => {
+    const order = ["dpfo","socialni","zdravotni","dph"];
+    return order.map(cat => taxRecords.find(r => r.category === cat)).filter(Boolean);
+  }, [taxRecords]);
+
+  const totalPaid = Object.values(AUTO).reduce((s,a) => s + a.paid, 0);
+  const haveAllSettlements = records.length > 0 && records.every(r => r.actual_settlement != null && r.actual_settlement !== "");
+  const totalSettled = records.reduce((s,r) => s + (r.actual_settlement != null ? Number(r.actual_settlement) : 0), 0);
+  const totalDiff = haveAllSettlements ? (totalPaid - totalSettled) : null;
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+      {/* Souhrnná karta — daňový přehled roku */}
+      <div style={{ background: "#fff", border: "1px solid var(--line)", borderRadius: 14, padding: "20px 22px" }}>
+        <div style={{ fontSize: 9, letterSpacing: ".28em", textTransform: "uppercase", fontWeight: 600, color: "var(--mut)", marginBottom: 10 }}>
+          Daňový přehled {year} · základ pro přesný výpočet a optimalizaci záloh
+        </div>
+        <div style={{ display: "flex", gap: 32, flexWrap: "wrap", alignItems: "baseline" }}>
+          <div>
+            <div style={{ fontSize: 10, color: "var(--mut)" }}>Zaplaceno na zálohách (YTD, automaticky)</div>
+            <div style={{ fontFamily: "Fraunces,serif", fontSize: 24, fontWeight: 300, color: "var(--txt)" }}>{fmtKc(totalPaid)}</div>
+          </div>
+          <div>
+            <div style={{ fontSize: 10, color: "var(--mut)" }}>Skutečné vyúčtování (zadáváš ručně)</div>
+            <div style={{ fontFamily: "Fraunces,serif", fontSize: 24, fontWeight: 300, color: haveAllSettlements ? "var(--txt)" : "var(--mut)" }}>
+              {haveAllSettlements ? fmtKc(totalSettled) : "doplň v tabulce ↓"}
+            </div>
+          </div>
+          {totalDiff != null && (
+            <div>
+              <div style={{ fontSize: 10, color: "var(--mut)" }}>{totalDiff >= 0 ? "Přeplatek celkem" : "Nedoplatek celkem"}</div>
+              <div style={{ fontFamily: "Fraunces,serif", fontSize: 24, fontWeight: 500, color: totalDiff >= 0 ? "#059669" : "#DC2626" }}>
+                {totalDiff >= 0 ? "+" : "−"}{fmtKc(Math.abs(totalDiff))}
+              </div>
+            </div>
+          )}
+          {danUschov > 0 && (
+            <div>
+              <div style={{ fontSize: 10, color: "var(--mut)" }}>Daň z výnosu úschov (informativně)</div>
+              <div style={{ fontFamily: "Fraunces,serif", fontSize: 24, fontWeight: 300, color: "var(--mut)" }}>{fmtKc(danUschov)}</div>
+            </div>
+          )}
+        </div>
+        <div style={{ fontSize: 10.5, color: "var(--mut)", marginTop: 14, lineHeight: 1.55, maxWidth: 720 }}>
+          Sloupec „Zaplaceno" se počítá živě z dat, která appka už eviduje — DPFO tracker, uhrazené faktury (DPH) a pravidelné výdaje.
+          Jakmile po podání přiznání nebo přehledů od ČSSZ/VZP zjistíš skutečnou částku, klikni do sloupce „Skutečné vyúčtování" a zapiš ji —
+          appka sama dopočítá přeplatek nebo nedoplatek a vše si pamatuje pro příští rok, kdy z toho společně přesně nastavíme výši záloh.
+        </div>
+      </div>
+
+      {/* Tabulka kategorií — auto vs. ruční */}
+      <div style={{ background: "#fff", border: "1px solid var(--line)", borderRadius: 14, overflow: "hidden" }}>
+        <div style={{ display: "grid", gridTemplateColumns: "1.5fr 1fr 1.1fr 1fr 1.7fr", padding: "11px 22px", borderBottom: "1px solid var(--line)", background: "#FAFAFC" }}>
+          {["Kategorie","Zaplaceno (auto)","Skutečné vyúčtování","Rozdíl","Poznámka k optimalizaci záloh"].map((h,i) => (
+            <div key={i} style={{ fontSize: 9, letterSpacing: ".12em", textTransform: "uppercase", fontWeight: 600, color: "var(--mut)" }}>{h}</div>
+          ))}
+        </div>
+        {records.map(rec => <TaxRow key={rec.id} rec={rec} auto={AUTO[rec.category]} onSave={onSaveTax} />)}
+        {records.length === 0 && (
+          <div style={{ padding: "28px 22px", textAlign: "center", color: "var(--mut)", fontSize: 12.5 }}>
+            Evidence pro rok {year} se právě zakládá — za chvíli se objeví čtyři kategorie k vyplnění.
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function TaxRow({ rec, auto, onSave }) {
+  const [settlement, setSettlement] = useState(rec.actual_settlement ?? "");
+  const [note, setNote] = useState(rec.note || "");
+  const [editingSettlement, setEditingSettlement] = useState(false);
+  const [editingNote, setEditingNote] = useState(false);
+
+  const hasSettlement = rec.actual_settlement != null && rec.actual_settlement !== "";
+  const diff = hasSettlement ? (auto.paid - Number(rec.actual_settlement)) : null;
+
+  const commitSettlement = () => { onSave({ ...rec, actual_settlement: settlement === "" ? null : Number(settlement) }); setEditingSettlement(false); };
+  const commitNote = () => { onSave({ ...rec, note }); setEditingNote(false); };
+
+  return (
+    <div style={{ display: "grid", gridTemplateColumns: "1.5fr 1fr 1.1fr 1fr 1.7fr", padding: "14px 22px", borderBottom: "1px solid var(--line)", alignItems: "center", gap: 6 }}>
+      <div>
+        <div style={{ fontSize: 13, color: "var(--txt)", fontWeight: 500 }}>{rec.label}</div>
+        <div style={{ fontSize: 9.5, color: "var(--mut)", marginTop: 2 }}>{auto.basis}</div>
+      </div>
+      <div style={{ fontFamily: "var(--mono)", fontSize: 13, color: "var(--txt)" }}>{fmtKc(auto.paid)}</div>
+      <div>
+        {editingSettlement ? (
+          <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+            <input type="number" autoFocus value={settlement}
+              onChange={e => setSettlement(e.target.value)}
+              onKeyDown={e => { if (e.key === "Enter") commitSettlement(); if (e.key === "Escape") setEditingSettlement(false); }}
+              style={{ width: 88, fontSize: 12, fontFamily: "var(--mono)", padding: "3px 6px", border: "1px solid var(--ink)", borderRadius: 5, outline: "none" }} />
+            <button onClick={commitSettlement} style={{ fontSize: 12, border: "none", background: "none", cursor: "pointer", color: "var(--ink)" }}>✓</button>
+          </span>
+        ) : (
+          <span onClick={() => { setSettlement(rec.actual_settlement ?? ""); setEditingSettlement(true); }}
+            title="Klikni a zadej skutečné vyúčtování po podání přiznání / přehledu"
+            style={{ fontFamily: "var(--mono)", fontSize: 13, cursor: "pointer", borderBottom: "1px dotted var(--mut)", color: hasSettlement ? "var(--txt)" : "var(--mut)" }}>
+            {hasSettlement ? fmtKc(Number(rec.actual_settlement)) : "klikni a zadej…"}
+          </span>
+        )}
+      </div>
+      <div style={{ fontFamily: "var(--mono)", fontSize: 13, fontWeight: 600, color: diff == null ? "var(--mut)" : (diff >= 0 ? "#059669" : "#DC2626") }}>
+        {diff == null ? "—" : `${diff >= 0 ? "+" : "−"}${fmtKc(Math.abs(diff))}`}
+      </div>
+      <div>
+        {editingNote ? (
+          <span style={{ display: "inline-flex", alignItems: "center", gap: 4, width: "100%" }}>
+            <input type="text" autoFocus value={note}
+              onChange={e => setNote(e.target.value)}
+              onKeyDown={e => { if (e.key === "Enter") commitNote(); if (e.key === "Escape") setEditingNote(false); }}
+              placeholder="např. snížit zálohu od ledna o…"
+              style={{ flex: 1, fontSize: 12, padding: "3px 6px", border: "1px solid var(--ink)", borderRadius: 5, outline: "none" }} />
+            <button onClick={commitNote} style={{ fontSize: 12, border: "none", background: "none", cursor: "pointer", color: "var(--ink)" }}>✓</button>
+          </span>
+        ) : (
+          <span onClick={() => { setNote(rec.note || ""); setEditingNote(true); }}
+            title="Klikni a napiš poznámku k optimalizaci záloh na příští rok"
+            style={{ fontSize: 12, cursor: "pointer", color: rec.note ? "var(--txt)" : "var(--mut)", borderBottom: "1px dotted var(--mut)" }}>
+            {rec.note || "klikni a přidej poznámku…"}
+          </span>
+        )}
+      </div>
+    </div>
+  );
+}
+
 /* ─── KLIENTI ─── */
 function ClientList({ clients, invoices, query, setQuery, filter, setFilter, onOpen, onNew, onRepairClients }) {
   const sum = useMemo(() => clients.reduce((a, c) => a + (c.invoiced || 0), 0), [clients]);
@@ -4864,6 +5061,7 @@ export default function MauxCRM() {
   const [workEntries, setWorkEntries] = useState([]);
   const [financeItems, setFinanceItems] = useState([]);
   const [dpfoMonths, setDpfoMonths] = useState([]);
+  const [taxRecords, setTaxRecords] = useState([]);
   const [loanTrackers, setLoanTrackers] = useState([]);
   const [loanTransactions, setLoanTransactions] = useState({}); // { loanId: [] }
   const [escrows, setEscrows] = useState([]);
@@ -4903,12 +5101,14 @@ export default function MauxCRM() {
       fetchWorkEntries().catch(e => { console.error("work:", e); return []; }),
       fetchFinanceItems().catch(e => { console.error("finance:", e); return []; }),
       ensureDpfoYear(new Date().getFullYear()).catch(() => []),
+      ensureTaxYear(new Date().getFullYear()).catch(() => []),
       fetchLoanTrackers().catch(() => []),
       fetchEscrows().catch(e => { console.error("escrows load:", e); return []; }),
     ])
-      .then(async ([c, i, w, f, dpfo, loans, esc]) => {
+      .then(async ([c, i, w, f, dpfo, tax, loans, esc]) => {
         setClients(c); setInvoices(i); setWorkEntries(w); setFinanceItems(f);
         setDpfoMonths(dpfo);
+        setTaxRecords(tax);
         setLoanTrackers(loans);
         setEscrows(esc || []);
         const txMap = {};
@@ -4929,6 +5129,10 @@ export default function MauxCRM() {
   const handleDpfoToggle = async (row) => {
     const updated = await toggleDpfoMonth(row);
     setDpfoMonths(p => p.map(m => m.id === row.id ? updated : m));
+  };
+  const saveTaxRecord = async (rec) => {
+    try { await upsertTaxRecord(rec); setTaxRecords(await fetchTaxRecords(rec.year)); }
+    catch(e) { alert("Chyba: " + e.message); }
   };
   const handleLoanTxAdd = async (tx) => {
     await upsertLoanTransaction(tx);
@@ -5240,6 +5444,19 @@ export default function MauxCRM() {
               onSave={saveEscrow}
               onCancel={() => { setEscrowMode("list"); setSelEscrow(null); }}
               saving={saving}
+            />
+          )}
+
+          {/* DANĚ */}
+          {mod === "dane" && (
+            <DaneModule
+              year={new Date().getFullYear()}
+              taxRecords={taxRecords}
+              financeItems={financeItems}
+              invoices={invoices}
+              dpfoMonths={dpfoMonths}
+              escrows={escrows}
+              onSaveTax={saveTaxRecord}
             />
           )}
         </div>
