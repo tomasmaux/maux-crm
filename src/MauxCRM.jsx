@@ -5626,15 +5626,13 @@ function DphOdpocetTile({ invoices, financeItems, onSaveFinance }) {
   const odpocetPrev = log.filter(e => (e.date||"").startsWith(prevMonthKey)).reduce((s,e)=>s+(e.vat||0),0);
   const kUhradePrev = Math.max(dphFakturyPrev - odpocetPrev, 0);
 
-  // "Tvůj měsíční výdělek na DPH" — POUZE za uzavřený předchozí měsíc (dřív se tu omylem sčítalo
-  // přes všechny naimportované měsíce dohromady — to je ta chyba, na kterou jsi upozornil).
-  //
-  // Tvoje přesné zadání (citace): "Postav proti sobě DPH z faktur, které jsem vystavil a odečti od toho
-  // DPH z účtenek z předchozího měsíce. Rozdíl znamená ten zisk, který se mi připíše v tom aktuálním
-  // měsíci, kdy se na to koukám." — tedy: DPH z faktur TOHOTO měsíce minus odpočet z účtenek za
-  // PŘEDCHOZÍ měsíc = zisk připsaný v tomto (aktuálním, právě sledovaném) měsíci.
-  const zisk = dphFaktury - odpocetPrev;
-  const ziskMonthName = CZM[now.getMonth()];
+  // "Tvůj měsíční výdělek na DPH" — POUZE za jeden uzavřený měsíc, párované period-to-period
+  // (ne kumulativní součet napříč měsíci — to byla ta chyba, na kterou jsi upozornil, a ne ani
+  // mix dvou různých období — jak jsme si ověřili, Čechmanová počítá vždy ze stejného měsíce
+  // pro faktury i odpočet, takže "kolik jsi ušetřil" = jak velkou část odpočtu sis reálně
+  // odečetl od DPH na fakturách za TENTÝŽ měsíc).
+  const zisk = Math.min(odpocetPrev, dphFakturyPrev);   // = kolik jsi za {prevMonthName} reálně ušetřil na DPH
+  const ziskMonthName = prevMonthName;
 
   const prevodPrev = Math.max(odpocetPrev - dphFakturyPrev, 0); // nadměrný odpočet za {prevMonthName} (daňový pojem) — převádí se dál
 
@@ -5646,19 +5644,19 @@ function DphOdpocetTile({ invoices, financeItems, onSaveFinance }) {
     onSaveFinance({ ...odpItem, notes: JSON.stringify(next) });
   };
 
-  // Routing "zisku" do zvolené složky na spořáku — využívá existující "obálky" (sporaci položky).
-  // Zisk se připisuje aktuálnímu měsíci (viz výše), takže i převod evidujeme pod aktuálním měsícem.
+  // Routing "úspory" do zvolené složky na spořáku — využívá existující "obálky" (sporaci položky).
+  // Vztahuje se k uzavřenému měsíci, jehož se týká i platba Čechmanové, proto stejný klíč prevMonthKey.
   const savingsFolders = (financeItems||[]).filter(i =>
     i.category === "sporaci" && i.notes !== "SKIP_DISPLAY" && !["fi_sp_99","fi_sp_01","fi_sp_02"].includes(i.id)
   );
-  const transferThis = transferredMap[thisMonthKey] || null;
+  const transferThis = transferredMap[prevMonthKey] || null;
   const [selFolder, setSelFolder] = useState("");
   const transferToFolder = () => {
     if (!onSaveFinance || !selFolder) return;
     const folder = savingsFolders.find(f => f.id === selFolder);
     if (!folder) return;
     onSaveFinance({ ...folder, amount: (folder.amount||0) + zisk });
-    const next = { ...meta, transferred: { ...transferredMap, [thisMonthKey]: { folderId: folder.id, folderLabel: folder.label, amount: zisk, date: today() } } };
+    const next = { ...meta, transferred: { ...transferredMap, [prevMonthKey]: { folderId: folder.id, folderLabel: folder.label, amount: zisk, date: today() } } };
     onSaveFinance({ ...odpItem, notes: JSON.stringify(next) });
     setSelFolder("");
   };
@@ -5714,13 +5712,13 @@ function DphOdpocetTile({ invoices, financeItems, onSaveFinance }) {
         {zisk > 0 && (
           <div style={{ background:"linear-gradient(135deg,#ECFDF5,#F0FDF9)", border:"1px solid #A7F3D0", borderRadius:12, padding:"14px 18px", maxWidth:320 }}>
             <div style={{ display:"flex", alignItems:"center", gap:6, fontSize:10, color:"#065F46", fontWeight:600, letterSpacing:".04em" }}>
-              <span style={{ fontSize:14 }}>💚</span> Tvůj měsíční výdělek na DPH <span style={{opacity:.7, fontWeight:400}}>(za {ziskMonthName})</span>
+              <span style={{ fontSize:14 }}>💚</span> Kolik jsi ušetřil na DPH <span style={{opacity:.7, fontWeight:400}}>(za {ziskMonthName})</span>
             </div>
             <div style={{ fontFamily:"Fraunces,serif", fontSize:30, fontWeight:500, color:"#059669", marginTop:4 }}>{fmtKc(zisk)}</div>
             <div style={{ fontSize:10, color:"#047857", marginTop:6, lineHeight:1.5 }}>
-              Postaveno přesně podle tebe: DPH z faktur, které vystavuješ teď v <b>{ziskMonthName}</b> ({fmtKc(dphFaktury)}),
-              minus odpočet z účtenek za <b>{prevMonthName}</b> ({fmtKc(odpocetPrev)}) — <b>rozdíl je zisk, který se ti
-              připisuje právě teď, v {ziskMonthName}, kdy se na to díváš.</b>
+              Stejné páry, ze kterých počítá i Čechmanová: DPH na fakturách za <b>{ziskMonthName}</b> ({fmtKc(dphFakturyPrev)})
+              a odpočet z účtenek uplatněný za <b>{ziskMonthName}</b> ({fmtKc(odpocetPrev)}). <b>Tahle částka je to, o co ti
+              odpočet reálně snížil platbu Čechmanové</b> — peníze, které ti tak fakticky zůstávají navíc.
             </div>
             <div style={{ marginTop:10, paddingTop:10, borderTop:"1px solid #A7F3D0" }}>
               {transferThis ? (
@@ -5774,11 +5772,11 @@ function DphOdpocetTile({ invoices, financeItems, onSaveFinance }) {
         Princip odpočtu: DPH vybrané z vystavených faktur snižuješ o DPH z účtenek, které posíláš Čechmanové jako odpočet —
         Čechmanové reálně uhradíš jen rozdíl. Co z odpočtu „přebývá" (nadměrný odpočet), to ti fakticky zůstává —
         a appka to automaticky započítá jako novou položku v měsíčním přehledu příjmů, aniž by se tím měnilo
-        stávající souhrnné číslo daně výše. Číslo „výdělku" výše appka teď počítá přesně podle tvého zadání:
-        DPH z faktur, které vystavuješ <b>tento</b> měsíc, minus odpočet z účtenek za měsíc <b>předchozí</b> —
-        rozdíl je zisk připsaný do měsíce, ve kterém se na to právě díváš (ne součet všech naimportovaných
-        měsíců, jak appka chybně počítala dřív). Jakmile 25. zaplatíš Čechmanové, klikni na „✓ Zaplatil jsem
-        Čechmanové" — appka si to zapamatuje. Výdělek pak rovnou pošli do zvolené obálky na spořáku tlačítkem „→ Převést".
+        stávající souhrnné číslo daně výše. Číslo „Kolik jsi ušetřil na DPH" výše appka počítá ze stejných párů
+        jako Čechmanová — DPH na fakturách a odpočet z účtenek <b>za jeden a tentýž uzavřený měsíc</b> (ne součet
+        napříč různými měsíci a ne mix dvou různých období, jak appka počítala dřív). Jakmile 25. zaplatíš
+        Čechmanové, klikni na „✓ Zaplatil jsem Čechmanové" — appka si to zapamatuje. Ušetřenou částku pak rovnou
+        pošli do zvolené obálky na spořáku tlačítkem „→ Převést".
       </div>
 
       <DphKalkulacka odpItem={odpItem} onSaveFinance={onSaveFinance} />
