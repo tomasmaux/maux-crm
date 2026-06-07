@@ -2992,6 +2992,7 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
   const [editLayout, setEditLayout] = useState(false);
   const [panelState, setPanelState] = useState(loadPanelState);
   const [dragOver, setDragOver] = useState(null);
+  const [hoverBar, setHoverBar] = useState(null);
   const dragId = useRef(null);
 
   function handleDragStart(id) { dragId.current = id; }
@@ -3433,14 +3434,26 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
         {(() => {
           const n = barData.length;
           if (n === 0) return null;
-          const W = 900, BAR_AREA_H = 180, padL = 10, padR = 10, padT = 36, padB = 32;
+          const W = 900, BAR_AREA_H = 230, padL = 10, padR = 10, padT = 54, padB = 32;
           const totalW = W - padL - padR;
           const barW = Math.max(Math.floor(totalW / n * 0.62), 18);
           const gap = (totalW - barW * n) / Math.max(n - 1, 1);
           const barX = (i) => padL + i * (barW + gap);
-          const toBarH = (v) => (v / maxBarV) * BAR_AREA_H;
+          // Zoomovaná osa: nezačínáme od nuly, ale od ~70 % nejnižšího měsíce —
+          // díky tomu jsou rozdíly mezi měsíci (i řádu 10k) na první pohled vidět.
+          const positiveTotals = barData.map(d=>d.total).filter(v=>v>0);
+          const minTotal = positiveTotals.length ? Math.min(...positiveTotals) : 0;
+          const baseline = Math.max(0, Math.floor(minTotal*0.7/5000)*5000);
+          const range = Math.max(maxBarV - baseline, 1);
+          const toBarH = (v) => v <= 0 ? 0 : ((v - baseline) / range) * BAR_AREA_H;
+          const baseY = padT + BAR_AREA_H;
           const ytdInv = barData.filter(d => d.key.startsWith(String(year))).reduce((s,d)=>s+d.inv,0);
           const ytdEsc = barData.filter(d => d.key.startsWith(String(year))).reduce((s,d)=>s+d.escrow,0);
+          const hov = hoverBar != null ? barData[hoverBar] : null;
+          const hovPrev = hoverBar != null && hoverBar > 0 ? barData[hoverBar-1] : null;
+          const hovDelta = hov && hovPrev ? hov.total - hovPrev.total : null;
+          const hovPct = (hov && hovPrev && hovPrev.total > 0) ? (hovDelta / hovPrev.total * 100) : null;
+          const [hovY, hovM] = hov ? hov.key.split("-").map(Number) : [null,null];
           return (
             <>
               {/* Header */}
@@ -3468,30 +3481,56 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
 
               {/* SVG bars */}
               <svg width="100%" viewBox={`0 0 ${W} ${padT + BAR_AREA_H + padB}`} style={{overflow:"visible"}}>
-                {/* Grid lines */}
-                {[0, 0.25, 0.5, 0.75, 1].map(p => (
-                  <line key={p}
-                    x1={padL} x2={W-padR}
-                    y1={padT + BAR_AREA_H * (1-p)} y2={padT + BAR_AREA_H * (1-p)}
-                    stroke="#F3F4F6" strokeWidth={p===0?1.5:1}
+                {/* Grid lines + osové popisky (reálné hodnoty, aby zoomovaná osa nebyla zavádějící) */}
+                {[0, 0.25, 0.5, 0.75, 1].map(p => {
+                  const v = baseline + range * p;
+                  return (
+                    <g key={p}>
+                      <line
+                        x1={padL} x2={W-padR}
+                        y1={baseY - BAR_AREA_H * p} y2={baseY - BAR_AREA_H * p}
+                        stroke="#F3F4F6" strokeWidth={p===0?1.5:1}
+                      />
+                      <text x={padL} y={baseY - BAR_AREA_H * p - 4} fontSize={7.5} fontFamily="Inter" fill="#D1D5DB">
+                        {Math.round(v/1000)}k
+                      </text>
+                    </g>
+                  );
+                })}
+
+                {/* Trend linka — spojnice vrcholů sloupců, zvýrazňuje růstovou trajektorii */}
+                {n > 1 && (
+                  <polyline
+                    points={barData.map((d,i) => `${barX(i)+barW/2},${d.total>0 ? baseY - toBarH(d.total) - 2 : baseY}`).join(" ")}
+                    fill="none" stroke="#3518A5" strokeWidth={1.2} strokeDasharray="3,3" opacity={0.35}
                   />
-                ))}
+                )}
 
                 {barData.map((d, i) => {
                   const x = barX(i);
                   const invH = toBarH(d.inv);
-                  const escH = toBarH(d.escrow);
+                  const escH = d.escrow > 0 ? Math.max(toBarH(d.inv + d.escrow) - invH, 6) : 0;
                   const totalH = invH + escH;
-                  const baseY = padT + BAR_AREA_H;
                   const isNow = d.isCurrent;
+                  const isHov = hoverBar === i;
+                  const prev = i > 0 ? barData[i-1] : null;
+                  const delta = prev ? d.total - prev.total : null;
                   return (
-                    <g key={i}>
+                    <g key={i}
+                      onMouseEnter={() => setHoverBar(i)}
+                      onMouseLeave={() => setHoverBar(h => h === i ? null : h)}
+                      style={{ cursor: "pointer" }}>
+                      {/* Neviditelný hit-box přes celý sloupec — usnadňuje hover */}
+                      <rect x={x-gap/2} y={padT-10} width={barW+gap} height={BAR_AREA_H+22} fill="transparent" />
+
                       {/* Zelený bar — faktury */}
                       {d.inv > 0 && (
                         <rect
                           x={x} y={baseY - invH} width={barW} height={invH}
                           rx={d.escrow > 0 ? 0 : 4} ry={d.escrow > 0 ? 0 : 4}
                           fill={isNow ? "#059669" : "#4ADE80"}
+                          opacity={isHov ? 1 : (hoverBar != null ? 0.45 : 1)}
+                          style={{ transition: "opacity .12s" }}
                         />
                       )}
                       {/* Oranžový bar — úschovy (nahoře) */}
@@ -3500,29 +3539,60 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
                           x={x} y={baseY - totalH} width={barW} height={escH}
                           rx={4} ry={4}
                           fill={isNow ? "#D97706" : "#FB923C"}
+                          opacity={isHov ? 1 : (hoverBar != null ? 0.45 : 1)}
+                          style={{ transition: "opacity .12s" }}
                         />
                       )}
-                      {/* Hodnota nahoře */}
+                      {/* Obrys při hoveru */}
+                      {isHov && (
+                        <rect x={x-2} y={baseY-totalH-2} width={barW+4} height={totalH+4}
+                          rx={5} fill="none" stroke="#3518A5" strokeWidth={1.4} opacity={0.5}/>
+                      )}
+
+                      {/* Popisek fakturace — vždy viditelný */}
+                      {d.inv > 0 && (
+                        <text
+                          x={x + barW/2} y={invH > 16 ? baseY - invH/2 + 3 : baseY - invH - 5}
+                          textAnchor="middle" fontSize={7.5}
+                          fontFamily="Inter" fontWeight="600"
+                          fill={invH > 16 ? "rgba(255,255,255,.92)" : "#16A34A"}
+                        >
+                          {Math.round(d.inv/1000)}k
+                        </text>
+                      )}
+                      {/* Popisek úschov — vždy viditelný */}
+                      {d.escrow > 0 && (
+                        <text
+                          x={x + barW/2} y={escH > 14 ? baseY - invH - escH/2 + 3 : baseY - totalH - 5}
+                          textAnchor="middle" fontSize={7.5}
+                          fontFamily="Inter" fontWeight="600"
+                          fill={escH > 14 ? "rgba(255,255,255,.92)" : "#D97706"}
+                        >
+                          +{Math.round(d.escrow/1000)}k
+                        </text>
+                      )}
+                      {/* Hodnota CELKEM nahoře */}
                       {d.total > 0 && (
                         <text
-                          x={x + barW/2} y={baseY - totalH - 6}
+                          x={x + barW/2} y={baseY - totalH - 16}
                           textAnchor="middle"
-                          fontSize={isNow ? 11 : 9}
+                          fontSize={isNow ? 12 : 10}
                           fontFamily="Fraunces,serif"
-                          fontWeight={isNow ? "600" : "300"}
-                          fill={isNow ? "var(--ink)" : "var(--mut)"}
+                          fontWeight={isNow ? "600" : "400"}
+                          fill={isNow ? "var(--ink)" : "var(--txt)"}
                         >
                           {Math.round(d.total/1000)}k
                         </text>
                       )}
-                      {/* Úschovy label uvnitř oranž baru (pokud dost velký) */}
-                      {d.escrow > 0 && escH > 14 && (
+                      {/* Delta vs. předchozí měsíc — malá šipka nad celkovou hodnotou */}
+                      {delta != null && d.total > 0 && (
                         <text
-                          x={x + barW/2} y={baseY - invH - escH/2 + 4}
-                          textAnchor="middle" fontSize={8}
-                          fontFamily="Inter" fill="rgba(255,255,255,.9)" fontWeight="600"
+                          x={x + barW/2} y={baseY - totalH - 28}
+                          textAnchor="middle" fontSize={7}
+                          fontFamily="Inter" fontWeight="700"
+                          fill={delta > 0 ? "#059669" : delta < 0 ? "#DC2626" : "var(--mut)"}
                         >
-                          +{Math.round(d.escrow/1000)}k
+                          {delta > 0 ? "▲" : delta < 0 ? "▼" : "—"} {delta !== 0 ? `${delta>0?"+":""}${Math.round(delta/1000)}k` : ""}
                         </text>
                       )}
                       {/* X label */}
@@ -3539,7 +3609,41 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
                     </g>
                   );
                 })}
+
+                {/* Tooltip při hoveru */}
+                {hov && (() => {
+                  const i = hoverBar;
+                  const tx = Math.min(Math.max(barX(i) + barW/2, 86), W - 86);
+                  const ty = padT - 14;
+                  const lines = [
+                    `${CZ_MONTHS[hovM]} ${hovY}`,
+                    `Fakturace: ${fmtKc(hov.inv)}`,
+                    ...(hov.escrow > 0 ? [`Úschovy: ${fmtKc(hov.escrow)}`] : []),
+                    `Celkem: ${fmtKc(hov.total)}`,
+                    ...(hovDelta != null ? [`Změna: ${hovDelta>=0?"+":""}${fmtKc(hovDelta)}${hovPct!=null ? ` (${hovDelta>=0?"+":""}${hovPct.toFixed(1)} %)` : ""}`] : []),
+                  ];
+                  const boxH = 14 + lines.length * 13;
+                  const boxW = 158;
+                  return (
+                    <g style={{ pointerEvents: "none" }}>
+                      <rect x={tx-boxW/2} y={ty-boxH} width={boxW} height={boxH} rx={8}
+                        fill="#1A1530" opacity={0.94} />
+                      {lines.map((ln, li) => (
+                        <text key={li} x={tx} y={ty - boxH + 16 + li*13}
+                          textAnchor="middle" fontSize={li===0?9:8.5}
+                          fontFamily={li===0?"Fraunces,serif":"Inter"}
+                          fontWeight={li===0?"600":(li===lines.length-1 && hovDelta!=null ? "700":"400")}
+                          fill={li===0 ? "#fff" : (li===lines.length-1 && hovDelta!=null ? (hovDelta>=0?"#6EE7B7":"#FCA5A5") : "rgba(255,255,255,.78)")}>
+                          {ln}
+                        </text>
+                      ))}
+                    </g>
+                  );
+                })()}
               </svg>
+              <div style={{fontSize:8,color:"var(--mut)",opacity:.55,marginTop:2,textAlign:"right"}}>
+                osa zvýrazněna od {Math.round(baseline/1000)}k Kč — pro lepší srovnání měsíců
+              </div>
             </>
           );
         })()}
