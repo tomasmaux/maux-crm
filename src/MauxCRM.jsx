@@ -3675,8 +3675,11 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
     );
   }
   const now = new Date();
-  const thisMonth = now.toISOString().slice(0, 7);
-  const prevMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1).toISOString().slice(0, 7);
+  // Lokální (ne UTC) klíč měsíce — toISOString() o půlnoci 1. dne v měsíci v české časové zóně
+  // ukrojí přes UTC převod den a vrátí PŘEDCHOZÍ měsíc (stejná chyba jako v DPH dlaždici).
+  const monthKeyOf = (d) => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`;
+  const thisMonth = monthKeyOf(now);
+  const prevMonth = monthKeyOf(new Date(now.getFullYear(), now.getMonth() - 1, 1));
   const year = now.getFullYear();
   const H = now.getHours();
   const MESICE_NOM_D = ["Leden","Únor","Březen","Duben","Květen","Červen","Červenec","Srpen","Září","Říjen","Listopad","Prosinec"];
@@ -5584,10 +5587,16 @@ function DphKalkulacka({ odpItem, onSaveFinance }) {
 }
 
 function DphOdpocetTile({ invoices, financeItems, onSaveFinance }) {
+  // POZOR: záměrně NEPOUŽÍVÁME toISOString().slice(0,7) — to převádí na UTC a o půlnoci
+  // (zejména 1. den v měsíci) to v české časové zóně (UTC+1/+2) ukrojí den a vrátí
+  // PŘEDCHOZÍ měsíc (např. "2026-05-01 00:00 SELČ" → "2026-04-30T22:00:00Z" → "2026-04").
+  // Přesně tahle chyba způsobila, že "Odpočet za května" ve skutečnosti počítal duben.
+  // Klíč proto skládáme z lokálních (ne UTC) složek data.
+  const monthKeyOf = (d) => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`;
   const now = new Date();
-  const thisMonthKey = now.toISOString().slice(0,7);
+  const thisMonthKey = monthKeyOf(now);
   const prevMonthDate = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-  const prevMonthKey = prevMonthDate.toISOString().slice(0,7);
+  const prevMonthKey = monthKeyOf(prevMonthDate);
   const CZM = ["ledna","února","března","dubna","května","června","července","srpna","září","října","listopadu","prosince"];
 
   const parseMeta = (notes) => {
