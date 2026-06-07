@@ -243,7 +243,11 @@ async function fetchClients() {
   return data || [];
 }
 async function upsertClient(c) {
-  const { error } = await supabase.from("clients").upsert({ ...c, updated_at: new Date().toISOString() });
+  // Prázdný řetězec není platné datum pro Postgres typ "date" — převádíme na null,
+  // aby uložení nepadalo na "invalid input syntax for type date: ''"
+  const clean = { ...c };
+  ["last_work_date", "birth_date"].forEach(k => { if (clean[k] === "") clean[k] = null; });
+  const { error } = await supabase.from("clients").upsert({ ...clean, updated_at: new Date().toISOString() });
   if (error) throw error;
 }
 async function deleteClientDb(id) {
@@ -4454,9 +4458,30 @@ function InvoiceForm({ init, clients, invoices, onSave, onCancel, saving }) {
 }
 
 /* ─── KLIENTI ─── */
-function ClientList({ clients, query, setQuery, filter, setFilter, onOpen, onNew }) {
+function ClientList({ clients, invoices, query, setQuery, filter, setFilter, onOpen, onNew, onRepairClients }) {
   const sum = useMemo(() => clients.reduce((a, c) => a + (c.invoiced || 0), 0), [clients]);
   const firmy = clients.filter(c => c.type === "firma").length;
+  // Faktury vystavené na klienty, kteří v evidenci chybí — seskupíme podle jména
+  // odvozeného z poznámky na faktuře (vzor "Jméno klienta - …"), abychom je mohli
+  // jedním klikem doplnit do evidence bez ručního zadávání.
+  const [repairOpen, setRepairOpen] = useState(false);
+  const [repairing, setRepairing] = useState(false);
+  const orphanGroups = useMemo(() => {
+    const ids = new Set(clients.map(c => c.id));
+    const orphans = (invoices || []).filter(inv => !inv.client_id || !ids.has(inv.client_id));
+    if (!orphans.length) return [];
+    const byKey = {};
+    orphans.forEach(inv => {
+      let name = (inv.notes || "").split(" - ")[0]?.trim();
+      if (!name) name = (inv.notes || "").trim();
+      if (!name) name = `Neznámý klient (${inv.invoice_number || inv.id})`;
+      const key = name.toLowerCase();
+      if (!byKey[key]) byKey[key] = { name, invoiceIds: [], total: 0 };
+      byKey[key].invoiceIds.push(inv.id);
+      byKey[key].total += inv.subtotal || 0;
+    });
+    return Object.values(byKey);
+  }, [invoices, clients]);
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     return clients
@@ -4472,6 +4497,33 @@ function ClientList({ clients, query, setQuery, filter, setFilter, onOpen, onNew
         <div className="stat gold"><div className="k">Fakturováno celkem</div><div className="v">{fmtKc(sum)}</div></div>
         <div className="stat"><div className="k">Firmy / osoby</div><div className="v">{firmy} / {clients.length - firmy}</div></div>
       </div>
+      {orphanGroups.length > 0 && (
+        <div style={{ background: "#FEF6E7", border: "1px solid #F4DFAF", borderRadius: 12, padding: "13px 16px", marginBottom: 16 }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+            <div style={{ fontSize: 12.5, color: "#7A5A1A", lineHeight: 1.5 }}>
+              <strong>{orphanGroups.length}</strong> {orphanGroups.length === 1 ? "klient nalezen" : orphanGroups.length < 5 ? "klienti nalezeni" : "klientů nalezeno"} na fakturách, ale chybí v evidenci
+              {" "}({orphanGroups.reduce((s, g) => s + g.invoiceIds.length, 0)} {orphanGroups.reduce((s, g) => s + g.invoiceIds.length, 0) === 1 ? "faktura" : "faktur"} bez přiřazení).
+            </div>
+            <div style={{ display: "flex", gap: 8 }}>
+              <button className="btn gho" style={{ fontSize: 11.5 }} onClick={() => setRepairOpen(v => !v)}>{repairOpen ? "Skrýt náhled" : "Zobrazit náhled"}</button>
+              <button className="btn pri" style={{ fontSize: 11.5 }} disabled={repairing}
+                onClick={async () => { setRepairing(true); try { await onRepairClients(orphanGroups); } finally { setRepairing(false); setRepairOpen(false); } }}>
+                {repairing ? "Doplňuji…" : `+ Doplnit z faktur (${orphanGroups.length})`}
+              </button>
+            </div>
+          </div>
+          {repairOpen && (
+            <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 5 }}>
+              {orphanGroups.map((g, i) => (
+                <div key={i} style={{ display: "flex", justifyContent: "space-between", fontSize: 11.5, color: "#7A5A1A", padding: "5px 9px", background: "rgba(255,255,255,.5)", borderRadius: 7 }}>
+                  <span>{g.name}</span>
+                  <span>{g.invoiceIds.length}× faktura · {fmtKc(g.total)}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
       <div className="tools">
         <div className="search"><span style={{ color: "#ccc" }}>⌕</span>
           <input placeholder="Hledat klienta, kontakt, e-mail…" value={query} onChange={e => setQuery(e.target.value)} />
@@ -4534,6 +4586,8 @@ function ClientDetail({ c, onBack, onEdit, onDelete }) {
           </div>
         </div>
         {c.hourly_rate > 0 && <div className="fld"><div className="l">Hodinová sazba</div><div className="d">{fmtKc(c.hourly_rate)} / h</div></div>}
+        {c.ico && <div className="fld"><div className="l">IČO</div><div className="d">{c.ico}</div></div>}
+        {c.birth_date && <div className="fld"><div className="l">Narozen</div><div className="d">{fmtDate(c.birth_date)}</div></div>}
         {c.last_work_date && <div className="fld"><div className="l">Datum poslední práce</div><div className="d">{fmtDate(c.last_work_date)}</div></div>}
         {c.file_link && <div className="fld"><div className="l">Odkaz na spis</div><div className="d"><a href={c.file_link} target="_blank" rel="noopener noreferrer">Otevřít spis →</a></div></div>}
       </div>
@@ -4552,24 +4606,44 @@ function ClientForm({ init, onSave, onCancel, saving }) {
     id: uid(), name: "", type: "firma", ico: "", reg: "", invoiced: 0,
     contact: "", emails: [], services: [], notes: "",
     status: "aktivní", uschovaaml: false, last_work_date: "", file_link: "", hourly_rate: 0,
+    first_name: "", last_name: "", birth_date: "",
   });
   const set = (k, v) => setD(p => ({ ...p, [k]: v }));
   const toggleSv = (s) => setD(p => ({
     ...p, services: (p.services || []).includes(s) ? (p.services || []).filter(x => x !== s) : [...(p.services || []), s]
   }));
+  const isOsoba = d.type === "osoba";
   const save = () => {
-    if (!d.name.trim()) return;
+    const composedName = isOsoba
+      ? `${(d.first_name || "").trim()} ${(d.last_name || "").trim()}`.trim()
+      : (d.name || "").trim();
+    if (!composedName) return;
     const emails = typeof d.emails === "string"
       ? d.emails.split(/[,;\n]/).map(e => e.trim()).filter(Boolean)
       : d.emails;
-    onSave({ ...d, name: d.name.trim(), invoiced: Number(d.invoiced) || 0, hourly_rate: Number(d.hourly_rate) || 0, emails });
+    onSave({
+      ...d,
+      name: composedName,
+      first_name: isOsoba ? ((d.first_name || "").trim() || null) : null,
+      last_name: isOsoba ? ((d.last_name || "").trim() || null) : null,
+      birth_date: isOsoba ? (d.birth_date || null) : null,
+      last_work_date: d.last_work_date || null,
+      invoiced: Number(d.invoiced) || 0, hourly_rate: Number(d.hourly_rate) || 0, emails,
+    });
   };
   const emailStr = Array.isArray(d.emails) ? d.emails.join(", ") : d.emails;
 
   return (
     <div className="form">
       <h2>{init ? "Upravit klienta" : "Nový klient"}</h2>
-      <div className="frow"><label>Název klienta *</label><input value={d.name} onChange={e => set("name", e.target.value)} /></div>
+      {isOsoba ? (
+        <div className="two">
+          <div className="frow"><label>Jméno *</label><input value={d.first_name || ""} onChange={e => set("first_name", e.target.value)} /></div>
+          <div className="frow"><label>Příjmení *</label><input value={d.last_name || ""} onChange={e => set("last_name", e.target.value)} /></div>
+        </div>
+      ) : (
+        <div className="frow"><label>Obchodní firma *</label><input value={d.name} onChange={e => set("name", e.target.value)} /></div>
+      )}
       <div className="three">
         <div className="frow"><label>Typ</label><select value={d.type} onChange={e => set("type", e.target.value)}>
           <option value="firma">firma</option><option value="osoba">osoba</option>
@@ -4577,9 +4651,11 @@ function ClientForm({ init, onSave, onCancel, saving }) {
         <div className="frow"><label>Stav</label><select value={d.status || "aktivní"} onChange={e => set("status", e.target.value)}>
           <option value="aktivní">aktivní</option><option value="spící">spící</option><option value="ukončený">ukončený</option>
         </select></div>
-        <div className="frow"><label>IČO</label><input value={d.ico || ""} onChange={e => set("ico", e.target.value)} /></div>
+        {isOsoba
+          ? <div className="frow"><label>Narozen</label><input type="date" value={d.birth_date || ""} onChange={e => set("birth_date", e.target.value)} /></div>
+          : <div className="frow"><label>IČO</label><input value={d.ico || ""} onChange={e => set("ico", e.target.value)} /></div>}
       </div>
-      <div className="frow"><label>Identifikace / adresa</label><input value={d.reg || ""} onChange={e => set("reg", e.target.value)} /></div>
+      <div className="frow"><label>{isOsoba ? "Bydliště" : "Sídlo"}</label><input value={d.reg || ""} onChange={e => set("reg", e.target.value)} /></div>
       <div className="three">
         <div className="frow"><label>Kontaktní osoba</label><input value={d.contact || ""} onChange={e => set("contact", e.target.value)} /></div>
         <div className="frow"><label>Fakturováno (Kč)</label><input type="number" value={d.invoiced || 0} onChange={e => set("invoiced", e.target.value)} /></div>
@@ -4841,6 +4917,31 @@ export default function MauxCRM() {
     try { await deleteClientDb(id); setClients(p => p.filter(c => c.id !== id)); setConfirmDel(null); setMode("list"); setSel(null); }
     catch (e) { alert("Chyba: " + e.message); }
   };
+  // Faktury vystavené na klienty, kteří chybí v evidenci — automaticky je založíme
+  // z údajů na faktuře (jméno z poznámky) a fakturu propojíme na nový záznam.
+  // Žádné ruční doplňování — Finance/Dashboard si po obnovení dat samy dotáhnou
+  // správné částky podle nově nastaveného client_id.
+  const repairClientsFromInvoices = async (groups) => {
+    setSaving(true);
+    try {
+      for (const g of groups) {
+        const newClient = {
+          id: uid(), name: g.name, type: "firma", ico: "", reg: "", invoiced: g.total,
+          contact: "", emails: [], services: [], notes: "Klient doplněn automaticky z faktur bez evidence.",
+          status: "aktivní", uschovaaml: false, last_work_date: null, file_link: "", hourly_rate: 0,
+          first_name: null, last_name: null, birth_date: null,
+        };
+        await upsertClient(newClient);
+        for (const invId of g.invoiceIds) {
+          const inv = invoices.find(i => i.id === invId);
+          if (inv) { const { clients: _c, ...rest } = inv; await upsertInvoice({ ...rest, client_id: newClient.id }); }
+        }
+      }
+      const [updatedClients, updatedInvoices] = await Promise.all([fetchClients(), fetchInvoices()]);
+      setClients(updatedClients); setInvoices(updatedInvoices);
+    } catch (e) { alert("Chyba: " + e.message); }
+    finally { setSaving(false); }
+  };
   const saveInvoice = async (inv) => {
     setSaving(true);
     try { await upsertInvoice(inv); const updated = await fetchInvoices(); setInvoices(updated); setSel(inv.id); setMode("detail"); }
@@ -5004,7 +5105,7 @@ export default function MauxCRM() {
 
           {/* KLIENTI */}
           {mod === "klienti" && mode === "list" && (
-            <ClientList clients={clients} query={query} setQuery={setQuery} filter={filter} setFilter={setFilter} onOpen={id => { setSel(id); setMode("detail"); }} onNew={() => setMode("new")} />
+            <ClientList clients={clients} invoices={invoices} query={query} setQuery={setQuery} filter={filter} setFilter={setFilter} onOpen={id => { setSel(id); setMode("detail"); }} onNew={() => setMode("new")} onRepairClients={repairClientsFromInvoices} />
           )}
           {mod === "klienti" && mode === "detail" && selClient && (
             <ClientDetail c={selClient} onBack={() => setMode("list")} onEdit={() => setMode("edit")} onDelete={() => setConfirmDel(selClient.id)} />
