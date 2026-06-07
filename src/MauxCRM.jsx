@@ -5340,6 +5340,18 @@ function SroOptimizationPanel({ year, invoices }) {
    bez ručního počítání. Loguje si i historii přidaných účtenek (lze i odebrat). */
 const CZ_MONTHS_FULL = ["leden","únor","březen","duben","květen","červen","červenec","srpen","září","říjen","listopad","prosinec"];
 
+// Účtenky a faktury za duben 2026, které Tom poslal účetní Čechmanové k dubnovému DPH —
+// přepsané z PDF, co nahrál (Alza, T-Mobile, notářka Svobodová: Podruhovi + GEBAUER & STEIN alfa/beta).
+// Pevná ID kvůli ochraně proti duplicitnímu importu (lze spustit klidně vícekrát).
+const APRIL_2026_RECEIPTS = [
+  { id: "imp_apr26_01", date: "2026-04-10", label: "Alza – monitor Dell U3425WE", gross: 20087, rate: 21, vat: 3486 },
+  { id: "imp_apr26_02", date: "2026-04-10", label: "Alza – hrnky ORION Decora", gross: 577, rate: 21, vat: 100 },
+  { id: "imp_apr26_03", date: "2026-04-20", label: "T-Mobile – vyúčtování služeb (20.3.–19.4.)", gross: 398, rate: 21, vat: 69 },
+  { id: "imp_apr26_04", date: "2026-04-23", label: "Notářka Svobodová – založení Podruhovi, s.r.o.", gross: 5711, rate: 21, vat: 991 },
+  { id: "imp_apr26_05", date: "2026-04-29", label: "Notářka Svobodová – založení GEBAUER & STEIN alfa s.r.o.", gross: 5675, rate: 21, vat: 985 },
+  { id: "imp_apr26_06", date: "2026-04-29", label: "Notářka Svobodová – založení GEBAUER & STEIN beta s.r.o.", gross: 5675, rate: 21, vat: 985 },
+];
+
 function DphKalkulacka({ odpItem, onSaveFinance }) {
   const [open, setOpen] = useState(false);
   const [label, setLabel] = useState("");
@@ -5402,11 +5414,30 @@ function DphKalkulacka({ odpItem, onSaveFinance }) {
     });
   };
 
+  // Jednorázový import účtenek z dubna 2026, které jsi poslal Čechmanové (z nahraných PDF) —
+  // chráněno proti duplicitě podle pevných ID, takže lze klidně kliknout opakovaně bez rizika.
+  const missingImport = APRIL_2026_RECEIPTS.filter(r => !log.some(e => e.id === r.id));
+  const importApril = () => {
+    if (missingImport.length === 0) return;
+    const addedVat = missingImport.reduce((s, e) => s + (e.vat || 0), 0);
+    onSaveFinance({
+      ...odpItem,
+      amount: (odpItem.amount || 0) + addedVat,
+      notes: JSON.stringify({ log: [...missingImport, ...log] }),
+    });
+  };
+
   return (
     <div style={{ marginTop: 16, paddingTop: 14, borderTop: "1px solid var(--line)" }}>
       <div style={{ fontSize: 9, letterSpacing: ".2em", textTransform: "uppercase", color: "var(--mut)", fontWeight: 600, marginBottom: 8 }}>
         Kalkulačka účtenek → rovnou do odpočtu DPH (a do archivu)
       </div>
+      {missingImport.length > 0 && (
+        <div onClick={importApril} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, fontSize: 11, color: "#3518A5", background: "#F5F3FF", border: "1px solid #DDD6FE", borderRadius: 8, padding: "8px 12px", marginBottom: 10, cursor: "pointer" }}>
+          <span>📥 Naimportovat {missingImport.length} účtenek z dubna 2026, co jsi poslal Čechmanové (Alza, T-Mobile, notářka Svobodová) — DPH celkem {fmtKc(missingImport.reduce((s,e)=>s+(e.vat||0),0))}</span>
+          <b style={{ whiteSpace: "nowrap" }}>importovat →</b>
+        </div>
+      )}
       {!open ? (
         <div onClick={() => setOpen(true)} style={{ fontSize: 11, color: "#3518A5", cursor: "pointer", opacity: .8 }}>
           + spočítat účtenku (např. faktura notářky) a přičíst DPH do odpočtu
@@ -5518,9 +5549,9 @@ function DphOdpocetTile({ invoices, financeItems, onSaveFinance }) {
         {zustane > 0 && (
           <div>
             <div style={{ fontSize:10, color:"var(--mut)" }}>Zůstane mi díky odpočtu <span style={{fontSize:8,background:"#ECFDF5",color:"#065F46",padding:"1px 5px",borderRadius:3,fontWeight:600,marginLeft:2}}>→ příjmy</span></div>
-            <div style={{ fontFamily:"Fraunces,serif", fontSize:24, fontWeight:300, color:"#059669" }}>{fmtKc(zustane)}</div>
-            <div style={{ fontSize:9.5, color:"var(--mut)", marginTop:4, maxWidth:200, lineHeight:1.4 }}>
-              Kdy to „přijde": až ve vyúčtování za <b>{CZM[now.getMonth()]}</b> — Čechmanová to zpracuje a vyrovná v rámci platby splatné <b>do 25. {dueMonthName}</b>. Dřív se to fakticky neprojeví.
+            <div style={{ fontFamily:"Fraunces,serif", fontSize:24, fontWeight:300, color:"#059669", letterSpacing:".06em" }}>· · · ·</div>
+            <div style={{ fontSize:9.5, color:"var(--mut)", marginTop:4, maxWidth:220, lineHeight:1.4 }}>
+              Schválně — necháváš se překvapit. Projeví se to ve vyúčtování za <b>{CZM[now.getMonth()]}</b>, vyrovnání s platbou do <b>25. {dueMonthName}</b>.
             </div>
           </div>
         )}
