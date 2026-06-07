@@ -5378,6 +5378,14 @@ const MAY_2026_RECEIPTS = [
   { id: "imp_maj26_07", date: "2026-05-21", label: "Alza – leštidlo do myčky MIELE", gross: 433, rate: 21, vat: 75 },
   { id: "imp_maj26_08", date: "2026-05-22", label: "Alza – řemínek Apple Watch Ocean", gross: 2161, rate: 21, vat: 375 },
   { id: "imp_maj26_09", date: "2026-05-30", label: "PODA a.s. – internet (vyúčtování za květen)", gross: 499, rate: 21, vat: 87 },
+  // — doplněno z dávky naskenované asistentkou 21.5. (složka 001_Účetní podklady) —
+  { id: "imp_maj26_10", date: "2026-05-16", label: "Woolworth Home Discount – drobnosti do domácnosti", gross: 340, rate: 21, vat: 59 },
+];
+
+// Účtenky a faktury za červen 2026 — průběžně doplňováno ze složky 001_Účetní podklady,
+// jak je asistentka skenuje a nahrává. Stejný dedup-safe import princip (pevná ID).
+const JUNE_2026_RECEIPTS = [
+  { id: "imp_cer26_01", date: "2026-06-01", label: "Blažek Praha – kožená taška", gross: 12089, rate: 21, vat: 2098 },
 ];
 
 function DphKalkulacka({ odpItem, onSaveFinance }) {
@@ -5466,6 +5474,17 @@ function DphKalkulacka({ odpItem, onSaveFinance }) {
     });
   };
 
+  const missingImportJune = JUNE_2026_RECEIPTS.filter(r => !log.some(e => e.id === r.id));
+  const importJune = () => {
+    if (missingImportJune.length === 0) return;
+    const addedVat = missingImportJune.reduce((s, e) => s + (e.vat || 0), 0);
+    onSaveFinance({
+      ...odpItem,
+      amount: (odpItem.amount || 0) + addedVat,
+      notes: JSON.stringify({ log: [...missingImportJune, ...log] }),
+    });
+  };
+
   return (
     <div style={{ marginTop: 16, paddingTop: 14, borderTop: "1px solid var(--line)" }}>
       <div style={{ fontSize: 9, letterSpacing: ".2em", textTransform: "uppercase", color: "var(--mut)", fontWeight: 600, marginBottom: 8 }}>
@@ -5479,7 +5498,13 @@ function DphKalkulacka({ odpItem, onSaveFinance }) {
       )}
       {missingImportMay.length > 0 && (
         <div onClick={importMay} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, fontSize: 11, color: "#9D174D", background: "#FDF2F8", border: "1px solid #FBCFE8", borderRadius: 8, padding: "8px 12px", marginBottom: 10, cursor: "pointer" }}>
-          <span>📥 Naimportovat {missingImportMay.length} účtenek z května 2026 (Alza, dm drogerie, Action, Papírnictví Zbraněk, T-Mobile, PODA…) — DPH celkem {fmtKc(missingImportMay.reduce((s,e)=>s+(e.vat||0),0))}</span>
+          <span>📥 Naimportovat {missingImportMay.length} účtenek z května 2026 (Alza, dm drogerie, Action, Woolworth, Papírnictví Zbraněk, T-Mobile, PODA…) — DPH celkem {fmtKc(missingImportMay.reduce((s,e)=>s+(e.vat||0),0))}</span>
+          <b style={{ whiteSpace: "nowrap" }}>importovat →</b>
+        </div>
+      )}
+      {missingImportJune.length > 0 && (
+        <div onClick={importJune} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, fontSize: 11, color: "#9D174D", background: "#FDF2F8", border: "1px solid #FBCFE8", borderRadius: 8, padding: "8px 12px", marginBottom: 10, cursor: "pointer" }}>
+          <span>📥 Naimportovat {missingImportJune.length} účtenku z června 2026 (Blažek Praha – kožená taška) — DPH celkem {fmtKc(missingImportJune.reduce((s,e)=>s+(e.vat||0),0))}</span>
           <b style={{ whiteSpace: "nowrap" }}>importovat →</b>
         </div>
       )}
