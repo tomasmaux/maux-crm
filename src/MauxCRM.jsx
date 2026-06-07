@@ -2858,14 +2858,14 @@ function MiniSpořák({ financeItems, invoices, dpfoMonths, loanTransactions, es
           <span style={{fontSize:15,color:volné>=0?"#059669":"#DC2626",fontWeight:700}}>{volné>=0?"+":""}{fmtKc(volné)} volného</span>
           <span style={{fontSize:11,color:"var(--mut)"}}>z {fmtKc(totalEarmarked)} obálek</span>
         </div>
-        {/* === GRAF — poměrné rozložení zůstatku, barevně dle obálek (decentní, jemné tóny) === */}
+        {/* === GRAF — poměrné rozložení zůstatku jako plně vyplněné, vzdušné bloky (barva = obálka) === */}
         {actualBalance > 0 && (
-          <div style={{display:"flex",height:7,borderRadius:5,overflow:"hidden",gap:1,marginTop:10,background:"#F1F5F9"}}>
+          <div style={{display:"flex",gap:7,marginTop:16}}>
             {volné > 0 && (
-              <div style={{width:`${Math.min((volné/actualBalance)*100,100)}%`,background:"#D9C7A3",transition:"width .4s"}} title={`Firemní rezerva (volné): ${fmtKc(volné)}`} />
+              <div style={{flexGrow:Math.max(volné,1),flexBasis:0,height:38,borderRadius:11,background:"#D9C7A3"}} title={`Firemní rezerva (volné): ${fmtKc(volné)}`} />
             )}
             {allEnvelopes.map((e,i) => (
-              <div key={i} style={{width:`${Math.min((e.amount/actualBalance)*100,100)}%`,background:e.color,opacity:.5,transition:"width .4s"}} title={`${e.label}: ${fmtKc(e.amount)}`} />
+              <div key={i} style={{flexGrow:Math.max(e.amount,1),flexBasis:0,height:38,borderRadius:11,background:e.color}} title={`${e.label}: ${fmtKc(e.amount)}`} />
             ))}
           </div>
         )}
@@ -3027,9 +3027,9 @@ function MajetekBar({ financeItems, onSaveFinance, invoices, dpfoMonths, loanTra
 
       {/* STACKED BAR + POLOŽKY */}
       <div style={{display:"flex",flexDirection:"column",justifyContent:"center",flexGrow:1,minWidth:200}}>
-        <div style={{display:"flex",height:10,borderRadius:6,overflow:"hidden",gap:1,marginBottom:16}}>
+        <div style={{display:"flex",gap:7,marginBottom:18}}>
           {allAssets.map((a,i) => (
-            <div key={i} style={{width:`${barW(a)}%`,background:a.color,transition:"width .4s"}} title={`${a.label}: ${fmtKc(a.amount)}`} />
+            <div key={i} style={{flexGrow:Math.max(a.amount,1),flexBasis:0,height:38,borderRadius:11,background:a.color}} title={`${a.label}: ${fmtKc(a.amount)}`} />
           ))}
         </div>
         <div style={{display:"flex",gap:24,flexWrap:"wrap",alignItems:"flex-start"}}>
@@ -3515,21 +3515,11 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
 
       {/* TOP ROW KPI */}
       <Panel id="kpi">
-      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr 1fr",gap:10,marginBottom:2}}>
-        <Card style={{position:"relative"}} title={`YTD: ${fmtKc(ytd)} · Průměr: ${fmtKc(Math.round(ytd/monthsElapsed))}/měsíc`}>
-          <Lbl>◀ Vyfakturováno — {prevMonthName}</Lbl>
-          <Num size={22}>{fmtKc(mRevPrev)}</Num>
-          {trend!==null&&<div style={{fontSize:11,color:trend>=0?"#059669":"#DC2626",fontWeight:500,marginTop:4}}>{trend>=0?"↑":"↓"} {Math.abs(trend)} % vs {thisMonthName}</div>}
-        </Card>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10,marginBottom:2}}>
         <Card style={{background:"#F0FDF4",border:"1px solid #BBF7D0"}}>
           <Lbl color="#065F46">▶ Přijde v {nextMonthName}</Lbl>
           <Num size={22} color="#059669">+{fmtKc(Math.round(unbilledAmt+mestoPodebrady+escrowNetThisMonth))}</Num>
           <div style={{fontSize:11,color:"#065F46",marginTop:4,lineHeight:1.5}}>výkazy {fmtKc(unbilledAmt)} · radní {fmtKc(mestoPodebrady)} · úschovy {fmtKc(Math.round(escrowNetThisMonth))}</div>
-        </Card>
-        <Card>
-          <Lbl>Vyfakturováno — {thisMonthName}</Lbl>
-          <Num size={22}>{fmtKc(mRev)}</Num>
-          {trend!==null&&<div style={{fontSize:11,color:trend>=0?"#059669":"#DC2626",fontWeight:500,marginTop:4}}>{trend>=0?"↑":"↓"} {Math.abs(trend)} % vs {prevMonthName}</div>}
         </Card>
         <Card style={{cursor:"pointer"}} onClick={()=>onNav("fakturace")}>
           <Lbl color="var(--ink)">K vystavení</Lbl>
