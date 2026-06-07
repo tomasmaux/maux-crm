@@ -5628,8 +5628,15 @@ function DphOdpocetTile({ invoices, financeItems, onSaveFinance }) {
 
   // "Tvůj měsíční výdělek na DPH" — POUZE za uzavřený předchozí měsíc (dřív se tu omylem sčítalo
   // přes všechny naimportované měsíce dohromady — to je ta chyba, na kterou jsi upozornil).
-  const zustanePrev = Math.min(odpocetPrev, dphFakturyPrev);     // = "nadměrný odpočet" za {prevMonthName} — fakticky ti zůstává
-  const prevodPrev  = Math.max(odpocetPrev - dphFakturyPrev, 0); // přesah odpočtu nad DPH z faktur za {prevMonthName} — převádí se dál
+  //
+  // Tvoje přesné zadání (citace): "Postav proti sobě DPH z faktur, které jsem vystavil a odečti od toho
+  // DPH z účtenek z předchozího měsíce. Rozdíl znamená ten zisk, který se mi připíše v tom aktuálním
+  // měsíci, kdy se na to koukám." — tedy: DPH z faktur TOHOTO měsíce minus odpočet z účtenek za
+  // PŘEDCHOZÍ měsíc = zisk připsaný v tomto (aktuálním, právě sledovaném) měsíci.
+  const zisk = dphFaktury - odpocetPrev;
+  const ziskMonthName = CZM[now.getMonth()];
+
+  const prevodPrev = Math.max(odpocetPrev - dphFakturyPrev, 0); // nadměrný odpočet za {prevMonthName} (daňový pojem) — převádí se dál
 
   // Stav plateb Čechmanové — checkbox "zaplaceno" pro uzavřený měsíc
   const paidPrev = paidMap[prevMonthKey] || null;
@@ -5639,18 +5646,19 @@ function DphOdpocetTile({ invoices, financeItems, onSaveFinance }) {
     onSaveFinance({ ...odpItem, notes: JSON.stringify(next) });
   };
 
-  // Routing "zbytku" (výdělku) do zvolené složky na spořáku — využívá existující "obálky" (sporaci položky)
+  // Routing "zisku" do zvolené složky na spořáku — využívá existující "obálky" (sporaci položky).
+  // Zisk se připisuje aktuálnímu měsíci (viz výše), takže i převod evidujeme pod aktuálním měsícem.
   const savingsFolders = (financeItems||[]).filter(i =>
     i.category === "sporaci" && i.notes !== "SKIP_DISPLAY" && !["fi_sp_99","fi_sp_01","fi_sp_02"].includes(i.id)
   );
-  const transferPrev = transferredMap[prevMonthKey] || null;
+  const transferThis = transferredMap[thisMonthKey] || null;
   const [selFolder, setSelFolder] = useState("");
   const transferToFolder = () => {
     if (!onSaveFinance || !selFolder) return;
     const folder = savingsFolders.find(f => f.id === selFolder);
     if (!folder) return;
-    onSaveFinance({ ...folder, amount: (folder.amount||0) + zustanePrev });
-    const next = { ...meta, transferred: { ...transferredMap, [prevMonthKey]: { folderId: folder.id, folderLabel: folder.label, amount: zustanePrev, date: today() } } };
+    onSaveFinance({ ...folder, amount: (folder.amount||0) + zisk });
+    const next = { ...meta, transferred: { ...transferredMap, [thisMonthKey]: { folderId: folder.id, folderLabel: folder.label, amount: zisk, date: today() } } };
     onSaveFinance({ ...odpItem, notes: JSON.stringify(next) });
     setSelFolder("");
   };
@@ -5703,21 +5711,21 @@ function DphOdpocetTile({ invoices, financeItems, onSaveFinance }) {
           </div>
           <div style={{ fontSize:9, color:"var(--mut)", marginTop:2 }}>orientační — měsíc se ještě tvoří</div>
         </div>
-        {zustanePrev > 0 && (
+        {zisk > 0 && (
           <div style={{ background:"linear-gradient(135deg,#ECFDF5,#F0FDF9)", border:"1px solid #A7F3D0", borderRadius:12, padding:"14px 18px", maxWidth:320 }}>
             <div style={{ display:"flex", alignItems:"center", gap:6, fontSize:10, color:"#065F46", fontWeight:600, letterSpacing:".04em" }}>
-              <span style={{ fontSize:14 }}>💚</span> Tvůj měsíční výdělek na DPH <span style={{opacity:.7, fontWeight:400}}>(za {prevMonthName})</span>
+              <span style={{ fontSize:14 }}>💚</span> Tvůj měsíční výdělek na DPH <span style={{opacity:.7, fontWeight:400}}>(za {ziskMonthName})</span>
             </div>
-            <div style={{ fontFamily:"Fraunces,serif", fontSize:30, fontWeight:500, color:"#059669", marginTop:4 }}>{fmtKc(zustanePrev)}</div>
+            <div style={{ fontFamily:"Fraunces,serif", fontSize:30, fontWeight:500, color:"#059669", marginTop:4 }}>{fmtKc(zisk)}</div>
             <div style={{ fontSize:10, color:"#047857", marginTop:6, lineHeight:1.5 }}>
-              Za {prevMonthName} jsi vybral DPH od klientů, ale účtenkami a fakturami (notář, technika, telefon…) jsi
-              odvedl míň — <b>tenhle rozdíl je fakticky tvůj příjem navíc za {prevMonthName}.</b> Reálně se promítne
-              do platby Čechmanové splatné <b>do 25. {dueMonthName}</b>, kde ti zůstane.
+              Postaveno přesně podle tebe: DPH z faktur, které vystavuješ teď v <b>{ziskMonthName}</b> ({fmtKc(dphFaktury)}),
+              minus odpočet z účtenek za <b>{prevMonthName}</b> ({fmtKc(odpocetPrev)}) — <b>rozdíl je zisk, který se ti
+              připisuje právě teď, v {ziskMonthName}, kdy se na to díváš.</b>
             </div>
             <div style={{ marginTop:10, paddingTop:10, borderTop:"1px solid #A7F3D0" }}>
-              {transferPrev ? (
+              {transferThis ? (
                 <div style={{ fontSize:10, color:"#047857" }}>
-                  ✓ Převedeno {fmtKc(transferPrev.amount)} do <b>{transferPrev.folderLabel}</b> · {fmtDate(transferPrev.date)}
+                  ✓ Převedeno {fmtKc(transferThis.amount)} do <b>{transferThis.folderLabel}</b> · {fmtDate(transferThis.date)}
                 </div>
               ) : savingsFolders.length > 0 ? (
                 <div style={{ display:"flex", gap:6, alignItems:"center", flexWrap:"wrap" }}>
@@ -5735,7 +5743,7 @@ function DphOdpocetTile({ invoices, financeItems, onSaveFinance }) {
                     style={{ fontSize:9, fontWeight:700, color:"#fff", background: selFolder ? "#059669" : "#A7F3D0", border:"none", borderRadius:5, padding:"5px 10px", cursor: selFolder ? "pointer" : "default", whiteSpace:"nowrap" }}
                     title="Přičte částku do zvolené obálky na spořicím účtu a zapamatuje si, že je za tento měsíc převedeno"
                   >
-                    → Převést {fmtKc(zustanePrev)}
+                    → Převést {fmtKc(zisk)}
                   </button>
                 </div>
               ) : (
@@ -5766,9 +5774,11 @@ function DphOdpocetTile({ invoices, financeItems, onSaveFinance }) {
         Princip odpočtu: DPH vybrané z vystavených faktur snižuješ o DPH z účtenek, které posíláš Čechmanové jako odpočet —
         Čechmanové reálně uhradíš jen rozdíl. Co z odpočtu „přebývá" (nadměrný odpočet), to ti fakticky zůstává —
         a appka to automaticky započítá jako novou položku v měsíčním přehledu příjmů, aniž by se tím měnilo
-        stávající souhrnné číslo daně výše. Číslo „výdělku" výše je teď vždy za jeden uzavřený měsíc (ne součet
-        za všechny naimportované měsíce dohromady) — a jakmile 25. zaplatíš Čechmanové, klikni na „✓ Zaplatil jsem
-        Čechmanové", appka si to zapamatuje. Zbytek pak rovnou pošli do zvolené obálky na spořáku tlačítkem „→ Převést".
+        stávající souhrnné číslo daně výše. Číslo „výdělku" výše appka teď počítá přesně podle tvého zadání:
+        DPH z faktur, které vystavuješ <b>tento</b> měsíc, minus odpočet z účtenek za měsíc <b>předchozí</b> —
+        rozdíl je zisk připsaný do měsíce, ve kterém se na to právě díváš (ne součet všech naimportovaných
+        měsíců, jak appka chybně počítala dřív). Jakmile 25. zaplatíš Čechmanové, klikni na „✓ Zaplatil jsem
+        Čechmanové" — appka si to zapamatuje. Výdělek pak rovnou pošli do zvolené obálky na spořáku tlačítkem „→ Převést".
       </div>
 
       <DphKalkulacka odpItem={odpItem} onSaveFinance={onSaveFinance} />
