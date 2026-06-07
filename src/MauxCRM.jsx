@@ -2331,6 +2331,8 @@ function EscrowForm({ init, onSave, onCancel, saving }) {
     setNewT({ party_type:"složitel", party_name:"", amount:0, received_date:"", notes:"" });
   };
   const removeTranche = (id) => setTranches(p => p.filter(t => t.id !== id));
+  // Oprava omylem zaškrtnuté/odškrtnuté výplaty přímo v detailu úschovy (vyplacení i datum jdou ručně přepsat zpět)
+  const updateTranche = (id, patch) => setTranches(p => p.map(t => t.id === id ? { ...t, ...patch } : t));
   const save = async () => {
     if(!d.escrow_number.trim()) return;
     // Save escrow first, then sync tranches
@@ -2382,6 +2384,7 @@ function EscrowForm({ init, onSave, onCancel, saving }) {
               <th style={{padding:"5px 8px",textAlign:"left",fontWeight:500,color:"var(--mut)"}}>Typ</th>
               <th style={{padding:"5px 8px",textAlign:"left",fontWeight:500,color:"var(--mut)"}}>Strana</th>
               <th style={{padding:"5px 8px",textAlign:"right",fontWeight:500,color:"var(--mut)"}}>Částka</th>
+              <th style={{padding:"5px 8px",textAlign:"center",fontWeight:500,color:"var(--mut)"}}>Vyplaceno</th>
               <th style={{padding:"5px 8px"}}></th>
             </tr></thead>
             <tbody>
@@ -2390,6 +2393,22 @@ function EscrowForm({ init, onSave, onCancel, saving }) {
                   <td style={{padding:"6px 8px"}}><span style={{fontSize:10,padding:"2px 6px",borderRadius:3,background:t.party_type==='složitel'?"#EEF2FF":"#F0FDF4",color:t.party_type==='složitel'?"#3730A3":"#065F46"}}>{t.party_type}</span></td>
                   <td style={{padding:"6px 8px",color:"var(--txt)"}}>{t.party_name}</td>
                   <td style={{padding:"6px 8px",textAlign:"right",fontFamily:"Fraunces,serif"}}>{fmtKc(t.amount)}</td>
+                  <td style={{padding:"6px 8px",textAlign:"center"}}>
+                    {t.party_type === 'oprávněný' ? (
+                      <div style={{display:"flex",alignItems:"center",justifyContent:"center",gap:5,flexWrap:"wrap"}}>
+                        <input type="checkbox" checked={!!t.is_paid}
+                          onChange={e => updateTranche(t.id, e.target.checked
+                            ? { is_paid:true, paid_date: t.paid_date || new Date().toISOString().slice(0,10) }
+                            : { is_paid:false, paid_date:null })}
+                          style={{width:"auto",cursor:"pointer"}}
+                          title="Oprav zde, pokud bylo zaškrtnuto omylem — uložením se to promítne i do úroků"/>
+                        {t.is_paid && (
+                          <input type="date" value={t.paid_date||""} onChange={e=>updateTranche(t.id,{paid_date:e.target.value||null})}
+                            style={{fontSize:11,padding:"2px 5px",borderRadius:4,border:"1px solid var(--line)",width:120}}/>
+                        )}
+                      </div>
+                    ) : <span style={{color:"var(--mut)",opacity:.4}}>—</span>}
+                  </td>
                   <td style={{padding:"6px 8px",textAlign:"center"}}><button className="btn dng" style={{fontSize:10,padding:"2px 8px"}} onClick={()=>removeTranche(t.id)}>✕</button></td>
                 </tr>
               ))}
@@ -2839,6 +2858,17 @@ function MiniSpořák({ financeItems, invoices, dpfoMonths, loanTransactions, es
           <span style={{fontSize:15,color:volné>=0?"#059669":"#DC2626",fontWeight:700}}>{volné>=0?"+":""}{fmtKc(volné)} volného</span>
           <span style={{fontSize:11,color:"var(--mut)"}}>z {fmtKc(totalEarmarked)} obálek</span>
         </div>
+        {/* === GRAF — poměrné rozložení zůstatku, barevně dle obálek (decentní, jemné tóny) === */}
+        {actualBalance > 0 && (
+          <div style={{display:"flex",height:7,borderRadius:5,overflow:"hidden",gap:1,marginTop:10,background:"#F1F5F9"}}>
+            {volné > 0 && (
+              <div style={{width:`${Math.min((volné/actualBalance)*100,100)}%`,background:"#D9C7A3",transition:"width .4s"}} title={`Firemní rezerva (volné): ${fmtKc(volné)}`} />
+            )}
+            {allEnvelopes.map((e,i) => (
+              <div key={i} style={{width:`${Math.min((e.amount/actualBalance)*100,100)}%`,background:e.color,opacity:.5,transition:"width .4s"}} title={`${e.label}: ${fmtKc(e.amount)}`} />
+            ))}
+          </div>
+        )}
       </div>
 
       <Div />
@@ -2974,11 +3004,12 @@ function MajetekBar({ financeItems, onSaveFinance, invoices, dpfoMonths, loanTra
     setNewLabel(""); setNewAmount(0); setAdding(false);
   };
 
-  const COLORS = ["#10B981","#D97706","#8B5CF6","#0EA5E9","#F43F5E","#6366F1"];
+  // Decentní, nerušivá paleta — jemné/zemité tóny místo syté (graf = poměrné rozložení podle barev položek)
+  const COLORS = ["#7FA8C9","#D08F9B","#9094C9","#7FB69E","#C9A468","#A48FD6"];
   const allAssets = [
-    akcieItem    && { item: akcieItem,    label: "Akcie / ETF",      amount: akcie,    color: "#10B981", editable: true  },
-    stavebkoItem && { item: stavebkoItem, label: "Stavební spoření", amount: stavebko, color: "#D97706", editable: true  },
-    firmaKap > 0  && { item: null,         label: "Firemní rezerva",  amount: firmaKap, color: "#8B5CF6", editable: false, liquid: true, goal: reserveGoal, autoNote: "= spořák − obálky · fyzicky leží na spořicím účtu (volné)" },
+    akcieItem    && { item: akcieItem,    label: "Akcie / ETF",      amount: akcie,    color: "#6FA98A", editable: true  },
+    stavebkoItem && { item: stavebkoItem, label: "Stavební spoření", amount: stavebko, color: "#C9A468", editable: true  },
+    firmaKap > 0  && { item: null,         label: "Firemní rezerva",  amount: firmaKap, color: "#A48FD6", editable: false, liquid: true, goal: reserveGoal, autoNote: "= spořák − obálky · fyzicky leží na spořicím účtu (volné)" },
     ...extraItems.map((it,idx) => ({ item: it, label: it.label, amount: it.amount||0, color: COLORS[(3+idx)%COLORS.length], editable: true })),
   ].filter(Boolean).filter(a => a.amount > 0 || a.editable);
 
@@ -3473,39 +3504,6 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
           🖱 Přetáhni karty pro změnu pořadí · ✕ skryje kartu · + ji znovu zobrazí · klikni <strong>Hotovo</strong> pro uložení
         </div>
       )}
-
-      {/* ── C35 MOTOR — hlavní motivační číslo ── */}
-      <Panel id="c35">
-      <div style={{
-        background: c35Bg,
-        borderRadius: 16, padding: "20px 28px 18px", color: "#fff", position: "relative", overflow: "hidden"
-      }}>
-        <div style={{position:"absolute",top:0,right:0,width:200,height:200,borderRadius:"50%",background:"rgba(255,255,255,.04)",transform:"translate(30%,-30%)"}} />
-        <div style={{fontSize:8,letterSpacing:".3em",textTransform:"uppercase",fontWeight:700,opacity:.7,marginBottom:6}}>
-          Příští měsíc — celkový přehled (projekce)
-        </div>
-        <div style={{display:"flex",alignItems:"baseline",gap:16,marginBottom:6}}>
-          <div style={{fontFamily:"Fraunces,serif",fontSize:48,fontWeight:300,lineHeight:1}}>
-            {c35Pos ? "+" : ""}{fmtKc(c35)}
-          </div>
-          <div style={{fontSize:12,opacity:.8,lineHeight:1.4}}>
-            {c35Pos
-              ? <>Náklady pokryty ✓<br /><strong>tohle je čisté — jen tvoje</strong></>
-              : <>Do pokrytí nákladů zbývá<br /><strong>{fmtKc(Math.abs(c35))}</strong></>
-            }
-          </div>
-        </div>
-        <div style={{display:"flex",gap:20,fontSize:11,opacity:.8,flexWrap:"wrap",borderTop:"1px solid rgba(255,255,255,.15)",paddingTop:10,marginTop:4}}>
-          {onTheWayAmt>0&&<span>💳 Na cestě {fmtKc(onTheWayAmt)}</span>}
-          <span>📋 Výkazy {fmtKc(unbilledAmt)}</span>
-          <span>🏛 Radní {fmtKc(mestoPodebrady)}</span>
-          <span>💰 Úschovy 1.{((now.getMonth()+2)%12)||12}. {fmtKc(Math.round(escrowNetThisMonth))}</span>
-          <span style={{opacity:.6}}>−</span>
-          <span>📉 Nutné {fmtKc(Math.abs(totalNutne))}</span>
-          <span>🎯 Lusus {fmtKc(Math.abs(totalLuxus))}</span>
-        </div>
-      </div>
-      </Panel>
 
       {/* TOP ROW KPI */}
       <Panel id="kpi">
