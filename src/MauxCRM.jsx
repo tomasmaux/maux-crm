@@ -5664,16 +5664,24 @@ function DphOdpocetTile({ invoices, financeItems, onSaveFinance }) {
   return (
     <div style={{ background:"#fff", border:"1px solid var(--line)", borderRadius:14, padding:"20px 22px" }}>
       <div style={{ fontSize:9, letterSpacing:".28em", textTransform:"uppercase", fontWeight:600, color:"var(--mut)", marginBottom:12 }}>
-        DPH za {CZM[now.getMonth()]} (v přípravě) · splatnost Čechmanové do 25. {dueMonthName} · odpočet z účtenek
+        DPH za {prevMonthName} (vyúčtování) · splatnost Čechmanové do 25. {CZM[now.getMonth()]} · počítá se do příjmů {CZM[now.getMonth()]}
       </div>
       <div style={{ display:"flex", gap:32, flexWrap:"wrap", alignItems:"flex-start" }}>
         <div>
-          <div style={{ fontSize:10, color:"var(--mut)" }}>DPH z vystavených faktur ({CZM[now.getMonth()]})</div>
-          <div style={{ fontFamily:"Fraunces,serif", fontSize:24, fontWeight:300, color:"var(--txt)" }}>{fmtKc(dphFaktury)}</div>
+          <div style={{ fontSize:10, color:"var(--mut)" }}>
+            DPH z vystavených faktur ({prevMonthName}) <span style={{opacity:.7}}>— určuje, kolik dostaneš 25. {CZM[now.getMonth()]}</span>
+          </div>
+          <div style={{ fontFamily:"Fraunces,serif", fontSize:24, fontWeight:300, color:"var(--txt)" }}>{fmtKc(dphFakturyPrev)}</div>
         </div>
         <div>
-          <div style={{ fontSize:10, color:"var(--mut)" }}>Odpočet z účtenek <span style={{opacity:.7}}>(zadáváš ručně / kalkulačkou níže)</span></div>
-          <div style={{ marginTop:3 }}><EditableMoney item={odpItem} onSave={onSaveFinance} color="#3518A5" sign="−" abs /></div>
+          <div style={{ fontSize:10, color:"var(--mut)" }}>
+            Odpočet z účtenek za {prevMonthName} <span style={{opacity:.7}}>— uplatněný k tomuto vyúčtování</span>
+          </div>
+          <div style={{ fontFamily:"Fraunces,serif", fontSize:24, fontWeight:300, color:"#3518A5" }}>−{fmtKc(odpocetPrev)}</div>
+          <div style={{ fontSize:9, color:"var(--mut)", marginTop:3 }}>
+            celkem zadáno (kumulativně, napříč měsíci): <EditableMoney item={odpItem} onSave={onSaveFinance} color="#3518A5" sign="−" abs />
+            <span style={{opacity:.7}}> — zadáváš ručně / kalkulačkou níže</span>
+          </div>
         </div>
         <div>
           <div style={{ fontSize:10, color:"var(--mut)" }}>
