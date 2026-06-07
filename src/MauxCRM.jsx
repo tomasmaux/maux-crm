@@ -5439,22 +5439,28 @@ function DphOdpocetTile({ invoices, financeItems, onSaveFinance }) {
   const zustane = Math.min(odpocet, dphFaktury);       // = "Nadměrný odpočet" v příjmech — fakticky mi zůstává
   const prevod  = Math.max(odpocet - dphFaktury, 0);   // přesah odpočtu nad DPH z faktur — převádí se do dalšího měsíce
 
+  // Zdaňovací období DPH se přiznává a platí až do 25. dne NÁSLEDUJÍCÍHO měsíce (ověřeno na přiznání
+  // za duben 2026, splatném 25. 5. 2026) — appka tedy správně počítá z dokladů AKTUÁLNÍHO měsíce,
+  // ale výsledek je splatný až příští měsíc. Štítky níže to teď odrážejí, ať se to nepřekrývá s částkou,
+  // která už ti od Čechmanové přišla k úhradě (ta je vždय za měsíc předchozí).
+  const dueMonthName = CZM[(now.getMonth() + 1) % 12];
+
   return (
     <div style={{ background:"#fff", border:"1px solid var(--line)", borderRadius:14, padding:"20px 22px" }}>
       <div style={{ fontSize:9, letterSpacing:".28em", textTransform:"uppercase", fontWeight:600, color:"var(--mut)", marginBottom:12 }}>
-        DPH — výzva k úhradě (Čechmanová, konec {CZM[now.getMonth()]}) · odpočet z účtenek
+        DPH za {CZM[now.getMonth()]} (v přípravě) · splatnost Čechmanové do 25. {dueMonthName} · odpočet z účtenek
       </div>
       <div style={{ display:"flex", gap:32, flexWrap:"wrap", alignItems:"flex-start" }}>
         <div>
-          <div style={{ fontSize:10, color:"var(--mut)" }}>DPH z vystavených faktur (tento měsíc)</div>
+          <div style={{ fontSize:10, color:"var(--mut)" }}>DPH z vystavených faktur ({CZM[now.getMonth()]})</div>
           <div style={{ fontFamily:"Fraunces,serif", fontSize:24, fontWeight:300, color:"var(--txt)" }}>{fmtKc(dphFaktury)}</div>
         </div>
         <div>
-          <div style={{ fontSize:10, color:"var(--mut)" }}>Odpočet z účtenek <span style={{opacity:.7}}>(zadáváš ručně)</span></div>
+          <div style={{ fontSize:10, color:"var(--mut)" }}>Odpočet z účtenek <span style={{opacity:.7}}>(zadáváš ručně / kalkulačkou níže)</span></div>
           <div style={{ marginTop:3 }}><EditableMoney item={odpItem} onSave={onSaveFinance} color="#3518A5" sign="−" abs /></div>
         </div>
         <div>
-          <div style={{ fontSize:10, color:"var(--mut)" }}>K úhradě Čechmanové (konec měsíce)</div>
+          <div style={{ fontSize:10, color:"var(--mut)" }}>Odhad k úhradě Čechmanové (do 25. {dueMonthName})</div>
           <div style={{ fontFamily:"Fraunces,serif", fontSize:26, fontWeight:500, color: kUhrade>0 ? "#DC2626" : "#059669" }}>
             {kUhrade>0 ? fmtKc(kUhrade) : "✓ kryto odpočtem"}
           </div>
@@ -5467,13 +5473,21 @@ function DphOdpocetTile({ invoices, financeItems, onSaveFinance }) {
         )}
         {prevod > 0 && (
           <div>
-            <div style={{ fontSize:10, color:"var(--mut)" }}>Přesah odpočtu (převádí se do dalšího měsíce)</div>
+            <div style={{ fontSize:10, color:"var(--mut)" }}>Přesah odpočtu (převádí se do dalšího období)</div>
             <div style={{ fontFamily:"Fraunces,serif", fontSize:24, fontWeight:300, color:"#7C3AED" }}>{fmtKc(prevod)}</div>
           </div>
         )}
       </div>
       <div style={{ fontSize:10.5, color:"var(--mut)", marginTop:14, lineHeight:1.55, maxWidth:740 }}>
-        Princip: DPH vybrané z vystavených faktur snižuješ o DPH z účtenek, které posíláš Čechmanové jako odpočet —
+        <b style={{ color:"var(--txt)" }}>Důležité k načasování:</b> DPH se neplatí za běžící měsíc, ale až zpětně — přiznání
+        a platba za {CZM[now.getMonth()]} je splatná až <b>25. {dueMonthName}</b> (přesně takhle to dělá i Čechmanová: tvoje
+        přiznání za duben bylo podané a uhrazené 25. 5.). To, co ti teď chodí k úhradě kolem 25. {CZM[now.getMonth()]},
+        je tedy ještě vyúčtování za <b>{CZM[(now.getMonth() + 11) % 12]}</b> — appka to nepřepočítává, protože už ti dorazilo hotové od Čechmanové.
+        Vše, co zadáš tady (včetně dnešních účtenek typu „notářka"), se počítá do aktuálního, ještě neuzavřeného období
+        {CZM[now.getMonth()]} a promítne se až do platby splatné <b>25. {dueMonthName}</b>.
+      </div>
+      <div style={{ fontSize:10.5, color:"var(--mut)", marginTop:10, lineHeight:1.55, maxWidth:740 }}>
+        Princip odpočtu: DPH vybrané z vystavených faktur snižuješ o DPH z účtenek, které posíláš Čechmanové jako odpočet —
         Čechmanové reálně uhradíš jen rozdíl. Co z odpočtu „přebývá" (nadměrný odpočet), to ti fakticky zůstává —
         a appka to automaticky započítá jako novou položku v měsíčním přehledu příjmů, aniž by se tím měnilo
         stávající souhrnné číslo daně výše.
