@@ -5604,7 +5604,6 @@ function DphOdpocetTile({ invoices, financeItems, onSaveFinance }) {
   const meta = parseMeta(odpItem.notes);
   const log = meta.log;
   const paidMap = meta.paid;
-  const transferredMap = meta.transferred;
 
   // Odhad pro běžící měsíc — počítáme jen z odpočtu uplatněného PRO TENTO měsíc (ne kumulativně přes všechny),
   // jinak by číslo bylo zkreslené součtem starších měsíců (přesně na tohle jsi upozornil).
@@ -5626,14 +5625,6 @@ function DphOdpocetTile({ invoices, financeItems, onSaveFinance }) {
   const odpocetPrev = log.filter(e => (e.date||"").startsWith(prevMonthKey)).reduce((s,e)=>s+(e.vat||0),0);
   const kUhradePrev = Math.max(dphFakturyPrev - odpocetPrev, 0);
 
-  // "Tvůj měsíční výdělek na DPH" — POUZE za jeden uzavřený měsíc, párované period-to-period
-  // (ne kumulativní součet napříč měsíci — to byla ta chyba, na kterou jsi upozornil, a ne ani
-  // mix dvou různých období — jak jsme si ověřili, Čechmanová počítá vždy ze stejného měsíce
-  // pro faktury i odpočet, takže "kolik jsi ušetřil" = jak velkou část odpočtu sis reálně
-  // odečetl od DPH na fakturách za TENTÝŽ měsíc).
-  const zisk = Math.min(odpocetPrev, dphFakturyPrev);   // = kolik jsi za {prevMonthName} reálně ušetřil na DPH
-  const ziskMonthName = prevMonthName;
-
   const prevodPrev = Math.max(odpocetPrev - dphFakturyPrev, 0); // nadměrný odpočet za {prevMonthName} (daňový pojem) — převádí se dál
 
   // Stav plateb Čechmanové — checkbox "zaplaceno" pro uzavřený měsíc
@@ -5642,23 +5633,6 @@ function DphOdpocetTile({ invoices, financeItems, onSaveFinance }) {
     if (!onSaveFinance) return;
     const next = { ...meta, paid: { ...paidMap, [prevMonthKey]: { date: today(), amount: kUhradePrev } } };
     onSaveFinance({ ...odpItem, notes: JSON.stringify(next) });
-  };
-
-  // Routing "úspory" do zvolené složky na spořáku — využívá existující "obálky" (sporaci položky).
-  // Vztahuje se k uzavřenému měsíci, jehož se týká i platba Čechmanové, proto stejný klíč prevMonthKey.
-  const savingsFolders = (financeItems||[]).filter(i =>
-    i.category === "sporaci" && i.notes !== "SKIP_DISPLAY" && !["fi_sp_99","fi_sp_01","fi_sp_02"].includes(i.id)
-  );
-  const transferThis = transferredMap[prevMonthKey] || null;
-  const [selFolder, setSelFolder] = useState("");
-  const transferToFolder = () => {
-    if (!onSaveFinance || !selFolder) return;
-    const folder = savingsFolders.find(f => f.id === selFolder);
-    if (!folder) return;
-    onSaveFinance({ ...folder, amount: (folder.amount||0) + zisk });
-    const next = { ...meta, transferred: { ...transferredMap, [prevMonthKey]: { folderId: folder.id, folderLabel: folder.label, amount: zisk, date: today() } } };
-    onSaveFinance({ ...odpItem, notes: JSON.stringify(next) });
-    setSelFolder("");
   };
 
   return (
@@ -5717,47 +5691,6 @@ function DphOdpocetTile({ invoices, financeItems, onSaveFinance }) {
           </div>
           <div style={{ fontSize:9, color:"var(--mut)", marginTop:2 }}>orientační — měsíc se ještě tvoří</div>
         </div>
-        {zisk > 0 && (
-          <div style={{ background:"linear-gradient(135deg,#ECFDF5,#F0FDF9)", border:"1px solid #A7F3D0", borderRadius:12, padding:"14px 18px", maxWidth:320 }}>
-            <div style={{ display:"flex", alignItems:"center", gap:6, fontSize:10, color:"#065F46", fontWeight:600, letterSpacing:".04em" }}>
-              <span style={{ fontSize:14 }}>💚</span> Kolik jsi ušetřil na DPH <span style={{opacity:.7, fontWeight:400}}>(za {ziskMonthName})</span>
-            </div>
-            <div style={{ fontFamily:"Fraunces,serif", fontSize:30, fontWeight:500, color:"#059669", marginTop:4 }}>{fmtKc(zisk)}</div>
-            <div style={{ fontSize:10, color:"#047857", marginTop:6, lineHeight:1.5 }}>
-              Stejné páry, ze kterých počítá i Čechmanová: DPH na fakturách za <b>{ziskMonthName}</b> ({fmtKc(dphFakturyPrev)})
-              a odpočet z účtenek uplatněný za <b>{ziskMonthName}</b> ({fmtKc(odpocetPrev)}). <b>Tahle částka je to, o co ti
-              odpočet reálně snížil platbu Čechmanové</b> — peníze, které ti tak fakticky zůstávají navíc.
-            </div>
-            <div style={{ marginTop:10, paddingTop:10, borderTop:"1px solid #A7F3D0" }}>
-              {transferThis ? (
-                <div style={{ fontSize:10, color:"#047857" }}>
-                  ✓ Převedeno {fmtKc(transferThis.amount)} do <b>{transferThis.folderLabel}</b> · {fmtDate(transferThis.date)}
-                </div>
-              ) : savingsFolders.length > 0 ? (
-                <div style={{ display:"flex", gap:6, alignItems:"center", flexWrap:"wrap" }}>
-                  <select
-                    value={selFolder}
-                    onChange={e=>setSelFolder(e.target.value)}
-                    style={{ fontSize:10, padding:"4px 6px", borderRadius:5, border:"1px solid #A7F3D0", color:"#065F46", background:"#fff" }}
-                  >
-                    <option value="">→ vyber složku na spořáku…</option>
-                    {savingsFolders.map(f => <option key={f.id} value={f.id}>{f.label}</option>)}
-                  </select>
-                  <button
-                    onClick={transferToFolder}
-                    disabled={!selFolder}
-                    style={{ fontSize:9, fontWeight:700, color:"#fff", background: selFolder ? "#059669" : "#A7F3D0", border:"none", borderRadius:5, padding:"5px 10px", cursor: selFolder ? "pointer" : "default", whiteSpace:"nowrap" }}
-                    title="Přičte částku do zvolené obálky na spořicím účtu a zapamatuje si, že je za tento měsíc převedeno"
-                  >
-                    → Převést {fmtKc(zisk)}
-                  </button>
-                </div>
-              ) : (
-                <div style={{ fontSize:9, color:"var(--mut)" }}>Pro převod si nejdřív založ vlastní obálku ve Spořáku.</div>
-              )}
-            </div>
-          </div>
-        )}
         {prevodPrev > 0 && (
           <div>
             <div style={{ fontSize:10, color:"var(--mut)" }}>Přesah odpočtu za {prevMonthName} (převádí se dál)</div>
