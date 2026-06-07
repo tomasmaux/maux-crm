@@ -37,6 +37,7 @@ const MODULES = [
   { key: "klienti",    label: "Klienti",      live: true },
   { key: "uschovy",    label: "Úschovy",      live: true },
   { key: "dane",       label: "Daně",         live: true },
+  { key: "ostatni",    label: "Ostatní",      live: true },
   { key: "happy",      label: "Happy Life",   live: false, desc: "Osobní finance — spoření, majetek, přehledy." },
 ];
 
@@ -3285,6 +3286,326 @@ function EditableMoney({ item, onSave, color = "var(--txt)", sign = "", abs = fa
   );
 }
 
+// Klikací popisek položky — přejmenování na místě (stejná logika jako EditableMoney, ale pro label)
+function EditableLabel({ item, onSave }) {
+  const [editing, setEditing] = useState(false);
+  const [val, setVal] = useState(item.label || "");
+  const commit = () => {
+    const v = val.trim();
+    if (v && v !== item.label) onSave({ ...item, label: v });
+    setEditing(false);
+  };
+  if (editing) {
+    return (
+      <input autoFocus value={val} onChange={e => setVal(e.target.value)}
+        onBlur={commit}
+        onKeyDown={e => { if (e.key === "Enter") commit(); if (e.key === "Escape") { setVal(item.label || ""); setEditing(false); } }}
+        style={{ fontSize: 12, padding: "1px 5px", border: "1px solid var(--line2)", borderRadius: 5, color: "var(--txt)", minWidth: 110 }} />
+    );
+  }
+  return (
+    <span onClick={() => { setVal(item.label || ""); setEditing(true); }} title="Klikni pro přejmenování"
+      style={{ cursor: "pointer", borderBottom: "1px dotted var(--mut)" }}>
+      {item.label}
+    </span>
+  );
+}
+
+// Inline řádek pro přidání nové položky výdajů (nutné/lusus) — jednoduché user ovládání
+function AddExpenseRow({ category, color, onSaveFinance }) {
+  const [open, setOpen] = useState(false);
+  const [label, setLabel] = useState("");
+  const [amount, setAmount] = useState("");
+  const save = () => {
+    const lbl = label.trim();
+    const amt = Math.abs(Number(amount) || 0);
+    if (!lbl || !amt) return;
+    onSaveFinance({ id: `fi_${category}_${Date.now()}`, category, label: lbl, amount: -amt });
+    setLabel(""); setAmount(""); setOpen(false);
+  };
+  if (!open) {
+    return (
+      <div onClick={() => setOpen(true)} style={{ fontSize: 11, color, cursor: "pointer", marginTop: 5, opacity: .7 }}>
+        + přidat položku
+      </div>
+    );
+  }
+  return (
+    <div style={{ display: "flex", gap: 6, alignItems: "center", marginTop: 6 }}>
+      <input autoFocus value={label} onChange={e => setLabel(e.target.value)} placeholder="Název"
+        onKeyDown={e => { if (e.key === "Enter") save(); if (e.key === "Escape") setOpen(false); }}
+        style={{ fontSize: 11, padding: "4px 7px", border: "1px solid var(--line2)", borderRadius: 6, flex: 1, minWidth: 0 }} />
+      <input type="number" value={amount} onChange={e => setAmount(e.target.value)} placeholder="Kč"
+        onKeyDown={e => { if (e.key === "Enter") save(); if (e.key === "Escape") setOpen(false); }}
+        style={{ fontSize: 11, padding: "4px 7px", border: "1px solid var(--line2)", borderRadius: 6, width: 76 }} />
+      <button onClick={save} title="Uložit" style={{ fontSize: 13, color, border: "none", background: "none", cursor: "pointer", padding: "0 2px" }}>✓</button>
+      <button onClick={() => { setOpen(false); setLabel(""); setAmount(""); }} title="Zrušit" style={{ fontSize: 12, color: "var(--mut)", border: "none", background: "none", cursor: "pointer", padding: "0 2px" }}>✕</button>
+    </div>
+  );
+}
+
+/* ─── ZISKOVOST ZAKÁZEK — reálné vs. fakturované hodiny z výkazů práce ─── */
+function ZiskovostPanel({ workEntries, clients }) {
+  const cardSt = { background: "#fff", border: "1px solid var(--line)", borderRadius: 14, padding: "18px 20px" };
+  const lblSt  = { fontSize: 9, letterSpacing: ".2em", textTransform: "uppercase", fontWeight: 600, color: "var(--mut)" };
+
+  const withReal = (workEntries || []).filter(e => (e.real_hours || 0) > 0 && (e.hours || 0) > 0);
+
+  if (withReal.length === 0) {
+    return (
+      <div style={cardSt}>
+        <div style={{ ...lblSt, marginBottom: 8 }}>Ziskovost zakázek</div>
+        <div style={{ fontSize: 13, color: "var(--mut)", padding: "10px 0 4px", lineHeight: 1.6 }}>
+          Zatím nemáš dost záznamů s vyplněnými reálnými hodinami — jakmile jich přibude (pole „reálné hodiny" ve výkazu práce),
+          objeví se tu analýza ziskovosti: kolik skutečně vyděláváš na hodinu odpracovaného času oproti fakturované sazbě.
+        </div>
+      </div>
+    );
+  }
+
+  const totalBilled = withReal.reduce((s, e) => s + (e.hours || 0), 0);
+  const totalReal   = withReal.reduce((s, e) => s + (e.real_hours || 0), 0);
+  const totalAmount = withReal.reduce((s, e) => s + (e.amount || (e.hours || 0) * (e.rate || 0)), 0);
+  const effRate  = totalReal   > 0 ? totalAmount / totalReal   : 0;
+  const nomRate  = totalBilled > 0 ? totalAmount / totalBilled : 0;
+  const ratioAll = totalReal   > 0 ? totalBilled / totalReal   : 0;
+
+  const rows = withReal
+    .map(e => ({ ...e, client: clients.find(c => c.id === e.client_id), ratio: e.real_hours > 0 ? e.hours / e.real_hours : 0 }))
+    .sort((a, b) => new Date(b.entry_date) - new Date(a.entry_date))
+    .slice(0, 7);
+
+  const best  = [...rows].sort((a, b) => b.ratio - a.ratio)[0];
+  const worst = [...rows].sort((a, b) => a.ratio - b.ratio)[0];
+  const maxH  = Math.max(...rows.flatMap(r => [r.hours, r.real_hours]), 1);
+  const pctColor = (r) => r >= 1.15 ? "#059669" : r >= 0.9 ? "#B8923D" : "#DC2626";
+  const fmtH = (h) => `${(h || 0).toLocaleString("cs-CZ", { maximumFractionDigits: 1 })} h`;
+
+  return (
+    <div style={cardSt}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 14 }}>
+        <div style={lblSt}>Ziskovost zakázek — reálné vs. fakturované hodiny</div>
+        <div style={{ fontSize: 10, color: "var(--mut)" }}>{withReal.length} záznamů s reálnými hodinami</div>
+      </div>
+
+      {/* KPI řada */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 10, marginBottom: 18 }}>
+        <div style={{ background: "#F0FDF4", border: "1px solid #BBF7D0", borderRadius: 12, padding: "12px 16px" }}>
+          <div style={{ fontSize: 10, color: "#065F46", marginBottom: 3 }}>Efektivní hodinovka</div>
+          <div style={{ fontFamily: "Fraunces,serif", fontSize: 20, fontWeight: 300, color: "#059669" }}>{fmtKc(effRate)}/h</div>
+          <div style={{ fontSize: 10, color: "#065F46", marginTop: 3 }}>výdělek na reálně odpracovanou hodinu</div>
+        </div>
+        <div style={{ background: "#F7F5FF", border: "1px solid #DDD6FE", borderRadius: 12, padding: "12px 16px" }}>
+          <div style={{ fontSize: 10, color: "#5B21B6", marginBottom: 3 }}>Nominální sazba</div>
+          <div style={{ fontFamily: "Fraunces,serif", fontSize: 20, fontWeight: 300, color: "#7C3AED" }}>{fmtKc(nomRate)}/h</div>
+          <div style={{ fontSize: 10, color: "#5B21B6", marginTop: 3 }}>vážený průměr fakturované hodinovky</div>
+        </div>
+        <div style={{ background: ratioAll >= 1 ? "#F0FDF4" : "#FEF2F2", border: `1px solid ${ratioAll >= 1 ? "#BBF7D0" : "#FECACA"}`, borderRadius: 12, padding: "12px 16px" }}>
+          <div style={{ fontSize: 10, color: ratioAll >= 1 ? "#065F46" : "#991B1B", marginBottom: 3 }}>Ziskovost (fakt. ÷ reálně)</div>
+          <div style={{ fontFamily: "Fraunces,serif", fontSize: 20, fontWeight: 300, color: ratioAll >= 1 ? "#059669" : "#DC2626" }}>{(ratioAll * 100).toFixed(0)} %</div>
+          <div style={{ fontSize: 10, color: ratioAll >= 1 ? "#065F46" : "#991B1B", marginTop: 3 }}>{fmtH(totalBilled)} fakt. · {fmtH(totalReal)} reálně</div>
+        </div>
+      </div>
+
+      {/* Spektrum posledních zakázek */}
+      <div style={{ fontSize: 9, letterSpacing: ".18em", textTransform: "uppercase", color: "var(--mut)", fontWeight: 600, marginBottom: 9 }}>
+        Poslední zakázky · fakturováno vs. reálně odpracováno
+      </div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+        {rows.map((r, i) => (
+          <div key={i} style={{ display: "flex", alignItems: "center", gap: 10 }}
+            title={`${r.client?.name || "—"} · ${fmtDate(r.entry_date)} · fakturováno ${fmtH(r.hours)} / reálně ${fmtH(r.real_hours)} · poměr ${(r.ratio * 100).toFixed(0)} %`}>
+            <div style={{ width: 116, flexShrink: 0, overflow: "hidden" }}>
+              <div style={{ fontSize: 11, fontWeight: 500, color: "var(--ink)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{r.client?.name || "—"}</div>
+              <div style={{ fontSize: 9.5, color: "var(--mut)" }}>{fmtDate(r.entry_date)}</div>
+            </div>
+            <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 3 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                <div style={{ width: 58, fontSize: 9, color: "var(--mut)", textAlign: "right" }}>fakt. {fmtH(r.hours)}</div>
+                <div style={{ flex: 1, height: 7, borderRadius: 4, background: "var(--line)", overflow: "hidden" }}>
+                  <div style={{ height: "100%", width: `${(r.hours / maxH) * 100}%`, background: "#7C3AED", borderRadius: 4 }} />
+                </div>
+              </div>
+              <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                <div style={{ width: 58, fontSize: 9, color: "var(--mut)", textAlign: "right" }}>reál. {fmtH(r.real_hours)}</div>
+                <div style={{ flex: 1, height: 7, borderRadius: 4, background: "var(--line)", overflow: "hidden" }}>
+                  <div style={{ height: "100%", width: `${(r.real_hours / maxH) * 100}%`, background: "#D9C7A3", borderRadius: 4 }} />
+                </div>
+              </div>
+            </div>
+            <div style={{ width: 46, textAlign: "right", flexShrink: 0 }}>
+              <span style={{ fontSize: 12, fontWeight: 600, color: pctColor(r.ratio) }}>{(r.ratio * 100).toFixed(0)} %</span>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {(best || worst) && (
+        <div style={{ display: "flex", gap: 14, marginTop: 16, paddingTop: 14, borderTop: "1px solid var(--line)" }}>
+          {best && (
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: 9.5, color: "#065F46", fontWeight: 600, marginBottom: 2 }}>🏆 Nejziskovější</div>
+              <div style={{ fontSize: 11.5, color: "var(--txt)" }}>{best.client?.name || "—"} · {(best.ratio * 100).toFixed(0)} % ({fmtH(best.hours)} fakt. / {fmtH(best.real_hours)} reálně)</div>
+            </div>
+          )}
+          {worst && worst !== best && (
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: 9.5, color: "#991B1B", fontWeight: 600, marginBottom: 2 }}>⏳ Nejnáročnější</div>
+              <div style={{ fontSize: 11.5, color: "var(--txt)" }}>{worst.client?.name || "—"} · {(worst.ratio * 100).toFixed(0)} % ({fmtH(worst.hours)} fakt. / {fmtH(worst.real_hours)} reálně)</div>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function PohledavkyPanel({ financeItems, onSaveFinance, onDeleteFinance }) {
+  const [open, setOpen] = useState(false);
+  const [form, setForm] = useState({ label: "", amount: "", due: "", source: "" });
+
+  const items = (financeItems || []).filter(i => i.category === "pohledavka");
+  const parseMeta = (notes) => { try { return JSON.parse(notes || "{}"); } catch { return {}; } };
+
+  const save = () => {
+    const lbl = form.label.trim();
+    const amt = Math.abs(Number(form.amount) || 0);
+    if (!lbl || !amt) return;
+    onSaveFinance({
+      id: `fi_pohledavka_${Date.now()}`,
+      category: "pohledavka",
+      label: lbl,
+      amount: amt,
+      notes: JSON.stringify({ due: form.due || null, source: form.source.trim() || null }),
+    });
+    setForm({ label: "", amount: "", due: "", source: "" });
+    setOpen(false);
+  };
+
+  const totalOut = items.reduce((s, i) => s + Math.abs(i.amount || 0), 0);
+
+  return (
+    <div style={{ background: "#fff", border: "1px solid var(--line)", borderRadius: 14, padding: "20px 22px" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", flexWrap: "wrap", gap: 8 }}>
+        <div style={{ fontSize: 9, letterSpacing: ".28em", textTransform: "uppercase", fontWeight: 600, color: "var(--mut)" }}>
+          Pohledávky · peníze půjčené ven
+        </div>
+        {totalOut > 0 && (
+          <div style={{ fontSize: 12, color: "var(--mut)" }}>
+            Celkem venku: <b style={{ color: "var(--txt)" }}>{fmtKc(totalOut)}</b>
+          </div>
+        )}
+      </div>
+
+      {items.length === 0 && (
+        <div style={{ fontSize: 12.5, color: "var(--mut)", marginTop: 10 }}>Zatím žádná evidovaná pohledávka.</div>
+      )}
+
+      <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 14 }}>
+        {items.map(item => {
+          const meta = parseMeta(item.notes);
+          const dueDate = meta.due ? new Date(meta.due) : null;
+          const daysLeft = dueDate ? Math.ceil((dueDate - new Date(today())) / 86400000) : null;
+          const overdue = daysLeft != null && daysLeft < 0;
+          const soon = daysLeft != null && daysLeft >= 0 && daysLeft <= 7;
+          return (
+            <div key={item.id} style={{ display: "flex", alignItems: "center", gap: 14, padding: "12px 14px", borderRadius: 10, background: overdue ? "#FEF2F2" : soon ? "#FFFBEB" : "#FAFAFC", border: `1px solid ${overdue ? "#FECACA" : soon ? "#FDE68A" : "var(--line2)"}` }}>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 13, color: "var(--txt)", fontWeight: 500 }}>{item.label}</div>
+                {meta.source && <div style={{ fontSize: 10.5, color: "var(--mut)", marginTop: 2 }}>zdroj: {meta.source}</div>}
+              </div>
+              {dueDate && (
+                <div style={{ textAlign: "right" }}>
+                  <div style={{ fontSize: 10.5, color: "var(--mut)" }}>splatnost {fmtDate(meta.due)}</div>
+                  <div style={{ fontSize: 11, fontWeight: 600, color: overdue ? "#DC2626" : soon ? "#B45309" : "var(--mut)", marginTop: 1 }}>
+                    {overdue ? `po splatnosti ${Math.abs(daysLeft)} dní` : daysLeft === 0 ? "splatnost dnes" : `zbývá ${daysLeft} dní`}
+                  </div>
+                </div>
+              )}
+              <div style={{ fontFamily: "Fraunces,serif", fontSize: 18, fontWeight: 400, color: "var(--txt)", minWidth: 90, textAlign: "right" }}>
+                {fmtKc(Math.abs(item.amount || 0))}
+              </div>
+              <button onClick={() => onDeleteFinance(item.id)} title="Smazat" style={{ background: "none", border: "none", color: "var(--mut)", cursor: "pointer", fontSize: 13, padding: "0 2px" }}>✕</button>
+            </div>
+          );
+        })}
+      </div>
+
+      {!open ? (
+        <div onClick={() => setOpen(true)} style={{ fontSize: 11, color: "var(--mut)", cursor: "pointer", marginTop: 12, opacity: .75 }}>+ přidat pohledávku</div>
+      ) : (
+        <div style={{ display: "flex", gap: 6, alignItems: "center", marginTop: 12, flexWrap: "wrap" }}>
+          <input autoFocus value={form.label} onChange={e => setForm(f => ({ ...f, label: e.target.value }))} placeholder="Komu / za co"
+            style={{ fontSize: 11, padding: "5px 8px", border: "1px solid var(--line2)", borderRadius: 6, flex: 1, minWidth: 120 }} />
+          <input type="number" value={form.amount} onChange={e => setForm(f => ({ ...f, amount: e.target.value }))} placeholder="Kč"
+            style={{ fontSize: 11, padding: "5px 8px", border: "1px solid var(--line2)", borderRadius: 6, width: 84 }} />
+          <input type="date" value={form.due} onChange={e => setForm(f => ({ ...f, due: e.target.value }))}
+            style={{ fontSize: 11, padding: "5px 8px", border: "1px solid var(--line2)", borderRadius: 6, width: 130 }} />
+          <input value={form.source} onChange={e => setForm(f => ({ ...f, source: e.target.value }))} placeholder="Zdroj (volitelně)"
+            style={{ fontSize: 11, padding: "5px 8px", border: "1px solid var(--line2)", borderRadius: 6, width: 130 }} />
+          <button onClick={save} title="Uložit" style={{ fontSize: 13, color: "#059669", border: "none", background: "none", cursor: "pointer", padding: "0 2px" }}>✓</button>
+          <button onClick={() => setOpen(false)} title="Zrušit" style={{ fontSize: 12, color: "var(--mut)", border: "none", background: "none", cursor: "pointer", padding: "0 2px" }}>✕</button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function OstatniModule({ dpfoMonths, loanTrackers, loanTransactions, financeItems, onDpfoToggle, onLoanTxAdd, onLoanTxToggle, onLoanTxDelete, onLoanUpdate, onSaveFinance, onDeleteFinance }) {
+  // Jednorázové založení pohledávky — půjčka kamarádovi 22 000 Kč, splatnost 16. 6. 2026, z firemní rezervy
+  const seeded = useRef(false);
+  useEffect(() => {
+    if (seeded.current) return;
+    seeded.current = true;
+    const exists = (financeItems || []).some(i => i.id === "fi_pohledavka_kamarad_22k");
+    if (!exists) {
+      onSaveFinance({
+        id: "fi_pohledavka_kamarad_22k",
+        category: "pohledavka",
+        label: "Půjčka kamarádovi",
+        amount: 22000,
+        notes: JSON.stringify({ due: "2026-06-16", source: "Firemní rezerva" }),
+      });
+    }
+  }, [financeItems, onSaveFinance]);
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+      <div>
+        <h2 className="serif" style={{ margin: 0 }}>Ostatní</h2>
+        <p style={{ fontSize: 12.5, color: "var(--mut)", marginTop: 4, maxWidth: 720, lineHeight: 1.55 }}>
+          Úvěry, zálohy na daň a pohledávky — věci, které appka loguje a dopočítává sama, jakmile jen odškrtneš, že je máš vyřízené.
+        </p>
+      </div>
+
+      {/* DPFO — zálohy na daň (přesunuto z Přehledu) */}
+      {dpfoMonths.length > 0 && (
+        <DpfoTracker months={dpfoMonths} onToggle={onDpfoToggle} year={new Date().getFullYear()} />
+      )}
+
+      {/* Úvěry — Půjčka od táty, Bobnice investiční úvěr (přesunuto z Přehledu) */}
+      {(loanTrackers || []).length > 0 && (
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(360px, 1fr))", gap: 16 }}>
+          {(loanTrackers || []).map(tracker => (
+            <LoanDashTile
+              key={tracker.id}
+              tracker={tracker}
+              transactions={(loanTransactions || {})[tracker.id] || []}
+              onAddTransaction={onLoanTxAdd}
+              onToggleTransaction={onLoanTxToggle}
+              onDeleteTransaction={(txId) => onLoanTxDelete(tracker.id, txId)}
+              onUpdateTracker={onLoanUpdate}
+            />
+          ))}
+        </div>
+      )}
+
+      {/* Pohledávky — peníze půjčené ven, splatnost a připomínky */}
+      <PohledavkyPanel financeItems={financeItems} onSaveFinance={onSaveFinance} onDeleteFinance={onDeleteFinance} />
+    </div>
+  );
+}
+
 function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, loanTrackers, loanTransactions, escrows, expenseChecks, onToggleExpenseCheck, onNav, onSaveFinance, onDeleteFinance, onDpfoToggle, onLoanTxAdd, onLoanTxToggle, onLoanTxDelete, onLoanUpdate }) {
   const [escrowAlertDismissed, setEscrowAlertDismissed] = useState(false);
   const [editLayout, setEditLayout] = useState(false);
@@ -3723,23 +4044,16 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
             ))}
           </div>
 
-          {/* Dolní část — CASH FLOW */}
+          {/* Dolní část — CASH FLOW (zjednodušeno na jednu negativní položku, bez nadpisu) */}
           <div style={{padding:"14px 20px 16px",flex:1,display:"flex",flexDirection:"column"}}>
-            <div style={{fontSize:9,letterSpacing:".22em",textTransform:"uppercase",color:"var(--mut)",fontWeight:700,marginBottom:10}}>Cash flow — tento měsíc</div>
-            {[
-              { label: "Nutné výdaje", value: Math.abs(totalNutne), color: "#DC2626", sign: "−" },
-              { label: "Lusus výdaje", value: Math.abs(totalLuxus), color: "#9333EA", sign: "−" },
-            ].map((row,i) => (
-              <div key={i} style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",padding:"7px 0",borderBottom:"1px solid var(--line)"}}>
-                <div>
-                  <div style={{fontSize:12,color:"var(--txt)"}}>{row.label}</div>
-                  {row.sub && <div style={{fontSize:9.5,color:"#D97706",marginTop:1}}>{row.sub}</div>}
-                </div>
-                <span style={{fontSize:13,fontFamily:"Fraunces,serif",fontWeight:300,color:row.color,flexShrink:0,marginLeft:8}}>
-                  {row.sign}{fmtKc(row.value)}
-                </span>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",padding:"7px 0",borderBottom:"1px solid var(--line)"}}>
+              <div>
+                <div style={{fontSize:12,color:"var(--txt)"}}>Celkové náklady</div>
               </div>
-            ))}
+              <span style={{fontSize:13,fontFamily:"Fraunces,serif",fontWeight:300,color:"#DC2626",flexShrink:0,marginLeft:8}}>
+                −{fmtKc(Math.abs(totalNutne) + Math.abs(totalLuxus))}
+              </span>
+            </div>
             <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",padding:"11px 0 4px",borderTop:`2px solid ${nextMonthBalance>=0?"#059669":"#DC2626"}`,marginTop:4}}>
               <div>
                 <div style={{fontSize:13,fontWeight:700,color:"var(--txt)"}}>Finance v následujícím měsíci</div>
@@ -3802,24 +4116,32 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
           <div style={{borderTop:"1px solid var(--line)",paddingTop:8,marginBottom:6}}>
             <div style={{fontSize:9,letterSpacing:".2em",textTransform:"uppercase",color:"#DC2626",fontWeight:600,marginBottom:6}}>Nutné</div>
             {nutne.map((i,idx) => (
-              <div key={idx} style={{display:"flex",justifyContent:"space-between",alignItems:"center",fontSize:12,color:isPaid(i.id)?"var(--mut)":"var(--txt)",paddingBottom:3}}>
-                <span style={{display:"flex",alignItems:"center",textDecoration:isPaid(i.id)?"line-through":"none"}}>
-                  <Check item={i} color="#DC2626" />{i.label}
+              <div key={idx} style={{display:"flex",justifyContent:"space-between",alignItems:"center",fontSize:12,color:isPaid(i.id)?"var(--mut)":"var(--txt)",paddingBottom:3,gap:6}}>
+                <span style={{display:"flex",alignItems:"center",textDecoration:isPaid(i.id)?"line-through":"none",minWidth:0}}>
+                  <Check item={i} color="#DC2626" /><EditableLabel item={i} onSave={onSaveFinance} />
                 </span>
-                <span style={{opacity:isPaid(i.id)?.55:1}}><EditableMoney item={i} onSave={onSaveFinance} color="#DC2626" abs /></span>
+                <span style={{display:"flex",alignItems:"center",gap:5,flexShrink:0}}>
+                  <span style={{opacity:isPaid(i.id)?.55:1}}><EditableMoney item={i} onSave={onSaveFinance} color="#DC2626" abs /></span>
+                  <button onClick={() => onDeleteFinance(i.id)} title="Smazat položku" style={{background:"none",border:"none",color:"var(--mut)",cursor:"pointer",fontSize:11,padding:"0 1px",opacity:.6}}>✕</button>
+                </span>
               </div>
             ))}
+            <AddExpenseRow category="nutne" color="#DC2626" onSaveFinance={onSaveFinance} />
           </div>
           <div style={{borderTop:"1px solid var(--line)",paddingTop:8,marginTop:4}}>
             <div style={{fontSize:9,letterSpacing:".2em",textTransform:"uppercase",color:"#9333EA",fontWeight:600,marginBottom:6}}>Lusus</div>
             {luxus.map((i,idx) => (
-              <div key={idx} style={{display:"flex",justifyContent:"space-between",alignItems:"center",fontSize:12,color:isPaid(i.id)?"var(--mut)":"var(--txt)",paddingBottom:3}}>
-                <span style={{display:"flex",alignItems:"center",textDecoration:isPaid(i.id)?"line-through":"none"}}>
-                  <Check item={i} color="#9333EA" />{i.label}
+              <div key={idx} style={{display:"flex",justifyContent:"space-between",alignItems:"center",fontSize:12,color:isPaid(i.id)?"var(--mut)":"var(--txt)",paddingBottom:3,gap:6}}>
+                <span style={{display:"flex",alignItems:"center",textDecoration:isPaid(i.id)?"line-through":"none",minWidth:0}}>
+                  <Check item={i} color="#9333EA" /><EditableLabel item={i} onSave={onSaveFinance} />
                 </span>
-                <span style={{opacity:isPaid(i.id)?.55:1}}><EditableMoney item={i} onSave={onSaveFinance} color="#9333EA" abs /></span>
+                <span style={{display:"flex",alignItems:"center",gap:5,flexShrink:0}}>
+                  <span style={{opacity:isPaid(i.id)?.55:1}}><EditableMoney item={i} onSave={onSaveFinance} color="#9333EA" abs /></span>
+                  <button onClick={() => onDeleteFinance(i.id)} title="Smazat položku" style={{background:"none",border:"none",color:"var(--mut)",cursor:"pointer",fontSize:11,padding:"0 1px",opacity:.6}}>✕</button>
+                </span>
               </div>
             ))}
+            <AddExpenseRow category="luxus" color="#9333EA" onSaveFinance={onSaveFinance} />
           </div>
           <div style={{marginTop:10,borderTop:"2px solid var(--line)",paddingTop:8,display:"flex",justifyContent:"space-between",alignItems:"baseline"}}>
             <span style={{fontSize:10,color:"var(--mut)",letterSpacing:".1em",textTransform:"uppercase"}}>Celkem výdaje</span>
@@ -4128,25 +4450,9 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
       </Card>
       </Panel>
 
-      {/* ── DPFO + LOANS + ÚSCHOVY ── */}
-      <Panel id="uschovy">
-      {dpfoMonths.length > 0 && (
-        <DpfoTracker months={dpfoMonths} onToggle={onDpfoToggle} year={new Date().getFullYear()} />
-      )}
-      {(loanTrackers||[]).length > 0 && (
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(340px, 1fr))", gap: 14, marginTop: dpfoMonths.length>0?12:0 }}>
-          {(loanTrackers||[]).map(tracker => (
-            <LoanDashTile key={tracker.id}
-              tracker={tracker}
-              transactions={loanTransactions[tracker.id] || []}
-              onUpdateTracker={onLoanUpdate}
-              onAddTransaction={onLoanTxAdd}
-              onToggleTransaction={onLoanTxToggle}
-              onDeleteTransaction={(txId) => onLoanTxDelete(tracker.id, txId)}
-            />
-          ))}
-        </div>
-      )}
+      {/* ── ZISKOVOST ZAKÁZEK (nahradilo DPFO/úvěry — ty jsou teď v sekci Ostatní) ── */}
+      <Panel id="ziskovost">
+        <ZiskovostPanel workEntries={workEntries} clients={clients} />
       </Panel>
     </div>
   );
@@ -5967,6 +6273,23 @@ export default function MauxCRM() {
               escrows={escrows}
               onSaveTax={saveTaxRecord}
               onSaveFinance={saveFinanceItem}
+            />
+          )}
+
+          {/* OSTATNÍ — DPFO, úvěry, pohledávky (přesunuto z Přehledu) */}
+          {mod === "ostatni" && (
+            <OstatniModule
+              dpfoMonths={dpfoMonths}
+              loanTrackers={loanTrackers}
+              loanTransactions={loanTransactions}
+              financeItems={financeItems}
+              onDpfoToggle={handleDpfoToggle}
+              onLoanTxAdd={handleLoanTxAdd}
+              onLoanTxToggle={handleLoanTxToggle}
+              onLoanTxDelete={(loanId, txId) => handleLoanTxDelete(loanId, txId)}
+              onLoanUpdate={handleLoanUpdate}
+              onSaveFinance={saveFinanceItem}
+              onDeleteFinance={deleteFinanceItem}
             />
           )}
         </div>
