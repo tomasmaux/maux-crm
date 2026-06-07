@@ -5547,11 +5547,15 @@ function DphOdpocetTile({ invoices, financeItems, onSaveFinance }) {
           </div>
         </div>
         {zustane > 0 && (
-          <div>
-            <div style={{ fontSize:10, color:"var(--mut)" }}>Zůstane mi díky odpočtu <span style={{fontSize:8,background:"#ECFDF5",color:"#065F46",padding:"1px 5px",borderRadius:3,fontWeight:600,marginLeft:2}}>→ příjmy</span></div>
-            <div style={{ fontFamily:"Fraunces,serif", fontSize:24, fontWeight:300, color:"#059669", letterSpacing:".06em" }}>· · · ·</div>
-            <div style={{ fontSize:9.5, color:"var(--mut)", marginTop:4, maxWidth:220, lineHeight:1.4 }}>
-              Schválně — necháváš se překvapit. Projeví se to ve vyúčtování za <b>{CZM[now.getMonth()]}</b>, vyrovnání s platbou do <b>25. {dueMonthName}</b>.
+          <div style={{ background:"linear-gradient(135deg,#ECFDF5,#F0FDF9)", border:"1px solid #A7F3D0", borderRadius:12, padding:"14px 18px", maxWidth:300 }}>
+            <div style={{ display:"flex", alignItems:"center", gap:6, fontSize:10, color:"#065F46", fontWeight:600, letterSpacing:".04em" }}>
+              <span style={{ fontSize:14 }}>💚</span> Tvůj měsíční výdělek na DPH
+            </div>
+            <div style={{ fontFamily:"Fraunces,serif", fontSize:30, fontWeight:500, color:"#059669", marginTop:4 }}>{fmtKc(zustane)}</div>
+            <div style={{ fontSize:10, color:"#047857", marginTop:6, lineHeight:1.5 }}>
+              Vyberu DPH od klientů, ale účtenkami a fakturami (notář, technika, telefon…) ho odvedu míň —
+              <b> tenhle rozdíl je fakticky pravidelný měsíční příjem navíc.</b> Reálně se objeví v platbě
+              Čechmanové splatné <b>do 25. {dueMonthName}</b> — a počítá se jako příjem za <b>{CZM[now.getMonth()]}</b>, kdy vznikl.
             </div>
           </div>
         )}
