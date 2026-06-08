@@ -496,7 +496,7 @@ function InvoiceIssueModal({ clientId, entries, clients, invoices, onConfirm, on
     id: uid(), invoice_number: invoiceNo,
     client_id: clientId, issue_date: issueDate, due_date: dueDate,
     items: [
-      ...selEntries.filter(e => e.hours > 0).map(e => ({ id: uid(), description: e.description, hours: e.hours, rate: e.rate, amount: e.amount, no_vat: false })),
+      ...selEntries.filter(e => e.hours > 0 || e.billing_type === "flat_rate").map(e => ({ id: uid(), description: e.description, hours: e.hours, rate: e.rate, amount: e.amount, no_vat: false, flat_rate: e.billing_type === "flat_rate" })),
       ...(notary > 0 ? [{ id: uid(), description: "Přefakturace — notář", hours: 0, rate: 0, amount: notary, no_vat: true }] : []),
       ...(admin > 0 ? [{ id: uid(), description: "Správní poplatek — přefakturace", hours: 0, rate: 0, amount: admin, no_vat: true }] : []),
     ],
@@ -790,7 +790,10 @@ function InvoicePrintPreview({ invoice, client, workEntries, onBack, onIssue, sa
                 <tr key={i} style={{ background: i % 2 === 1 ? "#FAFAFF" : "#fff" }}>
                   <td style={{ padding: "9px 12px", fontSize: 11.5, color: "#444", whiteSpace: "nowrap", borderBottom: "1px solid #F0EEF8" }}>{fmtDate(e.entry_date)}</td>
                   <td style={{ padding: "9px 12px", fontSize: 11.5, color: "#222", borderBottom: "1px solid #F0EEF8", maxWidth: "320px" }}>
-                    <div style={{ overflow: "hidden", display: "-webkit-box", WebkitLineClamp: 3, WebkitBoxOrient: "vertical" }}>{e.description}</div>
+                    <div style={{ overflow: "hidden", display: "-webkit-box", WebkitLineClamp: 3, WebkitBoxOrient: "vertical" }}>
+                      {e.description}
+                      {e.billing_type === "flat_rate" && <span style={{ marginLeft: 7, fontSize: 9, fontWeight: 600, letterSpacing: ".06em", textTransform: "uppercase", color: "#5B21B6", background: "#F3F0FF", border: "1px solid #DDD6FE", borderRadius: 4, padding: "1px 6px" }}>paušál</span>}
+                    </div>
                     {(e.notary_fee > 0 || e.admin_fee > 0) && (
                       <div style={{ fontSize: 10, color: "#888", marginTop: 3 }}>
                         {e.notary_fee > 0 && `Notář: ${fmtKc(e.notary_fee)}`}
@@ -798,7 +801,7 @@ function InvoicePrintPreview({ invoice, client, workEntries, onBack, onIssue, sa
                       </div>
                     )}
                   </td>
-                  <td style={{ padding: "9px 12px", textAlign: "right", fontSize: 11.5, color: "#444", borderBottom: "1px solid #F0EEF8", whiteSpace: "nowrap" }}>{e.hours > 0 ? `${e.hours} h` : "—"}</td>
+                  <td style={{ padding: "9px 12px", textAlign: "right", fontSize: 11.5, color: "#444", borderBottom: "1px solid #F0EEF8", whiteSpace: "nowrap" }}>{e.billing_type === "flat_rate" ? "paušál" : (e.hours > 0 ? `${e.hours} h` : "—")}</td>
                   <td style={{ padding: "9px 12px", textAlign: "right", fontSize: 12, fontFamily: "Fraunces, serif", fontWeight: 300, color: "#222", borderBottom: "1px solid #F0EEF8" }}>
                     {fmtKc((e.amount||0)+(e.notary_fee||0)+(e.admin_fee||0))}
                   </td>
@@ -3349,7 +3352,11 @@ function ZiskovostPanel({ workEntries, clients }) {
   const cardSt = { background: "#fff", border: "1px solid var(--line)", borderRadius: 14, padding: "18px 20px" };
   const lblSt  = { fontSize: 9, letterSpacing: ".2em", textTransform: "uppercase", fontWeight: 600, color: "var(--mut)" };
 
-  const withReal = (workEntries || []).filter(e => (e.real_hours || 0) > 0 && (e.hours || 0) > 0);
+  // withReal = vše s vyplněnými reálnými hodinami (vč. paušálů — ty se počítají jen do "Efektivní hodinovky",
+  // protože u nich pojem "fakturovaných hodin" nedává smysl). hourlyEntries = jen klasické hodinové záznamy,
+  // ze kterých se počítá "Nominální sazba" a "Ziskovost (fakt. ÷ reálně)".
+  const withReal = (workEntries || []).filter(e => (e.real_hours || 0) > 0 && ((e.hours || 0) > 0 || e.billing_type === "flat_rate"));
+  const hourlyEntries = withReal.filter(e => (e.hours || 0) > 0);
 
   if (withReal.length === 0) {
     return (
@@ -3363,14 +3370,19 @@ function ZiskovostPanel({ workEntries, clients }) {
     );
   }
 
-  const totalBilled = withReal.reduce((s, e) => s + (e.hours || 0), 0);
+  // Efektivní hodinovka — počítá se ze VŠECH záznamů s reálnými hodinami (vč. paušálů): co skutečně vydělávám na hodinu práce.
   const totalReal   = withReal.reduce((s, e) => s + (e.real_hours || 0), 0);
   const totalAmount = withReal.reduce((s, e) => s + (e.amount || (e.hours || 0) * (e.rate || 0)), 0);
-  const effRate  = totalReal   > 0 ? totalAmount / totalReal   : 0;
-  const nomRate  = totalBilled > 0 ? totalAmount / totalBilled : 0;
-  const ratioAll = totalReal   > 0 ? totalBilled / totalReal   : 0;
+  const effRate  = totalReal > 0 ? totalAmount / totalReal : 0;
 
-  const rows = withReal
+  // Nominální sazba a Ziskovost — jen z hodinových záznamů (paušál nemá "fakturované hodiny", takže by zkresloval poměr).
+  const totalBilled     = hourlyEntries.reduce((s, e) => s + (e.hours || 0), 0);
+  const totalRealHourly = hourlyEntries.reduce((s, e) => s + (e.real_hours || 0), 0);
+  const hourlyAmount    = hourlyEntries.reduce((s, e) => s + (e.amount || (e.hours || 0) * (e.rate || 0)), 0);
+  const nomRate  = totalBilled     > 0 ? hourlyAmount / totalBilled     : 0;
+  const ratioAll = totalRealHourly > 0 ? totalBilled / totalRealHourly : 0;
+
+  const rows = hourlyEntries
     .map(e => ({ ...e, client: clients.find(c => c.id === e.client_id), ratio: e.real_hours > 0 ? e.hours / e.real_hours : 0 }))
     .sort((a, b) => new Date(b.entry_date) - new Date(a.entry_date))
     .slice(0, 7);
@@ -4482,6 +4494,7 @@ function WorkEntryForm({ init, clients, onSave, onCancel, saving }) {
     description: "", hours: "", rate: 2000,
     notary_fee: 0, admin_fee: 0,
     real_hours: "", notes: "",
+    billing_type: "hourly", flat_amount: "",
   });
   const set = (k, v) => setD(p => ({ ...p, [k]: v }));
 
@@ -4491,12 +4504,38 @@ function WorkEntryForm({ init, clients, onSave, onCancel, saving }) {
     if (c?.hourly_rate > 0) set("rate", c.hourly_rate);
   };
 
-  const amount = Math.round((Number(d.hours) || 0) * (Number(d.rate) || 0));
+  // — fulltextové vyhledávání klienta (nahrazuje dropdown) —
+  const [clientQuery, setClientQuery] = useState(() => {
+    const c = init && clients.find(x => x.id === init.client_id);
+    return c ? c.name : "";
+  });
+  const [clientOpen, setClientOpen] = useState(false);
+  const filteredClients = (() => {
+    const q = clientQuery.trim().toLowerCase();
+    return clients
+      .filter(c => !q || (c.name || "").toLowerCase().includes(q) || (c.ico || "").includes(q) || (c.contact || "").toLowerCase().includes(q))
+      .sort((a, b) => a.name.localeCompare(b.name, "cs"))
+      .slice(0, 8);
+  })();
+  const pickClient = (c) => {
+    onClientChange(c.id);
+    setClientQuery(c.name);
+    setClientOpen(false);
+  };
+
+  const isFlat = d.billing_type === "flat_rate";
+  const amount = isFlat
+    ? Math.round(Number(d.flat_amount) || 0)
+    : Math.round((Number(d.hours) || 0) * (Number(d.rate) || 0));
   const client = clients.find(c => c.id === d.client_id);
 
   const save = () => {
     if (!d.client_id || !d.description.trim()) return;
-    onSave({ ...d, hours: Number(d.hours) || 0, rate: Number(d.rate) || 2000,
+    onSave({ ...d,
+      billing_type: isFlat ? "flat_rate" : "hourly",
+      hours: isFlat ? 0 : (Number(d.hours) || 0),
+      rate: isFlat ? 0 : (Number(d.rate) || 2000),
+      flat_amount: isFlat ? amount : 0,
       amount, notary_fee: Number(d.notary_fee) || 0, admin_fee: Number(d.admin_fee) || 0,
       real_hours: Number(d.real_hours) || 0 });
   };
@@ -4505,14 +4544,28 @@ function WorkEntryForm({ init, clients, onSave, onCancel, saving }) {
     <div className="form" style={{ maxWidth: 680 }}>
       <h2>{init ? "Upravit záznam" : "Nový záznam"}</h2>
       <div className="two">
-        <div className="frow">
+        <div className="frow" style={{ position: "relative" }}>
           <label>Klient *</label>
-          <select value={d.client_id} onChange={e => onClientChange(e.target.value)}>
-            <option value="">— vyber klienta —</option>
-            {clients.sort((a,b) => a.name.localeCompare(b.name,"cs")).map(c =>
-              <option key={c.id} value={c.id}>{c.name}</option>
-            )}
-          </select>
+          <input
+            value={clientQuery}
+            onChange={e => { setClientQuery(e.target.value); setClientOpen(true); if (d.client_id) set("client_id", ""); }}
+            onFocus={() => setClientOpen(true)}
+            onBlur={() => setTimeout(() => setClientOpen(false), 150)}
+            placeholder="Začni psát jméno klienta…"
+            autoComplete="off"
+          />
+          {clientOpen && filteredClients.length > 0 && (
+            <div style={{ position: "absolute", top: "100%", left: 0, right: 0, zIndex: 30, background: "#fff", border: "1px solid var(--line)", borderRadius: 8, marginTop: 4, boxShadow: "0 8px 24px rgba(0,0,0,.10)", maxHeight: 230, overflowY: "auto" }}>
+              {filteredClients.map(c => (
+                <div key={c.id}
+                  onMouseDown={() => pickClient(c)}
+                  style={{ padding: "8px 12px", fontSize: 12.5, cursor: "pointer", borderBottom: "1px solid var(--line)", background: d.client_id === c.id ? "#F7F5FF" : "#fff" }}>
+                  <div style={{ fontWeight: 500, color: "var(--ink)" }}>{c.name}</div>
+                  {(c.ico || c.contact) && <div style={{ fontSize: 10.5, color: "var(--mut)", marginTop: 1 }}>{[c.ico && `IČO ${c.ico}`, c.contact].filter(Boolean).join(" · ")}</div>}
+                </div>
+              ))}
+            </div>
+          )}
         </div>
         <div className="frow">
           <label>Datum</label>
@@ -4526,6 +4579,25 @@ function WorkEntryForm({ init, clients, onSave, onCancel, saving }) {
       </div>
       <div style={{ background: "#F7F5FF", border: "1px solid var(--line)", borderRadius: 10, padding: "14px 16px", marginBottom: 14 }}>
         <div style={{ fontSize: 9, letterSpacing: ".12em", textTransform: "uppercase", color: "var(--ink)", fontWeight: 600, marginBottom: 12, opacity: .7 }}>Fakturované položky</div>
+        <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+          <button type="button" onClick={() => set("billing_type", "hourly")}
+            style={{ flex: 1, padding: "7px 10px", borderRadius: 8, border: `1px solid ${!isFlat ? "var(--ink)" : "var(--line)"}`, background: !isFlat ? "var(--ink)" : "#fff", color: !isFlat ? "#fff" : "var(--mut)", fontSize: 11.5, fontWeight: 500, cursor: "pointer" }}>
+            Hodinová sazba
+          </button>
+          <button type="button" onClick={() => set("billing_type", "flat_rate")}
+            style={{ flex: 1, padding: "7px 10px", borderRadius: 8, border: `1px solid ${isFlat ? "var(--ink)" : "var(--line)"}`, background: isFlat ? "var(--ink)" : "#fff", color: isFlat ? "#fff" : "var(--mut)", fontSize: 11.5, fontWeight: 500, cursor: "pointer" }}>
+            Paušální částka
+          </button>
+        </div>
+        {isFlat ? (
+          <div className="frow" style={{ marginBottom: 0 }}>
+            <label>Paušální částka (Kč, bez DPH)</label>
+            <input type="number" min="0" value={d.flat_amount} onChange={e => set("flat_amount", e.target.value)} placeholder="např. 12500" />
+            <div style={{ fontSize: 10.5, color: "var(--mut)", marginTop: 5 }}>
+              Hodiny se nefakturují — na faktuře se objeví jen popis úkonu a tato částka (se štítkem „paušál"). Reálně odpracovaný čas si veď v poli „Reálné hodiny" níže — bude se počítat do efektivní hodinovky.
+            </div>
+          </div>
+        ) : (
         <div className="three">
           <div className="frow" style={{ marginBottom: 0 }}>
             <label>Hodiny (faktur.)</label>
@@ -4541,6 +4613,7 @@ function WorkEntryForm({ init, clients, onSave, onCancel, saving }) {
               style={{ background: "#fff", color: "var(--ink)", fontFamily: "Fraunces, serif", fontWeight: 300, fontSize: 15 }} />
           </div>
         </div>
+        )}
         <div className="two" style={{ marginTop: 10 }}>
           <div className="frow" style={{ marginBottom: 0 }}>
             <label>Notář — přefakturace (Kč, bez DPH)</label>
@@ -5079,9 +5152,9 @@ function InvoiceDetail({ inv, clients, onBack, onEdit, onDelete }) {
         <tbody>
           {items.map((it, i) => (
             <tr key={i}>
-              <td>{it.description || "—"}</td>
-              <td>{it.hours ? `${it.hours} h` : "—"}</td>
-              <td>{it.rate ? fmtKc(it.rate) : "—"}</td>
+              <td>{it.description || "—"}{it.flat_rate && <span style={{ marginLeft: 7, fontSize: 9, fontWeight: 600, letterSpacing: ".06em", textTransform: "uppercase", color: "#5B21B6", background: "#F3F0FF", border: "1px solid #DDD6FE", borderRadius: 4, padding: "1px 6px" }}>paušál</span>}</td>
+              <td>{it.flat_rate ? "—" : (it.hours ? `${it.hours} h` : "—")}</td>
+              <td>{it.flat_rate ? "—" : (it.rate ? fmtKc(it.rate) : "—")}</td>
               <td style={{ textAlign: "right", fontFamily: "Fraunces, serif", fontWeight: 300 }}>{fmtKc(it.amount)}</td>
             </tr>
           ))}
@@ -6375,7 +6448,7 @@ export default function MauxCRM() {
       id: uid(), invoice_number: nextInvoiceNumber(invoices),
       client_id: clientId, issue_date: today(), due_date: nextDueDate(),
       items: [
-        ...entries.filter(e=>e.hours>0).map(e=>({ id: uid(), description: e.description, hours: e.hours, rate: e.rate, amount: e.amount, no_vat: false })),
+        ...entries.filter(e=>e.hours>0 || e.billing_type === "flat_rate").map(e=>({ id: uid(), description: e.description, hours: e.hours, rate: e.rate, amount: e.amount, no_vat: false, flat_rate: e.billing_type === "flat_rate" })),
         ...(notary>0 ? [{ id: uid(), description: "Přefakturace — notář", hours:0, rate:0, amount:notary, no_vat:true }] : []),
         ...(admin>0 ? [{ id: uid(), description: "Správní poplatek — přefakturace", hours:0, rate:0, amount:admin, no_vat:true }] : []),
       ],
