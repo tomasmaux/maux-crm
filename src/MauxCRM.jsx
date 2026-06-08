@@ -5396,6 +5396,7 @@ const MAY_2026_RECEIPTS = [
 // jak je asistentka skenuje a nahrává. Stejný dedup-safe import princip (pevná ID).
 const JUNE_2026_RECEIPTS = [
   { id: "imp_cer26_01", date: "2026-06-01", label: "Blažek Praha – kožená taška", gross: 12089, rate: 21, vat: 2098 },
+  { id: "imp_cer26_02", date: "2026-06-07", label: "IKEA – vybavení (úschovné schránky, ručníky, doplňky)", gross: 9463, rate: 21, vat: 1642 },
 ];
 
 function DphKalkulacka({ odpItem, onSaveFinance }) {
