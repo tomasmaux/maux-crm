@@ -52,6 +52,20 @@ function savePrivacyMode(v) {
   try { localStorage.setItem("maux_privacy", v ? "1" : "0"); } catch (e) {}
 }
 
+// ── Zápisníček: rychlé osobní poznámky v menu, vidět napříč všemi listy appky ──
+function loadZapisnicek() {
+  try { return localStorage.getItem("maux_zapisnicek") || ""; } catch (e) { return ""; }
+}
+function saveZapisnicek(v) {
+  try { localStorage.setItem("maux_zapisnicek", v); } catch (e) {}
+}
+function loadZapisnicekOpen() {
+  try { return localStorage.getItem("maux_zapisnicek_open") !== "0"; } catch (e) { return true; }
+}
+function saveZapisnicekOpen(v) {
+  try { localStorage.setItem("maux_zapisnicek_open", v ? "1" : "0"); } catch (e) {}
+}
+
 const fmtKc = (n) => maskNum(new Intl.NumberFormat("cs-CZ").format(Math.round(n || 0))) + " Kč";
 const fmtDate = (d) => d ? new Date(d).toLocaleDateString("cs-CZ", { day: "numeric", month: "numeric", year: "numeric" }) : "—";
 const uid = () => "id_" + Math.random().toString(36).slice(2, 10);
@@ -862,6 +876,24 @@ function ServiceDots({ list, max = 3 }) {
 }
 
 function Sidebar({ mod, setMod, onLogout, privacyMode, onTogglePrivacy }) {
+  // — Zápisníček: lokální poznámkový blok, vidět napříč všemi listy (sidebar se nikdy neodmountuje) —
+  const [note, setNote] = useState(loadZapisnicek);
+  const [noteOpen, setNoteOpen] = useState(loadZapisnicekOpen);
+  const [noteSavedAt, setNoteSavedAt] = useState(null);
+  const noteSaveTimer = useRef(null);
+
+  const onNoteChange = (v) => {
+    setNote(v);
+    if (noteSaveTimer.current) clearTimeout(noteSaveTimer.current);
+    noteSaveTimer.current = setTimeout(() => {
+      saveZapisnicek(v);
+      setNoteSavedAt(new Date());
+    }, 500);
+  };
+  const toggleNote = () => {
+    setNoteOpen(o => { const n = !o; saveZapisnicekOpen(n); return n; });
+  };
+
   return (
     <aside className="sb">
       <div className="brand">
@@ -884,6 +916,32 @@ function Sidebar({ mod, setMod, onLogout, privacyMode, onTogglePrivacy }) {
           </button>
         ))}
       </nav>
+
+      {/* Zápisníček — interaktivní poznámkový blok, vidět napříč všemi listy aplikace */}
+      <div style={{ margin: "14px 2px 0", border: "1px solid var(--line)", borderRadius: 10, background: "#FAFAFE", overflow: "hidden", flexShrink: 0 }}>
+        <button onClick={toggleNote}
+          style={{ width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between", padding: "9px 11px", background: "none", border: "none", cursor: "pointer" }}>
+          <span style={{ fontSize: 10, fontWeight: 600, letterSpacing: ".14em", textTransform: "uppercase", color: "var(--ink)", opacity: .72, display: "flex", alignItems: "center", gap: 6 }}>
+            📝 Zápisníček
+          </span>
+          <span style={{ fontSize: 13, color: "var(--mut)", lineHeight: 1 }}>{noteOpen ? "–" : "+"}</span>
+        </button>
+        {noteOpen && (
+          <div style={{ padding: "0 10px 10px" }}>
+            <textarea
+              value={note}
+              onChange={e => onNoteChange(e.target.value)}
+              placeholder="Rychlá poznámka, nápad, co nezapomenout…"
+              rows={6}
+              style={{ width: "100%", resize: "vertical", fontSize: 11.5, lineHeight: 1.55, padding: "8px 9px", border: "1px solid var(--line2)", borderRadius: 7, outline: "none", fontFamily: "inherit", color: "var(--txt)", background: "#fff" }}
+            />
+            <div style={{ fontSize: 9, color: "var(--mut)", marginTop: 4, textAlign: "right", opacity: .8 }}>
+              {noteSavedAt ? `uloženo ${noteSavedAt.toLocaleTimeString("cs-CZ", { hour: "2-digit", minute: "2-digit" })} · jen v tomto prohlížeči` : "ukládá se automaticky · jen v tomto prohlížeči"}
+            </div>
+          </div>
+        )}
+      </div>
+
       <div className="sbfoot">
         Mgr. Tomáš Maux<br />
         Poděbrady · {new Date().getFullYear()}<br />
