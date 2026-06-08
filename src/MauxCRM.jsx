@@ -31,15 +31,20 @@ const SERVICE_COLORS = {
 const ALL_SERVICES = Object.keys(SERVICE_COLORS);
 
 const MODULES = [
-  { key: "dashboard",  label: "Přehled",      live: true },
-  { key: "vykaz",      label: "Výkaz práce",  live: true },
-  { key: "fakturace",  label: "Fakturace",    live: true },
-  { key: "klienti",    label: "Klienti",      live: true },
-  { key: "uschovy",    label: "Úschovy",      live: true },
-  { key: "dane",       label: "Daně",         live: true },
-  { key: "ostatni",    label: "Ostatní",      live: true },
-  { key: "happy",      label: "Happy Life",   live: false, desc: "Osobní finance — spoření, majetek, přehledy." },
+  { key: "dashboard",  label: "Přehled",        live: true },
+  { key: "vykaz",      label: "Výkaz práce",    live: true },
+  { key: "fakturace",  label: "Fakturace",      live: true },
+  { key: "klienti",    label: "Klienti",        live: true },
+  { key: "uschovy",    label: "Úschovy",        live: true },
+  { key: "dane",       label: "Daně",           live: true },
+  { key: "ostatni",    label: "Ostatní",        live: true },
+  { key: "asistent",   label: "Josef · Asistent", live: true },
 ];
+
+// ── Asistentský portál — přístup přes vlastní Supabase Auth účet ──
+// Josef Řehák (asistent@maux.cz) vidí po přihlášení jen VÝKAZY a DOCHÁZKU,
+// žádná čísla ani fakturace. Tomas vidí Josefův přehled v listu "Josef · Asistent".
+const ASSISTANT_EMAILS = ["asistent@maux.cz"];
 
 // ── Privacy mode: čistě zobrazovací maska částek, NIKDY nepřepisuje reálná data ──
 let PRIVACY_MODE = false;
@@ -440,6 +445,40 @@ async function upsertInvoice(inv) {
 async function deleteInvoiceDb(id) {
   const { error } = await supabase.from("invoices").delete().eq("id", id);
   if (error) throw error;
+}
+
+/* ─── ASISTENT DATA LAYER ─── */
+async function fetchAssistantWorkLogs(email) {
+  const { data, error } = await supabase.from("assistant_work_logs").select("*").eq("assistant_email", email).order("entry_date", { ascending: false });
+  if (error) throw error;
+  return data || [];
+}
+async function upsertAssistantWorkLog(log) {
+  const { error } = await supabase.from("assistant_work_logs").upsert({ ...log, updated_at: new Date().toISOString() });
+  if (error) throw error;
+}
+async function deleteAssistantWorkLog(id) {
+  const { error } = await supabase.from("assistant_work_logs").delete().eq("id", id);
+  if (error) throw error;
+}
+async function fetchAssistantAvailability(email, yearMonth) {
+  const { data, error } = await supabase.from("assistant_availability").select("*").eq("assistant_email", email).eq("year_month", yearMonth).maybeSingle();
+  if (error) throw error;
+  return data;
+}
+async function upsertAssistantAvailability(rec) {
+  const { error } = await supabase.from("assistant_availability").upsert({ ...rec, updated_at: new Date().toISOString() }, { onConflict: "assistant_email,year_month" });
+  if (error) throw error;
+}
+async function fetchAssistantAttendance(email) {
+  const { data, error } = await supabase.from("assistant_attendance").select("*").eq("assistant_email", email).order("date", { ascending: false }).limit(60);
+  if (error) throw error;
+  return data || [];
+}
+async function upsertAssistantAttendance(rec) {
+  const { data, error } = await supabase.from("assistant_attendance").upsert(rec, { onConflict: "assistant_email,date" }).select().single();
+  if (error) throw error;
+  return data;
 }
 
 /* ─── HELPERS ─── */
@@ -6301,6 +6340,500 @@ function Placeholder({ m }) {
   );
 }
 
+/* ══════════════════════════════════════════════════════════════════
+   ASISTENTSKÝ PORTÁL — Josef Řehák
+   Omezené prostředí: VÝKAZY + DOCHÁZKA, bez jakýchkoliv finančních dat.
+   Přístup přes supabase auth s emailem asistent@maux.cz.
+   ══════════════════════════════════════════════════════════════════ */
+
+function AsistentVykazy({ email, clients }) {
+  const [logs, setLogs] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [form, setForm] = useState({ id: uid(), client_id: "", entry_date: today(), description: "", hours: "", notes: "" });
+  const [clientQ, setClientQ] = useState("");
+  const [clientOpen, setClientOpen] = useState(false);
+  const set = (k, v) => setForm(p => ({ ...p, [k]: v }));
+
+  useEffect(() => {
+    fetchAssistantWorkLogs(email).then(setLogs).catch(console.error).finally(() => setLoading(false));
+  }, [email]);
+
+  const filteredClients = (() => {
+    const q = clientQ.trim().toLowerCase();
+    return clients.filter(c => !q || (c.name||"").toLowerCase().includes(q) || (c.ico||"").includes(q)).sort((a,b)=>a.name.localeCompare(b.name,"cs")).slice(0,8);
+  })();
+  const pickClient = (c) => { set("client_id", c.id); setClientQ(c.name); setClientOpen(false); };
+
+  const save = async () => {
+    if (!form.client_id || !form.description.trim() || !form.hours) return;
+    setSaving(true);
+    try {
+      const rec = { ...form, assistant_email: email, hours: Number(form.hours)||0 };
+      await upsertAssistantWorkLog(rec);
+      const updated = await fetchAssistantWorkLogs(email);
+      setLogs(updated);
+      setForm({ id: uid(), client_id: "", entry_date: today(), description: "", hours: "", notes: "" });
+      setClientQ("");
+    } catch(e) { alert("Chyba: " + e.message); }
+    finally { setSaving(false); }
+  };
+
+  const archive = async (id) => {
+    const log = logs.find(l => l.id === id);
+    if (!log) return;
+    await upsertAssistantWorkLog({ ...log, status: log.status === "archived" ? "logged" : "archived" });
+    setLogs(await fetchAssistantWorkLogs(email));
+  };
+
+  const del = async (id) => {
+    if (!window.confirm("Smazat tento záznam?")) return;
+    await deleteAssistantWorkLog(id);
+    setLogs(logs.filter(l => l.id !== id));
+  };
+
+  const clientName = (id) => clients.find(c=>c.id===id)?.name || "—";
+
+  return (
+    <div style={{ padding: "32px 28px" }}>
+      <h2 style={{ fontFamily: "Fraunces, serif", fontWeight: 300, fontSize: 28, color: "var(--ink)", marginBottom: 6 }}>Výkaz práce</h2>
+      <p style={{ fontSize: 12, color: "var(--mut)", marginBottom: 28 }}>Zapisuj odpracovaný čas na každou zakázku. Záznamy jsou interní — do fakturace nevstoupí.</p>
+
+      {/* Formulář nového záznamu */}
+      <div style={{ background: "#F7F5FF", border: "1px solid var(--line)", borderRadius: 12, padding: "18px 20px", marginBottom: 28 }}>
+        <div style={{ fontSize: 9, letterSpacing: ".14em", textTransform: "uppercase", fontWeight: 600, color: "var(--ink)", opacity: .7, marginBottom: 14 }}>Nový záznam</div>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 12 }}>
+          <div style={{ position: "relative" }}>
+            <label style={{ display: "block", fontSize: 10, fontWeight: 600, color: "var(--mut)", marginBottom: 5, letterSpacing: ".08em", textTransform: "uppercase" }}>Klient *</label>
+            <input value={clientQ} onChange={e=>{setClientQ(e.target.value);setClientOpen(true);if(form.client_id)set("client_id","");}}
+              onFocus={()=>setClientOpen(true)} onBlur={()=>setTimeout(()=>setClientOpen(false),150)}
+              placeholder="Hledat klienta…" autoComplete="off"
+              style={{ width:"100%", padding:"8px 10px", border:"1px solid var(--line2)", borderRadius:7, fontSize:13, outline:"none", fontFamily:"inherit" }} />
+            {clientOpen && filteredClients.length > 0 && (
+              <div style={{ position:"absolute", top:"100%", left:0, right:0, zIndex:30, background:"#fff", border:"1px solid var(--line)", borderRadius:8, marginTop:3, boxShadow:"0 8px 24px rgba(0,0,0,.1)", maxHeight:200, overflowY:"auto" }}>
+                {filteredClients.map(c => (
+                  <div key={c.id} onMouseDown={()=>pickClient(c)}
+                    style={{ padding:"8px 12px", fontSize:12.5, cursor:"pointer", borderBottom:"1px solid var(--line)", background: form.client_id===c.id?"#F7F5FF":"#fff" }}>
+                    <div style={{ fontWeight:500, color:"var(--ink)" }}>{c.name}</div>
+                    {c.ico && <div style={{ fontSize:10, color:"var(--mut)" }}>IČO {c.ico}</div>}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+          <div>
+            <label style={{ display:"block", fontSize:10, fontWeight:600, color:"var(--mut)", marginBottom:5, letterSpacing:".08em", textTransform:"uppercase" }}>Datum</label>
+            <input type="date" value={form.entry_date} onChange={e=>set("entry_date",e.target.value)}
+              style={{ width:"100%", padding:"8px 10px", border:"1px solid var(--line2)", borderRadius:7, fontSize:13, outline:"none", fontFamily:"inherit" }} />
+          </div>
+        </div>
+        <div style={{ marginBottom:12 }}>
+          <label style={{ display:"block", fontSize:10, fontWeight:600, color:"var(--mut)", marginBottom:5, letterSpacing:".08em", textTransform:"uppercase" }}>Popis úkonu *</label>
+          <textarea value={form.description} onChange={e=>set("description",e.target.value)} rows={3} placeholder="Příprava podkladů, výzkum judikatury, komunikace s klientem…"
+            style={{ width:"100%", padding:"8px 10px", border:"1px solid var(--line2)", borderRadius:7, fontSize:13, resize:"vertical", outline:"none", fontFamily:"inherit", lineHeight:1.5 }} />
+        </div>
+        <div style={{ display:"grid", gridTemplateColumns:"120px 1fr", gap:12, alignItems:"end" }}>
+          <div>
+            <label style={{ display:"block", fontSize:10, fontWeight:600, color:"var(--mut)", marginBottom:5, letterSpacing:".08em", textTransform:"uppercase" }}>Hodiny *</label>
+            <input type="number" step="0.25" min="0" value={form.hours} onChange={e=>set("hours",e.target.value)} placeholder="0"
+              style={{ width:"100%", padding:"8px 10px", border:"1px solid var(--line2)", borderRadius:7, fontSize:13, outline:"none", fontFamily:"inherit" }} />
+          </div>
+          <div style={{ textAlign:"right" }}>
+            <button onClick={save} disabled={saving || !form.client_id || !form.description.trim() || !form.hours}
+              style={{ padding:"9px 22px", background:"var(--ink)", color:"#fff", border:"none", borderRadius:8, fontSize:13, fontWeight:500, cursor:"pointer", opacity: (!form.client_id||!form.description.trim()||!form.hours)?0.5:1 }}>
+              {saving ? "Ukládám…" : "Uložit záznam"}
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* Seznam záznamů */}
+      {loading ? <div style={{ color:"var(--mut)", fontSize:13 }}>Načítám…</div> : logs.length === 0 ? (
+        <div style={{ color:"var(--mut)", fontSize:13, textAlign:"center", padding:"40px 0" }}>Zatím žádné záznamy — přidej první výkaz výš.</div>
+      ) : (
+        <div style={{ border:"1px solid var(--line)", borderRadius:12, overflow:"hidden" }}>
+          {logs.map((l, i) => (
+            <div key={l.id} style={{ display:"flex", alignItems:"flex-start", gap:14, padding:"14px 16px", borderBottom: i<logs.length-1?"1px solid var(--line)":"none", background: l.status==="archived"?"#FAFAFA":"#fff", opacity: l.status==="archived"?0.65:1 }}>
+              <div style={{ flex:1, minWidth:0 }}>
+                <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:3 }}>
+                  <span style={{ fontSize:12, fontWeight:600, color:"var(--ink)" }}>{clientName(l.client_id)}</span>
+                  <span style={{ fontSize:10.5, color:"var(--mut)" }}>· {fmtDate(l.entry_date)}</span>
+                  {l.status === "archived" && <span style={{ fontSize:9, background:"#F0FDF4", color:"#065F46", border:"1px solid #BBF7D0", borderRadius:4, padding:"1px 6px", fontWeight:600 }}>archivováno</span>}
+                </div>
+                <div style={{ fontSize:12.5, color:"var(--txt)", lineHeight:1.5 }}>{l.description}</div>
+              </div>
+              <div style={{ flexShrink:0, textAlign:"right" }}>
+                <div style={{ fontFamily:"Fraunces, serif", fontWeight:300, fontSize:16, color:"var(--ink)" }}>{l.hours} h</div>
+                <div style={{ display:"flex", gap:6, marginTop:6 }}>
+                  <button onClick={()=>archive(l.id)} title={l.status==="archived"?"Vrátit":"Archivovat"}
+                    style={{ fontSize:10, padding:"3px 8px", borderRadius:5, border:"1px solid var(--line2)", background:"#fff", cursor:"pointer", color:"var(--mut)" }}>
+                    {l.status==="archived" ? "↩ vrátit" : "✓ hotovo"}
+                  </button>
+                  <button onClick={()=>del(l.id)} style={{ fontSize:10, padding:"3px 8px", borderRadius:5, border:"1px solid #FECACA", background:"#FEF2F2", cursor:"pointer", color:"#DC2626" }}>✕</button>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function AsistentDochazka({ email }) {
+  const now = new Date();
+  const [viewMonth, setViewMonth] = useState(() => {
+    // default: příští měsíc pro plánování
+    const d = new Date(now.getFullYear(), now.getMonth()+1, 1);
+    return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`;
+  });
+  const [availability, setAvailability] = useState(null);
+  const [attendance, setAttendance] = useState([]);
+  const [savingAvail, setSavingAvail] = useState(false);
+  const [checkinSaving, setCheckinSaving] = useState(false);
+
+  // Načti dostupnost pro vybraný měsíc
+  useEffect(() => {
+    fetchAssistantAvailability(email, viewMonth).then(setAvailability).catch(console.error);
+  }, [email, viewMonth]);
+
+  useEffect(() => {
+    fetchAssistantAttendance(email).then(setAttendance).catch(console.error);
+  }, [email]);
+
+  const plannedDates = availability?.planned_dates || [];
+
+  const toggleDay = async (dateStr) => {
+    const newDates = plannedDates.includes(dateStr)
+      ? plannedDates.filter(d => d !== dateStr)
+      : [...plannedDates, dateStr].sort();
+    setSavingAvail(true);
+    try {
+      const rec = { id: availability?.id || uid(), assistant_email: email, year_month: viewMonth, planned_dates: newDates };
+      await upsertAssistantAvailability(rec);
+      setAvailability(rec);
+    } catch(e) { alert("Chyba: " + e.message); }
+    finally { setSavingAvail(false); }
+  };
+
+  // Generuj dny v měsíci (jen pracovní — po-pá)
+  const monthDays = (() => {
+    const [y, m] = viewMonth.split("-").map(Number);
+    const days = [];
+    const d = new Date(y, m-1, 1);
+    while (d.getMonth() === m-1) {
+      const dow = d.getDay();
+      if (dow !== 0 && dow !== 6) days.push(d.toISOString().slice(0,10));
+      d.setDate(d.getDate()+1);
+    }
+    return days;
+  })();
+
+  // Docházka — dnešní záznam
+  const todayStr = today();
+  const todayRec = attendance.find(a => a.date === todayStr);
+  const isPlannedToday = plannedDates.includes(todayStr) || attendance.some(a=>a.date===todayStr);
+
+  const checkAction = async (type) => {
+    setCheckinSaving(true);
+    try {
+      const ts = new Date().toISOString();
+      const rec = {
+        id: todayRec?.id || uid(),
+        assistant_email: email,
+        date: todayStr,
+        check_in: type==="in" ? ts : (todayRec?.check_in || ts),
+        check_out: type==="out" ? ts : (todayRec?.check_out || null),
+      };
+      const updated = await upsertAssistantAttendance(rec);
+      setAttendance(p => { const r = p.filter(a=>a.date!==todayStr); return [updated||rec, ...r]; });
+    } catch(e) { alert("Chyba: " + e.message); }
+    finally { setCheckinSaving(false); }
+  };
+
+  const fmtTime = (ts) => ts ? new Date(ts).toLocaleTimeString("cs-CZ",{hour:"2-digit",minute:"2-digit"}) : "—";
+  const monthNames = ["leden","únor","březen","duben","květen","červen","červenec","srpen","září","říjen","listopad","prosinec"];
+  const [vy, vm] = viewMonth.split("-").map(Number);
+
+  return (
+    <div style={{ padding:"32px 28px" }}>
+      <h2 style={{ fontFamily:"Fraunces, serif", fontWeight:300, fontSize:28, color:"var(--ink)", marginBottom:6 }}>Docházka</h2>
+
+      {/* Sekce 1 — Příchod / Odchod DNES */}
+      <div style={{ background:"#fff", border:"1px solid var(--line)", borderRadius:12, padding:"18px 20px", marginBottom:24 }}>
+        <div style={{ fontSize:9, letterSpacing:".14em", textTransform:"uppercase", fontWeight:600, color:"var(--ink)", opacity:.7, marginBottom:14 }}>Dnes — {fmtDate(todayStr)}</div>
+        <div style={{ display:"flex", alignItems:"center", gap:16, flexWrap:"wrap" }}>
+          <button onClick={()=>checkAction("in")} disabled={checkinSaving || !!todayRec?.check_in}
+            style={{ padding:"10px 20px", borderRadius:9, border:"none", background: todayRec?.check_in?"#F0FDF4":"var(--ink)", color: todayRec?.check_in?"#065F46":"#fff", fontWeight:600, fontSize:13, cursor: todayRec?.check_in?"default":"pointer", opacity: todayRec?.check_in?1:1 }}>
+            {todayRec?.check_in ? `✓ Příchod ${fmtTime(todayRec.check_in)}` : "Přišel jsem 👋"}
+          </button>
+          <button onClick={()=>checkAction("out")} disabled={checkinSaving || !todayRec?.check_in || !!todayRec?.check_out}
+            style={{ padding:"10px 20px", borderRadius:9, border:"none", background: todayRec?.check_out?"#F0FDF4": (!todayRec?.check_in?"#F3F4F6":"#1a1a2e"), color: todayRec?.check_out?"#065F46":"#fff", fontWeight:600, fontSize:13, cursor: (!todayRec?.check_in||todayRec?.check_out)?"default":"pointer", opacity: !todayRec?.check_in?0.4:1 }}>
+            {todayRec?.check_out ? `✓ Odchod ${fmtTime(todayRec.check_out)}` : "Odcházím 🚪"}
+          </button>
+          {todayRec?.check_in && todayRec?.check_out && (
+            <div style={{ fontSize:12, color:"var(--mut)" }}>
+              Odpracováno: {Math.round((new Date(todayRec.check_out)-new Date(todayRec.check_in))/36e5*10)/10} h
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Sekce 2 — Plánování příštího měsíce */}
+      <div style={{ background:"#fff", border:"1px solid var(--line)", borderRadius:12, padding:"18px 20px", marginBottom:24 }}>
+        <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:14 }}>
+          <div style={{ fontSize:9, letterSpacing:".14em", textTransform:"uppercase", fontWeight:600, color:"var(--ink)", opacity:.7 }}>
+            Plánovaná docházka — {monthNames[vm-1]} {vy}
+          </div>
+          <div style={{ display:"flex", gap:8, alignItems:"center" }}>
+            <button onClick={()=>{ const d=new Date(vy,vm-2,1); setViewMonth(`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`); }}
+              style={{ padding:"4px 10px", border:"1px solid var(--line)", borderRadius:6, background:"#fff", cursor:"pointer", fontSize:12 }}>←</button>
+            <button onClick={()=>{ const d=new Date(vy,vm,1); setViewMonth(`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`); }}
+              style={{ padding:"4px 10px", border:"1px solid var(--line)", borderRadius:6, background:"#fff", cursor:"pointer", fontSize:12 }}>→</button>
+          </div>
+        </div>
+        <div style={{ fontSize:11, color:"var(--mut)", marginBottom:12 }}>
+          Klikni na dny, kdy budeš v kanceláři. Uloží se automaticky. {savingAvail && "Ukládám…"}
+        </div>
+        <div style={{ display:"grid", gridTemplateColumns:"repeat(5, 1fr)", gap:6 }}>
+          {monthDays.map(d => {
+            const isSelected = plannedDates.includes(d);
+            const isPast = d < todayStr;
+            const dayNum = new Date(d).getDate();
+            const dayName = ["Ne","Po","Út","St","Čt","Pá","So"][new Date(d).getDay()];
+            return (
+              <button key={d} onClick={()=>!isPast&&toggleDay(d)} disabled={isPast}
+                style={{ padding:"8px 4px", borderRadius:8, border:`1px solid ${isSelected?"var(--ink)":"var(--line)"}`, background: isSelected?"var(--ink)":"#fff", color: isSelected?"#fff": isPast?"#ccc":"var(--txt)", cursor:isPast?"default":"pointer", textAlign:"center", fontSize:11.5 }}>
+                <div style={{ fontSize:9, opacity:.7 }}>{dayName}</div>
+                <div style={{ fontWeight:600 }}>{dayNum}.</div>
+              </button>
+            );
+          })}
+        </div>
+        {plannedDates.length > 0 && (
+          <div style={{ marginTop:12, fontSize:11.5, color:"var(--mut)" }}>
+            Naplánováno: <strong style={{ color:"var(--ink)" }}>{plannedDates.filter(d=>d.startsWith(viewMonth)).length} dní</strong> v {monthNames[vm-1]} {vy}
+          </div>
+        )}
+      </div>
+
+      {/* Sekce 3 — Historie docházky */}
+      <div style={{ background:"#fff", border:"1px solid var(--line)", borderRadius:12, padding:"18px 20px" }}>
+        <div style={{ fontSize:9, letterSpacing:".14em", textTransform:"uppercase", fontWeight:600, color:"var(--ink)", opacity:.7, marginBottom:14 }}>Historie posledních příchodů</div>
+        {attendance.length === 0 ? (
+          <div style={{ fontSize:12.5, color:"var(--mut)" }}>Zatím žádné záznamy.</div>
+        ) : (
+          <table style={{ width:"100%", borderCollapse:"collapse" }}>
+            <thead>
+              <tr style={{ borderBottom:"1px solid var(--line)" }}>
+                {["Datum","Příchod","Odchod","Odpracováno"].map(h => (
+                  <th key={h} style={{ padding:"7px 10px", textAlign:"left", fontSize:9.5, letterSpacing:".1em", textTransform:"uppercase", color:"var(--mut)", fontWeight:500 }}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {attendance.slice(0,20).map((a,i) => {
+                const dur = a.check_in && a.check_out ? Math.round((new Date(a.check_out)-new Date(a.check_in))/36e5*10)/10 : null;
+                return (
+                  <tr key={a.id} style={{ borderBottom:"1px solid var(--line)", background:i%2?"#FAFAFE":"#fff" }}>
+                    <td style={{ padding:"9px 10px", fontSize:12.5 }}>{fmtDate(a.date)}</td>
+                    <td style={{ padding:"9px 10px", fontSize:12.5 }}>{fmtTime(a.check_in)}</td>
+                    <td style={{ padding:"9px 10px", fontSize:12.5 }}>{fmtTime(a.check_out)}</td>
+                    <td style={{ padding:"9px 10px", fontSize:12.5, fontWeight:500, color:"var(--ink)" }}>{dur ? `${dur} h` : "—"}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function AsistentApp({ session, onLogout }) {
+  const [mod, setMod] = useState("vykaz");
+  const [clients, setClients] = useState([]);
+  const email = session.user.email;
+
+  useEffect(() => {
+    fetchClients().then(setClients).catch(console.error);
+  }, []);
+
+  return (
+    <div className="mx">
+      <style>{CSS}</style>
+      {/* Omezený sidebar — jen VÝKAZY a DOCHÁZKA */}
+      <aside className="sb">
+        <div className="brand">
+          <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:6 }}>
+            <div style={{ width:32, height:32, borderRadius:"50%", border:"1.5px solid var(--ink)", display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0 }}>
+              <span style={{ fontFamily:"Fraunces, serif", fontSize:14, color:"var(--ink)", fontWeight:400 }}>M</span>
+            </div>
+            <div><div className="wm serif">MAUX</div></div>
+          </div>
+          <div className="sub">Legal · Asistent</div>
+          <div className="sub2">Josef Řehák</div>
+        </div>
+        <nav className="nav">
+          {[{key:"vykaz",label:"Výkaz práce"},{key:"dochazka",label:"Docházka"}].map(m=>(
+            <button key={m.key} className={"ni"+(mod===m.key?" on":"")} onClick={()=>setMod(m.key)}>{m.label}</button>
+          ))}
+        </nav>
+        <div className="sbfoot">
+          {email}<br />
+          <button onClick={onLogout}>Odhlásit se</button>
+        </div>
+      </aside>
+      {/* Obsah */}
+      <main style={{ flex:1, minWidth:0 }}>
+        {mod === "vykaz" && <AsistentVykazy email={email} clients={clients} />}
+        {mod === "dochazka" && <AsistentDochazka email={email} />}
+      </main>
+    </div>
+  );
+}
+
+/* ── Tomův přehled asistenta — modul v hlavním CRM (list "Josef · Asistent") ── */
+function AsistentPanel({ clients }) {
+  const email = "asistent@maux.cz";
+  const [logs, setLogs] = useState([]);
+  const [attendance, setAttendance] = useState([]);
+  const [availability, setAvailability] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [tab, setTab] = useState("logs");
+
+  const nextMonth = (() => {
+    const d = new Date(); d.setMonth(d.getMonth()+1);
+    return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`;
+  })();
+
+  useEffect(() => {
+    Promise.all([
+      fetchAssistantWorkLogs(email),
+      fetchAssistantAttendance(email),
+      fetchAssistantAvailability(email, nextMonth),
+    ]).then(([l,a,av])=>{ setLogs(l); setAttendance(a); setAvailability(av); }).catch(console.error).finally(()=>setLoading(false));
+  }, []);
+
+  const archiveLog = async (log) => {
+    await upsertAssistantWorkLog({ ...log, status: log.status==="archived"?"logged":"archived" });
+    setLogs(await fetchAssistantWorkLogs(email));
+  };
+
+  const clientName = (id) => clients.find(c=>c.id===id)?.name || "—";
+  const fmtTime = (ts) => ts ? new Date(ts).toLocaleTimeString("cs-CZ",{hour:"2-digit",minute:"2-digit"}) : "—";
+  const monthNames = ["leden","únor","březen","duben","květen","červen","červenec","srpen","září","říjen","listopad","prosinec"];
+  const [nmy, nmm] = nextMonth.split("-").map(Number);
+
+  if (loading) return <div className="body"><div style={{ color:"var(--mut)", padding:40 }}>Načítám data asistenta…</div></div>;
+
+  const totalHours = logs.reduce((s,l)=>s+(l.hours||0),0);
+  const activeClients = new Set(logs.map(l=>l.client_id)).size;
+  const thisMonthLogs = logs.filter(l=>(l.entry_date||"").startsWith(`${new Date().getFullYear()}-${String(new Date().getMonth()+1).padStart(2,"0")}`));
+
+  return (
+    <div className="body">
+      <div className="top" style={{ marginBottom:0 }}>
+        <h1 style={{ fontFamily:"Fraunces, serif", fontWeight:300, fontSize:30 }}>Josef · Asistent</h1>
+        <p style={{ color:"var(--mut)", fontSize:13, marginTop:4 }}>Interní přehled výkazů, docházky a plánování — {email}</p>
+      </div>
+
+      {/* KPI řada */}
+      <div style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:12, margin:"20px 28px 0" }}>
+        {[
+          { label:"Celkem hodin", value: `${totalHours} h`, sub:"všechny záznamy" },
+          { label:"Hodiny tento měsíc", value: `${thisMonthLogs.reduce((s,l)=>s+(l.hours||0),0)} h`, sub:`${thisMonthLogs.length} záznamů` },
+          { label:"Klientů s výkazem", value: activeClients, sub:"unikátní klienti" },
+        ].map(k=>(
+          <div key={k.label} style={{ background:"#fff", border:"1px solid var(--line)", borderRadius:12, padding:"14px 18px" }}>
+            <div style={{ fontSize:9.5, letterSpacing:".12em", textTransform:"uppercase", color:"var(--mut)", marginBottom:4 }}>{k.label}</div>
+            <div style={{ fontFamily:"Fraunces, serif", fontWeight:300, fontSize:24, color:"var(--ink)" }}>{k.value}</div>
+            <div style={{ fontSize:10.5, color:"var(--mut)", marginTop:2 }}>{k.sub}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* Záložky */}
+      <div style={{ display:"flex", gap:4, margin:"20px 28px 0", borderBottom:"1px solid var(--line)", paddingBottom:0 }}>
+        {[{k:"logs",l:"Výkazy práce"},{k:"dochazka",l:"Docházka"},{k:"plan",l:`Plán ${monthNames[nmm-1]}`}].map(t=>(
+          <button key={t.k} onClick={()=>setTab(t.k)}
+            style={{ padding:"9px 16px", border:"none", borderBottom: tab===t.k?"2px solid var(--ink)":"2px solid transparent", background:"none", cursor:"pointer", fontSize:12.5, fontWeight: tab===t.k?600:400, color: tab===t.k?"var(--ink)":"var(--mut)" }}>
+            {t.l}
+          </button>
+        ))}
+      </div>
+
+      <div style={{ padding:"20px 28px" }}>
+        {tab === "logs" && (
+          logs.length === 0 ? <div style={{ color:"var(--mut)",fontSize:13 }}>Josef zatím nemá žádné záznamy.</div> : (
+            <div style={{ border:"1px solid var(--line)", borderRadius:12, overflow:"hidden" }}>
+              {logs.map((l,i)=>(
+                <div key={l.id} style={{ display:"flex", alignItems:"flex-start", gap:14, padding:"13px 16px", borderBottom:i<logs.length-1?"1px solid var(--line)":"none", background:l.status==="archived"?"#F9FFF9":"#fff", opacity:l.status==="archived"?0.75:1 }}>
+                  <div style={{ flex:1 }}>
+                    <div style={{ display:"flex", gap:8, alignItems:"center", marginBottom:3 }}>
+                      <span style={{ fontSize:12, fontWeight:600, color:"var(--ink)" }}>{clientName(l.client_id)}</span>
+                      <span style={{ fontSize:10.5, color:"var(--mut)" }}>· {fmtDate(l.entry_date)}</span>
+                      {l.status==="archived"&&<span style={{ fontSize:9, background:"#F0FDF4", color:"#065F46", border:"1px solid #BBF7D0", borderRadius:4, padding:"1px 6px", fontWeight:600 }}>archivováno</span>}
+                    </div>
+                    <div style={{ fontSize:12.5, color:"var(--txt)", lineHeight:1.5 }}>{l.description}</div>
+                  </div>
+                  <div style={{ flexShrink:0, textAlign:"right" }}>
+                    <div style={{ fontFamily:"Fraunces, serif", fontWeight:300, fontSize:18, color:"var(--ink)" }}>{l.hours} h</div>
+                    <button onClick={()=>archiveLog(l)} style={{ marginTop:6, fontSize:10, padding:"3px 8px", borderRadius:5, border:"1px solid var(--line2)", background:"#fff", cursor:"pointer", color:"var(--mut)" }}>
+                      {l.status==="archived"?"↩ vrátit":"✓ archivovat"}
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )
+        )}
+        {tab === "dochazka" && (
+          attendance.length === 0 ? <div style={{ color:"var(--mut)",fontSize:13 }}>Žádné záznamy docházky.</div> : (
+            <table style={{ width:"100%", borderCollapse:"collapse", border:"1px solid var(--line)", borderRadius:12, overflow:"hidden" }}>
+              <thead><tr style={{ background:"var(--bg)" }}>
+                {["Datum","Příchod","Odchod","Odpracováno"].map(h=>(
+                  <th key={h} style={{ padding:"9px 14px", textAlign:"left", fontSize:9.5, letterSpacing:".1em", textTransform:"uppercase", color:"var(--mut)", fontWeight:500 }}>{h}</th>
+                ))}
+              </tr></thead>
+              <tbody>
+                {attendance.map((a,i)=>{
+                  const dur = a.check_in&&a.check_out?Math.round((new Date(a.check_out)-new Date(a.check_in))/36e5*10)/10:null;
+                  return (
+                    <tr key={a.id} style={{ borderTop:"1px solid var(--line)", background:i%2?"#FAFAFE":"#fff" }}>
+                      <td style={{ padding:"10px 14px", fontSize:13 }}>{fmtDate(a.date)}</td>
+                      <td style={{ padding:"10px 14px", fontSize:13 }}>{fmtTime(a.check_in)}</td>
+                      <td style={{ padding:"10px 14px", fontSize:13 }}>{fmtTime(a.check_out)}</td>
+                      <td style={{ padding:"10px 14px", fontSize:13, fontWeight:500, color:"var(--ink)" }}>{dur?`${dur} h`:"—"}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          )
+        )}
+        {tab === "plan" && (
+          <div>
+            <p style={{ fontSize:12.5, color:"var(--mut)", marginBottom:16 }}>Dny, které si Josef naplánoval v kanceláři — {monthNames[nmm-1]} {nmy}</p>
+            {(!availability || availability.planned_dates.length === 0) ? (
+              <div style={{ color:"var(--mut)", fontSize:13 }}>Josef ještě nevyplnil plánovanou docházku na {monthNames[nmm-1]}.</div>
+            ) : (
+              <div style={{ display:"flex", flexWrap:"wrap", gap:8 }}>
+                {availability.planned_dates.map(d=>(
+                  <div key={d} style={{ padding:"8px 14px", background:"#F7F5FF", border:"1px solid var(--ink)", borderRadius:8, fontSize:12.5, fontWeight:500, color:"var(--ink)" }}>
+                    {fmtDate(d)}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function Lock({ onOk }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -6653,6 +7186,11 @@ export default function MauxCRM() {
   if (passwordRecovery) return <div className="mx"><style>{CSS}</style><PasswordReset onDone={() => setPasswordRecovery(false)} /></div>;
   if (!session) return <div className="mx"><style>{CSS}</style><Lock onOk={() => {}} /></div>;
 
+  // ── Asistentský portál: Josef vidí jen VÝKAZY + DOCHÁZKA, žádná čísla ──
+  if (ASSISTANT_EMAILS.includes(session.user.email)) {
+    return <AsistentApp session={session} onLogout={handleLogout} />;
+  }
+
   return (
     <div className="mx">
       <style>{CSS}</style>
@@ -6799,6 +7337,9 @@ export default function MauxCRM() {
               onDeleteFinance={deleteFinanceItem}
             />
           )}
+
+          {/* ASISTENT — Tomův přehled Josefových výkazů a docházky */}
+          {mod === "asistent" && <AsistentPanel clients={clients} />}
         </div>
       </div>
 
