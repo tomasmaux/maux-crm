@@ -6345,6 +6345,167 @@ function Placeholder({ m }) {
    Přístup přes supabase auth s emailem asistent@maux.cz.
    ══════════════════════════════════════════════════════════════════ */
 
+// ── Konstanta: denní cíl klientské práce (hodiny) ─────────────────────────────
+const ASISTENT_DAILY_H = 3;
+const UNDO_WINDOW_MS   = 10 * 60 * 1000; // 10 minut
+
+// Lokální formát data bez UTC problémů (reuse today() pattern)
+const localDs = (d) =>
+  `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
+
+// ── PŘEHLED — motivační dashboard Josefa ─────────────────────────────────────
+function AsistentPrehled({ logs, attendance }) {
+  const [tick, setTick] = useState(0);
+  useEffect(() => { const id = setInterval(()=>setTick(t=>t+1), 30000); return ()=>clearInterval(id); }, []);
+
+  const now = new Date();
+  const todayStr = today();
+
+  // Dnešní hodiny z výkazů
+  const todayLogs = logs.filter(l => l.entry_date === todayStr && l.status !== "archived");
+  const todayH    = todayLogs.reduce((s,l)=>s+(l.hours||0),0);
+  const todayPct  = Math.min(todayH / ASISTENT_DAILY_H, 1);
+
+  // Dnešní docházka — živý čítač
+  const todayAtt  = attendance.find(a=>a.date===todayStr);
+  const attDur    = todayAtt?.check_in
+    ? todayAtt.check_out
+      ? (new Date(todayAtt.check_out)-new Date(todayAtt.check_in))/36e5
+      : (Date.now()-new Date(todayAtt.check_in).getTime())/36e5
+    : 0;
+
+  // Týdenní přehled (Po–Ne, do dneška)
+  const weekMon = new Date(now);
+  weekMon.setDate(now.getDate() - (now.getDay()===0?6:now.getDay()-1));
+  weekMon.setHours(0,0,0,0);
+  const weekDays = [];
+  for (let i=0;i<7;i++) {
+    const d = new Date(weekMon); d.setDate(weekMon.getDate()+i);
+    if (d > now) break;
+    const ds = localDs(d);
+    const h  = logs.filter(l=>l.entry_date===ds&&l.status!=="archived").reduce((s,l)=>s+(l.hours||0),0);
+    weekDays.push({ ds, h, name:["Po","Út","St","Čt","Pá","So","Ne"][i], isToday: ds===todayStr });
+  }
+  const weekH       = weekDays.reduce((s,d)=>s+d.h,0);
+  const weekDone    = weekDays.filter(d=>d.h>=ASISTENT_DAILY_H).length;
+
+  // Streak: po sobě jdoucí pracovní dny s ≥ cílem
+  const streak = (() => {
+    let s=0, d=new Date(now); d.setHours(0,0,0,0);
+    for (let i=0;i<60;i++) {
+      const dow=d.getDay();
+      if (dow===0||dow===6) { d.setDate(d.getDate()-1); continue; }
+      const ds=localDs(d);
+      const h=logs.filter(l=>l.entry_date===ds&&l.status!=="archived").reduce((acc,l)=>acc+(l.hours||0),0);
+      if (h>=ASISTENT_DAILY_H) { s++; d.setDate(d.getDate()-1); } else break;
+    }
+    return s;
+  })();
+
+  // Měsíční statistiky
+  const mKey   = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,"0")}`;
+  const mLogs  = logs.filter(l=>(l.entry_date||"").startsWith(mKey)&&l.status!=="archived");
+  const mH     = mLogs.reduce((s,l)=>s+(l.hours||0),0);
+  const mDays  = new Set(mLogs.map(l=>l.entry_date)).size;
+  const mAtt   = attendance.filter(a=>a.date.startsWith(mKey)&&a.check_in).length;
+
+  const fmtH = (h) => {
+    if (!h||h<=0) return "0 h";
+    const f=Math.floor(h); const m=Math.round((h-f)*60);
+    return m>0?`${f}h ${m}m`:`${f} h`;
+  };
+  const msg = todayPct>=1
+    ? { t:"🎉 Denní cíl splněn! Parádní práce.", c:"#059669" }
+    : todayPct>=0.67 ? { t:"💪 Na dobré cestě — ještě kousek!", c:"#D97706" }
+    : todayH>0       ? { t:"⏳ Dobrý začátek, přidej ještě pár hodin.", c:"#7C3AED" }
+    :                  { t:"🌅 Nový den — zaloguj první hodiny!", c:"var(--mut)" };
+
+  return (
+    <div style={{padding:"28px 28px"}}>
+      <div style={{display:"flex",alignItems:"baseline",gap:14,marginBottom:22}}>
+        <h2 style={{fontFamily:"Fraunces,serif",fontWeight:300,fontSize:26,color:"var(--ink)",margin:0}}>Dobrý den, Josefe 👋</h2>
+        <span style={{fontSize:12,color:"var(--mut)"}}>{now.toLocaleDateString("cs-CZ",{weekday:"long",day:"numeric",month:"long"})}</span>
+      </div>
+
+      {/* ── Denní cíl — hero card ── */}
+      <div style={{background:todayPct>=1?"#F0FDF4":"#F7F5FF",border:`1.5px solid ${todayPct>=1?"#86EFAC":"#DDD6FE"}`,borderRadius:14,padding:"20px 24px",marginBottom:16}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:14}}>
+          <div>
+            <div style={{fontSize:8,letterSpacing:".22em",textTransform:"uppercase",fontWeight:700,color:todayPct>=1?"#065F46":"#5B21B6",marginBottom:6}}>DENNÍ CÍL — KLIENTSKÁ PRÁCE</div>
+            <div style={{fontFamily:"Fraunces,serif",fontSize:34,fontWeight:300,color:"var(--ink)",lineHeight:1}}>
+              {fmtH(todayH)}
+              <span style={{fontSize:16,color:"var(--mut)",fontFamily:"inherit",marginLeft:8}}>/ {ASISTENT_DAILY_H} h</span>
+            </div>
+          </div>
+          <div style={{textAlign:"right"}}>
+            {todayAtt?.check_in && (
+              <div style={{fontSize:11.5,color:"var(--mut)",marginBottom:4}}>
+                {todayAtt.check_out?"Byl v kanceláři":"V kanceláři"} {fmtH(Math.round(attDur*4)/4)}
+              </div>
+            )}
+            {streak>0 && <div style={{fontSize:13,fontWeight:700,color:"#D97706"}}>🔥 {streak} dní v řadě</div>}
+          </div>
+        </div>
+        <div style={{height:10,borderRadius:6,background:"rgba(0,0,0,.08)",overflow:"hidden",marginBottom:8}}>
+          <div style={{height:"100%",width:`${Math.round(todayPct*100)}%`,background:todayPct>=1?"#22C55E":"#7C3AED",borderRadius:6,transition:"width .6s"}} />
+        </div>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+          <div style={{fontSize:11.5,color:msg.c,fontWeight:500}}>{msg.t}</div>
+          <div style={{fontSize:11,color:"var(--mut)"}}>{Math.round(todayPct*100)} %</div>
+        </div>
+      </div>
+
+      {/* ── Týdenní pruhový graf ── */}
+      <div style={{background:"#fff",border:"1px solid var(--line)",borderRadius:12,padding:"16px 20px",marginBottom:16}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
+          <div style={{fontSize:8,letterSpacing:".2em",textTransform:"uppercase",fontWeight:700,color:"var(--mut)"}}>TENTO TÝDEN</div>
+          <div style={{fontSize:11.5,color:"var(--mut)"}}>
+            <strong style={{color:"var(--ink)"}}>{weekDone}</strong>/{weekDays.length} dní splněno · celkem <strong style={{color:"var(--ink)"}}>{fmtH(weekH)}</strong>
+          </div>
+        </div>
+        <div style={{display:"flex",gap:6,alignItems:"flex-end",height:72}}>
+          {weekDays.map(wd=>{
+            const barH = wd.h>0?Math.max(8,Math.min(56,Math.round(wd.h/ASISTENT_DAILY_H*48))):0;
+            const done = wd.h>=ASISTENT_DAILY_H;
+            return (
+              <div key={wd.ds} style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",gap:3}}>
+                <div style={{fontSize:9,color:wd.isToday?"#7C3AED":"var(--mut)",fontWeight:wd.isToday?700:400,minHeight:14}}>
+                  {wd.h>0?fmtH(wd.h):""}
+                </div>
+                <div style={{width:"100%",height:52,display:"flex",flexDirection:"column",justifyContent:"flex-end"}}>
+                  <div style={{width:"100%",height:barH,borderRadius:4,background:done?"#22C55E":wd.h>0?"#A78BFA":wd.isToday?"#EDE9FE":"var(--line)",transition:"height .4s"}} />
+                </div>
+                <div style={{fontSize:10,color:wd.isToday?"#7C3AED":"var(--mut)",fontWeight:wd.isToday?700:400}}>{wd.name}</div>
+              </div>
+            );
+          })}
+        </div>
+        {/* Target line label */}
+        <div style={{marginTop:6,fontSize:9.5,color:"var(--mut)",textAlign:"center"}}>
+          cíl {ASISTENT_DAILY_H} h / den · zelená = splněno ✓
+        </div>
+      </div>
+
+      {/* ── Měsíční KPI chips ── */}
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr",gap:10}}>
+        {[
+          { label:"Hodiny tento měsíc", val:fmtH(mH),  sub:`z ${mDays} aktivních dní`,   ok:mH>0 },
+          { label:"Dny s výkazem",      val:`${mDays}`, sub:"splněný target: "+weekDone+" tento týden", ok:mDays>=10 },
+          { label:"Příchody v kanceláři", val:`${mAtt}`,sub:"záznamy docházky",            ok:mAtt>0 },
+          { label:"Streak",             val:streak>0?`${streak} 🔥`:"0", sub:"po sobě jdoucích dní", ok:streak>=3 },
+        ].map(k=>(
+          <div key={k.label} style={{background:"#fff",border:`1px solid ${k.ok?"#BBF7D0":"var(--line)"}`,borderRadius:10,padding:"12px 14px"}}>
+            <div style={{fontSize:8,letterSpacing:".12em",textTransform:"uppercase",color:"var(--mut)",marginBottom:4}}>{k.label}</div>
+            <div style={{fontFamily:"Fraunces,serif",fontWeight:300,fontSize:22,color:k.ok?"#059669":"var(--ink)"}}>{k.val}</div>
+            <div style={{fontSize:9.5,color:"var(--mut)",marginTop:2}}>{k.sub}</div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ── VÝKAZY — zápis hodin ──────────────────────────────────────────────────────
 function AsistentVykazy({ email, clients }) {
   const [logs, setLogs] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -6479,166 +6640,287 @@ function AsistentVykazy({ email, clients }) {
   );
 }
 
-function AsistentDochazka({ email }) {
-  const now = new Date();
+function AsistentDochazka({ email, attendance, onRefreshAttendance }) {
   const [viewMonth, setViewMonth] = useState(() => {
-    // default: příští měsíc pro plánování
-    const d = new Date(now.getFullYear(), now.getMonth()+1, 1);
+    const d = new Date(); d.setMonth(d.getMonth()+1);
     return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`;
   });
   const [availability, setAvailability] = useState(null);
-  const [attendance, setAttendance] = useState([]);
   const [savingAvail, setSavingAvail] = useState(false);
-  const [checkinSaving, setCheckinSaving] = useState(false);
+  const [actionSaving, setActionSaving] = useState(false);
+  const [tick, setTick] = useState(0);
 
-  // Načti dostupnost pro vybraný měsíc
-  useEffect(() => {
-    fetchAssistantAvailability(email, viewMonth).then(setAvailability).catch(console.error);
-  }, [email, viewMonth]);
+  // Undo state — uloženo v localStorage s timestampem stisknutí
+  const loadUndo = (key) => {
+    try { const v = localStorage.getItem(key); return v ? JSON.parse(v) : null; } catch { return null; }
+  };
+  const [undoIn,  setUndoIn]  = useState(() => loadUndo("maux_undo_checkin"));
+  const [undoOut, setUndoOut] = useState(() => loadUndo("maux_undo_checkout"));
 
-  useEffect(() => {
-    fetchAssistantAttendance(email).then(setAttendance).catch(console.error);
-  }, [email]);
+  useEffect(() => { const id = setInterval(()=>setTick(t=>t+1), 15000); return ()=>clearInterval(id); }, []);
+  useEffect(() => { fetchAssistantAvailability(email, viewMonth).then(setAvailability).catch(console.error); }, [email, viewMonth]);
 
+  const todayStr    = today();
+  const todayRec    = attendance.find(a=>a.date===todayStr);
   const plannedDates = availability?.planned_dates || [];
 
-  const toggleDay = async (dateStr) => {
-    const newDates = plannedDates.includes(dateStr)
-      ? plannedDates.filter(d => d !== dateStr)
-      : [...plannedDates, dateStr].sort();
-    setSavingAvail(true);
+  // Undo okno — platné jen pro dnešek a do 10 minut
+  const canUndo = (u) => u && u.date===todayStr && (Date.now()-new Date(u.recordedAt).getTime()) < UNDO_WINDOW_MS;
+  const undoMinsLeft = (u) => u ? Math.ceil(Math.max(0, UNDO_WINDOW_MS-(Date.now()-new Date(u.recordedAt).getTime()))/60000) : 0;
+
+  const checkIn = async () => {
+    setActionSaving(true);
     try {
-      const rec = { id: availability?.id || uid(), assistant_email: email, year_month: viewMonth, planned_dates: newDates };
-      await upsertAssistantAvailability(rec);
-      setAvailability(rec);
-    } catch(e) { alert("Chyba: " + e.message); }
-    finally { setSavingAvail(false); }
+      const ts = new Date().toISOString();
+      const rec = { id: todayRec?.id||uid(), assistant_email:email, date:todayStr, check_in:ts, check_out:todayRec?.check_out||null };
+      const updated = await upsertAssistantAttendance(rec);
+      const u = { date:todayStr, recordedAt:ts };
+      localStorage.setItem("maux_undo_checkin", JSON.stringify(u));
+      setUndoIn(u); localStorage.removeItem("maux_undo_checkout"); setUndoOut(null);
+      onRefreshAttendance && onRefreshAttendance();
+    } catch(e) { alert("Chyba: "+e.message); } finally { setActionSaving(false); }
   };
 
-  // Generuj dny v měsíci (jen pracovní — po-pá)
-  const monthDays = (() => {
-    const [y, m] = viewMonth.split("-").map(Number);
-    const days = [];
-    const d = new Date(y, m-1, 1);
-    while (d.getMonth() === m-1) {
-      const dow = d.getDay();
-      if (dow !== 0 && dow !== 6) days.push(d.toISOString().slice(0,10));
+  const checkOut = async () => {
+    setActionSaving(true);
+    try {
+      const ts = new Date().toISOString();
+      const rec = { id: todayRec?.id||uid(), assistant_email:email, date:todayStr, check_in:todayRec?.check_in||ts, check_out:ts };
+      await upsertAssistantAttendance(rec);
+      const u = { date:todayStr, recordedAt:ts };
+      localStorage.setItem("maux_undo_checkout", JSON.stringify(u));
+      setUndoOut(u);
+      onRefreshAttendance && onRefreshAttendance();
+    } catch(e) { alert("Chyba: "+e.message); } finally { setActionSaving(false); }
+  };
+
+  const undoCheckIn = async () => {
+    if (!canUndo(undoIn)) return;
+    setActionSaving(true);
+    try {
+      const rec = { id:todayRec?.id||uid(), assistant_email:email, date:todayStr, check_in:null, check_out:null };
+      await upsertAssistantAttendance(rec);
+      localStorage.removeItem("maux_undo_checkin"); setUndoIn(null);
+      onRefreshAttendance && onRefreshAttendance();
+    } catch(e) { alert("Chyba: "+e.message); } finally { setActionSaving(false); }
+  };
+
+  const undoCheckOut = async () => {
+    if (!canUndo(undoOut)) return;
+    setActionSaving(true);
+    try {
+      const rec = { id:todayRec?.id||uid(), assistant_email:email, date:todayStr, check_in:todayRec?.check_in||null, check_out:null };
+      await upsertAssistantAttendance(rec);
+      localStorage.removeItem("maux_undo_checkout"); setUndoOut(null);
+      onRefreshAttendance && onRefreshAttendance();
+    } catch(e) { alert("Chyba: "+e.message); } finally { setActionSaving(false); }
+  };
+
+  const fmtTime = (ts) => ts ? new Date(ts).toLocaleTimeString("cs-CZ",{hour:"2-digit",minute:"2-digit"}) : "—";
+  const fmtH    = (h)  => { if(!h||h<=0)return"0 h"; const f=Math.floor(h),m=Math.round((h-f)*60); return m>0?`${f}h ${m}m`:`${f} h`; };
+
+  // Live duration
+  const liveDur = todayRec?.check_in
+    ? todayRec.check_out
+      ? (new Date(todayRec.check_out)-new Date(todayRec.check_in))/36e5
+      : (Date.now()-new Date(todayRec.check_in).getTime())/36e5
+    : 0;
+  const status = !todayRec?.check_in ? "out" : !todayRec?.check_out ? "in" : "done";
+
+  // Kalendář
+  const toggleDay = async (dateStr) => {
+    const newDates = plannedDates.includes(dateStr) ? plannedDates.filter(d=>d!==dateStr) : [...plannedDates,dateStr].sort();
+    setSavingAvail(true);
+    try {
+      const rec = { id:availability?.id||uid(), assistant_email:email, year_month:viewMonth, planned_dates:newDates };
+      await upsertAssistantAvailability(rec); setAvailability(rec);
+    } catch(e) { alert("Chyba: "+e.message); } finally { setSavingAvail(false); }
+  };
+
+  const [vy,vm] = viewMonth.split("-").map(Number);
+  const monthNames = ["leden","únor","březen","duben","květen","červen","červenec","srpen","září","říjen","listopad","prosinec"];
+  const DOW = ["Ne","Po","Út","St","Čt","Pá","So"];
+
+  // Všechny dny měsíce (Po–Pá)
+  const monthWorkDays = (() => {
+    const days=[]; const d=new Date(vy,vm-1,1);
+    while(d.getMonth()===vm-1) {
+      if(d.getDay()!==0&&d.getDay()!==6) days.push({ ds:localDs(d), dow:d.getDay(), dayNum:d.getDate() });
       d.setDate(d.getDate()+1);
     }
     return days;
   })();
 
-  // Docházka — dnešní záznam
-  const todayStr = today();
-  const todayRec = attendance.find(a => a.date === todayStr);
-  const isPlannedToday = plannedDates.includes(todayStr) || attendance.some(a=>a.date===todayStr);
-
-  const checkAction = async (type) => {
-    setCheckinSaving(true);
-    try {
-      const ts = new Date().toISOString();
-      const rec = {
-        id: todayRec?.id || uid(),
-        assistant_email: email,
-        date: todayStr,
-        check_in: type==="in" ? ts : (todayRec?.check_in || ts),
-        check_out: type==="out" ? ts : (todayRec?.check_out || null),
-      };
-      const updated = await upsertAssistantAttendance(rec);
-      setAttendance(p => { const r = p.filter(a=>a.date!==todayStr); return [updated||rec, ...r]; });
-    } catch(e) { alert("Chyba: " + e.message); }
-    finally { setCheckinSaving(false); }
-  };
-
-  const fmtTime = (ts) => ts ? new Date(ts).toLocaleTimeString("cs-CZ",{hour:"2-digit",minute:"2-digit"}) : "—";
-  const monthNames = ["leden","únor","březen","duben","květen","červen","červenec","srpen","září","říjen","listopad","prosinec"];
-  const [vy, vm] = viewMonth.split("-").map(Number);
-
   return (
-    <div style={{ padding:"32px 28px" }}>
-      <h2 style={{ fontFamily:"Fraunces, serif", fontWeight:300, fontSize:28, color:"var(--ink)", marginBottom:6 }}>Docházka</h2>
+    <div style={{padding:"28px 28px"}}>
+      <h2 style={{fontFamily:"Fraunces,serif",fontWeight:300,fontSize:26,color:"var(--ink)",marginBottom:20}}>Docházka</h2>
 
-      {/* Sekce 1 — Příchod / Odchod DNES */}
-      <div style={{ background:"#fff", border:"1px solid var(--line)", borderRadius:12, padding:"18px 20px", marginBottom:24 }}>
-        <div style={{ fontSize:9, letterSpacing:".14em", textTransform:"uppercase", fontWeight:600, color:"var(--ink)", opacity:.7, marginBottom:14 }}>Dnes — {fmtDate(todayStr)}</div>
-        <div style={{ display:"flex", alignItems:"center", gap:16, flexWrap:"wrap" }}>
-          <button onClick={()=>checkAction("in")} disabled={checkinSaving || !!todayRec?.check_in}
-            style={{ padding:"10px 20px", borderRadius:9, border:"none", background: todayRec?.check_in?"#F0FDF4":"var(--ink)", color: todayRec?.check_in?"#065F46":"#fff", fontWeight:600, fontSize:13, cursor: todayRec?.check_in?"default":"pointer", opacity: todayRec?.check_in?1:1 }}>
-            {todayRec?.check_in ? `✓ Příchod ${fmtTime(todayRec.check_in)}` : "Přišel jsem 👋"}
-          </button>
-          <button onClick={()=>checkAction("out")} disabled={checkinSaving || !todayRec?.check_in || !!todayRec?.check_out}
-            style={{ padding:"10px 20px", borderRadius:9, border:"none", background: todayRec?.check_out?"#F0FDF4": (!todayRec?.check_in?"#F3F4F6":"#1a1a2e"), color: todayRec?.check_out?"#065F46":"#fff", fontWeight:600, fontSize:13, cursor: (!todayRec?.check_in||todayRec?.check_out)?"default":"pointer", opacity: !todayRec?.check_in?0.4:1 }}>
-            {todayRec?.check_out ? `✓ Odchod ${fmtTime(todayRec.check_out)}` : "Odcházím 🚪"}
-          </button>
-          {todayRec?.check_in && todayRec?.check_out && (
-            <div style={{ fontSize:12, color:"var(--mut)" }}>
-              Odpracováno: {Math.round((new Date(todayRec.check_out)-new Date(todayRec.check_in))/36e5*10)/10} h
-            </div>
-          )}
+      {/* ── STATUS DNES ── */}
+      <div style={{
+        background: status==="in"?"#F0FDF4":status==="done"?"#F7F5FF":"#fff",
+        border:`1.5px solid ${status==="in"?"#86EFAC":status==="done"?"#DDD6FE":"var(--line)"}`,
+        borderRadius:14,padding:"20px 24px",marginBottom:16
+      }}>
+        <div style={{fontSize:8,letterSpacing:".2em",textTransform:"uppercase",fontWeight:700,color:"var(--mut)",marginBottom:14}}>
+          DNES — {fmtDate(todayStr)}
         </div>
-      </div>
 
-      {/* Sekce 2 — Plánování příštího měsíce */}
-      <div style={{ background:"#fff", border:"1px solid var(--line)", borderRadius:12, padding:"18px 20px", marginBottom:24 }}>
-        <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:14 }}>
-          <div style={{ fontSize:9, letterSpacing:".14em", textTransform:"uppercase", fontWeight:600, color:"var(--ink)", opacity:.7 }}>
-            Plánovaná docházka — {monthNames[vm-1]} {vy}
-          </div>
-          <div style={{ display:"flex", gap:8, alignItems:"center" }}>
-            <button onClick={()=>{ const d=new Date(vy,vm-2,1); setViewMonth(`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`); }}
-              style={{ padding:"4px 10px", border:"1px solid var(--line)", borderRadius:6, background:"#fff", cursor:"pointer", fontSize:12 }}>←</button>
-            <button onClick={()=>{ const d=new Date(vy,vm,1); setViewMonth(`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`); }}
-              style={{ padding:"4px 10px", border:"1px solid var(--line)", borderRadius:6, background:"#fff", cursor:"pointer", fontSize:12 }}>→</button>
-          </div>
-        </div>
-        <div style={{ fontSize:11, color:"var(--mut)", marginBottom:12 }}>
-          Klikni na dny, kdy budeš v kanceláři. Uloží se automaticky. {savingAvail && "Ukládám…"}
-        </div>
-        <div style={{ display:"grid", gridTemplateColumns:"repeat(5, 1fr)", gap:6 }}>
-          {monthDays.map(d => {
-            const isSelected = plannedDates.includes(d);
-            const isPast = d < todayStr;
-            const dayNum = new Date(d).getDate();
-            const dayName = ["Ne","Po","Út","St","Čt","Pá","So"][new Date(d).getDay()];
-            return (
-              <button key={d} onClick={()=>!isPast&&toggleDay(d)} disabled={isPast}
-                style={{ padding:"8px 4px", borderRadius:8, border:`1px solid ${isSelected?"var(--ink)":"var(--line)"}`, background: isSelected?"var(--ink)":"#fff", color: isSelected?"#fff": isPast?"#ccc":"var(--txt)", cursor:isPast?"default":"pointer", textAlign:"center", fontSize:11.5 }}>
-                <div style={{ fontSize:9, opacity:.7 }}>{dayName}</div>
-                <div style={{ fontWeight:600 }}>{dayNum}.</div>
+        {/* Stav: ještě nepřišel */}
+        {status==="out" && (
+          <div style={{display:"flex",alignItems:"center",gap:16}}>
+            <div style={{flex:1}}>
+              <div style={{fontSize:13,color:"var(--mut)",marginBottom:14}}>Ještě jsi se nepřihlásil/a. Klikni, až přijdeš do kanceláře.</div>
+              <button onClick={checkIn} disabled={actionSaving}
+                style={{padding:"12px 28px",borderRadius:10,border:"none",background:"var(--ink)",color:"#fff",fontWeight:700,fontSize:14,cursor:"pointer"}}>
+                👋 Přišel jsem
               </button>
-            );
-          })}
-        </div>
-        {plannedDates.length > 0 && (
-          <div style={{ marginTop:12, fontSize:11.5, color:"var(--mut)" }}>
-            Naplánováno: <strong style={{ color:"var(--ink)" }}>{plannedDates.filter(d=>d.startsWith(viewMonth)).length} dní</strong> v {monthNames[vm-1]} {vy}
+            </div>
+          </div>
+        )}
+
+        {/* Stav: v kanceláři */}
+        {status==="in" && (
+          <div>
+            <div style={{display:"flex",alignItems:"center",gap:20,marginBottom:14,flexWrap:"wrap"}}>
+              <div style={{display:"flex",alignItems:"center",gap:10}}>
+                <div style={{width:10,height:10,borderRadius:"50%",background:"#22C55E",boxShadow:"0 0 0 3px #BBF7D0"}} />
+                <span style={{fontSize:14,fontWeight:600,color:"#065F46"}}>V kanceláři</span>
+                <span style={{fontSize:13,color:"#065F46"}}>od {fmtTime(todayRec.check_in)}</span>
+              </div>
+              <div style={{fontFamily:"Fraunces,serif",fontSize:26,fontWeight:300,color:"#059669",lineHeight:1}}>
+                {fmtH(liveDur)}
+              </div>
+            </div>
+            <div style={{display:"flex",gap:10,alignItems:"center",flexWrap:"wrap"}}>
+              <button onClick={checkOut} disabled={actionSaving}
+                style={{padding:"10px 22px",borderRadius:9,border:"none",background:"#1a1a2e",color:"#fff",fontWeight:600,fontSize:13,cursor:"pointer"}}>
+                🚪 Odcházím
+              </button>
+              {canUndo(undoIn) && (
+                <button onClick={undoCheckIn} disabled={actionSaving}
+                  style={{padding:"8px 14px",borderRadius:8,border:"1.5px solid #FCA5A5",background:"#FEF2F2",color:"#DC2626",fontWeight:500,fontSize:12,cursor:"pointer"}}>
+                  ↩ Zrušit příchod <span style={{fontSize:10,opacity:.7}}>({undoMinsLeft(undoIn)} min)</span>
+                </button>
+              )}
+            </div>
+            <div style={{marginTop:10,fontSize:11,color:"var(--mut)"}}>
+              ℹ️ Čas příchodu nelze zpětně upravit — jen zrušit do {UNDO_WINDOW_MS/60000} minut.
+            </div>
+          </div>
+        )}
+
+        {/* Stav: odešel */}
+        {status==="done" && (
+          <div>
+            <div style={{display:"flex",gap:24,alignItems:"center",marginBottom:14,flexWrap:"wrap"}}>
+              <div>
+                <div style={{fontSize:10,color:"var(--mut)",marginBottom:3}}>Příchod</div>
+                <div style={{fontSize:16,fontWeight:600,color:"var(--ink)"}}>{fmtTime(todayRec.check_in)}</div>
+              </div>
+              <div style={{fontSize:22,color:"var(--mut)"}}>→</div>
+              <div>
+                <div style={{fontSize:10,color:"var(--mut)",marginBottom:3}}>Odchod</div>
+                <div style={{fontSize:16,fontWeight:600,color:"var(--ink)"}}>{fmtTime(todayRec.check_out)}</div>
+              </div>
+              <div style={{marginLeft:"auto",textAlign:"right"}}>
+                <div style={{fontSize:10,color:"var(--mut)",marginBottom:3}}>Odpracováno</div>
+                <div style={{fontFamily:"Fraunces,serif",fontSize:26,fontWeight:300,color:"#7C3AED"}}>{fmtH(liveDur)}</div>
+              </div>
+            </div>
+            <div style={{display:"flex",gap:10,alignItems:"center"}}>
+              {canUndo(undoOut) ? (
+                <button onClick={undoCheckOut} disabled={actionSaving}
+                  style={{padding:"8px 14px",borderRadius:8,border:"1.5px solid #FCA5A5",background:"#FEF2F2",color:"#DC2626",fontWeight:500,fontSize:12,cursor:"pointer"}}>
+                  ↩ Zrušit odchod <span style={{fontSize:10,opacity:.7}}>({undoMinsLeft(undoOut)} min)</span>
+                </button>
+              ) : (
+                <div style={{fontSize:11,color:"var(--mut)"}}>✓ Záznam uzamčen · skvělý den!</div>
+              )}
+            </div>
           </div>
         )}
       </div>
 
-      {/* Sekce 3 — Historie docházky */}
-      <div style={{ background:"#fff", border:"1px solid var(--line)", borderRadius:12, padding:"18px 20px" }}>
-        <div style={{ fontSize:9, letterSpacing:".14em", textTransform:"uppercase", fontWeight:600, color:"var(--ink)", opacity:.7, marginBottom:14 }}>Historie posledních příchodů</div>
-        {attendance.length === 0 ? (
-          <div style={{ fontSize:12.5, color:"var(--mut)" }}>Zatím žádné záznamy.</div>
-        ) : (
-          <table style={{ width:"100%", borderCollapse:"collapse" }}>
-            <thead>
-              <tr style={{ borderBottom:"1px solid var(--line)" }}>
-                {["Datum","Příchod","Odchod","Odpracováno"].map(h => (
-                  <th key={h} style={{ padding:"7px 10px", textAlign:"left", fontSize:9.5, letterSpacing:".1em", textTransform:"uppercase", color:"var(--mut)", fontWeight:500 }}>{h}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {attendance.slice(0,20).map((a,i) => {
-                const dur = a.check_in && a.check_out ? Math.round((new Date(a.check_out)-new Date(a.check_in))/36e5*10)/10 : null;
+      {/* ── PLÁNOVANÁ DOCHÁZKA — kalendář ── */}
+      <div style={{background:"#fff",border:"1px solid var(--line)",borderRadius:12,padding:"16px 20px",marginBottom:16}}>
+        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:10}}>
+          <div style={{fontSize:8,letterSpacing:".2em",textTransform:"uppercase",fontWeight:700,color:"var(--mut)"}}>
+            Plánovaná docházka — {monthNames[vm-1]} {vy}
+          </div>
+          <div style={{display:"flex",gap:5,alignItems:"center"}}>
+            {savingAvail && <span style={{fontSize:10,color:"var(--mut)"}}>Ukládám…</span>}
+            <button onClick={()=>{ const d=new Date(vy,vm-2,1); setViewMonth(`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`); }}
+              style={{padding:"3px 9px",border:"1px solid var(--line)",borderRadius:6,background:"#fff",cursor:"pointer",fontSize:11}}>←</button>
+            <button onClick={()=>{ const d=new Date(vy,vm,1); setViewMonth(`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`); }}
+              style={{padding:"3px 9px",border:"1px solid var(--line)",borderRadius:6,background:"#fff",cursor:"pointer",fontSize:11}}>→</button>
+          </div>
+        </div>
+        <div style={{fontSize:11,color:"var(--mut)",marginBottom:10}}>Klikni na dny, kdy plánuješ být v kanceláři.</div>
+        {/* Header Po–Pá */}
+        <div style={{display:"grid",gridTemplateColumns:"repeat(5,1fr)",gap:5,marginBottom:4}}>
+          {["Po","Út","St","Čt","Pá"].map(n=>(<div key={n} style={{textAlign:"center",fontSize:9,color:"var(--mut)",fontWeight:600}}>{n}</div>))}
+        </div>
+        {/* Grid — plné týdny */}
+        {(()=>{
+          const firstDow = monthWorkDays[0]?.dow; // 1=Po…5=Pá
+          const pad = firstDow ? firstDow-1 : 0;
+          const cells = [...Array(pad).fill(null), ...monthWorkDays];
+          const rows=[]; for(let i=0;i<cells.length;i+=5) rows.push(cells.slice(i,i+5));
+          return rows.map((row,ri)=>(
+            <div key={ri} style={{display:"grid",gridTemplateColumns:"repeat(5,1fr)",gap:5,marginBottom:5}}>
+              {row.map((cell,ci)=>{
+                if(!cell) return <div key={ci} />;
+                const { ds, dayNum } = cell;
+                const isSel    = plannedDates.includes(ds);
+                const isPast   = ds < todayStr;
+                const isToday  = ds === todayStr;
+                const attended = attendance.some(a=>a.date===ds&&a.check_in);
                 return (
-                  <tr key={a.id} style={{ borderBottom:"1px solid var(--line)", background:i%2?"#FAFAFE":"#fff" }}>
-                    <td style={{ padding:"9px 10px", fontSize:12.5 }}>{fmtDate(a.date)}</td>
-                    <td style={{ padding:"9px 10px", fontSize:12.5 }}>{fmtTime(a.check_in)}</td>
-                    <td style={{ padding:"9px 10px", fontSize:12.5 }}>{fmtTime(a.check_out)}</td>
-                    <td style={{ padding:"9px 10px", fontSize:12.5, fontWeight:500, color:"var(--ink)" }}>{dur ? `${dur} h` : "—"}</td>
+                  <button key={ds} onClick={()=>!isPast&&toggleDay(ds)} disabled={isPast}
+                    style={{padding:"7px 4px",borderRadius:7,textAlign:"center",fontSize:12,fontWeight:isToday?700:400,cursor:isPast?"default":"pointer",
+                      border:`1px solid ${attended?"#86EFAC":isSel?"var(--ink)":isToday?"#DDD6FE":"var(--line)"}`,
+                      background:attended?"#F0FDF4":isSel?"var(--ink)":isToday?"#F7F5FF":"#fff",
+                      color:attended?"#065F46":isSel?"#fff":isPast?"#ccc":"var(--txt)"}}>
+                    {dayNum}
+                    {attended&&<div style={{fontSize:7,color:"#22C55E",marginTop:1}}>✓</div>}
+                  </button>
+                );
+              })}
+            </div>
+          ));
+        })()}
+        {plannedDates.filter(d=>d.startsWith(viewMonth)).length>0 && (
+          <div style={{marginTop:8,fontSize:11,color:"var(--mut)"}}>
+            Naplánováno: <strong style={{color:"var(--ink)"}}>{plannedDates.filter(d=>d.startsWith(viewMonth)).length} dní</strong>
+          </div>
+        )}
+      </div>
+
+      {/* ── HISTORIE ── */}
+      <div style={{background:"#fff",border:"1px solid var(--line)",borderRadius:12,padding:"16px 20px"}}>
+        <div style={{fontSize:8,letterSpacing:".2em",textTransform:"uppercase",fontWeight:700,color:"var(--mut)",marginBottom:12}}>Historie docházky</div>
+        {attendance.length===0 ? (
+          <div style={{fontSize:12.5,color:"var(--mut)"}}>Zatím žádné záznamy.</div>
+        ) : (
+          <table style={{width:"100%",borderCollapse:"collapse"}}>
+            <thead><tr style={{borderBottom:"1px solid var(--line)"}}>
+              {["Datum","Příchod","Odchod","Odpracováno"].map(h=>(
+                <th key={h} style={{padding:"6px 10px",textAlign:"left",fontSize:9,letterSpacing:".1em",textTransform:"uppercase",color:"var(--mut)",fontWeight:500}}>{h}</th>
+              ))}
+            </tr></thead>
+            <tbody>
+              {attendance.slice(0,25).map((a,i)=>{
+                const dur = a.check_in&&a.check_out ? (new Date(a.check_out)-new Date(a.check_in))/36e5 : null;
+                const good = dur!=null && dur>=ASISTENT_DAILY_H;
+                return (
+                  <tr key={a.id} style={{borderBottom:"1px solid var(--line)",background:a.date===todayStr?"#F7F5FF":i%2?"#FAFAFE":"#fff"}}>
+                    <td style={{padding:"8px 10px",fontSize:12.5}}>
+                      {fmtDate(a.date)}
+                      {a.date===todayStr&&<span style={{marginLeft:6,fontSize:9,background:"#F7F5FF",color:"#7C3AED",border:"1px solid #DDD6FE",borderRadius:4,padding:"1px 5px",fontWeight:600}}>dnes</span>}
+                    </td>
+                    <td style={{padding:"8px 10px",fontSize:12.5}}>{fmtTime(a.check_in)}</td>
+                    <td style={{padding:"8px 10px",fontSize:12.5}}>{fmtTime(a.check_out)}</td>
+                    <td style={{padding:"8px 10px",fontSize:12.5,fontWeight:600,color:good?"#059669":"var(--ink)"}}>{dur?fmtH(dur):"—"}</td>
                   </tr>
                 );
               })}
@@ -6651,23 +6933,38 @@ function AsistentDochazka({ email }) {
 }
 
 function AsistentApp({ session, onLogout, previewMode }) {
-  const [mod, setMod] = useState("vykaz");
+  const [mod, setMod] = useState("prehled");
   const [clients, setClients] = useState([]);
+  const [logs, setLogs] = useState([]);
+  const [attendance, setAttendance] = useState([]);
+  const [ready, setReady] = useState(false);
   const email = session.user.email;
 
   useEffect(() => {
-    fetchClients().then(setClients).catch(console.error);
-  }, []);
+    Promise.all([
+      fetchClients(),
+      fetchAssistantWorkLogs(email),
+      fetchAssistantAttendance(email),
+    ]).then(([c,l,a]) => { setClients(c); setLogs(l); setAttendance(a); setReady(true); }).catch(console.error);
+  }, [email]);
+
+  const refreshLogs = () => fetchAssistantWorkLogs(email).then(setLogs).catch(console.error);
+  const refreshAtt  = () => fetchAssistantAttendance(email).then(setAttendance).catch(console.error);
+
+  const TABS = [
+    { key:"prehled",  label:"📊 Přehled" },
+    { key:"vykaz",    label:"Výkaz práce" },
+    { key:"dochazka", label:"Docházka" },
+  ];
 
   return (
     <div className="mx">
       <style>{CSS}</style>
-      {/* Omezený sidebar — jen VÝKAZY a DOCHÁZKA */}
       <aside className="sb">
         <div className="brand">
-          <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:6 }}>
-            <div style={{ width:32, height:32, borderRadius:"50%", border:"1.5px solid var(--ink)", display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0 }}>
-              <span style={{ fontFamily:"Fraunces, serif", fontSize:14, color:"var(--ink)", fontWeight:400 }}>M</span>
+          <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:6}}>
+            <div style={{width:32,height:32,borderRadius:"50%",border:"1.5px solid var(--ink)",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>
+              <span style={{fontFamily:"Fraunces,serif",fontSize:14,color:"var(--ink)",fontWeight:400}}>M</span>
             </div>
             <div><div className="wm serif">MAUX</div></div>
           </div>
@@ -6675,7 +6972,7 @@ function AsistentApp({ session, onLogout, previewMode }) {
           <div className="sub2">{previewMode ? "Náhled jako Josef Řehák" : "Josef Řehák"}</div>
         </div>
         <nav className="nav">
-          {[{key:"vykaz",label:"Výkaz práce"},{key:"dochazka",label:"Docházka"}].map(m=>(
+          {TABS.map(m=>(
             <button key={m.key} className={"ni"+(mod===m.key?" on":"")} onClick={()=>setMod(m.key)}>{m.label}</button>
           ))}
         </nav>
@@ -6684,23 +6981,27 @@ function AsistentApp({ session, onLogout, previewMode }) {
           <button onClick={onLogout}>{previewMode ? "← Zpět na admin" : "Odhlásit se"}</button>
         </div>
       </aside>
-      {/* Obsah */}
-      <main style={{ flex:1, minWidth:0 }}>
-        {mod === "vykaz" && <AsistentVykazy email={email} clients={clients} />}
-        {mod === "dochazka" && <AsistentDochazka email={email} />}
+      <main style={{flex:1,minWidth:0}}>
+        {!ready ? <div style={{padding:40,color:"var(--mut)",fontSize:13}}>Načítám…</div> : (
+          <>
+            {mod==="prehled"  && <AsistentPrehled logs={logs} attendance={attendance} />}
+            {mod==="vykaz"    && <AsistentVykazy email={email} clients={clients} onRefresh={refreshLogs} />}
+            {mod==="dochazka" && <AsistentDochazka email={email} attendance={attendance} onRefreshAttendance={refreshAtt} />}
+          </>
+        )}
       </main>
     </div>
   );
 }
 
-/* ── Tomův přehled asistenta — modul v hlavním CRM (list "Josef · Asistent") ── */
+/* ── Tomův přehled asistenta ─────────────────────────────────────────────── */
 function AsistentPanel({ clients, onPreview }) {
   const email = "asistent@maux.cz";
   const [logs, setLogs] = useState([]);
   const [attendance, setAttendance] = useState([]);
   const [availability, setAvailability] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [tab, setTab] = useState("logs");
+  const [tab, setTab] = useState("prehled");
 
   const nextMonth = (() => {
     const d = new Date(); d.setMonth(d.getMonth()+1);
@@ -6721,71 +7022,121 @@ function AsistentPanel({ clients, onPreview }) {
   };
 
   const clientName = (id) => clients.find(c=>c.id===id)?.name || "—";
-  const fmtTime = (ts) => ts ? new Date(ts).toLocaleTimeString("cs-CZ",{hour:"2-digit",minute:"2-digit"}) : "—";
+  const fmtTime    = (ts) => ts ? new Date(ts).toLocaleTimeString("cs-CZ",{hour:"2-digit",minute:"2-digit"}) : "—";
+  const fmtH       = (h)  => { if(!h||h<=0)return"0 h"; const f=Math.floor(h),m=Math.round((h-f)*60); return m>0?`${f}h ${m}m`:`${f} h`; };
   const monthNames = ["leden","únor","březen","duben","květen","červen","červenec","srpen","září","říjen","listopad","prosinec"];
   const [nmy, nmm] = nextMonth.split("-").map(Number);
 
-  if (loading) return <div className="body"><div style={{ color:"var(--mut)", padding:40 }}>Načítám data asistenta…</div></div>;
+  if (loading) return <div className="body"><div style={{color:"var(--mut)",padding:40}}>Načítám data asistenta…</div></div>;
 
-  const totalHours = logs.reduce((s,l)=>s+(l.hours||0),0);
-  const activeClients = new Set(logs.map(l=>l.client_id)).size;
-  const thisMonthLogs = logs.filter(l=>(l.entry_date||"").startsWith(`${new Date().getFullYear()}-${String(new Date().getMonth()+1).padStart(2,"0")}`));
+  const now = new Date();
+  const mKey = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,"0")}`;
+  const mLogs = logs.filter(l=>(l.entry_date||"").startsWith(mKey)&&l.status!=="archived");
+  const mH    = mLogs.reduce((s,l)=>s+(l.hours||0),0);
+  const mDays = new Set(mLogs.map(l=>l.entry_date)).size;
+  const mAtt  = attendance.filter(a=>a.date.startsWith(mKey)&&a.check_in).length;
+  const totalH = logs.filter(l=>l.status!=="archived").reduce((s,l)=>s+(l.hours||0),0);
+
+  // Týdenní přehled (shodný algoritmus s AsistentPrehled)
+  const weekMon = new Date(now); weekMon.setDate(now.getDate()-(now.getDay()===0?6:now.getDay()-1)); weekMon.setHours(0,0,0,0);
+  const weekDays = [];
+  for(let i=0;i<7;i++) {
+    const d=new Date(weekMon); d.setDate(weekMon.getDate()+i);
+    if(d>now) break;
+    const ds=localDs(d);
+    const h=logs.filter(l=>l.entry_date===ds&&l.status!=="archived").reduce((s,l)=>s+(l.hours||0),0);
+    weekDays.push({ ds, h, name:["Po","Út","St","Čt","Pá","So","Ne"][i], isToday:ds===today() });
+  }
+  const weekH    = weekDays.reduce((s,d)=>s+d.h,0);
+  const weekDone = weekDays.filter(d=>d.h>=ASISTENT_DAILY_H).length;
+
+  const TABS = [{k:"prehled",l:"Přehled"},{k:"logs",l:"Výkazy"},{k:"dochazka",l:"Docházka"},{k:"plan",l:`Plán ${monthNames[nmm-1]}`}];
 
   return (
     <div className="body">
-      <div className="top" style={{ marginBottom:0, display:"flex", alignItems:"flex-start", justifyContent:"space-between", flexWrap:"wrap", gap:12 }}>
+      <div className="top" style={{marginBottom:0,display:"flex",alignItems:"flex-start",justifyContent:"space-between",flexWrap:"wrap",gap:12}}>
         <div>
-          <h1 style={{ fontFamily:"Fraunces, serif", fontWeight:300, fontSize:30 }}>Josef · Asistent</h1>
-          <p style={{ color:"var(--mut)", fontSize:13, marginTop:4 }}>Interní přehled výkazů, docházky a plánování — {email}</p>
+          <h1 style={{fontFamily:"Fraunces,serif",fontWeight:300,fontSize:30}}>Josef · Asistent</h1>
+          <p style={{color:"var(--mut)",fontSize:13,marginTop:4}}>Interní přehled výkazů, docházky a výkonu — {email}</p>
         </div>
         <button onClick={onPreview}
-          style={{ marginTop:6, padding:"9px 18px", borderRadius:9, border:"1.5px solid var(--ink)", background:"var(--ink)", color:"#fff", fontSize:12.5, fontWeight:600, cursor:"pointer", display:"flex", alignItems:"center", gap:7, whiteSpace:"nowrap" }}>
+          style={{marginTop:6,padding:"9px 18px",borderRadius:9,border:"1.5px solid var(--ink)",background:"var(--ink)",color:"#fff",fontSize:12.5,fontWeight:600,cursor:"pointer",display:"flex",alignItems:"center",gap:7,whiteSpace:"nowrap"}}>
           👁 Zobrazit jako Josef →
         </button>
       </div>
 
-      {/* KPI řada */}
-      <div style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:12, margin:"20px 28px 0" }}>
+      {/* ── KPI řada ── */}
+      <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:12,margin:"20px 28px 0"}}>
         {[
-          { label:"Celkem hodin", value: `${totalHours} h`, sub:"všechny záznamy" },
-          { label:"Hodiny tento měsíc", value: `${thisMonthLogs.reduce((s,l)=>s+(l.hours||0),0)} h`, sub:`${thisMonthLogs.length} záznamů` },
-          { label:"Klientů s výkazem", value: activeClients, sub:"unikátní klienti" },
+          { label:"Tento měsíc",  val:fmtH(mH),    sub:`${mDays} dní s výkazem · cíl ${mDays*ASISTENT_DAILY_H} h`, ok:mH>=mDays*ASISTENT_DAILY_H&&mDays>0 },
+          { label:"Celkem hodin", val:fmtH(totalH), sub:"všechny záznamy",                       ok:totalH>0 },
+          { label:"Dny v kancelář", val:`${mAtt}`,  sub:`příchodů v ${monthNames[now.getMonth()]}`, ok:mAtt>0 },
+          { label:"Týden",        val:fmtH(weekH),  sub:`${weekDone}/${weekDays.length} dní splněno`, ok:weekDone===weekDays.length&&weekDays.length>0 },
         ].map(k=>(
-          <div key={k.label} style={{ background:"#fff", border:"1px solid var(--line)", borderRadius:12, padding:"14px 18px" }}>
-            <div style={{ fontSize:9.5, letterSpacing:".12em", textTransform:"uppercase", color:"var(--mut)", marginBottom:4 }}>{k.label}</div>
-            <div style={{ fontFamily:"Fraunces, serif", fontWeight:300, fontSize:24, color:"var(--ink)" }}>{k.value}</div>
-            <div style={{ fontSize:10.5, color:"var(--mut)", marginTop:2 }}>{k.sub}</div>
+          <div key={k.label} style={{background:"#fff",border:`1px solid ${k.ok?"#BBF7D0":"var(--line)"}`,borderRadius:12,padding:"14px 18px"}}>
+            <div style={{fontSize:8.5,letterSpacing:".12em",textTransform:"uppercase",color:"var(--mut)",marginBottom:4}}>{k.label}</div>
+            <div style={{fontFamily:"Fraunces,serif",fontWeight:300,fontSize:22,color:k.ok?"#059669":"var(--ink)"}}>{k.val}</div>
+            <div style={{fontSize:9.5,color:"var(--mut)",marginTop:2}}>{k.sub}</div>
           </div>
         ))}
       </div>
 
-      {/* Záložky */}
-      <div style={{ display:"flex", gap:4, margin:"20px 28px 0", borderBottom:"1px solid var(--line)", paddingBottom:0 }}>
-        {[{k:"logs",l:"Výkazy práce"},{k:"dochazka",l:"Docházka"},{k:"plan",l:`Plán ${monthNames[nmm-1]}`}].map(t=>(
+      {/* ── Týdenní pruhový graf (mini) ── */}
+      <div style={{margin:"14px 28px 0",background:"#fff",border:"1px solid var(--line)",borderRadius:10,padding:"12px 16px"}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+          <div style={{fontSize:8,letterSpacing:".2em",textTransform:"uppercase",fontWeight:700,color:"var(--mut)"}}>VÝKON TENTO TÝDEN</div>
+          <div style={{fontSize:11,color:"var(--mut)"}}>cíl {ASISTENT_DAILY_H} h/den</div>
+        </div>
+        <div style={{display:"flex",gap:5,alignItems:"flex-end",height:50}}>
+          {weekDays.map(wd=>{
+            const barH=wd.h>0?Math.max(5,Math.min(40,Math.round(wd.h/ASISTENT_DAILY_H*36))):0;
+            const done=wd.h>=ASISTENT_DAILY_H;
+            return (
+              <div key={wd.ds} style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",gap:2}}>
+                <div style={{fontSize:8.5,color:wd.isToday?"#7C3AED":"var(--mut)",fontWeight:wd.isToday?700:400,minHeight:12}}>
+                  {wd.h>0?fmtH(wd.h):""}
+                </div>
+                <div style={{width:"100%",height:38,display:"flex",flexDirection:"column",justifyContent:"flex-end"}}>
+                  <div style={{width:"100%",height:barH,borderRadius:3,background:done?"#22C55E":wd.h>0?"#A78BFA":"var(--line)"}} />
+                </div>
+                <div style={{fontSize:9,color:wd.isToday?"#7C3AED":"var(--mut)",fontWeight:wd.isToday?700:400}}>{wd.name}</div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* ── Záložky ── */}
+      <div style={{display:"flex",gap:4,margin:"16px 28px 0",borderBottom:"1px solid var(--line)"}}>
+        {TABS.map(t=>(
           <button key={t.k} onClick={()=>setTab(t.k)}
-            style={{ padding:"9px 16px", border:"none", borderBottom: tab===t.k?"2px solid var(--ink)":"2px solid transparent", background:"none", cursor:"pointer", fontSize:12.5, fontWeight: tab===t.k?600:400, color: tab===t.k?"var(--ink)":"var(--mut)" }}>
+            style={{padding:"8px 14px",border:"none",borderBottom:tab===t.k?"2px solid var(--ink)":"2px solid transparent",background:"none",cursor:"pointer",fontSize:12.5,fontWeight:tab===t.k?600:400,color:tab===t.k?"var(--ink)":"var(--mut)"}}>
             {t.l}
           </button>
         ))}
       </div>
 
-      <div style={{ padding:"20px 28px" }}>
-        {tab === "logs" && (
-          logs.length === 0 ? <div style={{ color:"var(--mut)",fontSize:13 }}>Josef zatím nemá žádné záznamy.</div> : (
-            <div style={{ border:"1px solid var(--line)", borderRadius:12, overflow:"hidden" }}>
+      <div style={{padding:"18px 28px"}}>
+        {/* Přehled */}
+        {tab==="prehled" && <AsistentPrehled logs={logs} attendance={attendance} />}
+
+        {/* Výkazy */}
+        {tab==="logs" && (
+          logs.length===0 ? <div style={{color:"var(--mut)",fontSize:13}}>Josef zatím nemá žádné záznamy.</div> : (
+            <div style={{border:"1px solid var(--line)",borderRadius:12,overflow:"hidden"}}>
               {logs.map((l,i)=>(
-                <div key={l.id} style={{ display:"flex", alignItems:"flex-start", gap:14, padding:"13px 16px", borderBottom:i<logs.length-1?"1px solid var(--line)":"none", background:l.status==="archived"?"#F9FFF9":"#fff", opacity:l.status==="archived"?0.75:1 }}>
-                  <div style={{ flex:1 }}>
-                    <div style={{ display:"flex", gap:8, alignItems:"center", marginBottom:3 }}>
-                      <span style={{ fontSize:12, fontWeight:600, color:"var(--ink)" }}>{clientName(l.client_id)}</span>
-                      <span style={{ fontSize:10.5, color:"var(--mut)" }}>· {fmtDate(l.entry_date)}</span>
-                      {l.status==="archived"&&<span style={{ fontSize:9, background:"#F0FDF4", color:"#065F46", border:"1px solid #BBF7D0", borderRadius:4, padding:"1px 6px", fontWeight:600 }}>archivováno</span>}
+                <div key={l.id} style={{display:"flex",alignItems:"flex-start",gap:14,padding:"12px 16px",borderBottom:i<logs.length-1?"1px solid var(--line)":"none",background:l.status==="archived"?"#F9FFF9":"#fff",opacity:l.status==="archived"?.75:1}}>
+                  <div style={{flex:1}}>
+                    <div style={{display:"flex",gap:8,alignItems:"center",marginBottom:3}}>
+                      <span style={{fontSize:12,fontWeight:600,color:"var(--ink)"}}>{clientName(l.client_id)}</span>
+                      <span style={{fontSize:10.5,color:"var(--mut)"}}>· {fmtDate(l.entry_date)}</span>
+                      {l.status==="archived"&&<span style={{fontSize:9,background:"#F0FDF4",color:"#065F46",border:"1px solid #BBF7D0",borderRadius:4,padding:"1px 6px",fontWeight:600}}>archivováno</span>}
                     </div>
-                    <div style={{ fontSize:12.5, color:"var(--txt)", lineHeight:1.5 }}>{l.description}</div>
+                    <div style={{fontSize:12.5,color:"var(--txt)",lineHeight:1.5}}>{l.description}</div>
                   </div>
-                  <div style={{ flexShrink:0, textAlign:"right" }}>
-                    <div style={{ fontFamily:"Fraunces, serif", fontWeight:300, fontSize:18, color:"var(--ink)" }}>{l.hours} h</div>
-                    <button onClick={()=>archiveLog(l)} style={{ marginTop:6, fontSize:10, padding:"3px 8px", borderRadius:5, border:"1px solid var(--line2)", background:"#fff", cursor:"pointer", color:"var(--mut)" }}>
+                  <div style={{flexShrink:0,textAlign:"right"}}>
+                    <div style={{fontFamily:"Fraunces,serif",fontWeight:300,fontSize:17,color:"var(--ink)"}}>{l.hours} h</div>
+                    <button onClick={()=>archiveLog(l)} style={{marginTop:5,fontSize:10,padding:"3px 8px",borderRadius:5,border:"1px solid var(--line2)",background:"#fff",cursor:"pointer",color:"var(--mut)"}}>
                       {l.status==="archived"?"↩ vrátit":"✓ archivovat"}
                     </button>
                   </div>
@@ -6794,23 +7145,25 @@ function AsistentPanel({ clients, onPreview }) {
             </div>
           )
         )}
-        {tab === "dochazka" && (
-          attendance.length === 0 ? <div style={{ color:"var(--mut)",fontSize:13 }}>Žádné záznamy docházky.</div> : (
-            <table style={{ width:"100%", borderCollapse:"collapse", border:"1px solid var(--line)", borderRadius:12, overflow:"hidden" }}>
-              <thead><tr style={{ background:"var(--bg)" }}>
+
+        {/* Docházka */}
+        {tab==="dochazka" && (
+          attendance.length===0 ? <div style={{color:"var(--mut)",fontSize:13}}>Žádné záznamy docházky.</div> : (
+            <table style={{width:"100%",borderCollapse:"collapse",border:"1px solid var(--line)",borderRadius:12,overflow:"hidden"}}>
+              <thead><tr style={{background:"var(--bg)"}}>
                 {["Datum","Příchod","Odchod","Odpracováno"].map(h=>(
-                  <th key={h} style={{ padding:"9px 14px", textAlign:"left", fontSize:9.5, letterSpacing:".1em", textTransform:"uppercase", color:"var(--mut)", fontWeight:500 }}>{h}</th>
+                  <th key={h} style={{padding:"9px 14px",textAlign:"left",fontSize:9,letterSpacing:".1em",textTransform:"uppercase",color:"var(--mut)",fontWeight:500}}>{h}</th>
                 ))}
               </tr></thead>
               <tbody>
                 {attendance.map((a,i)=>{
-                  const dur = a.check_in&&a.check_out?Math.round((new Date(a.check_out)-new Date(a.check_in))/36e5*10)/10:null;
+                  const dur = a.check_in&&a.check_out?(new Date(a.check_out)-new Date(a.check_in))/36e5:null;
                   return (
-                    <tr key={a.id} style={{ borderTop:"1px solid var(--line)", background:i%2?"#FAFAFE":"#fff" }}>
-                      <td style={{ padding:"10px 14px", fontSize:13 }}>{fmtDate(a.date)}</td>
-                      <td style={{ padding:"10px 14px", fontSize:13 }}>{fmtTime(a.check_in)}</td>
-                      <td style={{ padding:"10px 14px", fontSize:13 }}>{fmtTime(a.check_out)}</td>
-                      <td style={{ padding:"10px 14px", fontSize:13, fontWeight:500, color:"var(--ink)" }}>{dur?`${dur} h`:"—"}</td>
+                    <tr key={a.id} style={{borderTop:"1px solid var(--line)",background:i%2?"#FAFAFE":"#fff"}}>
+                      <td style={{padding:"10px 14px",fontSize:13}}>{fmtDate(a.date)}</td>
+                      <td style={{padding:"10px 14px",fontSize:13}}>{fmtTime(a.check_in)}</td>
+                      <td style={{padding:"10px 14px",fontSize:13}}>{fmtTime(a.check_out)}</td>
+                      <td style={{padding:"10px 14px",fontSize:13,fontWeight:600,color:dur&&dur>=ASISTENT_DAILY_H?"#059669":"var(--ink)"}}>{dur?fmtH(dur):"—"}</td>
                     </tr>
                   );
                 })}
@@ -6818,17 +7171,17 @@ function AsistentPanel({ clients, onPreview }) {
             </table>
           )
         )}
-        {tab === "plan" && (
+
+        {/* Plán */}
+        {tab==="plan" && (
           <div>
-            <p style={{ fontSize:12.5, color:"var(--mut)", marginBottom:16 }}>Dny, které si Josef naplánoval v kanceláři — {monthNames[nmm-1]} {nmy}</p>
-            {(!availability || availability.planned_dates.length === 0) ? (
-              <div style={{ color:"var(--mut)", fontSize:13 }}>Josef ještě nevyplnil plánovanou docházku na {monthNames[nmm-1]}.</div>
+            <p style={{fontSize:12.5,color:"var(--mut)",marginBottom:14}}>Dny, které Josef naplánoval v kanceláři — {monthNames[nmm-1]} {nmy}</p>
+            {(!availability||availability.planned_dates.length===0) ? (
+              <div style={{color:"var(--mut)",fontSize:13}}>Josef ještě nevyplnil plánovanou docházku na {monthNames[nmm-1]}.</div>
             ) : (
-              <div style={{ display:"flex", flexWrap:"wrap", gap:8 }}>
+              <div style={{display:"flex",flexWrap:"wrap",gap:8}}>
                 {availability.planned_dates.map(d=>(
-                  <div key={d} style={{ padding:"8px 14px", background:"#F7F5FF", border:"1px solid var(--ink)", borderRadius:8, fontSize:12.5, fontWeight:500, color:"var(--ink)" }}>
-                    {fmtDate(d)}
-                  </div>
+                  <div key={d} style={{padding:"7px 13px",background:"#F7F5FF",border:"1px solid var(--ink)",borderRadius:8,fontSize:12.5,fontWeight:500,color:"var(--ink)"}}>{fmtDate(d)}</div>
                 ))}
               </div>
             )}
