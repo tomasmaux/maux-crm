@@ -3340,10 +3340,10 @@ function FirmaBar({ financeItems, invoices, dpfoMonths, loanTransactions, escrow
 /* ─── DASHBOARD ─── */
 // Drag-and-drop panel IDs — pořadí a viditelnost karet na dashboardu
 // Verze: zvýšit pokud chceme vynutit reset uloženého pořadí u všech uživatelů
-const PANEL_LAYOUT_VERSION = 2;
+const PANEL_LAYOUT_VERSION = 3;
 const DEFAULT_PANELS = [
   "finance","c35","kpi","minisporak","majetek","firma",
-  "chart","klienti","uschovy","fakturace","happylife"
+  "chart","klienti","uschovy","fakturace","happylife","claude"
 ];
 function loadPanelState() {
   try {
@@ -3667,284 +3667,304 @@ function PohledavkyPanel({ financeItems, onSaveFinance, onDeleteFinance }) {
   );
 }
 
+// ─── helpers sdílené s Dashboard tilem ───
+function claudeLoadEntries() {
+  try { return JSON.parse(localStorage.getItem("claude_entries") || "[]"); } catch { return []; }
+}
+function claudeSaveEntries(arr) {
+  try { localStorage.setItem("claude_entries", JSON.stringify(arr)); } catch {}
+}
+function claudeLoadSettings() {
+  try { return { sub: 20, rate: 23, ...JSON.parse(localStorage.getItem("claude_settings") || "{}") }; } catch { return { sub: 20, rate: 23 }; }
+}
+function claudeSaveSettings(s) {
+  try { localStorage.setItem("claude_settings", JSON.stringify(s)); } catch {}
+}
+
 function ClaudeTracker() {
-  const [data, setData] = React.useState(null);
-  const [loading, setLoading] = React.useState(true);
-  const [apiError, setApiError] = React.useState(null);
-  const [subUsd, setSubUsd] = React.useState(() => {
-    try { return parseFloat(localStorage.getItem("claude_sub_usd") || "20"); } catch { return 20; }
-  });
-  const [usdCzkRate, setUsdCzkRate] = React.useState(() => {
-    try { return parseFloat(localStorage.getItem("claude_usd_czk") || "23"); } catch { return 23; }
-  });
+  const [entries, setEntries] = React.useState(claudeLoadEntries);
+  const [settings, setSettings] = React.useState(claudeLoadSettings);
   const [showSettings, setShowSettings] = React.useState(false);
-  const [editSub, setEditSub] = React.useState("20");
-  const [editRate, setEditRate] = React.useState("23");
+  const [editSettings, setEditSettings] = React.useState({ sub: "20", rate: "23" });
+  // Form state for adding/editing a monthly entry
+  const EMPTY_FORM = { month: new Date().toISOString().slice(0, 7), subscription_usd: "", extra_usd: "", note: "" };
+  const [showForm, setShowForm] = React.useState(false);
+  const [editForm, setEditForm] = React.useState(EMPTY_FORM);
+  const [editingId, setEditingId] = React.useState(null);
 
-  React.useEffect(() => {
-    setLoading(true);
-    setApiError(null);
-    fetch("/api/anthropic-costs")
-      .then(r => r.json())
-      .then(d => { setData(d); setLoading(false); })
-      .catch(e => { setApiError(e.message); setLoading(false); });
-  }, []);
+  const currentKey = new Date().toISOString().slice(0, 7);
 
-  const openSettings = () => {
-    setEditSub(String(subUsd));
-    setEditRate(String(usdCzkRate));
-    setShowSettings(true);
+  // ── helpers ──────────────────────────────────────────────────────────────
+  const fmtCzk = v => `${Math.round(v).toLocaleString("cs-CZ")} Kč`;
+  const fmtUsd = v => `$${Number(v).toFixed(2)}`;
+  const monthLabel = key => {
+    try { return new Date(key + "-15").toLocaleDateString("cs-CZ", { month: "long", year: "numeric" }); } catch { return key; }
   };
-  const saveSettings = () => {
-    const s = parseFloat(editSub) || 20;
-    const r = parseFloat(editRate) || 23;
-    setSubUsd(s); setUsdCzkRate(r);
-    try { localStorage.setItem("claude_sub_usd", String(s)); localStorage.setItem("claude_usd_czk", String(r)); } catch {}
+
+  // ── derived data ─────────────────────────────────────────────────────────
+  const enriched = React.useMemo(() => {
+    const { sub, rate } = settings;
+    return entries.map(e => {
+      const subUsd = e.subscription_usd != null ? Number(e.subscription_usd) : Number(sub);
+      const extraUsd = Number(e.extra_usd) || 0;
+      const totalUsd = subUsd + extraUsd;
+      const totalCzk = totalUsd * Number(rate);
+      return { ...e, subUsd, extraUsd, totalUsd, totalCzk };
+    }).sort((a, b) => b.month.localeCompare(a.month));
+  }, [entries, settings]);
+
+  const curEntry = enriched.find(e => e.month === currentKey);
+  const avgCzk = enriched.length > 0 ? enriched.reduce((s, e) => s + e.totalCzk, 0) / enriched.length : 0;
+  const totalCzk12 = enriched.slice(0, 12).reduce((s, e) => s + e.totalCzk, 0);
+
+  // ── actions ───────────────────────────────────────────────────────────────
+  const openAdd = () => {
+    setEditingId(null);
+    setEditForm({ ...EMPTY_FORM, subscription_usd: String(settings.sub) });
+    setShowForm(true);
+  };
+  const openEdit = (e) => {
+    setEditingId(e.id);
+    setEditForm({ month: e.month, subscription_usd: String(e.subscription_usd ?? settings.sub), extra_usd: String(e.extra_usd || 0), note: e.note || "" });
+    setShowForm(true);
+  };
+  const saveEntry = () => {
+    const next = [...entries];
+    const obj = {
+      id: editingId || `ce_${Date.now()}`,
+      month: editForm.month,
+      subscription_usd: parseFloat(editForm.subscription_usd) || 0,
+      extra_usd: parseFloat(editForm.extra_usd) || 0,
+      note: editForm.note.trim(),
+    };
+    const idx = next.findIndex(e => e.id === obj.id);
+    if (idx >= 0) next[idx] = obj; else next.push(obj);
+    claudeSaveEntries(next);
+    setEntries(next);
+    setShowForm(false);
+    setEditingId(null);
+  };
+  const deleteEntry = (id) => {
+    const next = entries.filter(e => e.id !== id);
+    claudeSaveEntries(next);
+    setEntries(next);
+  };
+  const saveSettings_ = () => {
+    const s = { sub: parseFloat(editSettings.sub) || 20, rate: parseFloat(editSettings.rate) || 23 };
+    claudeSaveSettings(s);
+    setSettings(s);
     setShowSettings(false);
   };
 
-  // Aggregate daily cost buckets → monthly totals
-  const monthly = React.useMemo(() => {
-    if (!data?.costs?.data) return [];
-    const map = {};
-    data.costs.data.forEach(bucket => {
-      const d = new Date(bucket.start_time);
-      const key = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`;
-      if (!map[key]) map[key] = 0;
-      (bucket.groups || []).forEach(g => { map[key] += parseFloat(g.cost || 0); });
-    });
-    return Object.entries(map)
-      .sort((a,b) => b[0].localeCompare(a[0]))
-      .map(([k, apiUsd]) => ({
-        key: k,
-        label: new Date(k + "-15").toLocaleDateString("cs-CZ", { month: "long", year: "numeric" }),
-        apiUsd,
-        totalUsd: apiUsd + subUsd,
-        totalCzk: (apiUsd + subUsd) * usdCzkRate,
-      }));
-  }, [data, subUsd, usdCzkRate]);
-
-  // Model breakdown from usage data
-  const models = React.useMemo(() => {
-    if (!data?.usage?.data) return [];
-    const map = {};
-    data.usage.data.forEach(bucket => {
-      (bucket.groups || []).forEach(g => {
-        const m = (g.model || "unknown").replace(/^claude-/,"");
-        if (!map[m]) map[m] = { input: 0, output: 0, cache_read: 0, cache_write: 0 };
-        map[m].input  += g.input_tokens || 0;
-        map[m].output += g.output_tokens || 0;
-        map[m].cache_read  += g.cache_read_input_tokens || 0;
-        map[m].cache_write += g.cache_creation_input_tokens || 0;
-      });
-    });
-    return Object.entries(map)
-      .sort((a,b) => (b[1].input+b[1].output) - (a[1].input+a[1].output))
-      .map(([name, t]) => ({ name, total: t.input+t.output+t.cache_read+t.cache_write, ...t }));
-  }, [data]);
-
-  const currentKey = new Date().toISOString().slice(0,7);
-  const curMonth   = monthly.find(m => m.key === currentKey) || monthly[0];
-  const totalAvg   = monthly.length > 0 ? monthly.reduce((s,m) => s+m.totalCzk, 0) / monthly.length : 0;
-  const total12m   = monthly.reduce((s,m) => s+m.totalCzk, 0);
-  const fmtUsd = v => `$${v.toFixed(2)}`;
-  const fmtCzk = v => `${Math.round(v).toLocaleString("cs-CZ")} Kč`;
-  const fmtTok = v => v >= 1e6 ? `${(v/1e6).toFixed(1)} M` : v >= 1e3 ? `${(v/1e3).toFixed(0)} K` : String(v);
-
-  if (loading) return (
-    <div style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",height:320,gap:10}}>
-      <div style={{fontSize:28,opacity:.35}}>◌</div>
-      <div style={{fontSize:13,color:"var(--mut)"}}>Načítám data z Anthropic…</div>
-    </div>
-  );
-
-  // Error / not configured
-  const err = apiError || data?.error;
-  if (err) return (
-    <div style={{padding:"40px 32px",maxWidth:640}}>
-      <div style={{background:"linear-gradient(135deg,#FFF8E6 0%,#FFFBF0 100%)",border:"1.5px solid #F59E0B33",borderRadius:20,padding:36}}>
-        <div style={{fontSize:36,lineHeight:1,marginBottom:18}}>🔑</div>
-        <div style={{fontFamily:"Fraunces,serif",fontSize:26,fontWeight:400,color:"var(--ink)",marginBottom:10}}>Nastavení Admin API klíče</div>
-        <p style={{fontSize:13.5,color:"var(--mut)",lineHeight:1.75,margin:"0 0 28px"}}>
-          Pro zobrazení nákladů Claude je potřeba Anthropic Admin API klíč. Tady je postup:
-        </p>
-        <div style={{background:"#fff",borderRadius:14,border:"1px solid var(--line)",overflow:"hidden",marginBottom:20}}>
-          {[
-            ["1","Otevři console.anthropic.com","Settings → Admin API Keys"],
-            ["2","Vytvoř nový klíč","Začíná sk-ant-admin01-…"],
-            ["3","Zkopíruj celý klíč",""],
-            ["4","Otevři vercel.com → projekt maux-crm","Settings → Environment Variables"],
-            ["5","Přidej proměnnou","ANTHROPIC_ADMIN_KEY = sk-ant-admin01-…"],
-            ["6","Redeploy projekt","Deployments → ⋯ → Redeploy"],
-          ].map(([num,label,sub],i,arr) => (
-            <div key={num} style={{display:"flex",alignItems:"center",gap:14,padding:"13px 20px",borderBottom:i<arr.length-1?"1px solid var(--line)":undefined}}>
-              <div style={{width:24,height:24,borderRadius:"50%",background:"var(--ink)",color:"#fff",fontSize:11,fontWeight:700,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>{num}</div>
-              <div>
-                <div style={{fontSize:13,color:"var(--ink)",fontWeight:500}}>{label}</div>
-                {sub && <div style={{fontSize:11,color:"var(--mut)",marginTop:2}}>{sub}</div>}
-              </div>
-            </div>
-          ))}
-        </div>
-        {typeof err === "string" && (
-          <div style={{fontSize:12,color:"#EF4444",background:"#FFF1F1",padding:"10px 14px",borderRadius:10,border:"1px solid #FECACA",fontFamily:"monospace",wordBreak:"break-all"}}>{err}</div>
-        )}
-      </div>
-    </div>
-  );
+  // ── shared style tokens ───────────────────────────────────────────────────
+  const card = { background: "#fff", border: "1px solid #E8E6F0", borderRadius: 16 };
+  const label = { fontSize: 10, letterSpacing: ".2em", textTransform: "uppercase", color: "var(--mut)", fontWeight: 600 };
+  const inputStyle = { width: "100%", padding: "9px 12px", border: "1px solid #E8E6F0", borderRadius: 8, fontSize: 13, color: "var(--ink)", outline: "none", background: "#FAFAFA", fontFamily: "inherit", boxSizing: "border-box" };
+  const btnPrimary = { padding: "9px 22px", background: "var(--ink)", color: "#fff", border: "none", borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: "pointer", letterSpacing: ".06em" };
+  const btnGhost = { padding: "9px 18px", background: "transparent", border: "1px solid #E8E6F0", borderRadius: 8, fontSize: 12, color: "var(--mut)", cursor: "pointer" };
 
   return (
-    <div style={{padding:"32px 32px 72px",maxWidth:920}}>
+    <div style={{ padding: "36px 36px 80px", maxWidth: 880 }}>
 
-      {/* Page header */}
-      <div style={{display:"flex",alignItems:"flex-start",justifyContent:"space-between",marginBottom:32}}>
+      {/* ── PAGE HEADER ── */}
+      <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", marginBottom: 36 }}>
         <div>
-          <div style={{fontSize:10,letterSpacing:".22em",textTransform:"uppercase",fontWeight:700,color:"var(--mut)",marginBottom:6}}>Správa nákladů</div>
-          <h2 style={{fontFamily:"Fraunces,serif",fontSize:32,fontWeight:300,color:"var(--ink)",margin:0,lineHeight:1.1}}>Claude AI</h2>
-          <div style={{fontSize:12,color:"var(--mut)",marginTop:6}}>Reálné výdaje · Anthropic Admin API</div>
+          <div style={{ ...label, marginBottom: 8 }}>Správa nákladů</div>
+          <h2 style={{ fontFamily: "Fraunces,serif", fontSize: 34, fontWeight: 300, color: "var(--ink)", margin: 0, lineHeight: 1 }}>Claude AI</h2>
+          <div style={{ fontSize: 12, color: "var(--mut)", marginTop: 7, letterSpacing: ".04em" }}>
+            Ruční evidence · {settings.rate} Kč / USD
+          </div>
         </div>
-        <button onClick={openSettings} style={{background:"transparent",border:"1.5px solid var(--line)",borderRadius:10,padding:"8px 16px",fontSize:12,color:"var(--mut)",cursor:"pointer",display:"flex",alignItems:"center",gap:6,marginTop:4}}>
-          ⚙ Nastavení
-        </button>
+        <div style={{ display: "flex", gap: 8 }}>
+          <button onClick={() => { setEditSettings({ sub: String(settings.sub), rate: String(settings.rate) }); setShowSettings(s => !s); }}
+            style={{ ...btnGhost, display: "flex", alignItems: "center", gap: 6 }}>
+            <span style={{ fontSize: 11 }}>⚙</span> Nastavení
+          </button>
+          <button onClick={openAdd} style={{ ...btnPrimary, display: "flex", alignItems: "center", gap: 6 }}>
+            <span style={{ fontSize: 14, lineHeight: 1 }}>+</span> Přidat měsíc
+          </button>
+        </div>
       </div>
 
-      {/* Settings panel */}
+      {/* ── SETTINGS PANEL ── */}
       {showSettings && (
-        <div style={{background:"#fff",border:"1.5px solid var(--line)",borderRadius:16,padding:24,marginBottom:28,maxWidth:420}}>
-          <div style={{fontSize:13,fontWeight:600,color:"var(--ink)",marginBottom:18}}>Nastavení</div>
-          <div style={{display:"flex",flexDirection:"column",gap:16}}>
+        <div style={{ ...card, padding: 24, marginBottom: 28, maxWidth: 400 }}>
+          <div style={{ ...label, marginBottom: 18 }}>Výchozí nastavení</div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 18 }}>
             <div>
-              <label style={{fontSize:11,color:"var(--mut)",letterSpacing:".05em",display:"block",marginBottom:6,textTransform:"uppercase"}}>Předplatné Claude Pro (USD/měsíc)</label>
-              <div style={{display:"flex",alignItems:"center",gap:8}}>
-                <span style={{fontSize:14,color:"var(--mut)"}}>$</span>
-                <input type="number" value={editSub} onChange={e => setEditSub(e.target.value)}
-                  style={{width:100,padding:"7px 10px",border:"1.5px solid var(--line)",borderRadius:8,fontSize:13,color:"var(--ink)",outline:"none"}} />
-                <span style={{fontSize:12,color:"var(--mut)"}}>/ měsíc</span>
-              </div>
+              <div style={{ ...label, marginBottom: 6, fontSize: 9 }}>Předplatné (USD/měs)</div>
+              <input type="number" value={editSettings.sub} onChange={e => setEditSettings(s => ({ ...s, sub: e.target.value }))}
+                style={inputStyle} placeholder="20" />
             </div>
             <div>
-              <label style={{fontSize:11,color:"var(--mut)",letterSpacing:".05em",display:"block",marginBottom:6,textTransform:"uppercase"}}>Kurz USD / CZK</label>
-              <div style={{display:"flex",alignItems:"center",gap:8}}>
-                <input type="number" value={editRate} onChange={e => setEditRate(e.target.value)}
-                  style={{width:100,padding:"7px 10px",border:"1.5px solid var(--line)",borderRadius:8,fontSize:13,color:"var(--ink)",outline:"none"}} />
-                <span style={{fontSize:12,color:"var(--mut)"}}>Kč za 1 USD</span>
-              </div>
+              <div style={{ ...label, marginBottom: 6, fontSize: 9 }}>Kurz Kč / USD</div>
+              <input type="number" value={editSettings.rate} onChange={e => setEditSettings(s => ({ ...s, rate: e.target.value }))}
+                style={inputStyle} placeholder="23" />
             </div>
-            <div style={{display:"flex",gap:8,paddingTop:4}}>
-              <button onClick={saveSettings} style={{flex:1,padding:"8px 0",background:"var(--ink)",color:"#fff",border:"none",borderRadius:8,fontSize:13,cursor:"pointer",fontWeight:500}}>Uložit</button>
-              <button onClick={() => setShowSettings(false)} style={{padding:"8px 16px",background:"transparent",border:"1.5px solid var(--line)",borderRadius:8,fontSize:13,cursor:"pointer",color:"var(--mut)"}}>Zrušit</button>
-            </div>
+          </div>
+          <div style={{ display: "flex", gap: 8 }}>
+            <button onClick={saveSettings_} style={btnPrimary}>Uložit</button>
+            <button onClick={() => setShowSettings(false)} style={btnGhost}>Zrušit</button>
           </div>
         </div>
       )}
 
-      {/* Hero KPI cards */}
-      {curMonth && (
-        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:16,marginBottom:36}}>
-          {/* Current month hero */}
-          <div style={{gridColumn:"1/3",background:"linear-gradient(135deg,#3518A5 0%,#5B3DE0 100%)",borderRadius:20,padding:"28px 32px",color:"#fff",position:"relative",overflow:"hidden"}}>
-            <div style={{position:"absolute",top:-40,right:-40,width:200,height:200,borderRadius:"50%",background:"rgba(255,255,255,.04)"}} />
-            <div style={{fontSize:10,letterSpacing:".22em",textTransform:"uppercase",opacity:.6,marginBottom:8}}>
-              {curMonth.label} · celkové náklady
+      {/* ── ADD / EDIT FORM ── */}
+      {showForm && (
+        <div style={{ ...card, padding: 28, marginBottom: 28 }}>
+          <div style={{ ...label, marginBottom: 20 }}>{editingId ? "Upravit záznam" : "Nový záznam"}</div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 16, marginBottom: 16 }}>
+            <div>
+              <div style={{ ...label, marginBottom: 6, fontSize: 9 }}>Měsíc</div>
+              <input type="month" value={editForm.month} onChange={e => setEditForm(f => ({ ...f, month: e.target.value }))}
+                style={inputStyle} />
             </div>
-            <div style={{fontFamily:"Fraunces,serif",fontSize:54,fontWeight:300,lineHeight:1,marginBottom:6}}>
-              {fmtCzk(curMonth.totalCzk)}
+            <div>
+              <div style={{ ...label, marginBottom: 6, fontSize: 9 }}>Předplatné USD</div>
+              <input type="number" value={editForm.subscription_usd} onChange={e => setEditForm(f => ({ ...f, subscription_usd: e.target.value }))}
+                style={inputStyle} placeholder={String(settings.sub)} />
             </div>
-            <div style={{fontSize:17,opacity:.65}}>{fmtUsd(curMonth.totalUsd)}</div>
-            <div style={{display:"flex",gap:32,marginTop:22,paddingTop:18,borderTop:"1px solid rgba(255,255,255,.12)"}}>
-              <div>
-                <div style={{fontSize:9,opacity:.5,letterSpacing:".15em",marginBottom:4}}>API USAGE</div>
-                <div style={{fontSize:15,fontWeight:500}}>{fmtUsd(curMonth.apiUsd)}</div>
+            <div>
+              <div style={{ ...label, marginBottom: 6, fontSize: 9 }}>Extra API USD</div>
+              <input type="number" value={editForm.extra_usd} onChange={e => setEditForm(f => ({ ...f, extra_usd: e.target.value }))}
+                style={inputStyle} placeholder="0" />
+            </div>
+          </div>
+          <div style={{ marginBottom: 20 }}>
+            <div style={{ ...label, marginBottom: 6, fontSize: 9 }}>Poznámka</div>
+            <input type="text" value={editForm.note} onChange={e => setEditForm(f => ({ ...f, note: e.target.value }))}
+              style={inputStyle} placeholder="Volitelná poznámka…" />
+          </div>
+          <div style={{ display: "flex", gap: 8 }}>
+            <button onClick={saveEntry} style={btnPrimary}>Uložit</button>
+            <button onClick={() => { setShowForm(false); setEditingId(null); }} style={btnGhost}>Zrušit</button>
+          </div>
+        </div>
+      )}
+
+      {/* ── HERO KPI ── */}
+      {enriched.length > 0 && (
+        <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr", gap: 16, marginBottom: 32 }}>
+          {/* Current month big card */}
+          <div style={{ background: "#fff", border: "1px solid #E8E6F0", borderRadius: 20, padding: "32px 36px", position: "relative", overflow: "hidden" }}>
+            <div style={{ position: "absolute", top: 0, right: 0, width: 180, height: 180, borderRadius: "0 20px 0 180px", background: "rgba(53,24,165,.03)" }} />
+            <div style={{ ...label, marginBottom: 10, fontSize: 9 }}>
+              {curEntry ? monthLabel(curEntry.month) : monthLabel(currentKey)} · celkové náklady
+            </div>
+            {curEntry ? (
+              <>
+                <div style={{ fontFamily: "Fraunces,serif", fontSize: 52, fontWeight: 300, color: "var(--ink)", lineHeight: 1, marginBottom: 6, fontVariantNumeric: "tabular-nums" }}>
+                  {fmtCzk(curEntry.totalCzk)}
+                </div>
+                <div style={{ fontSize: 15, color: "var(--mut)", letterSpacing: ".04em", marginBottom: 24 }}>
+                  {fmtUsd(curEntry.totalUsd)}
+                </div>
+                <div style={{ display: "flex", gap: 28, paddingTop: 18, borderTop: "1px solid #F0EEF8" }}>
+                  <div>
+                    <div style={{ ...label, fontSize: 8, marginBottom: 4 }}>Předplatné</div>
+                    <div style={{ fontFamily: "monospace", fontSize: 13, color: "var(--ink)" }}>{fmtUsd(curEntry.subUsd)}</div>
+                  </div>
+                  {curEntry.extraUsd > 0 && (
+                    <div>
+                      <div style={{ ...label, fontSize: 8, marginBottom: 4 }}>Extra API</div>
+                      <div style={{ fontFamily: "monospace", fontSize: 13, color: "var(--ink)" }}>{fmtUsd(curEntry.extraUsd)}</div>
+                    </div>
+                  )}
+                  {curEntry.note && (
+                    <div>
+                      <div style={{ ...label, fontSize: 8, marginBottom: 4 }}>Poznámka</div>
+                      <div style={{ fontSize: 12, color: "var(--mut)" }}>{curEntry.note}</div>
+                    </div>
+                  )}
+                </div>
+              </>
+            ) : (
+              <div style={{ paddingTop: 16 }}>
+                <div style={{ fontSize: 13, color: "var(--mut)", marginBottom: 16 }}>Tento měsíc ještě nemáš záznam.</div>
+                <button onClick={openAdd} style={{ ...btnPrimary, fontSize: 11 }}>+ Přidat</button>
               </div>
-              <div>
-                <div style={{fontSize:9,opacity:.5,letterSpacing:".15em",marginBottom:4}}>PŘEDPLATNÉ</div>
-                <div style={{fontSize:15,fontWeight:500}}>{fmtUsd(subUsd)}</div>
-              </div>
-            </div>
-            {curMonth.key === currentKey && (
-              <div style={{position:"absolute",top:18,right:20,fontSize:9,letterSpacing:".12em",textTransform:"uppercase",background:"rgba(255,255,255,.18)",padding:"4px 10px",borderRadius:20,opacity:.9}}>tento měsíc</div>
             )}
+            <div style={{ position: "absolute", top: 18, right: 20, fontSize: 9, letterSpacing: ".14em", textTransform: "uppercase", color: "var(--ink)", opacity: .35, fontWeight: 700 }}>NYNÍ</div>
           </div>
 
-          {/* Side KPIs */}
-          <div style={{display:"flex",flexDirection:"column",gap:16}}>
-            <div style={{background:"#fff",border:"1.5px solid var(--line)",borderRadius:16,padding:"20px 22px",flex:1}}>
-              <div style={{fontSize:10,letterSpacing:".15em",textTransform:"uppercase",color:"var(--mut)",marginBottom:10}}>Průměr / měsíc</div>
-              <div style={{fontFamily:"Fraunces,serif",fontSize:26,fontWeight:300,color:"var(--ink)",lineHeight:1}}>{fmtCzk(totalAvg)}</div>
-              <div style={{fontSize:11,color:"var(--mut)",marginTop:6}}>{fmtUsd(monthly.length > 0 ? monthly.reduce((s,m)=>s+m.totalUsd,0)/monthly.length : 0)}</div>
+          {/* Avg */}
+          <div style={{ ...card, padding: "28px 24px", display: "flex", flexDirection: "column", justifyContent: "center" }}>
+            <div style={{ ...label, fontSize: 9, marginBottom: 12 }}>Průměr / měsíc</div>
+            <div style={{ fontFamily: "Fraunces,serif", fontSize: 28, fontWeight: 300, color: "var(--ink)", lineHeight: 1, marginBottom: 4, fontVariantNumeric: "tabular-nums" }}>
+              {fmtCzk(avgCzk)}
             </div>
-            <div style={{background:"#fff",border:"1.5px solid var(--line)",borderRadius:16,padding:"20px 22px",flex:1}}>
-              <div style={{fontSize:10,letterSpacing:".15em",textTransform:"uppercase",color:"var(--mut)",marginBottom:10}}>Celkem 12 měsíců</div>
-              <div style={{fontFamily:"Fraunces,serif",fontSize:26,fontWeight:300,color:"var(--ink)",lineHeight:1}}>{fmtCzk(total12m)}</div>
-              <div style={{fontSize:11,color:"var(--mut)",marginTop:6}}>{fmtUsd(monthly.reduce((s,m)=>s+m.totalUsd,0))}</div>
+            <div style={{ fontFamily: "monospace", fontSize: 11, color: "var(--mut)" }}>
+              {fmtUsd(enriched.reduce((s, e) => s + e.totalUsd, 0) / enriched.length)}
+            </div>
+          </div>
+
+          {/* 12m total */}
+          <div style={{ ...card, padding: "28px 24px", display: "flex", flexDirection: "column", justifyContent: "center" }}>
+            <div style={{ ...label, fontSize: 9, marginBottom: 12 }}>Celkem 12 měsíců</div>
+            <div style={{ fontFamily: "Fraunces,serif", fontSize: 28, fontWeight: 300, color: "var(--ink)", lineHeight: 1, marginBottom: 4, fontVariantNumeric: "tabular-nums" }}>
+              {fmtCzk(totalCzk12)}
+            </div>
+            <div style={{ fontFamily: "monospace", fontSize: 11, color: "var(--mut)" }}>
+              {fmtUsd(enriched.slice(0, 12).reduce((s, e) => s + e.totalUsd, 0))}
             </div>
           </div>
         </div>
       )}
 
-      {/* Monthly history table */}
-      <div style={{background:"#fff",border:"1.5px solid var(--line)",borderRadius:16,overflow:"hidden",marginBottom:24}}>
-        <div style={{padding:"16px 24px",borderBottom:"1px solid var(--line)",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
-          <div style={{fontSize:13,fontWeight:600,color:"var(--ink)"}}>Měsíční přehled</div>
-          <div style={{fontSize:11,color:"var(--mut)"}}>Kurz {usdCzkRate} Kč/USD · Předplatné ${subUsd}/měs</div>
+      {/* ── HISTORY TABLE ── */}
+      <div style={{ ...card, overflow: "hidden" }}>
+        <div style={{ padding: "16px 24px", borderBottom: "1px solid #F0EEF8", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          <div style={{ ...label, fontSize: 9 }}>Měsíční přehled</div>
+          <div style={{ fontSize: 11, color: "var(--mut)", fontFamily: "monospace" }}>
+            kurz {settings.rate} Kč · předpl. ${settings.sub}/měs
+          </div>
         </div>
-        <table style={{width:"100%",borderCollapse:"collapse"}}>
-          <thead>
-            <tr style={{background:"var(--bg)"}}>
-              {["Měsíc","API usage","Předplatné","Celkem (USD)","Celkem (CZK)"].map((h,i) => (
-                <th key={h} style={{padding:"9px 24px",fontSize:10,fontWeight:700,letterSpacing:".12em",textTransform:"uppercase",color:"var(--mut)",textAlign:i===0?"left":"right",borderBottom:"1px solid var(--line)"}}>{h}</th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {monthly.map((m) => (
-              <tr key={m.key} style={{borderBottom:"1px solid var(--line)",background:m.key===currentKey?"rgba(53,24,165,.025)":"transparent"}}>
-                <td style={{padding:"12px 24px",fontSize:13,color:"var(--ink)",fontWeight:m.key===currentKey?600:400}}>
-                  {m.key===currentKey && <span style={{fontSize:9,background:"var(--ink)",color:"#fff",padding:"2px 7px",borderRadius:20,marginRight:8,letterSpacing:".05em"}}>NYNÍ</span>}
-                  {m.label}
-                </td>
-                <td style={{padding:"12px 24px",fontSize:13,color:"var(--mut)",textAlign:"right"}}>{fmtUsd(m.apiUsd)}</td>
-                <td style={{padding:"12px 24px",fontSize:13,color:"var(--mut)",textAlign:"right"}}>{fmtUsd(subUsd)}</td>
-                <td style={{padding:"12px 24px",fontSize:13,color:"var(--ink)",textAlign:"right",fontWeight:500}}>{fmtUsd(m.totalUsd)}</td>
-                <td style={{padding:"12px 24px",fontSize:13,color:"var(--ink)",textAlign:"right",fontWeight:m.key===currentKey?700:500}}>{fmtCzk(m.totalCzk)}</td>
+        {enriched.length === 0 ? (
+          <div style={{ padding: "60px 32px", textAlign: "center" }}>
+            <div style={{ fontFamily: "Fraunces,serif", fontSize: 22, fontWeight: 300, color: "var(--mut)", marginBottom: 12 }}>Zatím žádné záznamy</div>
+            <div style={{ fontSize: 13, color: "var(--mut)", marginBottom: 24, opacity: .7 }}>Přidej první měsíc a začni sledovat náklady.</div>
+            <button onClick={openAdd} style={btnPrimary}>+ Přidat měsíc</button>
+          </div>
+        ) : (
+          <table style={{ width: "100%", borderCollapse: "collapse" }}>
+            <thead>
+              <tr style={{ background: "#FAFAF9" }}>
+                {[["Měsíc","left"],["Předplatné","right"],["Extra API","right"],["Celkem USD","right"],["Celkem Kč","right"],["","center"]].map(([h, align]) => (
+                  <th key={h} style={{ padding: "9px 20px", fontSize: 9, fontWeight: 700, letterSpacing: ".16em", textTransform: "uppercase", color: "var(--mut)", textAlign: align, borderBottom: "1px solid #F0EEF8" }}>{h}</th>
+                ))}
               </tr>
-            ))}
-            {monthly.length === 0 && (
-              <tr><td colSpan={5} style={{padding:"40px 24px",textAlign:"center",color:"var(--mut)",fontSize:13}}>Žádná data k dispozici</td></tr>
-            )}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {enriched.map(e => (
+                <tr key={e.id} style={{ borderBottom: "1px solid #F7F6FB", background: e.month === currentKey ? "rgba(53,24,165,.018)" : "transparent" }}>
+                  <td style={{ padding: "12px 20px" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                      {e.month === currentKey && (
+                        <span style={{ fontSize: 8, background: "var(--ink)", color: "#fff", padding: "2px 7px", borderRadius: 20, letterSpacing: ".08em", fontWeight: 700 }}>NYNÍ</span>
+                      )}
+                      <span style={{ fontSize: 13, color: "var(--ink)", fontWeight: e.month === currentKey ? 600 : 400 }}>{monthLabel(e.month)}</span>
+                    </div>
+                    {e.note && <div style={{ fontSize: 11, color: "var(--mut)", marginTop: 2, opacity: .7 }}>{e.note}</div>}
+                  </td>
+                  <td style={{ padding: "12px 20px", fontFamily: "monospace", fontSize: 12, color: "var(--mut)", textAlign: "right" }}>{fmtUsd(e.subUsd)}</td>
+                  <td style={{ padding: "12px 20px", fontFamily: "monospace", fontSize: 12, color: e.extraUsd > 0 ? "var(--ink)" : "var(--mut)", textAlign: "right", opacity: e.extraUsd > 0 ? 1 : .35 }}>{fmtUsd(e.extraUsd)}</td>
+                  <td style={{ padding: "12px 20px", fontFamily: "monospace", fontSize: 12, color: "var(--ink)", textAlign: "right", fontWeight: 500 }}>{fmtUsd(e.totalUsd)}</td>
+                  <td style={{ padding: "12px 20px", fontFamily: "monospace", fontSize: 13, color: "var(--ink)", textAlign: "right", fontWeight: e.month === currentKey ? 700 : 500 }}>{fmtCzk(e.totalCzk)}</td>
+                  <td style={{ padding: "12px 16px", textAlign: "center" }}>
+                    <div style={{ display: "flex", gap: 4, justifyContent: "center" }}>
+                      <button onClick={() => openEdit(e)} style={{ background: "transparent", border: "1px solid #E8E6F0", borderRadius: 6, padding: "3px 8px", fontSize: 11, color: "var(--mut)", cursor: "pointer" }}>✎</button>
+                      <button onClick={() => deleteEntry(e.id)} style={{ background: "transparent", border: "1px solid #F0EEF8", borderRadius: 6, padding: "3px 8px", fontSize: 11, color: "#E0A0A0", cursor: "pointer" }}>✕</button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
       </div>
 
-      {/* Model breakdown */}
-      {models.length > 0 && (
-        <div style={{background:"#fff",border:"1.5px solid var(--line)",borderRadius:16,overflow:"hidden"}}>
-          <div style={{padding:"16px 24px",borderBottom:"1px solid var(--line)"}}>
-            <div style={{fontSize:13,fontWeight:600,color:"var(--ink)"}}>Využití modelů</div>
-            <div style={{fontSize:11,color:"var(--mut)",marginTop:2}}>Celkové tokeny za celé dostupné období</div>
-          </div>
-          <div style={{padding:"8px 0 12px"}}>
-            {models.map(({ name, total, input, output }) => {
-              const maxTot = models[0].total;
-              const pct = maxTot > 0 ? (total / maxTot) * 100 : 0;
-              return (
-                <div key={name} style={{padding:"9px 24px",display:"grid",gridTemplateColumns:"220px 1fr 100px 100px",alignItems:"center",gap:16}}>
-                  <div style={{fontSize:12,color:"var(--ink)",fontFamily:"monospace",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",opacity:.85}}>{name}</div>
-                  <div style={{background:"var(--bg)",borderRadius:4,height:5,overflow:"hidden"}}>
-                    <div style={{width:`${pct}%`,height:"100%",background:"var(--ink)",borderRadius:4}} />
-                  </div>
-                  <div style={{fontSize:11,color:"var(--mut)",textAlign:"right"}}>{fmtTok(input)} in</div>
-                  <div style={{fontSize:11,color:"var(--mut)",textAlign:"right"}}>{fmtTok(output)} out</div>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
-
-      <div style={{marginTop:20,fontSize:11,color:"var(--mut)",lineHeight:1.65,opacity:.65}}>
-        * API usage data z Anthropic Admin API. Předplatné Claude Pro zadáváš ručně v nastavení a je přičteno k API nákladům.
-        Kurz USD/CZK je statický — nastav v ⚙ Nastavení.
+      <div style={{ marginTop: 20, fontSize: 11, color: "var(--mut)", opacity: .5, lineHeight: 1.7 }}>
+        Data uložena v lokálním úložišti prohlížeče. Předplatné a extra API poplatky se zadávají ručně.
       </div>
     </div>
   );
@@ -4880,6 +4900,38 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
       {/* ── ZISKOVOST ZAKÁZEK (nahradilo DPFO/úvěry — ty jsou teď v sekci Ostatní) ── */}
       <Panel id="ziskovost">
         <ZiskovostPanel workEntries={workEntries} clients={clients} />
+      </Panel>
+
+      {/* ── CLAUDE AI ── */}
+      <Panel id="claude">
+        {(() => {
+          const claudeEntries = claudeLoadEntries();
+          const claudeSettings = claudeLoadSettings();
+          const curKey = new Date().toISOString().slice(0,7);
+          const curEntry = claudeEntries.find(e => e.month === curKey);
+          const subUsd = curEntry?.subscription_usd ?? claudeSettings.sub;
+          const extraUsd = Number(curEntry?.extra_usd) || 0;
+          const totalUsd = Number(subUsd) + extraUsd;
+          const totalCzk = totalUsd * Number(claudeSettings.rate);
+          const monthLabel = key => { try { return new Date(key+"-15").toLocaleDateString("cs-CZ",{month:"long",year:"numeric"}); } catch { return key; } };
+          return (
+            <Card style={{padding:"16px 18px",cursor:"pointer"}} onClick={()=>onNav("claude")}>
+              <div style={{fontSize:9,letterSpacing:".2em",textTransform:"uppercase",color:"var(--mut)",fontWeight:600,marginBottom:10}}>Claude AI</div>
+              {curEntry ? (
+                <>
+                  <div style={{fontFamily:"Fraunces,serif",fontSize:28,fontWeight:300,color:"var(--ink)",lineHeight:1,marginBottom:4,fontVariantNumeric:"tabular-nums"}}>
+                    {Math.round(totalCzk).toLocaleString("cs-CZ")} Kč
+                  </div>
+                  <div style={{fontSize:11,color:"var(--mut)",fontFamily:"monospace"}}>{monthLabel(curEntry.month)} · ${totalUsd.toFixed(2)}</div>
+                </>
+              ) : (
+                <div style={{fontSize:12,color:"var(--mut)",opacity:.6}}>
+                  Žádný záznam pro {monthLabel(curKey)}
+                </div>
+              )}
+            </Card>
+          );
+        })()}
       </Panel>
     </div>
   );
