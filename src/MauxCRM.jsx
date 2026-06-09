@@ -4142,135 +4142,157 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
           );
         };
         const mName = ["ledna","února","března","dubna","května","června","července","srpna","září","října","listopadu","prosince"];
+        const SEP = "1px solid rgba(0,0,0,.055)";
+        const positiveBalance = nextMonthBalance >= 0;
         return (
-        <Card style={{padding:0,overflow:"hidden",border:"1.5px solid #111"}}>
+        <div style={{
+          background:"#fff",
+          borderRadius:18,
+          overflow:"hidden",
+          borderTop: positiveBalance ? "2.5px solid #10B981" : "2.5px solid #F43F5E",
+          boxShadow:"0 0 0 1px rgba(0,0,0,.065), 0 8px 40px rgba(53,24,165,.07)",
+        }}>
 
-          {/* ── HERO STRIP: 3 klíčová čísla ── */}
-          <div style={{display:"grid",gridTemplateColumns:"1fr auto 1fr",borderBottom:"1px solid var(--line)"}}>
+          {/* ── HERO STRIP ── */}
+          <div style={{display:"grid",gridTemplateColumns:"1fr auto 1fr",borderBottom:SEP}}>
 
-            {/* LEVÁ: PŘÍJMY */}
-            <div style={{padding:"14px 20px 12px"}}>
-              <div style={{fontSize:8,letterSpacing:".22em",textTransform:"uppercase",color:"#059669",fontWeight:700,marginBottom:6}}>PŘÍJMY MĚSÍČNÍ</div>
-              <div style={{display:"flex",alignItems:"baseline",gap:6}}>
-                <span style={{fontFamily:"Fraunces,serif",fontSize:30,fontWeight:300,color:"#059669",lineHeight:1}}>{fmtKc(totalPrijmy)}</span>
-                <span style={{fontSize:10,color:"#065F46",fontWeight:400}}>/ měsíc</span>
+            {/* PŘÍJMY */}
+            <div style={{padding:"20px 26px 18px"}}>
+              <div style={{fontSize:7,letterSpacing:".30em",textTransform:"uppercase",color:"var(--mut)",fontWeight:700,marginBottom:9}}>PŘÍJMY MĚSÍČNÍ</div>
+              <div style={{display:"flex",alignItems:"baseline",gap:7}}>
+                <span style={{fontFamily:"Fraunces,serif",fontSize:30,fontWeight:300,color:"#059669",lineHeight:1,letterSpacing:"-.01em"}}>{fmtKc(totalPrijmy)}</span>
+                <span style={{fontSize:9.5,color:"#059669",opacity:.55,fontWeight:400}}>/ měsíc</span>
               </div>
-              <div style={{fontSize:9,color:"var(--mut)",marginTop:4}}>{mName[now.getMonth()]} {now.getFullYear()}</div>
+              <div style={{fontSize:8.5,color:"var(--mut)",marginTop:6,letterSpacing:".03em"}}>{mName[now.getMonth()]} {now.getFullYear()}</div>
             </div>
 
-            {/* STŘED: BILANCE — největší číslo na přehledu */}
-            <div style={{padding:"12px 32px",borderLeft:"1px solid var(--line)",borderRight:"1px solid var(--line)",textAlign:"center",background:nextMonthBalance>=0?"#F0FDF4":"#FEF2F2",minWidth:220}}>
-              <div style={{fontSize:8,letterSpacing:".22em",textTransform:"uppercase",color:"var(--mut)",fontWeight:700,marginBottom:6}}>BILANCE PŘÍŠTÍHO MĚSÍCE</div>
-              <div style={{fontFamily:"Fraunces,serif",fontSize:40,fontWeight:300,color:nextMonthBalance>=0?"#059669":"#DC2626",lineHeight:1}}>
-                {nextMonthBalance>=0?"+":"−"}{fmtKc(Math.abs(nextMonthBalance))}
+            {/* BILANCE — dominantní číslo */}
+            <div style={{
+              padding:"18px 40px 16px",
+              borderLeft:SEP, borderRight:SEP,
+              textAlign:"center",
+              background: positiveBalance ? "rgba(5,150,105,.035)" : "rgba(220,38,38,.035)",
+              minWidth:248
+            }}>
+              <div style={{fontSize:7,letterSpacing:".30em",textTransform:"uppercase",color:"var(--mut)",fontWeight:700,marginBottom:9}}>BILANCE PŘÍŠTÍHO MĚSÍCE</div>
+              <div style={{
+                fontFamily:"Fraunces,serif",
+                fontSize:54,
+                fontWeight:300,
+                color: positiveBalance ? "#059669" : "#DC2626",
+                lineHeight:1,
+                letterSpacing:"-.025em"
+              }}>
+                {positiveBalance?"+":"−"}{fmtKc(Math.abs(nextMonthBalance))}
               </div>
-              <div style={{fontSize:9,color:"var(--mut)",marginTop:4}}>příjmy − výdaje · záporné = chybí dovydělat</div>
+              <div style={{fontSize:8,color:"var(--mut)",marginTop:7,letterSpacing:".015em",opacity:.8}}>příjmy − výdaje příštího měsíce</div>
             </div>
 
-            {/* PRAVÁ: VÝDAJE + progress */}
-            <div style={{padding:"14px 20px 12px"}}>
-              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
-                <div style={{fontSize:8,letterSpacing:".22em",textTransform:"uppercase",color:"var(--mut)",fontWeight:700}}>VÝDAJE MĚSÍČNĚ</div>
-                <div style={{fontSize:9,color:pct===100?"#059669":"var(--mut)",fontWeight:700}}>
-                  {pct===100?"🎉 vše zaplaceno":`✓ ${paidCount}/${all.length} zaplaceno`}
+            {/* VÝDAJE */}
+            <div style={{padding:"20px 26px 18px"}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:9}}>
+                <div style={{fontSize:7,letterSpacing:".30em",textTransform:"uppercase",color:"var(--mut)",fontWeight:700}}>VÝDAJE MĚSÍČNĚ</div>
+                <div style={{fontSize:8.5,color:pct===100?"#059669":"var(--mut)",fontWeight:600,letterSpacing:".02em"}}>
+                  {pct===100?"✓ vše zaplaceno":`${paidCount}/${all.length}`}
                 </div>
               </div>
-              <div style={{display:"flex",gap:6,alignItems:"baseline",flexWrap:"wrap"}}>
-                <span style={{fontFamily:"Fraunces,serif",fontSize:22,fontWeight:300,color:"#DC2626"}}>{fmtKc(Math.abs(totalNutne))}</span>
-                <span style={{fontSize:10,color:"var(--mut)"}}>nutné</span>
-                <span style={{fontSize:14,color:"var(--mut)"}}>+</span>
-                <span style={{fontFamily:"Fraunces,serif",fontSize:22,fontWeight:300,color:"#9333EA"}}>{fmtKc(Math.abs(totalLuxus))}</span>
-                <span style={{fontSize:10,color:"var(--mut)"}}>lusus</span>
+              <div style={{display:"flex",gap:8,alignItems:"baseline",flexWrap:"wrap"}}>
+                <span style={{fontFamily:"Fraunces,serif",fontSize:22,fontWeight:300,color:"#DC2626",lineHeight:1}}>{fmtKc(Math.abs(totalNutne))}</span>
+                <span style={{fontSize:9,color:"var(--mut)"}}>nutné</span>
+                <span style={{fontSize:11,color:"var(--mut)",opacity:.35,fontWeight:300}}>+</span>
+                <span style={{fontFamily:"Fraunces,serif",fontSize:22,fontWeight:300,color:"#7C3AED",lineHeight:1}}>{fmtKc(Math.abs(totalLuxus))}</span>
+                <span style={{fontSize:9,color:"var(--mut)"}}>lusus</span>
               </div>
-              <div style={{height:4,borderRadius:2,background:"var(--line)",overflow:"hidden",marginTop:8}}>
-                <div style={{height:"100%",width:`${pct}%`,background:pct===100?"#059669":"#B8923D",transition:"width .5s"}} />
+              {/* progress */}
+              <div style={{height:2,borderRadius:2,background:"rgba(0,0,0,.08)",overflow:"hidden",marginTop:11}}>
+                <div style={{height:"100%",width:`${pct}%`,borderRadius:2,background:pct===100?"#10B981":"#0EA5E9",transition:"width .7s ease"}} />
               </div>
-              <div style={{fontSize:9,color:"var(--mut)",marginTop:3}}>
-                odškrtnuto {fmtKc(paidSum)} · zbývá {fmtKc(Math.max(Math.abs(totalVydaje)-paidSum,0))}
+              <div style={{fontSize:8,color:"var(--mut)",marginTop:5,letterSpacing:".01em"}}>
+                zaplaceno {fmtKc(paidSum)}{paidSum < Math.abs(totalVydaje) ? ` · zbývá ${fmtKc(Math.max(Math.abs(totalVydaje)-paidSum,0))}` : ""}
               </div>
             </div>
           </div>
 
-          {/* ── DETAIL: levý příjmy / pravý checklist výdajů ── */}
+          {/* ── DETAIL ── */}
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr"}}>
 
-            {/* LEVÝ SLOUPEC: příjmy detail */}
-            <div style={{padding:"12px 20px 14px",borderRight:"1px solid var(--line)"}}>
+            {/* Příjmy detail */}
+            <div style={{padding:"14px 26px 16px",borderRight:SEP}}>
               {nadmernyOdpocet>0 && (
-                <div style={{display:"flex",justifyContent:"space-between",fontSize:11.5,padding:"2px 0",gap:6}}>
-                  <span style={{display:"flex",alignItems:"center",gap:5,minWidth:0,overflow:"hidden"}}>
-                    <span style={{fontSize:8,background:"#ECFDF5",color:"#065F46",padding:"1px 4px",borderRadius:3,fontWeight:600,flexShrink:0}}>auto</span>
-                    <span style={{color:"var(--txt)",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>Nadměrný odpočet DPH za {prevMonthName.toLowerCase()}</span>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"3.5px 0",gap:8}}>
+                  <span style={{display:"flex",alignItems:"center",gap:6,minWidth:0,overflow:"hidden"}}>
+                    <span style={{fontSize:7.5,background:"rgba(5,150,105,.1)",color:"#065F46",padding:"1px 5px",borderRadius:3,fontWeight:700,letterSpacing:".05em",flexShrink:0}}>auto</span>
+                    <span style={{fontSize:11.5,color:"var(--txt)",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>Nadměrný odpočet DPH za {prevMonthName.toLowerCase()}</span>
                   </span>
-                  <span style={{fontFamily:"JetBrains Mono,monospace",color:"#059669",fontSize:10.5,flexShrink:0}}>+{fmtKc(nadmernyOdpocet)}</span>
+                  <span style={{fontFamily:"JetBrains Mono,monospace",color:"#059669",fontSize:11,flexShrink:0,letterSpacing:"-.01em"}}>+{fmtKc(nadmernyOdpocet)}</span>
                 </div>
               )}
               {unbilledAmt>0 && (
-                <div style={{display:"flex",justifyContent:"space-between",fontSize:11.5,padding:"2px 0",gap:6}}>
-                  <span style={{display:"flex",alignItems:"center",gap:5,minWidth:0}}>
-                    <span style={{fontSize:8,background:"#ECFDF5",color:"#065F46",padding:"1px 4px",borderRadius:3,fontWeight:600,flexShrink:0}}>auto</span>
-                    <span style={{color:"var(--txt)"}}>MAUX Legal — nevyfakturováno</span>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"3.5px 0",gap:8}}>
+                  <span style={{display:"flex",alignItems:"center",gap:6,minWidth:0}}>
+                    <span style={{fontSize:7.5,background:"rgba(5,150,105,.1)",color:"#065F46",padding:"1px 5px",borderRadius:3,fontWeight:700,letterSpacing:".05em",flexShrink:0}}>auto</span>
+                    <span style={{fontSize:11.5,color:"var(--txt)"}}>MAUX Legal — nevyfakturováno</span>
                   </span>
-                  <span style={{fontFamily:"JetBrains Mono,monospace",color:"#059669",fontSize:10.5,flexShrink:0}}>+{fmtKc(unbilledAmt)}</span>
+                  <span style={{fontFamily:"JetBrains Mono,monospace",color:"#059669",fontSize:11,flexShrink:0,letterSpacing:"-.01em"}}>+{fmtKc(unbilledAmt)}</span>
                 </div>
               )}
               {escrowNetThisMonth>0 && (
-                <div style={{display:"flex",justifyContent:"space-between",fontSize:11.5,padding:"2px 0",gap:6}}>
-                  <span style={{display:"flex",alignItems:"center",gap:5,minWidth:0}}>
-                    <span style={{fontSize:8,background:"#ECFDF5",color:"#065F46",padding:"1px 4px",borderRadius:3,fontWeight:600,flexShrink:0}}>auto</span>
-                    <span style={{color:"var(--txt)"}}>Úschovy — čistý úrok (k 1. {mName[(now.getMonth()+1)%12]})</span>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"3.5px 0",gap:8}}>
+                  <span style={{display:"flex",alignItems:"center",gap:6,minWidth:0}}>
+                    <span style={{fontSize:7.5,background:"rgba(5,150,105,.1)",color:"#065F46",padding:"1px 5px",borderRadius:3,fontWeight:700,letterSpacing:".05em",flexShrink:0}}>auto</span>
+                    <span style={{fontSize:11.5,color:"var(--txt)"}}>Úschovy — čistý úrok (k 1. {mName[(now.getMonth()+1)%12]})</span>
                   </span>
-                  <span style={{fontFamily:"JetBrains Mono,monospace",color:"#059669",fontSize:10.5,flexShrink:0}}>+{fmtKc(Math.round(escrowNetThisMonth))}</span>
+                  <span style={{fontFamily:"JetBrains Mono,monospace",color:"#059669",fontSize:11,flexShrink:0,letterSpacing:"-.01em"}}>+{fmtKc(Math.round(escrowNetThisMonth))}</span>
                 </div>
               )}
               {(financeItems||[]).filter(i=>i.category==="prijem"&&i.notes!=="TBD").map((item,idx)=>(
-                <div key={idx} style={{display:"flex",justifyContent:"space-between",fontSize:11.5,color:"var(--txt)",padding:"2px 0",gap:6}}>
+                <div key={idx} style={{display:"flex",justifyContent:"space-between",alignItems:"center",fontSize:11.5,color:"var(--txt)",padding:"3.5px 0",gap:8}}>
                   <span style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{item.label}</span>
                   <EditableMoney item={item} onSave={onSaveFinance} color="#059669" sign="+" />
                 </div>
               ))}
-              <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",paddingTop:8,marginTop:6,borderTop:"1px solid var(--line)"}}>
-                <span style={{fontSize:11,color:"var(--mut)"}}>Celkové náklady</span>
-                <span style={{fontSize:13,fontFamily:"Fraunces,serif",fontWeight:300,color:"#DC2626"}}>−{fmtKc(Math.abs(totalNutne)+Math.abs(totalLuxus))}</span>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",paddingTop:10,marginTop:8,borderTop:"1px solid rgba(0,0,0,.05)"}}>
+                <span style={{fontSize:10.5,color:"var(--mut)",letterSpacing:".02em"}}>Celkové náklady</span>
+                <span style={{fontSize:13,fontFamily:"Fraunces,serif",fontWeight:300,color:"#DC2626",letterSpacing:"-.01em"}}>−{fmtKc(Math.abs(totalNutne)+Math.abs(totalLuxus))}</span>
               </div>
             </div>
 
-            {/* PRAVÝ SLOUPEC: výdaje checklist */}
-            <div style={{padding:"12px 20px 14px"}}>
-              <div style={{fontSize:8,letterSpacing:".2em",textTransform:"uppercase",color:"#DC2626",fontWeight:600,marginBottom:5}}>Nutné</div>
+            {/* Výdaje checklist */}
+            <div style={{padding:"14px 26px 16px"}}>
+              <div style={{fontSize:7,letterSpacing:".28em",textTransform:"uppercase",color:"#DC2626",fontWeight:700,marginBottom:6,opacity:.8}}>Nutné</div>
               {nutne.map((i,idx) => (
-                <div key={idx} style={{display:"flex",justifyContent:"space-between",alignItems:"center",fontSize:11.5,color:isPaid(i.id)?"var(--mut)":"var(--txt)",paddingBottom:2,gap:6}}>
+                <div key={idx} style={{display:"flex",justifyContent:"space-between",alignItems:"center",fontSize:11.5,color:isPaid(i.id)?"var(--mut)":"var(--txt)",padding:"3px 0",gap:6}}>
                   <span style={{display:"flex",alignItems:"center",textDecoration:isPaid(i.id)?"line-through":"none",minWidth:0,overflow:"hidden"}}>
                     <Check item={i} color="#DC2626" /><EditableLabel item={i} onSave={onSaveFinance} />
                   </span>
                   <span style={{display:"flex",alignItems:"center",gap:4,flexShrink:0}}>
-                    <span style={{opacity:isPaid(i.id)?.5:1}}><EditableMoney item={i} onSave={onSaveFinance} color="#DC2626" abs /></span>
-                    <button onClick={()=>onDeleteFinance(i.id)} title="Smazat" style={{background:"none",border:"none",color:"var(--mut)",cursor:"pointer",fontSize:10,padding:"0 1px",opacity:.5}}>✕</button>
+                    <span style={{opacity:isPaid(i.id)?.4:1}}><EditableMoney item={i} onSave={onSaveFinance} color="#DC2626" abs /></span>
+                    <button onClick={()=>onDeleteFinance(i.id)} title="Smazat" style={{background:"none",border:"none",color:"var(--mut)",cursor:"pointer",fontSize:10,padding:"0 2px",opacity:.35,lineHeight:1}}>✕</button>
                   </span>
                 </div>
               ))}
               <AddExpenseRow category="nutne" color="#DC2626" onSaveFinance={onSaveFinance} />
-              <div style={{fontSize:8,letterSpacing:".2em",textTransform:"uppercase",color:"#9333EA",fontWeight:600,marginTop:8,marginBottom:5}}>Lusus</div>
+              <div style={{fontSize:7,letterSpacing:".28em",textTransform:"uppercase",color:"#7C3AED",fontWeight:700,marginTop:10,marginBottom:6,opacity:.8}}>Lusus</div>
               {luxus.map((i,idx) => (
-                <div key={idx} style={{display:"flex",justifyContent:"space-between",alignItems:"center",fontSize:11.5,color:isPaid(i.id)?"var(--mut)":"var(--txt)",paddingBottom:2,gap:6}}>
+                <div key={idx} style={{display:"flex",justifyContent:"space-between",alignItems:"center",fontSize:11.5,color:isPaid(i.id)?"var(--mut)":"var(--txt)",padding:"3px 0",gap:6}}>
                   <span style={{display:"flex",alignItems:"center",textDecoration:isPaid(i.id)?"line-through":"none",minWidth:0}}>
-                    <Check item={i} color="#9333EA" /><EditableLabel item={i} onSave={onSaveFinance} />
+                    <Check item={i} color="#7C3AED" /><EditableLabel item={i} onSave={onSaveFinance} />
                   </span>
                   <span style={{display:"flex",alignItems:"center",gap:4,flexShrink:0}}>
-                    <span style={{opacity:isPaid(i.id)?.5:1}}><EditableMoney item={i} onSave={onSaveFinance} color="#9333EA" abs /></span>
-                    <button onClick={()=>onDeleteFinance(i.id)} title="Smazat" style={{background:"none",border:"none",color:"var(--mut)",cursor:"pointer",fontSize:10,padding:"0 1px",opacity:.5}}>✕</button>
+                    <span style={{opacity:isPaid(i.id)?.4:1}}><EditableMoney item={i} onSave={onSaveFinance} color="#7C3AED" abs /></span>
+                    <button onClick={()=>onDeleteFinance(i.id)} title="Smazat" style={{background:"none",border:"none",color:"var(--mut)",cursor:"pointer",fontSize:10,padding:"0 2px",opacity:.35,lineHeight:1}}>✕</button>
                   </span>
                 </div>
               ))}
-              <AddExpenseRow category="luxus" color="#9333EA" onSaveFinance={onSaveFinance} />
-              <div style={{marginTop:8,borderTop:"1px solid var(--line)",paddingTop:6,display:"flex",justifyContent:"space-between",alignItems:"baseline"}}>
-                <span style={{fontSize:9,color:"var(--mut)",letterSpacing:".1em",textTransform:"uppercase"}}>Celkem výdaje</span>
-                <span style={{fontFamily:"Fraunces,serif",fontSize:15,fontWeight:300,color:"var(--ink)"}}>{fmtKc(Math.abs(totalVydaje))}</span>
+              <AddExpenseRow category="luxus" color="#7C3AED" onSaveFinance={onSaveFinance} />
+              <div style={{marginTop:10,borderTop:"1px solid rgba(0,0,0,.05)",paddingTop:8,display:"flex",justifyContent:"space-between",alignItems:"baseline"}}>
+                <span style={{fontSize:9.5,color:"var(--mut)",letterSpacing:".06em",textTransform:"uppercase"}}>Celkem výdaje</span>
+                <span style={{fontFamily:"Fraunces,serif",fontSize:14,fontWeight:300,color:"var(--ink)",letterSpacing:"-.01em"}}>{fmtKc(Math.abs(totalVydaje))}</span>
               </div>
-              <button className="btn gho" style={{fontSize:10.5,marginTop:8,width:"100%"}} onClick={()=>onNav("vykaz")}>+ Nový výkaz práce</button>
+              <button className="btn gho" style={{fontSize:10.5,marginTop:9,width:"100%",opacity:.65}} onClick={()=>onNav("vykaz")}>+ Nový výkaz práce</button>
             </div>
           </div>
-        </Card>
+        </div>
         );
       })()}
       </Panel>
@@ -6646,88 +6668,70 @@ function AsistentDochazka({ email, attendance, onRefreshAttendance }) {
     return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`;
   });
   const [availability, setAvailability] = useState(null);
-  const [savingAvail, setSavingAvail] = useState(false);
+  const [savingAvail, setSavingAvail]   = useState(false);
   const [actionSaving, setActionSaving] = useState(false);
-  const [tick, setTick] = useState(0);
+  const [now, setNow] = useState(new Date());
 
-  // Undo state — uloženo v localStorage s timestampem stisknutí
-  const loadUndo = (key) => {
-    try { const v = localStorage.getItem(key); return v ? JSON.parse(v) : null; } catch { return null; }
-  };
-  const [undoIn,  setUndoIn]  = useState(() => loadUndo("maux_undo_checkin"));
-  const [undoOut, setUndoOut] = useState(() => loadUndo("maux_undo_checkout"));
-
-  useEffect(() => { const id = setInterval(()=>setTick(t=>t+1), 15000); return ()=>clearInterval(id); }, []);
+  useEffect(() => { const id = setInterval(()=>setNow(new Date()), 30000); return ()=>clearInterval(id); }, []);
   useEffect(() => { fetchAssistantAvailability(email, viewMonth).then(setAvailability).catch(console.error); }, [email, viewMonth]);
 
-  const todayStr    = today();
-  const todayRec    = attendance.find(a=>a.date===todayStr);
+  const todayStr = localDs(new Date());
+  const todayRec = attendance.find(a=>a.date===todayStr);
   const plannedDates = availability?.planned_dates || [];
 
-  // Undo okno — platné jen pro dnešek a do 10 minut
-  const canUndo = (u) => u && u.date===todayStr && (Date.now()-new Date(u.recordedAt).getTime()) < UNDO_WINDOW_MS;
-  const undoMinsLeft = (u) => u ? Math.ceil(Math.max(0, UNDO_WINDOW_MS-(Date.now()-new Date(u.recordedAt).getTime()))/60000) : 0;
+  // ── Undo zcela z DB timestampů — žádný localStorage ──
+  const undoMsLeft = (ts) => ts ? Math.max(0, UNDO_WINDOW_MS-(Date.now()-new Date(ts).getTime())) : 0;
+  const canUndoIn  = !!todayRec?.check_in  && undoMsLeft(todayRec.check_in)  > 0;
+  const canUndoOut = !!todayRec?.check_out && undoMsLeft(todayRec.check_out) > 0;
+  const undoMinLabel = (ts) => `${Math.ceil(undoMsLeft(ts)/60000)} min`;
 
   const checkIn = async () => {
+    if(actionSaving) return;
     setActionSaving(true);
     try {
       const ts = new Date().toISOString();
-      const rec = { id: todayRec?.id||uid(), assistant_email:email, date:todayStr, check_in:ts, check_out:todayRec?.check_out||null };
-      const updated = await upsertAssistantAttendance(rec);
-      const u = { date:todayStr, recordedAt:ts };
-      localStorage.setItem("maux_undo_checkin", JSON.stringify(u));
-      setUndoIn(u); localStorage.removeItem("maux_undo_checkout"); setUndoOut(null);
-      onRefreshAttendance && onRefreshAttendance();
+      await upsertAssistantAttendance({ id:todayRec?.id||uid(), assistant_email:email, date:todayStr, check_in:ts, check_out:null });
+      await onRefreshAttendance?.();
     } catch(e) { alert("Chyba: "+e.message); } finally { setActionSaving(false); }
   };
-
   const checkOut = async () => {
+    if(actionSaving) return;
     setActionSaving(true);
     try {
       const ts = new Date().toISOString();
-      const rec = { id: todayRec?.id||uid(), assistant_email:email, date:todayStr, check_in:todayRec?.check_in||ts, check_out:ts };
-      await upsertAssistantAttendance(rec);
-      const u = { date:todayStr, recordedAt:ts };
-      localStorage.setItem("maux_undo_checkout", JSON.stringify(u));
-      setUndoOut(u);
-      onRefreshAttendance && onRefreshAttendance();
+      await upsertAssistantAttendance({ id:todayRec?.id||uid(), assistant_email:email, date:todayStr, check_in:todayRec?.check_in||ts, check_out:ts });
+      await onRefreshAttendance?.();
     } catch(e) { alert("Chyba: "+e.message); } finally { setActionSaving(false); }
   };
-
-  const undoCheckIn = async () => {
-    if (!canUndo(undoIn)) return;
+  const undoIn = async () => {
+    if(!canUndoIn||actionSaving) return;
     setActionSaving(true);
     try {
-      const rec = { id:todayRec?.id||uid(), assistant_email:email, date:todayStr, check_in:null, check_out:null };
-      await upsertAssistantAttendance(rec);
-      localStorage.removeItem("maux_undo_checkin"); setUndoIn(null);
-      onRefreshAttendance && onRefreshAttendance();
+      await upsertAssistantAttendance({ id:todayRec.id, assistant_email:email, date:todayStr, check_in:null, check_out:null });
+      await onRefreshAttendance?.();
     } catch(e) { alert("Chyba: "+e.message); } finally { setActionSaving(false); }
   };
-
-  const undoCheckOut = async () => {
-    if (!canUndo(undoOut)) return;
+  const undoOut = async () => {
+    if(!canUndoOut||actionSaving) return;
     setActionSaving(true);
     try {
-      const rec = { id:todayRec?.id||uid(), assistant_email:email, date:todayStr, check_in:todayRec?.check_in||null, check_out:null };
-      await upsertAssistantAttendance(rec);
-      localStorage.removeItem("maux_undo_checkout"); setUndoOut(null);
-      onRefreshAttendance && onRefreshAttendance();
+      await upsertAssistantAttendance({ id:todayRec.id, assistant_email:email, date:todayStr, check_in:todayRec.check_in, check_out:null });
+      await onRefreshAttendance?.();
     } catch(e) { alert("Chyba: "+e.message); } finally { setActionSaving(false); }
   };
 
   const fmtTime = (ts) => ts ? new Date(ts).toLocaleTimeString("cs-CZ",{hour:"2-digit",minute:"2-digit"}) : "—";
   const fmtH    = (h)  => { if(!h||h<=0)return"0 h"; const f=Math.floor(h),m=Math.round((h-f)*60); return m>0?`${f}h ${m}m`:`${f} h`; };
 
-  // Live duration
-  const liveDur = todayRec?.check_in
-    ? todayRec.check_out
-      ? (new Date(todayRec.check_out)-new Date(todayRec.check_in))/36e5
-      : (Date.now()-new Date(todayRec.check_in).getTime())/36e5
-    : 0;
   const status = !todayRec?.check_in ? "out" : !todayRec?.check_out ? "in" : "done";
+  const liveDur = todayRec?.check_in
+    ? (todayRec.check_out
+        ? (new Date(todayRec.check_out)-new Date(todayRec.check_in))/36e5
+        : (now-new Date(todayRec.check_in))/36e5)
+    : 0;
+  const progressPct = Math.min(100, Math.round(liveDur/ASISTENT_DAILY_H*100));
 
-  // Kalendář
+  // Plan calendar
   const toggleDay = async (dateStr) => {
     const newDates = plannedDates.includes(dateStr) ? plannedDates.filter(d=>d!==dateStr) : [...plannedDates,dateStr].sort();
     setSavingAvail(true);
@@ -6736,12 +6740,8 @@ function AsistentDochazka({ email, attendance, onRefreshAttendance }) {
       await upsertAssistantAvailability(rec); setAvailability(rec);
     } catch(e) { alert("Chyba: "+e.message); } finally { setSavingAvail(false); }
   };
-
   const [vy,vm] = viewMonth.split("-").map(Number);
   const monthNames = ["leden","únor","březen","duben","květen","červen","červenec","srpen","září","říjen","listopad","prosinec"];
-  const DOW = ["Ne","Po","Út","St","Čt","Pá","So"];
-
-  // Všechny dny měsíce (Po–Pá)
   const monthWorkDays = (() => {
     const days=[]; const d=new Date(vy,vm-1,1);
     while(d.getMonth()===vm-1) {
@@ -6750,182 +6750,205 @@ function AsistentDochazka({ email, attendance, onRefreshAttendance }) {
     }
     return days;
   })();
+  const nowTimeStr = now.toLocaleTimeString("cs-CZ",{hour:"2-digit",minute:"2-digit"});
+  const COLORS = { out:{ top:"2.5px solid #D1D5DB", bg:"#fff",      sh:"0 0 0 1px rgba(0,0,0,.06), 0 6px 24px rgba(0,0,0,.05)" },
+                   in:{  top:"2.5px solid #10B981", bg:"#F9FEFB",   sh:"0 0 0 1px rgba(16,185,129,.15), 0 6px 28px rgba(16,185,129,.08)" },
+                   done:{ top:"2.5px solid #7C3AED",bg:"#FDFBFF",   sh:"0 0 0 1px rgba(124,58,237,.12), 0 6px 28px rgba(124,58,237,.06)" } };
+  const cc = COLORS[status];
 
   return (
-    <div style={{padding:"28px 28px"}}>
-      <h2 style={{fontFamily:"Fraunces,serif",fontWeight:300,fontSize:26,color:"var(--ink)",marginBottom:20}}>Docházka</h2>
+    <div style={{padding:"24px 28px",display:"flex",flexDirection:"column",gap:14}}>
 
-      {/* ── STATUS DNES ── */}
-      <div style={{
-        background: status==="in"?"#F0FDF4":status==="done"?"#F7F5FF":"#fff",
-        border:`1.5px solid ${status==="in"?"#86EFAC":status==="done"?"#DDD6FE":"var(--line)"}`,
-        borderRadius:14,padding:"20px 24px",marginBottom:16
-      }}>
-        <div style={{fontSize:8,letterSpacing:".2em",textTransform:"uppercase",fontWeight:700,color:"var(--mut)",marginBottom:14}}>
-          DNES — {fmtDate(todayStr)}
+      {/* ── HERO STATUS KARTA ── */}
+      <div style={{borderRadius:18,overflow:"hidden",borderTop:cc.top,background:cc.bg,boxShadow:cc.sh}}>
+
+        {/* Horní lišta: datum + čas */}
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"14px 24px 0",opacity:.55}}>
+          <div style={{fontSize:10,letterSpacing:".04em",fontWeight:500,color:"var(--ink)"}}>
+            {new Date().toLocaleDateString("cs-CZ",{weekday:"long",day:"numeric",month:"long"})}
+          </div>
+          <div style={{fontFamily:"JetBrains Mono,monospace",fontSize:12,color:"var(--ink)",letterSpacing:"-.01em"}}>
+            {nowTimeStr}
+          </div>
         </div>
 
-        {/* Stav: ještě nepřišel */}
-        {status==="out" && (
-          <div style={{display:"flex",alignItems:"center",gap:16}}>
-            <div style={{flex:1}}>
-              <div style={{fontSize:13,color:"var(--mut)",marginBottom:14}}>Ještě jsi se nepřihlásil/a. Klikni, až přijdeš do kanceláře.</div>
+        <div style={{padding:"20px 24px 22px"}}>
+
+          {/* OUT: ještě nepřišel */}
+          {status==="out" && (
+            <div style={{display:"flex",flexDirection:"column",alignItems:"center",textAlign:"center",gap:18}}>
+              <div>
+                <div style={{fontFamily:"Fraunces,serif",fontWeight:300,fontSize:20,color:"var(--txt)",opacity:.5,marginBottom:4}}>Dobrý den!</div>
+                <div style={{fontSize:12,color:"var(--mut)"}}>Klikni níže, jakmile dorazíš do kanceláře.</div>
+              </div>
               <button onClick={checkIn} disabled={actionSaving}
-                style={{padding:"12px 28px",borderRadius:10,border:"none",background:"var(--ink)",color:"#fff",fontWeight:700,fontSize:14,cursor:"pointer"}}>
-                👋 Přišel jsem
+                style={{padding:"15px 48px",borderRadius:14,border:"none",background:"var(--ink)",color:"#fff",fontWeight:700,fontSize:15,cursor:actionSaving?"wait":"pointer",
+                  boxShadow:"0 4px 16px rgba(53,24,165,.35)",transition:"opacity .15s",opacity:actionSaving?.6:1,letterSpacing:".02em"}}>
+                {actionSaving ? "Ukládám…" : "Jsem tady →"}
               </button>
             </div>
-          </div>
-        )}
+          )}
 
-        {/* Stav: v kanceláři */}
-        {status==="in" && (
-          <div>
-            <div style={{display:"flex",alignItems:"center",gap:20,marginBottom:14,flexWrap:"wrap"}}>
-              <div style={{display:"flex",alignItems:"center",gap:10}}>
-                <div style={{width:10,height:10,borderRadius:"50%",background:"#22C55E",boxShadow:"0 0 0 3px #BBF7D0"}} />
-                <span style={{fontSize:14,fontWeight:600,color:"#065F46"}}>V kanceláři</span>
-                <span style={{fontSize:13,color:"#065F46"}}>od {fmtTime(todayRec.check_in)}</span>
+          {/* IN: v kanceláři */}
+          {status==="in" && (
+            <div>
+              <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:16}}>
+                <span style={{display:"inline-block",width:8,height:8,borderRadius:"50%",background:"#22C55E",boxShadow:"0 0 0 3px rgba(34,197,94,.25)",flexShrink:0}} />
+                <span style={{fontSize:11,fontWeight:600,color:"#059669",letterSpacing:".04em",textTransform:"uppercase"}}>V kanceláři</span>
+                <span style={{fontSize:11,color:"#059669",opacity:.7}}>od {fmtTime(todayRec.check_in)}</span>
               </div>
-              <div style={{fontFamily:"Fraunces,serif",fontSize:26,fontWeight:300,color:"#059669",lineHeight:1}}>
-                {fmtH(liveDur)}
+              {/* Velký časový ukazatel */}
+              <div style={{textAlign:"center",marginBottom:18}}>
+                <div style={{fontFamily:"Fraunces,serif",fontSize:56,fontWeight:300,color:"#059669",lineHeight:1,letterSpacing:"-.03em"}}>
+                  {fmtH(liveDur)}
+                </div>
+                <div style={{fontSize:10,color:"var(--mut)",marginTop:5}}>
+                  z cíle {ASISTENT_DAILY_H} h — {progressPct < 100 ? `zbývá ${fmtH(ASISTENT_DAILY_H - liveDur)}` : "🎉 cíl splněn!"}
+                </div>
               </div>
-            </div>
-            <div style={{display:"flex",gap:10,alignItems:"center",flexWrap:"wrap"}}>
-              <button onClick={checkOut} disabled={actionSaving}
-                style={{padding:"10px 22px",borderRadius:9,border:"none",background:"#1a1a2e",color:"#fff",fontWeight:600,fontSize:13,cursor:"pointer"}}>
-                🚪 Odcházím
-              </button>
-              {canUndo(undoIn) && (
-                <button onClick={undoCheckIn} disabled={actionSaving}
-                  style={{padding:"8px 14px",borderRadius:8,border:"1.5px solid #FCA5A5",background:"#FEF2F2",color:"#DC2626",fontWeight:500,fontSize:12,cursor:"pointer"}}>
-                  ↩ Zrušit příchod <span style={{fontSize:10,opacity:.7}}>({undoMinsLeft(undoIn)} min)</span>
+              {/* Progress bar */}
+              <div style={{height:3,borderRadius:2,background:"rgba(0,0,0,.08)",overflow:"hidden",marginBottom:18}}>
+                <div style={{height:"100%",width:`${progressPct}%`,borderRadius:2,background:progressPct>=100?"#10B981":"#22C55E",transition:"width .5s ease"}} />
+              </div>
+              {/* Akce */}
+              <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:10}}>
+                <button onClick={checkOut} disabled={actionSaving}
+                  style={{padding:"13px 44px",borderRadius:12,border:"none",background:"#1a1a2e",color:"#fff",fontWeight:600,fontSize:14,cursor:actionSaving?"wait":"pointer",
+                    boxShadow:"0 3px 12px rgba(0,0,0,.25)",opacity:actionSaving?.6:1,letterSpacing:".02em"}}>
+                  {actionSaving ? "Ukládám…" : "Odcházím →"}
                 </button>
-              )}
+                {canUndoIn && (
+                  <button onClick={undoIn} disabled={actionSaving}
+                    style={{background:"none",border:"none",color:"#DC2626",fontSize:11.5,cursor:"pointer",opacity:.7,textDecoration:"underline"}}>
+                    ↩ Zrušit dnešní příchod ({undoMinLabel(todayRec.check_in)} zbývá)
+                  </button>
+                )}
+              </div>
             </div>
-            <div style={{marginTop:10,fontSize:11,color:"var(--mut)"}}>
-              ℹ️ Čas příchodu nelze zpětně upravit — jen zrušit do {UNDO_WINDOW_MS/60000} minut.
-            </div>
-          </div>
-        )}
+          )}
 
-        {/* Stav: odešel */}
-        {status==="done" && (
-          <div>
-            <div style={{display:"flex",gap:24,alignItems:"center",marginBottom:14,flexWrap:"wrap"}}>
+          {/* DONE: odešel */}
+          {status==="done" && (() => {
+            const durH = liveDur;
+            const good = durH >= ASISTENT_DAILY_H;
+            return (
               <div>
-                <div style={{fontSize:10,color:"var(--mut)",marginBottom:3}}>Příchod</div>
-                <div style={{fontSize:16,fontWeight:600,color:"var(--ink)"}}>{fmtTime(todayRec.check_in)}</div>
+                <div style={{textAlign:"center",marginBottom:16}}>
+                  <div style={{fontSize:11,fontWeight:600,color:"#7C3AED",letterSpacing:".08em",textTransform:"uppercase",marginBottom:8,opacity:.7}}>
+                    {good ? "Skvělý den! 🎉" : "Hotovo na dnes"}
+                  </div>
+                  <div style={{fontFamily:"Fraunces,serif",fontSize:48,fontWeight:300,color:"#7C3AED",lineHeight:1,letterSpacing:"-.03em"}}>
+                    {fmtH(durH)}
+                  </div>
+                  <div style={{fontSize:10.5,color:"var(--mut)",marginTop:6}}>
+                    {fmtTime(todayRec.check_in)} → {fmtTime(todayRec.check_out)}
+                  </div>
+                </div>
+                {/* Progress bar */}
+                <div style={{height:3,borderRadius:2,background:"rgba(0,0,0,.08)",overflow:"hidden",marginBottom:14}}>
+                  <div style={{height:"100%",width:`${Math.min(100,progressPct)}%`,borderRadius:2,background:good?"#7C3AED":"#A78BFA"}} />
+                </div>
+                <div style={{display:"flex",justifyContent:"center"}}>
+                  {canUndoOut ? (
+                    <button onClick={undoOut} disabled={actionSaving}
+                      style={{background:"none",border:"none",color:"#DC2626",fontSize:11.5,cursor:"pointer",opacity:.7,textDecoration:"underline"}}>
+                      ↩ Zrušit odchod ({undoMinLabel(todayRec.check_out)} zbývá)
+                    </button>
+                  ) : (
+                    <div style={{fontSize:11,color:"var(--mut)",opacity:.7}}>Záznam uzamčen</div>
+                  )}
+                </div>
               </div>
-              <div style={{fontSize:22,color:"var(--mut)"}}>→</div>
-              <div>
-                <div style={{fontSize:10,color:"var(--mut)",marginBottom:3}}>Odchod</div>
-                <div style={{fontSize:16,fontWeight:600,color:"var(--ink)"}}>{fmtTime(todayRec.check_out)}</div>
-              </div>
-              <div style={{marginLeft:"auto",textAlign:"right"}}>
-                <div style={{fontSize:10,color:"var(--mut)",marginBottom:3}}>Odpracováno</div>
-                <div style={{fontFamily:"Fraunces,serif",fontSize:26,fontWeight:300,color:"#7C3AED"}}>{fmtH(liveDur)}</div>
-              </div>
-            </div>
-            <div style={{display:"flex",gap:10,alignItems:"center"}}>
-              {canUndo(undoOut) ? (
-                <button onClick={undoCheckOut} disabled={actionSaving}
-                  style={{padding:"8px 14px",borderRadius:8,border:"1.5px solid #FCA5A5",background:"#FEF2F2",color:"#DC2626",fontWeight:500,fontSize:12,cursor:"pointer"}}>
-                  ↩ Zrušit odchod <span style={{fontSize:10,opacity:.7}}>({undoMinsLeft(undoOut)} min)</span>
-                </button>
-              ) : (
-                <div style={{fontSize:11,color:"var(--mut)"}}>✓ Záznam uzamčen · skvělý den!</div>
-              )}
-            </div>
-          </div>
-        )}
+            );
+          })()}
+        </div>
       </div>
 
-      {/* ── PLÁNOVANÁ DOCHÁZKA — kalendář ── */}
-      <div style={{background:"#fff",border:"1px solid var(--line)",borderRadius:12,padding:"16px 20px",marginBottom:16}}>
-        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:10}}>
-          <div style={{fontSize:8,letterSpacing:".2em",textTransform:"uppercase",fontWeight:700,color:"var(--mut)"}}>
-            Plánovaná docházka — {monthNames[vm-1]} {vy}
+      {/* ── PLÁNOVANÁ DOCHÁZKA ── */}
+      <div style={{background:"#fff",borderRadius:14,boxShadow:"0 0 0 1px rgba(0,0,0,.06)",overflow:"hidden"}}>
+        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"14px 20px 10px"}}>
+          <div style={{fontSize:7,letterSpacing:".25em",textTransform:"uppercase",fontWeight:700,color:"var(--mut)"}}>
+            PLÁN DOCHÁZKY — {monthNames[vm-1].toUpperCase()} {vy}
           </div>
           <div style={{display:"flex",gap:5,alignItems:"center"}}>
-            {savingAvail && <span style={{fontSize:10,color:"var(--mut)"}}>Ukládám…</span>}
-            <button onClick={()=>{ const d=new Date(vy,vm-2,1); setViewMonth(`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`); }}
-              style={{padding:"3px 9px",border:"1px solid var(--line)",borderRadius:6,background:"#fff",cursor:"pointer",fontSize:11}}>←</button>
-            <button onClick={()=>{ const d=new Date(vy,vm,1); setViewMonth(`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`); }}
-              style={{padding:"3px 9px",border:"1px solid var(--line)",borderRadius:6,background:"#fff",cursor:"pointer",fontSize:11}}>→</button>
+            {savingAvail && <span style={{fontSize:9,color:"var(--mut)"}}>Ukládám…</span>}
+            {[["←",vm-1],["→",vm+1]].map(([sym,month])=>(
+              <button key={sym} onClick={()=>{ const d=new Date(vy,month-1,1); setViewMonth(`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`); }}
+                style={{width:26,height:26,display:"flex",alignItems:"center",justifyContent:"center",border:"1px solid var(--line)",borderRadius:7,background:"#fff",cursor:"pointer",fontSize:11,color:"var(--mut)"}}>
+                {sym}
+              </button>
+            ))}
           </div>
         </div>
-        <div style={{fontSize:11,color:"var(--mut)",marginBottom:10}}>Klikni na dny, kdy plánuješ být v kanceláři.</div>
-        {/* Header Po–Pá */}
-        <div style={{display:"grid",gridTemplateColumns:"repeat(5,1fr)",gap:5,marginBottom:4}}>
-          {["Po","Út","St","Čt","Pá"].map(n=>(<div key={n} style={{textAlign:"center",fontSize:9,color:"var(--mut)",fontWeight:600}}>{n}</div>))}
-        </div>
-        {/* Grid — plné týdny */}
-        {(()=>{
-          const firstDow = monthWorkDays[0]?.dow; // 1=Po…5=Pá
-          const pad = firstDow ? firstDow-1 : 0;
-          const cells = [...Array(pad).fill(null), ...monthWorkDays];
-          const rows=[]; for(let i=0;i<cells.length;i+=5) rows.push(cells.slice(i,i+5));
-          return rows.map((row,ri)=>(
-            <div key={ri} style={{display:"grid",gridTemplateColumns:"repeat(5,1fr)",gap:5,marginBottom:5}}>
-              {row.map((cell,ci)=>{
-                if(!cell) return <div key={ci} />;
-                const { ds, dayNum } = cell;
-                const isSel    = plannedDates.includes(ds);
-                const isPast   = ds < todayStr;
-                const isToday  = ds === todayStr;
-                const attended = attendance.some(a=>a.date===ds&&a.check_in);
-                return (
-                  <button key={ds} onClick={()=>!isPast&&toggleDay(ds)} disabled={isPast}
-                    style={{padding:"7px 4px",borderRadius:7,textAlign:"center",fontSize:12,fontWeight:isToday?700:400,cursor:isPast?"default":"pointer",
-                      border:`1px solid ${attended?"#86EFAC":isSel?"var(--ink)":isToday?"#DDD6FE":"var(--line)"}`,
-                      background:attended?"#F0FDF4":isSel?"var(--ink)":isToday?"#F7F5FF":"#fff",
-                      color:attended?"#065F46":isSel?"#fff":isPast?"#ccc":"var(--txt)"}}>
-                    {dayNum}
-                    {attended&&<div style={{fontSize:7,color:"#22C55E",marginTop:1}}>✓</div>}
-                  </button>
-                );
-              })}
+        <div style={{padding:"0 20px 16px"}}>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(5,1fr)",gap:5,marginBottom:6}}>
+            {["Po","Út","St","Čt","Pá"].map(n=>(<div key={n} style={{textAlign:"center",fontSize:8.5,color:"var(--mut)",fontWeight:600,padding:"2px 0"}}>{n}</div>))}
+          </div>
+          {(()=>{
+            const pad = (monthWorkDays[0]?.dow||1)-1;
+            const cells=[...Array(pad).fill(null),...monthWorkDays];
+            const rows=[]; for(let i=0;i<cells.length;i+=5) rows.push(cells.slice(i,i+5));
+            return rows.map((row,ri)=>(
+              <div key={ri} style={{display:"grid",gridTemplateColumns:"repeat(5,1fr)",gap:5,marginBottom:5}}>
+                {row.map((cell,ci)=>{
+                  if(!cell) return <div key={ci}/>;
+                  const {ds,dayNum}=cell;
+                  const isSel    = plannedDates.includes(ds);
+                  const isPast   = ds<todayStr;
+                  const isToday  = ds===todayStr;
+                  const attended = attendance.some(a=>a.date===ds&&a.check_in);
+                  return (
+                    <button key={ds} onClick={()=>!isPast&&toggleDay(ds)} disabled={isPast}
+                      style={{height:34,borderRadius:8,border:"none",textAlign:"center",fontSize:12,fontWeight:isToday?700:400,
+                        cursor:isPast?"default":"pointer",lineHeight:1,
+                        background:attended?"#ECFDF5":isSel?"var(--ink)":isToday?"#EDE9FD":"transparent",
+                        color:attended?"#059669":isSel?"#fff":isPast?"var(--line)":isToday?"var(--ink)":"var(--txt)",
+                        outline:isToday&&!isSel?"1.5px solid #DDD6FE":"none",
+                      }}>
+                      <div>{dayNum}</div>
+                      {attended&&<div style={{fontSize:6,marginTop:1,color:"#22C55E"}}>●</div>}
+                    </button>
+                  );
+                })}
+              </div>
+            ));
+          })()}
+          {plannedDates.filter(d=>d.startsWith(viewMonth)).length>0 && (
+            <div style={{fontSize:10,color:"var(--mut)",marginTop:4}}>
+              Naplánováno {plannedDates.filter(d=>d.startsWith(viewMonth)).length} dní v kanceláři
             </div>
-          ));
-        })()}
-        {plannedDates.filter(d=>d.startsWith(viewMonth)).length>0 && (
-          <div style={{marginTop:8,fontSize:11,color:"var(--mut)"}}>
-            Naplánováno: <strong style={{color:"var(--ink)"}}>{plannedDates.filter(d=>d.startsWith(viewMonth)).length} dní</strong>
-          </div>
-        )}
+          )}
+        </div>
       </div>
 
       {/* ── HISTORIE ── */}
-      <div style={{background:"#fff",border:"1px solid var(--line)",borderRadius:12,padding:"16px 20px"}}>
-        <div style={{fontSize:8,letterSpacing:".2em",textTransform:"uppercase",fontWeight:700,color:"var(--mut)",marginBottom:12}}>Historie docházky</div>
+      <div style={{background:"#fff",borderRadius:14,boxShadow:"0 0 0 1px rgba(0,0,0,.06)",overflow:"hidden"}}>
+        <div style={{fontSize:7,letterSpacing:".25em",textTransform:"uppercase",fontWeight:700,color:"var(--mut)",padding:"14px 20px 10px"}}>
+          HISTORIE DOCHÁZKY
+        </div>
         {attendance.length===0 ? (
-          <div style={{fontSize:12.5,color:"var(--mut)"}}>Zatím žádné záznamy.</div>
+          <div style={{fontSize:12.5,color:"var(--mut)",padding:"0 20px 16px"}}>Zatím žádné záznamy.</div>
         ) : (
-          <table style={{width:"100%",borderCollapse:"collapse"}}>
-            <thead><tr style={{borderBottom:"1px solid var(--line)"}}>
-              {["Datum","Příchod","Odchod","Odpracováno"].map(h=>(
-                <th key={h} style={{padding:"6px 10px",textAlign:"left",fontSize:9,letterSpacing:".1em",textTransform:"uppercase",color:"var(--mut)",fontWeight:500}}>{h}</th>
-              ))}
-            </tr></thead>
-            <tbody>
-              {attendance.slice(0,25).map((a,i)=>{
-                const dur = a.check_in&&a.check_out ? (new Date(a.check_out)-new Date(a.check_in))/36e5 : null;
-                const good = dur!=null && dur>=ASISTENT_DAILY_H;
-                return (
-                  <tr key={a.id} style={{borderBottom:"1px solid var(--line)",background:a.date===todayStr?"#F7F5FF":i%2?"#FAFAFE":"#fff"}}>
-                    <td style={{padding:"8px 10px",fontSize:12.5}}>
-                      {fmtDate(a.date)}
-                      {a.date===todayStr&&<span style={{marginLeft:6,fontSize:9,background:"#F7F5FF",color:"#7C3AED",border:"1px solid #DDD6FE",borderRadius:4,padding:"1px 5px",fontWeight:600}}>dnes</span>}
-                    </td>
-                    <td style={{padding:"8px 10px",fontSize:12.5}}>{fmtTime(a.check_in)}</td>
-                    <td style={{padding:"8px 10px",fontSize:12.5}}>{fmtTime(a.check_out)}</td>
-                    <td style={{padding:"8px 10px",fontSize:12.5,fontWeight:600,color:good?"#059669":"var(--ink)"}}>{dur?fmtH(dur):"—"}</td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+          <div style={{padding:"0 20px 16px",display:"flex",flexDirection:"column",gap:3}}>
+            {attendance.slice(0,20).map(a=>{
+              const dur = a.check_in&&a.check_out?(new Date(a.check_out)-new Date(a.check_in))/36e5:null;
+              const good = dur!=null&&dur>=ASISTENT_DAILY_H;
+              const isToday = a.date===todayStr;
+              return (
+                <div key={a.id} style={{display:"flex",alignItems:"center",gap:12,padding:"7px 10px",borderRadius:8,
+                  background:isToday?"rgba(124,58,237,.04)":"transparent"}}>
+                  <div style={{width:6,height:6,borderRadius:"50%",background:good?"#22C55E":dur?"#FCA5A5":"var(--line)",flexShrink:0}} />
+                  <div style={{flex:1,fontSize:11.5,color:"var(--txt)",fontWeight:isToday?600:400}}>{fmtDate(a.date)}</div>
+                  <div style={{fontSize:11,color:"var(--mut)",fontFamily:"JetBrains Mono,monospace",letterSpacing:"-.01em"}}>
+                    {fmtTime(a.check_in)} – {fmtTime(a.check_out)}
+                  </div>
+                  <div style={{fontSize:11.5,fontWeight:600,color:good?"#059669":"var(--mut)",minWidth:38,textAlign:"right"}}>
+                    {dur?fmtH(dur):"—"}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
         )}
       </div>
     </div>
