@@ -7147,44 +7147,90 @@ function AsistentPanel({ clients, onPreview }) {
         )}
 
         {/* Docházka */}
-        {tab==="dochazka" && (
-          attendance.length===0 ? <div style={{color:"var(--mut)",fontSize:13}}>Žádné záznamy docházky.</div> : (
+        {tab==="dochazka" && (() => {
+          const todayDs = localDs(new Date());
+          const [clearing, setClearing] = useState(false);
+          const clearCheckout = async (a) => {
+            setClearing(true);
+            try {
+              await upsertAssistantAttendance({ id:a.id, assistant_email:email, date:a.date, check_in:a.check_in, check_out:null });
+              setAttendance(await fetchAssistantAttendance(email));
+            } catch(e){ alert("Chyba: "+e.message); } finally { setClearing(false); }
+          };
+          if(attendance.length===0) return <div style={{color:"var(--mut)",fontSize:13}}>Žádné záznamy docházky.</div>;
+          return (
             <table style={{width:"100%",borderCollapse:"collapse",border:"1px solid var(--line)",borderRadius:12,overflow:"hidden"}}>
               <thead><tr style={{background:"var(--bg)"}}>
-                {["Datum","Příchod","Odchod","Odpracováno"].map(h=>(
+                {["Datum","Příchod","Odchod","Odpracováno",""].map(h=>(
                   <th key={h} style={{padding:"9px 14px",textAlign:"left",fontSize:9,letterSpacing:".1em",textTransform:"uppercase",color:"var(--mut)",fontWeight:500}}>{h}</th>
                 ))}
               </tr></thead>
               <tbody>
                 {attendance.map((a,i)=>{
                   const dur = a.check_in&&a.check_out?(new Date(a.check_out)-new Date(a.check_in))/36e5:null;
+                  const isToday = a.date===todayDs;
                   return (
-                    <tr key={a.id} style={{borderTop:"1px solid var(--line)",background:i%2?"#FAFAFE":"#fff"}}>
-                      <td style={{padding:"10px 14px",fontSize:13}}>{fmtDate(a.date)}</td>
+                    <tr key={a.id} style={{borderTop:"1px solid var(--line)",background:isToday?"#FDFBFF":i%2?"#FAFAFE":"#fff"}}>
+                      <td style={{padding:"10px 14px",fontSize:13,fontWeight:isToday?600:400}}>{fmtDate(a.date)}</td>
                       <td style={{padding:"10px 14px",fontSize:13}}>{fmtTime(a.check_in)}</td>
                       <td style={{padding:"10px 14px",fontSize:13}}>{fmtTime(a.check_out)}</td>
                       <td style={{padding:"10px 14px",fontSize:13,fontWeight:600,color:dur&&dur>=ASISTENT_DAILY_H?"#059669":"var(--ink)"}}>{dur?fmtH(dur):"—"}</td>
+                      <td style={{padding:"10px 14px",fontSize:12}}>
+                        {isToday && a.check_out && (
+                          <button onClick={()=>clearCheckout(a)} disabled={clearing}
+                            style={{padding:"4px 10px",borderRadius:6,border:"1px solid #FCA5A5",background:"#FEF2F2",color:"#991B1B",fontSize:11,cursor:"pointer",fontWeight:600,whiteSpace:"nowrap"}}>
+                            {clearing?"…":"🔧 Zrušit odchod"}
+                          </button>
+                        )}
+                      </td>
                     </tr>
                   );
                 })}
               </tbody>
             </table>
-          )
-        )}
+          );
+        })()}
 
         {/* Plán */}
         {tab==="plan" && (
-          <div>
-            <p style={{fontSize:12.5,color:"var(--mut)",marginBottom:14}}>Dny, které Josef naplánoval v kanceláři — {monthNames[nmm-1]} {nmy}</p>
-            {(!availability||availability.planned_dates.length===0) ? (
-              <div style={{color:"var(--mut)",fontSize:13}}>Josef ještě nevyplnil plánovanou docházku na {monthNames[nmm-1]}.</div>
-            ) : (
-              <div style={{display:"flex",flexWrap:"wrap",gap:8}}>
-                {availability.planned_dates.map(d=>(
-                  <div key={d} style={{padding:"7px 13px",background:"#F7F5FF",border:"1px solid var(--ink)",borderRadius:8,fontSize:12.5,fontWeight:500,color:"var(--ink)"}}>{fmtDate(d)}</div>
-                ))}
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:24}}>
+            {/* Aktuální měsíc — skutečná docházka */}
+            <div>
+              <div style={{fontSize:8.5,letterSpacing:".15em",textTransform:"uppercase",fontWeight:700,color:"var(--mut)",marginBottom:10}}>
+                Docházka — {monthNames[now.getMonth()]} {now.getFullYear()}
               </div>
-            )}
+              {mAtt===0 ? (
+                <div style={{color:"var(--mut)",fontSize:12.5}}>Zatím žádný příchod tento měsíc.</div>
+              ) : (
+                <div style={{display:"flex",flexDirection:"column",gap:6}}>
+                  {attendance.filter(a=>a.date.startsWith(mKey)&&a.check_in).map(a=>{
+                    const dur = a.check_in&&a.check_out?(new Date(a.check_out)-new Date(a.check_in))/36e5:null;
+                    return (
+                      <div key={a.id} style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"7px 12px",background:"#F0FDF4",border:"1px solid #BBF7D0",borderRadius:8}}>
+                        <span style={{fontSize:12.5,fontWeight:500,color:"var(--ink)"}}>{fmtDate(a.date)}</span>
+                        <span style={{fontSize:11.5,color:"#059669",fontWeight:600}}>{dur?fmtH(dur):fmtTime(a.check_in)+" →"}</span>
+                      </div>
+                    );
+                  })}
+                  <div style={{fontSize:11,color:"var(--mut)",marginTop:4}}>Celkem {mAtt} {mAtt===1?"den":"dní"} · {fmtH(mH)} práce</div>
+                </div>
+              )}
+            </div>
+            {/* Plánovaný příští měsíc */}
+            <div>
+              <div style={{fontSize:8.5,letterSpacing:".15em",textTransform:"uppercase",fontWeight:700,color:"var(--mut)",marginBottom:10}}>
+                Plán — {monthNames[nmm-1]} {nmy}
+              </div>
+              {(!availability||availability.planned_dates.length===0) ? (
+                <div style={{color:"var(--mut)",fontSize:12.5}}>Josef ještě nevyplnil plánovanou docházku.</div>
+              ) : (
+                <div style={{display:"flex",flexWrap:"wrap",gap:6}}>
+                  {availability.planned_dates.map(d=>(
+                    <div key={d} style={{padding:"7px 13px",background:"#F7F5FF",border:"1px solid #C4B5FD",borderRadius:8,fontSize:12.5,fontWeight:500,color:"var(--ink)"}}>{fmtDate(d)}</div>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
         )}
       </div>
