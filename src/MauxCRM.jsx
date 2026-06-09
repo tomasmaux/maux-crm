@@ -9,6 +9,7 @@ const FIRMA = {
   ico: "22148973",
   dic: "CZ9309133339",
   iban: "CZ74 0300 0000 0002 9588 8720",
+  account: "295888720/0300",
   bank: "ČSOB, a.s.",
   email: "advokat@maux.cz",
   emailCC: "andrea.cechmanova@anmavi.cz",
@@ -896,8 +897,8 @@ function InvoicePrintPreview({ invoice, client, workEntries, onBack, onIssue, sa
               <div>
                 <div style={{ fontSize: 7, letterSpacing: "0.35em", color: "#D4CEEA", textTransform: "uppercase", fontFamily: "'Inter', sans-serif", marginBottom: 9 }}>Platební údaje</div>
                 <div style={{ fontSize: 10, color: "#7A7494", lineHeight: 2.2, fontFamily: "'Inter', sans-serif", fontWeight: 300 }}>
-                  <span style={{ fontSize: 7.5, letterSpacing: "0.2em", color: "#D4CEEA", display: "inline-block", width: 30, textTransform: "uppercase" }}>IBAN</span>
-                  <span style={{ fontFamily: "monospace", color: "#2d2840" }}>{FIRMA.iban}</span>
+                  <span style={{ fontSize: 7.5, letterSpacing: "0.2em", color: "#D4CEEA", display: "inline-block", width: 46, textTransform: "uppercase" }}>Účet</span>
+                  <span style={{ fontFamily: "monospace", color: "#2d2840" }}>{FIRMA.account}</span>
                 </div>
                 <div style={{ fontSize: 10, color: "#7A7494", lineHeight: 2.2, fontFamily: "'Inter', sans-serif", fontWeight: 300 }}>
                   <span style={{ fontSize: 7.5, letterSpacing: "0.2em", color: "#D4CEEA", display: "inline-block", width: 30, textTransform: "uppercase" }}>VS</span>
@@ -952,53 +953,110 @@ function InvoicePrintPreview({ invoice, client, workEntries, onBack, onIssue, sa
         </div>
 
         {/* PAGE 2 — VÝKAZ PRÁCE (příloha) */}
-        {workEntries && workEntries.length > 0 && (
-          <div className="inv-page" style={{ boxShadow: "0 16px 60px rgba(0,0,0,.22)", fontFamily: "'Inter', Arial, sans-serif" }}>
-            <div style={{ background: "#3518A5", padding: "8mm 18mm 6mm", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-              <div>
-                <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 24, fontWeight: 400, color: "#fff", letterSpacing: "0.15em" }}>VÝKAZ PRÁCE</div>
-                <div style={{ fontSize: 8, letterSpacing: "0.3em", color: "rgba(255,255,255,.4)", marginTop: 6, textTransform: "uppercase", fontWeight: 300 }}>
-                  Příloha č. 1 k faktuře {invoice.invoice_number}
+        {workEntries && workEntries.length > 0 && (() => {
+          const sorted = [...workEntries].sort((a,b)=>(a.entry_date||"").localeCompare(b.entry_date||""));
+          const totalHours = sorted.reduce((s,e) => s + (e.hours||0), 0);
+          return (
+          <div className="inv-page" style={{ boxShadow: "0 16px 60px rgba(0,0,0,.22)", fontFamily: "'Inter', Arial, sans-serif", position: "relative" }}>
+
+            {/* Page watermark */}
+            <div style={{ position: "absolute", left: "50%", top: "52%", transform: "translate(-50%,-50%)", width: 860, height: 860, backgroundImage: `url(${LOGO_WM})`, backgroundRepeat: "no-repeat", backgroundPosition: "center", backgroundSize: "contain", opacity: .028, zIndex: 0, pointerEvents: "none" }} />
+
+            <div style={{ position: "relative", zIndex: 1 }}>
+              {/* ── HEADER ── */}
+              <div style={{ background: "#3518A5", position: "relative", overflow: "hidden" }}>
+                <div style={{ position: "absolute", inset: 0, backgroundImage: `url(${LOGO_WM})`, backgroundRepeat: "no-repeat", backgroundPosition: "center", backgroundSize: "68%", opacity: .07, pointerEvents: "none" }} />
+                <div style={{ position: "relative", zIndex: 1, padding: "11mm 18mm 9mm" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 24 }}>
+                    <div>
+                      <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 30, fontWeight: 400, color: "#fff", letterSpacing: "0.2em", lineHeight: 1 }}>VÝKAZ PRÁCE</div>
+                      <div style={{ fontSize: 7.5, letterSpacing: "0.4em", color: "rgba(255,255,255,.32)", marginTop: 8, textTransform: "uppercase", fontWeight: 300 }}>
+                        Příloha č. 1 k faktuře {invoice.invoice_number}
+                      </div>
+                    </div>
+                    <div style={{ textAlign: "right", flexShrink: 0 }}>
+                      <div style={{ fontSize: 6.5, letterSpacing: "0.4em", color: "rgba(255,255,255,.28)", textTransform: "uppercase", marginBottom: 5 }}>Klient</div>
+                      <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 18, fontWeight: 400, color: "rgba(255,255,255,.9)", letterSpacing: "0.04em", lineHeight: 1.2 }}>{client?.name || "—"}</div>
+                    </div>
+                  </div>
+                  {/* Meta row in header */}
+                  <div style={{ marginTop: "6mm", display: "flex", gap: "8mm", paddingTop: "4mm", borderTop: "1px solid rgba(255,255,255,.1)" }}>
+                    {[
+                      ["Období", prevMonthLabel()],
+                      ["Vystaveno", fmtDate(invoice.issue_date)],
+                      ["Faktura č.", invoice.invoice_number],
+                      ["Celkem hodin", totalHours > 0 ? `${totalHours} h` : "paušál"],
+                    ].map(([lbl, val], i) => (
+                      <div key={i}>
+                        <div style={{ fontSize: 6, letterSpacing: "0.4em", color: "rgba(255,255,255,.3)", textTransform: "uppercase", marginBottom: 3 }}>{lbl}</div>
+                        <div style={{ fontSize: 11, color: "rgba(255,255,255,.78)", fontWeight: 300, whiteSpace: "nowrap" }}>{val}</div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+                <div style={{ height: 1, background: "linear-gradient(90deg, #3518A5 0%, rgba(255,255,255,.22) 25%, rgba(255,255,255,.42) 50%, rgba(255,255,255,.22) 75%, #3518A5 100%)" }} />
+              </div>
+
+              {/* ── TABLE ── */}
+              <div style={{ padding: "9mm 18mm 0" }}>
+                <table style={{ width: "100%", borderCollapse: "collapse", tableLayout: "fixed" }}>
+                  <colgroup>
+                    <col style={{ width: "22mm" }} />
+                    <col />
+                    <col style={{ width: "14mm" }} />
+                    <col style={{ width: "22mm" }} />
+                    <col style={{ width: "24mm" }} />
+                  </colgroup>
+                  <thead>
+                    <tr>
+                      {[["Datum","left"],["Popis plnění","left"],["Hod.","right"],["Sazba / hod.","right"],["Bez DPH","right"]].map(([h,align],i) => (
+                        <th key={i} style={{ fontSize: 6.5, letterSpacing: "0.38em", color: "#D4CEEA", textTransform: "uppercase", fontWeight: 400, paddingBottom: 11, paddingRight: i < 4 ? "4mm" : 0, borderBottom: ".5px solid rgba(53,24,165,.12)", textAlign: align }}>{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {sorted.map((e, i) => (
+                      <tr key={i} style={{ background: i % 2 === 0 ? "transparent" : "rgba(53,24,165,.012)" }}>
+                        <td style={{ padding: "12px 4mm 12px 0", borderBottom: ".5px solid rgba(53,24,165,.045)", fontSize: 10.5, color: "#9C96B5", fontWeight: 300, whiteSpace: "nowrap", verticalAlign: "top" }}>{fmtDate(e.entry_date)}</td>
+                        <td style={{ padding: "12px 4mm 12px 0", borderBottom: ".5px solid rgba(53,24,165,.045)", fontSize: 11.5, color: "#2d2840", fontWeight: 300, lineHeight: 1.55, verticalAlign: "top" }}>{e.description}</td>
+                        <td style={{ padding: "12px 4mm 12px 0", borderBottom: ".5px solid rgba(53,24,165,.045)", textAlign: "right", fontSize: 11, color: "#B0ABCA", fontWeight: 300, verticalAlign: "top", whiteSpace: "nowrap" }}>{e.hours > 0 ? `${e.hours} h` : "—"}</td>
+                        <td style={{ padding: "12px 4mm 12px 0", borderBottom: ".5px solid rgba(53,24,165,.045)", textAlign: "right", fontSize: 11, color: "#B0ABCA", fontWeight: 300, verticalAlign: "top", whiteSpace: "nowrap" }}>{e.rate > 0 ? fmtKc(e.rate) : <span style={{ color: "#D4CEEA" }}>paušál</span>}</td>
+                        <td style={{ padding: "12px 0 12px 0", borderBottom: ".5px solid rgba(53,24,165,.045)", textAlign: "right", fontSize: 12, color: "#1a1530", fontWeight: 400, verticalAlign: "top", whiteSpace: "nowrap" }}>{fmtKc(e.amount)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* ── TOTAL BLOCK ── */}
+              <div style={{ padding: "6mm 18mm 8mm", display: "flex", justifyContent: "flex-end" }}>
+                <div style={{ minWidth: 220, borderTop: ".5px solid rgba(53,24,165,.15)", paddingTop: "5mm" }}>
+                  {totalHours > 0 && (
+                    <div style={{ display: "flex", justifyContent: "space-between", gap: 24, marginBottom: 8, alignItems: "baseline" }}>
+                      <span style={{ fontSize: 9, color: "#D4CEEA", letterSpacing: "0.3em", textTransform: "uppercase", fontWeight: 300 }}>Celkem hodin</span>
+                      <span style={{ fontSize: 11, color: "#9C96B5", fontWeight: 300 }}>{totalHours} h</span>
+                    </div>
+                  )}
+                  <div style={{ display: "flex", justifyContent: "space-between", gap: 32, alignItems: "baseline" }}>
+                    <span style={{ fontSize: 7, color: "#C4BDDC", letterSpacing: "0.42em", textTransform: "uppercase", fontFamily: "'Inter', sans-serif" }}>Základ bez DPH</span>
+                    <span style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 28, fontWeight: 500, color: "#3518A5", letterSpacing: "0.02em", lineHeight: 1, whiteSpace: "nowrap" }}>{fmtKc(invoice.subtotal)}</span>
+                  </div>
                 </div>
               </div>
-              <div style={{ textAlign: "right" }}>
-                <div style={{ fontSize: 8, letterSpacing: "0.3em", color: "rgba(255,255,255,.3)", textTransform: "uppercase", marginBottom: 4 }}>Klient</div>
-                <div style={{ fontSize: 13, color: "rgba(255,255,255,.85)", fontWeight: 400 }}>{client?.name || "—"}</div>
+
+              {/* ── FOOTER ── */}
+              <div style={{ margin: "0 18mm", paddingTop: "5mm", borderTop: ".5px solid rgba(53,24,165,.07)", paddingBottom: "6mm", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <div style={{ fontSize: 8.5, color: "#C4BDDC", fontWeight: 300, letterSpacing: "0.04em" }}>
+                  Výkaz práce je nedílnou součástí faktury {invoice.invoice_number} · {FIRMA.name} · IČO {FIRMA.ico}
+                </div>
+                <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 11, color: "rgba(53,24,165,.3)", letterSpacing: "0.2em" }}>MAUX LEGAL</div>
               </div>
+
+              <div style={{ height: 2, background: "linear-gradient(90deg, rgba(53,24,165,0), rgba(53,24,165,.6) 20%, rgba(53,24,165,.6) 80%, rgba(53,24,165,0))" }} />
             </div>
-            <div style={{ height: 1, background: "linear-gradient(90deg, #3518A5 0%, rgba(255,255,255,.22) 25%, rgba(255,255,255,.42) 50%, rgba(255,255,255,.22) 75%, #3518A5 100%)" }} />
-            <div style={{ padding: "8mm 18mm" }}>
-              <table style={{ width: "100%", borderCollapse: "collapse" }}>
-                <thead>
-                  <tr>
-                    {["Datum", "Popis", "Hod.", "Sazba", "Bez DPH"].map((h, i) => (
-                      <th key={i} style={{ fontSize: 7, letterSpacing: "0.3em", color: "#D4CEEA", textTransform: "uppercase", fontWeight: 400, paddingBottom: 10, borderBottom: ".5px solid rgba(53,24,165,.15)", textAlign: i === 0 || i === 1 ? "left" : "right", paddingLeft: i > 1 ? 8 : 0 }}>{h}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {workEntries.sort((a,b)=>(a.entry_date||"").localeCompare(b.entry_date||"")).map((e, i) => (
-                    <tr key={i}>
-                      <td style={{ padding: "10px 0", borderBottom: ".5px solid rgba(53,24,165,.05)", fontSize: 11, color: "#9C96B5", fontWeight: 300, whiteSpace: "nowrap" }}>{fmtDate(e.entry_date)}</td>
-                      <td style={{ padding: "10px 0", borderBottom: ".5px solid rgba(53,24,165,.05)", fontSize: 11.5, color: "#3a3355", fontWeight: 300, lineHeight: 1.4 }}>{e.description}</td>
-                      <td style={{ padding: "10px 0 10px 8px", borderBottom: ".5px solid rgba(53,24,165,.05)", textAlign: "right", fontSize: 11, color: "#B0ABCA", fontWeight: 300 }}>{e.hours > 0 ? `${e.hours}h` : "—"}</td>
-                      <td style={{ padding: "10px 0 10px 8px", borderBottom: ".5px solid rgba(53,24,165,.05)", textAlign: "right", fontSize: 11, color: "#B0ABCA", fontWeight: 300, whiteSpace: "nowrap" }}>{e.rate > 0 ? fmtKc(e.rate) : "paušál"}</td>
-                      <td style={{ padding: "10px 0 10px 8px", borderBottom: ".5px solid rgba(53,24,165,.05)", textAlign: "right", fontSize: 11.5, color: "#2d2840", fontWeight: 400, whiteSpace: "nowrap" }}>{fmtKc(e.amount)}</td>
-                    </tr>
-                  ))}
-                  <tr>
-                    <td colSpan={4} style={{ padding: "10px 0", textAlign: "right", fontSize: 9, letterSpacing: "0.3em", color: "#D4CEEA", textTransform: "uppercase" }}>Celkem bez DPH</td>
-                    <td style={{ padding: "10px 0 10px 8px", textAlign: "right", fontFamily: "'Cormorant Garamond', serif", fontSize: 20, color: "#3518A5", fontWeight: 500, lineHeight: 1 }}>{fmtKc(invoice.subtotal)}</td>
-                  </tr>
-                </tbody>
-              </table>
-              <div style={{ marginTop: "8mm", paddingTop: "4mm", borderTop: ".5px solid rgba(53,24,165,.08)", fontSize: 9, color: "#D4CEEA", fontWeight: 300 }}>
-                Tento výkaz je přílohou faktury {invoice.invoice_number} — {FIRMA.name} · IČO {FIRMA.ico}
-              </div>
-            </div>
-            <div style={{ height: 2, background: "linear-gradient(90deg, rgba(53,24,165,0), rgba(53,24,165,.6) 20%, rgba(53,24,165,.6) 80%, rgba(53,24,165,0))" }} />
           </div>
-        )}
+          );
+        })()}
       </div>
 
       {/* Sent dialog */}
