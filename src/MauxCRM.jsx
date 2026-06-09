@@ -3337,6 +3337,111 @@ function FirmaBar({ financeItems, invoices, dpfoMonths, loanTransactions, escrow
   );
 }
 
+/* ─── BACKUP ─── */
+const BACKUP_TABLES = [
+  "clients","invoices","work_entries","finance_items",
+  "dpfo_months","tax_records","expense_checklist",
+  "loan_trackers","loan_transactions",
+  "escrows","escrow_tranches",
+  "assistant_work_logs","assistant_availability","assistant_attendance"
+];
+
+async function downloadFullBackup() {
+  const result = {};
+  for (const table of BACKUP_TABLES) {
+    const { data, error } = await supabase.from(table).select("*");
+    result[table] = error ? { error: error.message } : data;
+  }
+  // localStorage snapshot
+  result["_localStorage"] = {};
+  const lsKeys = ["claude_entries","claude_settings","maux_notes","maux_panel_state","maux_backup_done_month"];
+  lsKeys.forEach(k => {
+    try { result["_localStorage"][k] = JSON.parse(localStorage.getItem(k) || "null"); } catch { result["_localStorage"][k] = null; }
+  });
+
+  const now = new Date();
+  const stamp = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,"0")}-${String(now.getDate()).padStart(2,"0")}`;
+  const filename = `maux-crm-zaloha-${stamp}.json`;
+  const blob = new Blob([JSON.stringify(result, null, 2)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = filename; a.click();
+  URL.revokeObjectURL(url);
+
+  // Mark as done for this month
+  const monthKey = now.toISOString().slice(0,7);
+  try { localStorage.setItem("maux_backup_done_month", monthKey); } catch {}
+}
+
+function backupReminderShouldShow() {
+  try {
+    const today = new Date();
+    const day = today.getDate();
+    if (day < 5) return false;
+    const monthKey = today.toISOString().slice(0,7);
+    const doneMo = localStorage.getItem("maux_backup_done_month");
+    if (doneMo === monthKey) return false;
+    const snoozeUntil = localStorage.getItem("maux_backup_snooze_until");
+    if (snoozeUntil) {
+      const snoozeDate = new Date(snoozeUntil);
+      if (today < snoozeDate) return false;
+    }
+    return true;
+  } catch { return false; }
+}
+
+function BackupReminderBanner({ onDone }) {
+  const [visible, setVisible] = useState(backupReminderShouldShow);
+  const [loading, setLoading] = useState(false);
+
+  if (!visible) return null;
+
+  const handleDownload = async () => {
+    setLoading(true);
+    await downloadFullBackup();
+    setLoading(false);
+    setVisible(false);
+    onDone && onDone();
+  };
+
+  const handleSnooze = () => {
+    const tomorrow = new Date();
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    const key = tomorrow.toISOString().slice(0,10);
+    try { localStorage.setItem("maux_backup_snooze_until", key); } catch {}
+    setVisible(false);
+  };
+
+  return (
+    <div style={{
+      background:"#fff", border:"1px solid #E8E6F0", borderLeft:"3px solid var(--ink)",
+      borderRadius:12, padding:"14px 20px", marginBottom:24,
+      display:"flex", alignItems:"center", justifyContent:"space-between", gap:16,
+      boxShadow:"0 1px 6px rgba(53,24,165,.06)"
+    }}>
+      <div style={{display:"flex",alignItems:"center",gap:12}}>
+        <span style={{fontSize:18,lineHeight:1}}>💾</span>
+        <div>
+          <div style={{fontSize:13,fontWeight:600,color:"var(--ink)"}}>Čas na zálohu dat</div>
+          <div style={{fontSize:11,color:"var(--mut)",marginTop:1}}>
+            Stáhni si kompletní zálohu — klienti, faktury, výkazy, finance, vše.
+          </div>
+        </div>
+      </div>
+      <div style={{display:"flex",gap:8,flexShrink:0}}>
+        <button onClick={handleSnooze}
+          style={{padding:"7px 14px",background:"transparent",border:"1px solid #E8E6F0",borderRadius:8,fontSize:12,color:"var(--mut)",cursor:"pointer"}}>
+          Teď ne
+        </button>
+        <button onClick={handleDownload} disabled={loading}
+          style={{padding:"7px 16px",background:"var(--ink)",color:"#fff",border:"none",borderRadius:8,fontSize:12,fontWeight:600,cursor:"pointer",opacity:loading?.6:1}}>
+          {loading ? "Stahuji…" : "Stáhnout zálohu"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 /* ─── DASHBOARD ─── */
 // Drag-and-drop panel IDs — pořadí a viditelnost karet na dashboardu
 // Verze: zvýšit pokud chceme vynutit reset uloženého pořadí u všech uživatelů
@@ -4261,6 +4366,9 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
 
   return (
     <div style={{display:"flex",flexDirection:"column",gap:16}}>
+
+      {/* Backup Reminder */}
+      <BackupReminderBanner />
 
       {/* Escrow Alerts */}
       {!escrowAlertDismissed && (() => {
