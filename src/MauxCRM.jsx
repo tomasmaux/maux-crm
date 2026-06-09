@@ -3338,19 +3338,25 @@ function FirmaBar({ financeItems, invoices, dpfoMonths, loanTransactions, escrow
 
 /* ─── DASHBOARD ─── */
 // Drag-and-drop panel IDs — pořadí a viditelnost karet na dashboardu
+// Verze: zvýšit pokud chceme vynutit reset uloženého pořadí u všech uživatelů
+const PANEL_LAYOUT_VERSION = 2;
 const DEFAULT_PANELS = [
-  "c35","kpi","minisporak","majetek","firma",
-  "finance","chart","klienti","uschovy","fakturace","happylife"
+  "finance","c35","kpi","minisporak","majetek","firma",
+  "chart","klienti","uschovy","fakturace","happylife"
 ];
 function loadPanelState() {
   try {
     const s = localStorage.getItem("maux_panel_state");
-    if (s) { const p = JSON.parse(s); if (p.order && p.hidden) return p; }
+    if (s) {
+      const p = JSON.parse(s);
+      // Pokud verze nesedí, vynutit reset na nové výchozí pořadí
+      if (p.order && p.hidden && p.version === PANEL_LAYOUT_VERSION) return p;
+    }
   } catch(e) {}
-  return { order: DEFAULT_PANELS, hidden: [] };
+  return { order: DEFAULT_PANELS, hidden: [], version: PANEL_LAYOUT_VERSION };
 }
 function savePanelState(state) {
-  try { localStorage.setItem("maux_panel_state", JSON.stringify(state)); } catch(e) {}
+  try { localStorage.setItem("maux_panel_state", JSON.stringify({ ...state, version: PANEL_LAYOUT_VERSION })); } catch(e) {}
 }
 
 // Klikatelná částka pro ručně zadávané (neautomatizované) finanční položky —
@@ -4112,168 +4118,161 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
       </Card>
       </Panel>
 
-      {/* FINANCE SEKCE — 2 sloupce: [Příjmy + Cash Flow spojené] | Výdaje */}
+      {/* FINANCE COMMAND CENTER — vždy řádek 1 */}
       <Panel id="finance">
-      <div style={{display:"grid",gridTemplateColumns:"3fr 2fr",gap:10,alignItems:"stretch"}}>
+      {(() => {
+        const isPaid = (id) => !!(expenseChecks||[]).find(c => c.item_id === id && c.paid);
+        const all = [...nutne.map(i=>({...i,_c:"#DC2626"})), ...luxus.map(i=>({...i,_c:"#9333EA"}))];
+        const paidItems = all.filter(i => isPaid(i.id));
+        const paidCount = paidItems.length;
+        const paidSum   = paidItems.reduce((s,i)=>s+Math.abs(i.amount||0),0);
+        const pct = all.length > 0 ? Math.round((paidCount/all.length)*100) : 0;
+        const totalPrijmy = (financeItems||[]).filter(i=>i.category==="prijem"&&i.notes!=="TBD").reduce((s,i)=>s+(i.amount||0),0)
+          + unbilledAmt + Math.round(escrowNetThisMonth) + nadmernyOdpocet;
+        const Check = ({item, color}) => {
+          const p = isPaid(item.id);
+          return (
+            <span onClick={() => onToggleExpenseCheck && onToggleExpenseCheck(item.id, !p)}
+              title={p ? "Zaplaceno — klikni pro zrušení" : "Označit jako zaplacené"}
+              style={{width:14,height:14,borderRadius:3,border:`1.5px solid ${p?color:"var(--line)"}`,background:p?color:"transparent",
+                display:"inline-flex",alignItems:"center",justifyContent:"center",cursor:"pointer",
+                flexShrink:0,marginRight:6,transition:"all .15s",fontSize:9,color:"#fff"}}>
+              {p ? "✓" : ""}
+            </span>
+          );
+        };
+        const mName = ["ledna","února","března","dubna","května","června","července","srpna","září","října","listopadu","prosince"];
+        return (
+        <Card style={{padding:0,overflow:"hidden",border:"1.5px solid #111"}}>
 
-        {/* LEVÁ KARTA: Příjmy měsíční + Cash Flow — propojené v jedné kartě */}
-        <Card style={{padding:0,overflow:"hidden",display:"flex",flexDirection:"column",border:"1.5px solid #111"}}>
-          {/* Horní pruh — PŘÍJMY */}
-          <div style={{padding:"16px 20px 14px",borderBottom:"1px solid var(--line)"}}>
-            <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:10}}>
-              <div style={{fontSize:9,letterSpacing:".22em",textTransform:"uppercase",color:"#059669",fontWeight:700}}>Příjmy měsíční</div>
-              <div style={{fontFamily:"Fraunces,serif",fontSize:22,fontWeight:300,color:"#059669"}}>
-                {fmtKc(
-                  (financeItems||[]).filter(i=>i.category==="prijem"&&i.notes!=="TBD").reduce((s,i)=>s+(i.amount||0),0)
-                  + unbilledAmt + Math.round(escrowNetThisMonth) + nadmernyOdpocet
-                )}&nbsp;<span style={{fontSize:10,color:"#065F46",fontWeight:400}}>/ měsíc</span>
-              </div>
-            </div>
-            {/* Auto položky */}
-            {nadmernyOdpocet>0 && (
-              <div style={{display:"flex",justifyContent:"space-between",fontSize:12,color:"var(--txt)",padding:"3px 0"}}>
-                <span style={{display:"flex",alignItems:"center",gap:6}}>
-                  <span style={{fontSize:9,background:"#ECFDF5",color:"#065F46",padding:"1px 5px",borderRadius:3,fontWeight:600}}>auto</span>
-                  Nadměrný odpočet DPH za {prevMonthName.toLowerCase()} — zůstane po úhradě Čechmanové
-                </span>
-                <span style={{fontFamily:"JetBrains Mono,monospace",color:"#059669",fontSize:11}}>+{fmtKc(nadmernyOdpocet)}</span>
-              </div>
-            )}
-            {unbilledAmt>0 && (
-              <div style={{display:"flex",justifyContent:"space-between",fontSize:12,color:"var(--txt)",padding:"3px 0"}}>
-                <span style={{display:"flex",alignItems:"center",gap:6}}>
-                  <span style={{fontSize:9,background:"#ECFDF5",color:"#065F46",padding:"1px 5px",borderRadius:3,fontWeight:600}}>auto</span>
-                  MAUX Legal — nevyfakturováno
-                </span>
-                <span style={{fontFamily:"JetBrains Mono,monospace",color:"#059669",fontSize:11}}>+{fmtKc(unbilledAmt)}</span>
-              </div>
-            )}
-            {escrowNetThisMonth>0 && (
-              <div style={{display:"flex",justifyContent:"space-between",fontSize:12,color:"var(--txt)",padding:"3px 0"}}>
-                <span style={{display:"flex",alignItems:"center",gap:6}}>
-                  <span style={{fontSize:9,background:"#ECFDF5",color:"#065F46",padding:"1px 5px",borderRadius:3,fontWeight:600}}>auto</span>
-                  Úschovy — čistý úrok (k 1. {["ledna","února","března","dubna","května","června","července","srpna","září","října","listopadu","prosince"][(now.getMonth()+1)%12]})
-                </span>
-                <span style={{fontFamily:"JetBrains Mono,monospace",color:"#059669",fontSize:11}}>+{fmtKc(Math.round(escrowNetThisMonth))}</span>
-              </div>
-            )}
-            {/* Manuální příjmové položky — částka je klikací a ručně upravitelná */}
-            {(financeItems||[]).filter(i=>i.category==="prijem"&&i.notes!=="TBD").map((item,idx)=>(
-              <div key={idx} style={{display:"flex",justifyContent:"space-between",fontSize:12,color:"var(--txt)",padding:"3px 0"}}>
-                <span>{item.label}</span>
-                <EditableMoney item={item} onSave={onSaveFinance} color="#059669" sign="+" />
-              </div>
-            ))}
-          </div>
+          {/* ── HERO STRIP: 3 klíčová čísla ── */}
+          <div style={{display:"grid",gridTemplateColumns:"1fr auto 1fr",borderBottom:"1px solid var(--line)"}}>
 
-          {/* Dolní část — CASH FLOW (zjednodušeno na jednu negativní položku, bez nadpisu) */}
-          <div style={{padding:"14px 20px 16px",flex:1,display:"flex",flexDirection:"column"}}>
-            <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",padding:"7px 0",borderBottom:"1px solid var(--line)"}}>
-              <div>
-                <div style={{fontSize:12,color:"var(--txt)"}}>Celkové náklady</div>
+            {/* LEVÁ: PŘÍJMY */}
+            <div style={{padding:"14px 20px 12px"}}>
+              <div style={{fontSize:8,letterSpacing:".22em",textTransform:"uppercase",color:"#059669",fontWeight:700,marginBottom:6}}>PŘÍJMY MĚSÍČNÍ</div>
+              <div style={{display:"flex",alignItems:"baseline",gap:6}}>
+                <span style={{fontFamily:"Fraunces,serif",fontSize:30,fontWeight:300,color:"#059669",lineHeight:1}}>{fmtKc(totalPrijmy)}</span>
+                <span style={{fontSize:10,color:"#065F46",fontWeight:400}}>/ měsíc</span>
               </div>
-              <span style={{fontSize:13,fontFamily:"Fraunces,serif",fontWeight:300,color:"#DC2626",flexShrink:0,marginLeft:8}}>
-                −{fmtKc(Math.abs(totalNutne) + Math.abs(totalLuxus))}
-              </span>
+              <div style={{fontSize:9,color:"var(--mut)",marginTop:4}}>{mName[now.getMonth()]} {now.getFullYear()}</div>
             </div>
-            <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",padding:"11px 0 4px",borderTop:`2px solid ${nextMonthBalance>=0?"#059669":"#DC2626"}`,marginTop:4}}>
-              <div>
-                <div style={{fontSize:13,fontWeight:700,color:"var(--txt)"}}>Finance v následujícím měsíci</div>
-                <div style={{fontSize:9.5,color:"var(--mut)",marginTop:1}}>příjmy výše − výdaje výše · záporné = kolik chybí dovydělat na nulu</div>
-              </div>
-              <span style={{fontSize:24,fontFamily:"Fraunces,serif",fontWeight:300,color:nextMonthBalance>=0?"#059669":"#DC2626",lineHeight:1,flexShrink:0,marginLeft:10}}>
+
+            {/* STŘED: BILANCE — největší číslo na přehledu */}
+            <div style={{padding:"12px 32px",borderLeft:"1px solid var(--line)",borderRight:"1px solid var(--line)",textAlign:"center",background:nextMonthBalance>=0?"#F0FDF4":"#FEF2F2",minWidth:220}}>
+              <div style={{fontSize:8,letterSpacing:".22em",textTransform:"uppercase",color:"var(--mut)",fontWeight:700,marginBottom:6}}>BILANCE PŘÍŠTÍHO MĚSÍCE</div>
+              <div style={{fontFamily:"Fraunces,serif",fontSize:40,fontWeight:300,color:nextMonthBalance>=0?"#059669":"#DC2626",lineHeight:1}}>
                 {nextMonthBalance>=0?"+":"−"}{fmtKc(Math.abs(nextMonthBalance))}
-              </span>
+              </div>
+              <div style={{fontSize:9,color:"var(--mut)",marginTop:4}}>příjmy − výdaje · záporné = chybí dovydělat</div>
             </div>
-          </div>
-        </Card>
 
-        {/* PRAVÁ KARTA: Výdaje — s checklistem plateb (V.03, samo se resetuje 1. v měsíci) */}
-        <Card style={{padding:"16px 20px",display:"flex",flexDirection:"column",gap:0}}>
-          {(() => {
-            const isPaid = (id) => !!(expenseChecks||[]).find(c => c.item_id === id && c.paid);
-            const all = [...nutne.map(i=>({...i,_c:"#DC2626"})), ...luxus.map(i=>({...i,_c:"#9333EA"}))];
-            const paidItems = all.filter(i => isPaid(i.id));
-            const paidCount = paidItems.length;
-            const paidSum   = paidItems.reduce((s,i)=>s+Math.abs(i.amount||0),0);
-            const pct = all.length > 0 ? Math.round((paidCount/all.length)*100) : 0;
-            const Check = ({item, color}) => {
-              const p = isPaid(item.id);
-              return (
-                <span onClick={() => onToggleExpenseCheck && onToggleExpenseCheck(item.id, !p)}
-                  title={p ? "Zaplaceno — klikni pro zrušení" : "Označit jako zaplacené"}
-                  style={{width:15,height:15,borderRadius:4,border:`1.6px solid ${p?color:"var(--line)"}`,background:p?color:"transparent",
-                    display:"inline-flex",alignItems:"center",justifyContent:"center",cursor:onToggleExpenseCheck?"pointer":"default",
-                    flexShrink:0,marginRight:7,transition:"all .15s",fontSize:10,color:"#fff",lineHeight:1}}>
-                  {p ? "✓" : ""}
-                </span>
-              );
-            };
-            return (<>
-          <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:10}}>
-            <div style={{fontSize:9,letterSpacing:".28em",textTransform:"uppercase",color:"var(--mut)",fontWeight:600}}>Výdaje měsíčně</div>
-            {all.length > 0 && (
-              <div style={{fontSize:9.5,color:pct===100?"#059669":"var(--mut)",fontWeight:700}}>
-                {pct===100 ? "🎉 vše zaplaceno" : `✓ ${paidCount}/${all.length} zaplaceno`}
+            {/* PRAVÁ: VÝDAJE + progress */}
+            <div style={{padding:"14px 20px 12px"}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
+                <div style={{fontSize:8,letterSpacing:".22em",textTransform:"uppercase",color:"var(--mut)",fontWeight:700}}>VÝDAJE MĚSÍČNĚ</div>
+                <div style={{fontSize:9,color:pct===100?"#059669":"var(--mut)",fontWeight:700}}>
+                  {pct===100?"🎉 vše zaplaceno":`✓ ${paidCount}/${all.length} zaplaceno`}
+                </div>
               </div>
-            )}
-          </div>
-          <div style={{display:"flex",gap:8,marginBottom:10}}>
-            <span style={{fontFamily:"Fraunces,serif",fontSize:26,fontWeight:300,color:"#DC2626"}}>{fmtKc(Math.abs(totalNutne))}</span>
-            <span style={{fontSize:11,color:"var(--mut)",alignSelf:"flex-end",marginBottom:4}}>nutné</span>
-            <span style={{fontSize:18,color:"var(--mut)",alignSelf:"flex-end",marginBottom:2,marginLeft:6}}>+</span>
-            <span style={{fontFamily:"Fraunces,serif",fontSize:26,fontWeight:300,color:"#9333EA",marginLeft:6}}>{fmtKc(Math.abs(totalLuxus))}</span>
-            <span style={{fontSize:11,color:"var(--mut)",alignSelf:"flex-end",marginBottom:4}}>lusus</span>
-          </div>
-          {all.length > 0 && (
-            <div style={{marginBottom:12}}>
-              <div style={{height:5,borderRadius:3,background:"var(--line)",overflow:"hidden"}}>
-                <div style={{height:"100%",width:`${pct}%`,background:pct===100?"#059669":"#B8923D",transition:"width .5s cubic-bezier(.4,0,.2,1)"}} />
+              <div style={{display:"flex",gap:6,alignItems:"baseline",flexWrap:"wrap"}}>
+                <span style={{fontFamily:"Fraunces,serif",fontSize:22,fontWeight:300,color:"#DC2626"}}>{fmtKc(Math.abs(totalNutne))}</span>
+                <span style={{fontSize:10,color:"var(--mut)"}}>nutné</span>
+                <span style={{fontSize:14,color:"var(--mut)"}}>+</span>
+                <span style={{fontFamily:"Fraunces,serif",fontSize:22,fontWeight:300,color:"#9333EA"}}>{fmtKc(Math.abs(totalLuxus))}</span>
+                <span style={{fontSize:10,color:"var(--mut)"}}>lusus</span>
               </div>
-              <div style={{fontSize:9.5,color:"var(--mut)",marginTop:4}}>
-                odškrtnuto {fmtKc(paidSum)} · zbývá uhradit {fmtKc(Math.max(Math.abs(totalVydaje)-paidSum,0))}
+              <div style={{height:4,borderRadius:2,background:"var(--line)",overflow:"hidden",marginTop:8}}>
+                <div style={{height:"100%",width:`${pct}%`,background:pct===100?"#059669":"#B8923D",transition:"width .5s"}} />
+              </div>
+              <div style={{fontSize:9,color:"var(--mut)",marginTop:3}}>
+                odškrtnuto {fmtKc(paidSum)} · zbývá {fmtKc(Math.max(Math.abs(totalVydaje)-paidSum,0))}
               </div>
             </div>
-          )}
-          <div style={{borderTop:"1px solid var(--line)",paddingTop:8,marginBottom:6}}>
-            <div style={{fontSize:9,letterSpacing:".2em",textTransform:"uppercase",color:"#DC2626",fontWeight:600,marginBottom:6}}>Nutné</div>
-            {nutne.map((i,idx) => (
-              <div key={idx} style={{display:"flex",justifyContent:"space-between",alignItems:"center",fontSize:12,color:isPaid(i.id)?"var(--mut)":"var(--txt)",paddingBottom:3,gap:6}}>
-                <span style={{display:"flex",alignItems:"center",textDecoration:isPaid(i.id)?"line-through":"none",minWidth:0}}>
-                  <Check item={i} color="#DC2626" /><EditableLabel item={i} onSave={onSaveFinance} />
-                </span>
-                <span style={{display:"flex",alignItems:"center",gap:5,flexShrink:0}}>
-                  <span style={{opacity:isPaid(i.id)?.55:1}}><EditableMoney item={i} onSave={onSaveFinance} color="#DC2626" abs /></span>
-                  <button onClick={() => onDeleteFinance(i.id)} title="Smazat položku" style={{background:"none",border:"none",color:"var(--mut)",cursor:"pointer",fontSize:11,padding:"0 1px",opacity:.6}}>✕</button>
-                </span>
+          </div>
+
+          {/* ── DETAIL: levý příjmy / pravý checklist výdajů ── */}
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr"}}>
+
+            {/* LEVÝ SLOUPEC: příjmy detail */}
+            <div style={{padding:"12px 20px 14px",borderRight:"1px solid var(--line)"}}>
+              {nadmernyOdpocet>0 && (
+                <div style={{display:"flex",justifyContent:"space-between",fontSize:11.5,padding:"2px 0",gap:6}}>
+                  <span style={{display:"flex",alignItems:"center",gap:5,minWidth:0,overflow:"hidden"}}>
+                    <span style={{fontSize:8,background:"#ECFDF5",color:"#065F46",padding:"1px 4px",borderRadius:3,fontWeight:600,flexShrink:0}}>auto</span>
+                    <span style={{color:"var(--txt)",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>Nadměrný odpočet DPH za {prevMonthName.toLowerCase()}</span>
+                  </span>
+                  <span style={{fontFamily:"JetBrains Mono,monospace",color:"#059669",fontSize:10.5,flexShrink:0}}>+{fmtKc(nadmernyOdpocet)}</span>
+                </div>
+              )}
+              {unbilledAmt>0 && (
+                <div style={{display:"flex",justifyContent:"space-between",fontSize:11.5,padding:"2px 0",gap:6}}>
+                  <span style={{display:"flex",alignItems:"center",gap:5,minWidth:0}}>
+                    <span style={{fontSize:8,background:"#ECFDF5",color:"#065F46",padding:"1px 4px",borderRadius:3,fontWeight:600,flexShrink:0}}>auto</span>
+                    <span style={{color:"var(--txt)"}}>MAUX Legal — nevyfakturováno</span>
+                  </span>
+                  <span style={{fontFamily:"JetBrains Mono,monospace",color:"#059669",fontSize:10.5,flexShrink:0}}>+{fmtKc(unbilledAmt)}</span>
+                </div>
+              )}
+              {escrowNetThisMonth>0 && (
+                <div style={{display:"flex",justifyContent:"space-between",fontSize:11.5,padding:"2px 0",gap:6}}>
+                  <span style={{display:"flex",alignItems:"center",gap:5,minWidth:0}}>
+                    <span style={{fontSize:8,background:"#ECFDF5",color:"#065F46",padding:"1px 4px",borderRadius:3,fontWeight:600,flexShrink:0}}>auto</span>
+                    <span style={{color:"var(--txt)"}}>Úschovy — čistý úrok (k 1. {mName[(now.getMonth()+1)%12]})</span>
+                  </span>
+                  <span style={{fontFamily:"JetBrains Mono,monospace",color:"#059669",fontSize:10.5,flexShrink:0}}>+{fmtKc(Math.round(escrowNetThisMonth))}</span>
+                </div>
+              )}
+              {(financeItems||[]).filter(i=>i.category==="prijem"&&i.notes!=="TBD").map((item,idx)=>(
+                <div key={idx} style={{display:"flex",justifyContent:"space-between",fontSize:11.5,color:"var(--txt)",padding:"2px 0",gap:6}}>
+                  <span style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{item.label}</span>
+                  <EditableMoney item={item} onSave={onSaveFinance} color="#059669" sign="+" />
+                </div>
+              ))}
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",paddingTop:8,marginTop:6,borderTop:"1px solid var(--line)"}}>
+                <span style={{fontSize:11,color:"var(--mut)"}}>Celkové náklady</span>
+                <span style={{fontSize:13,fontFamily:"Fraunces,serif",fontWeight:300,color:"#DC2626"}}>−{fmtKc(Math.abs(totalNutne)+Math.abs(totalLuxus))}</span>
               </div>
-            ))}
-            <AddExpenseRow category="nutne" color="#DC2626" onSaveFinance={onSaveFinance} />
-          </div>
-          <div style={{borderTop:"1px solid var(--line)",paddingTop:8,marginTop:4}}>
-            <div style={{fontSize:9,letterSpacing:".2em",textTransform:"uppercase",color:"#9333EA",fontWeight:600,marginBottom:6}}>Lusus</div>
-            {luxus.map((i,idx) => (
-              <div key={idx} style={{display:"flex",justifyContent:"space-between",alignItems:"center",fontSize:12,color:isPaid(i.id)?"var(--mut)":"var(--txt)",paddingBottom:3,gap:6}}>
-                <span style={{display:"flex",alignItems:"center",textDecoration:isPaid(i.id)?"line-through":"none",minWidth:0}}>
-                  <Check item={i} color="#9333EA" /><EditableLabel item={i} onSave={onSaveFinance} />
-                </span>
-                <span style={{display:"flex",alignItems:"center",gap:5,flexShrink:0}}>
-                  <span style={{opacity:isPaid(i.id)?.55:1}}><EditableMoney item={i} onSave={onSaveFinance} color="#9333EA" abs /></span>
-                  <button onClick={() => onDeleteFinance(i.id)} title="Smazat položku" style={{background:"none",border:"none",color:"var(--mut)",cursor:"pointer",fontSize:11,padding:"0 1px",opacity:.6}}>✕</button>
-                </span>
+            </div>
+
+            {/* PRAVÝ SLOUPEC: výdaje checklist */}
+            <div style={{padding:"12px 20px 14px"}}>
+              <div style={{fontSize:8,letterSpacing:".2em",textTransform:"uppercase",color:"#DC2626",fontWeight:600,marginBottom:5}}>Nutné</div>
+              {nutne.map((i,idx) => (
+                <div key={idx} style={{display:"flex",justifyContent:"space-between",alignItems:"center",fontSize:11.5,color:isPaid(i.id)?"var(--mut)":"var(--txt)",paddingBottom:2,gap:6}}>
+                  <span style={{display:"flex",alignItems:"center",textDecoration:isPaid(i.id)?"line-through":"none",minWidth:0,overflow:"hidden"}}>
+                    <Check item={i} color="#DC2626" /><EditableLabel item={i} onSave={onSaveFinance} />
+                  </span>
+                  <span style={{display:"flex",alignItems:"center",gap:4,flexShrink:0}}>
+                    <span style={{opacity:isPaid(i.id)?.5:1}}><EditableMoney item={i} onSave={onSaveFinance} color="#DC2626" abs /></span>
+                    <button onClick={()=>onDeleteFinance(i.id)} title="Smazat" style={{background:"none",border:"none",color:"var(--mut)",cursor:"pointer",fontSize:10,padding:"0 1px",opacity:.5}}>✕</button>
+                  </span>
+                </div>
+              ))}
+              <AddExpenseRow category="nutne" color="#DC2626" onSaveFinance={onSaveFinance} />
+              <div style={{fontSize:8,letterSpacing:".2em",textTransform:"uppercase",color:"#9333EA",fontWeight:600,marginTop:8,marginBottom:5}}>Lusus</div>
+              {luxus.map((i,idx) => (
+                <div key={idx} style={{display:"flex",justifyContent:"space-between",alignItems:"center",fontSize:11.5,color:isPaid(i.id)?"var(--mut)":"var(--txt)",paddingBottom:2,gap:6}}>
+                  <span style={{display:"flex",alignItems:"center",textDecoration:isPaid(i.id)?"line-through":"none",minWidth:0}}>
+                    <Check item={i} color="#9333EA" /><EditableLabel item={i} onSave={onSaveFinance} />
+                  </span>
+                  <span style={{display:"flex",alignItems:"center",gap:4,flexShrink:0}}>
+                    <span style={{opacity:isPaid(i.id)?.5:1}}><EditableMoney item={i} onSave={onSaveFinance} color="#9333EA" abs /></span>
+                    <button onClick={()=>onDeleteFinance(i.id)} title="Smazat" style={{background:"none",border:"none",color:"var(--mut)",cursor:"pointer",fontSize:10,padding:"0 1px",opacity:.5}}>✕</button>
+                  </span>
+                </div>
+              ))}
+              <AddExpenseRow category="luxus" color="#9333EA" onSaveFinance={onSaveFinance} />
+              <div style={{marginTop:8,borderTop:"1px solid var(--line)",paddingTop:6,display:"flex",justifyContent:"space-between",alignItems:"baseline"}}>
+                <span style={{fontSize:9,color:"var(--mut)",letterSpacing:".1em",textTransform:"uppercase"}}>Celkem výdaje</span>
+                <span style={{fontFamily:"Fraunces,serif",fontSize:15,fontWeight:300,color:"var(--ink)"}}>{fmtKc(Math.abs(totalVydaje))}</span>
               </div>
-            ))}
-            <AddExpenseRow category="luxus" color="#9333EA" onSaveFinance={onSaveFinance} />
+              <button className="btn gho" style={{fontSize:10.5,marginTop:8,width:"100%"}} onClick={()=>onNav("vykaz")}>+ Nový výkaz práce</button>
+            </div>
           </div>
-          <div style={{marginTop:10,borderTop:"2px solid var(--line)",paddingTop:8,display:"flex",justifyContent:"space-between",alignItems:"baseline"}}>
-            <span style={{fontSize:10,color:"var(--mut)",letterSpacing:".1em",textTransform:"uppercase"}}>Celkem výdaje</span>
-            <span style={{fontFamily:"Fraunces,serif",fontSize:18,fontWeight:300,color:"var(--ink)"}}>{fmtKc(Math.abs(totalVydaje))}</span>
-          </div>
-          <button className="btn gho" style={{fontSize:11,marginTop:"auto",paddingTop:10,width:"100%"}} onClick={()=>onNav("vykaz")}>+ Nový výkaz práce</button>
-            </>);
-          })()}
         </Card>
-      </div>
+        );
+      })()}
       </Panel>
 
       {/* STACKED BAR CHART — PŘÍJEM MAUX LEGAL: zelená faktury + oranžová úschovy */}
