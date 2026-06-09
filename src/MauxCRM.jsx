@@ -1783,7 +1783,7 @@ function calcEscrowInterest(escrow) {
         label:     `${['Led','Ún','Bře','Dub','Kvě','Čer','Čvn','Srp','Zář','Říj','Lis','Pro'][d.getMonth()]} ${d.getFullYear()}`,
         gross:     Math.round(gross * 100) / 100,
         net:       Math.round(gross * 0.85 * 100) / 100,
-        creditedOn: new Date(d.getFullYear(), d.getMonth() + 1, 1).toISOString().slice(0, 10),
+        creditedOn: (nxt => `${nxt.getFullYear()}-${String(nxt.getMonth()+1).padStart(2,'0')}-01`)(new Date(d.getFullYear(), d.getMonth() + 1, 1)),
       });
     }
     d = new Date(d.getFullYear(), d.getMonth() + 1, 1);
@@ -6651,7 +6651,7 @@ function AsistentDochazka({ email }) {
   );
 }
 
-function AsistentApp({ session, onLogout }) {
+function AsistentApp({ session, onLogout, previewMode }) {
   const [mod, setMod] = useState("vykaz");
   const [clients, setClients] = useState([]);
   const email = session.user.email;
@@ -6673,7 +6673,7 @@ function AsistentApp({ session, onLogout }) {
             <div><div className="wm serif">MAUX</div></div>
           </div>
           <div className="sub">Legal · Asistent</div>
-          <div className="sub2">Josef Řehák</div>
+          <div className="sub2">{previewMode ? "Náhled jako Josef Řehák" : "Josef Řehák"}</div>
         </div>
         <nav className="nav">
           {[{key:"vykaz",label:"Výkaz práce"},{key:"dochazka",label:"Docházka"}].map(m=>(
@@ -6682,7 +6682,7 @@ function AsistentApp({ session, onLogout }) {
         </nav>
         <div className="sbfoot">
           {email}<br />
-          <button onClick={onLogout}>Odhlásit se</button>
+          <button onClick={onLogout}>{previewMode ? "← Zpět na admin" : "Odhlásit se"}</button>
         </div>
       </aside>
       {/* Obsah */}
@@ -6695,7 +6695,7 @@ function AsistentApp({ session, onLogout }) {
 }
 
 /* ── Tomův přehled asistenta — modul v hlavním CRM (list "Josef · Asistent") ── */
-function AsistentPanel({ clients }) {
+function AsistentPanel({ clients, onPreview }) {
   const email = "asistent@maux.cz";
   const [logs, setLogs] = useState([]);
   const [attendance, setAttendance] = useState([]);
@@ -6734,9 +6734,15 @@ function AsistentPanel({ clients }) {
 
   return (
     <div className="body">
-      <div className="top" style={{ marginBottom:0 }}>
-        <h1 style={{ fontFamily:"Fraunces, serif", fontWeight:300, fontSize:30 }}>Josef · Asistent</h1>
-        <p style={{ color:"var(--mut)", fontSize:13, marginTop:4 }}>Interní přehled výkazů, docházky a plánování — {email}</p>
+      <div className="top" style={{ marginBottom:0, display:"flex", alignItems:"flex-start", justifyContent:"space-between", flexWrap:"wrap", gap:12 }}>
+        <div>
+          <h1 style={{ fontFamily:"Fraunces, serif", fontWeight:300, fontSize:30 }}>Josef · Asistent</h1>
+          <p style={{ color:"var(--mut)", fontSize:13, marginTop:4 }}>Interní přehled výkazů, docházky a plánování — {email}</p>
+        </div>
+        <button onClick={onPreview}
+          style={{ marginTop:6, padding:"9px 18px", borderRadius:9, border:"1.5px solid var(--ink)", background:"var(--ink)", color:"#fff", fontSize:12.5, fontWeight:600, cursor:"pointer", display:"flex", alignItems:"center", gap:7, whiteSpace:"nowrap" }}>
+          👁 Zobrazit jako Josef →
+        </button>
       </div>
 
       {/* KPI řada */}
@@ -6918,6 +6924,7 @@ export default function MauxCRM() {
   const [confirmDel, setConfirmDel] = useState(null);
   const [saving, setSaving] = useState(false);
   const [issueModal, setIssueModal] = useState(null); // { clientId, entries }
+  const [asistentPreview, setAsistentPreview] = useState(false); // Tom náhlíží pohled Josefa
   const [previewModal, setPreviewModal] = useState(null); // { invoice, client, workEntries }
 
   useEffect(() => {
@@ -7191,6 +7198,31 @@ export default function MauxCRM() {
     return <AsistentApp session={session} onLogout={handleLogout} />;
   }
 
+  // Tom náhlíží pohled Josefa (přepínač "Zobrazit jako Josef")
+  if (asistentPreview) {
+    const fakeSession = { user: { email: "asistent@maux.cz" } };
+    return (
+      <div style={{ position: "relative" }}>
+        {/* Floating admin banner — vždy viditelný, kliknutím zpět na admin */}
+        <div style={{ position: "fixed", top: 0, left: 0, right: 0, zIndex: 9999, background: "#3518A5", color: "#fff", display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 20px", boxShadow: "0 2px 12px rgba(53,24,165,.4)" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: ".12em", textTransform: "uppercase", opacity: .8 }}>Náhled pohledu</span>
+            <span style={{ fontFamily: "Fraunces, serif", fontSize: 16, fontWeight: 300 }}>Josef · Asistent</span>
+            <span style={{ fontSize: 11, background: "rgba(255,255,255,.15)", borderRadius: 6, padding: "2px 9px" }}>asistent@maux.cz</span>
+          </div>
+          <button onClick={() => setAsistentPreview(false)}
+            style={{ padding: "7px 18px", borderRadius: 8, border: "1.5px solid rgba(255,255,255,.6)", background: "transparent", color: "#fff", fontWeight: 600, fontSize: 12.5, cursor: "pointer", letterSpacing: ".04em" }}>
+            ← Zpět na admin
+          </button>
+        </div>
+        {/* Odsazení obsahu pod banner */}
+        <div style={{ paddingTop: 44 }}>
+          <AsistentApp session={fakeSession} onLogout={() => setAsistentPreview(false)} previewMode={true} />
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="mx">
       <style>{CSS}</style>
@@ -7339,7 +7371,7 @@ export default function MauxCRM() {
           )}
 
           {/* ASISTENT — Tomův přehled Josefových výkazů a docházky */}
-          {mod === "asistent" && <AsistentPanel clients={clients} />}
+          {mod === "asistent" && !asistentPreview && <AsistentPanel clients={clients} onPreview={() => setAsistentPreview(true)} />}
         </div>
       </div>
 
