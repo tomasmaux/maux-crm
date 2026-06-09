@@ -528,7 +528,7 @@ function lastDayPrevMonth(issueDateStr) {
 }
 function nextDueDate(issueDateStr) {
   const d = issueDateStr ? new Date(issueDateStr) : new Date();
-  const due = new Date(d.getFullYear(), d.getMonth() + 1, 15);
+  const due = new Date(d.getFullYear(), d.getMonth(), 15);
   return due.toISOString().slice(0, 10);
 }
 function adjustDueDate(base, offsetDays) {
@@ -675,7 +675,7 @@ function InvoicePrintPreview({ invoice, client, workEntries, onBack, onIssue, sa
   const qrData = `SPD*1.0*ACC:${ibanRaw}*AM:${amountStr}*CC:CZK*X-VS:${vsStr}*MSG:${invoice.invoice_number}*DT:${(invoice.due_date || "").replace(/-/g, "")}`;
 
   useEffect(() => {
-    QRCode.toDataURL(qrData, { width: 180, margin: 1, color: { dark: "#3518A5", light: "#FDFCFA" } })
+    QRCode.toDataURL(qrData, { width: 300, margin: 2, color: { dark: "#3518A5", light: "#FDFCFA" } })
       .then(setQrUrl).catch(console.error);
   }, [qrData]);
 
@@ -909,9 +909,33 @@ function InvoicePrintPreview({ invoice, client, workEntries, onBack, onIssue, sa
               </div>
               <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 14 }}>
                 {qrUrl && (
-                  <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 5 }}>
-                    <img src={qrUrl} alt="QR platba" style={{ width: 84, height: 84, border: ".5px solid rgba(53,24,165,.14)", padding: 6, background: "#FDFCFA", display: "block" }} />
-                    <div style={{ fontSize: 6.5, letterSpacing: "0.28em", color: "#D4CEEA", textTransform: "uppercase", fontFamily: "'Inter', sans-serif" }}>QR Platba</div>
+                  <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 0 }}>
+                    {/* QR as design element */}
+                    <div style={{ position: "relative", width: 130, height: 130 }}>
+                      {/* Corner marks */}
+                      {[["0 0","0","0"],["auto 0","0","0"],["0 auto","0","0"],["auto auto","0","0"]].map(([inset,_br,__],ci) => (
+                        <div key={ci} style={{
+                          position: "absolute",
+                          [ci===0||ci===2?"top":"bottom"]: 0,
+                          [ci===0||ci===1?"left":"right"]: 0,
+                          width: 14, height: 14,
+                          borderTop: (ci===0||ci===1) ? "1.5px solid rgba(53,24,165,.35)" : "none",
+                          borderBottom: (ci===2||ci===3) ? "1.5px solid rgba(53,24,165,.35)" : "none",
+                          borderLeft: (ci===0||ci===2) ? "1.5px solid rgba(53,24,165,.35)" : "none",
+                          borderRight: (ci===1||ci===3) ? "1.5px solid rgba(53,24,165,.35)" : "none",
+                        }} />
+                      ))}
+                      <img src={qrUrl} alt="QR platba" style={{
+                        position: "absolute", inset: 9,
+                        width: "calc(100% - 18px)", height: "calc(100% - 18px)",
+                        background: "#FDFCFA", display: "block",
+                      }} />
+                    </div>
+                    <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 5 }}>
+                      <div style={{ width: 20, height: .5, background: "rgba(53,24,165,.2)" }} />
+                      <div style={{ fontSize: 6, letterSpacing: "0.42em", color: "#D4CEEA", textTransform: "uppercase", fontFamily: "'Inter', sans-serif" }}>Zaplatit převodem</div>
+                      <div style={{ width: 20, height: .5, background: "rgba(53,24,165,.2)" }} />
+                    </div>
                   </div>
                 )}
                 <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end" }}>
