@@ -5770,6 +5770,10 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
           );
         })()}
       </Panel>
+
+      <Panel id="josef">
+        <JosefPanel logs={assistantLogs} attendance={assistantAttendance} />
+      </Panel>
     </div>
   );
 }
@@ -8504,6 +8508,8 @@ export default function MauxCRM() {
   const [saving, setSaving] = useState(false);
   const [issueModal, setIssueModal] = useState(null); // { clientId, entries }
   const [asistentPreview, setAsistentPreview] = useState(false); // Tom náhlíží pohled Josefa
+  const [assistantLogs, setAssistantLogs] = useState([]);
+  const [assistantAttendance, setAssistantAttendance] = useState([]);
   const [previewModal, setPreviewModal] = useState(null); // { invoice, client, workEntries }
   const [editInvModal, setEditInvModal] = useState(null); // { inv } — edit existing invoice
 
@@ -8529,14 +8535,18 @@ export default function MauxCRM() {
       fetchExpenseChecks(new Date().getFullYear(), new Date().getMonth()+1).catch(() => []),
       fetchLoanTrackers().catch(() => []),
       fetchEscrows().catch(e => { console.error("escrows load:", e); return []; }),
+      fetchAssistantWorkLogs("asistent@maux.cz").catch(() => []),
+      fetchAssistantAttendance("asistent@maux.cz").catch(() => []),
     ])
-      .then(async ([c, i, w, f, dpfo, tax, checks, loans, esc]) => {
+      .then(async ([c, i, w, f, dpfo, tax, checks, loans, esc, aLogs, aAtt]) => {
         setClients(c); setInvoices(i); setWorkEntries(w); setFinanceItems(f);
         setDpfoMonths(dpfo);
         setTaxRecords(tax);
         setExpenseChecks(checks);
         setLoanTrackers(loans);
         setEscrows(esc || []);
+        setAssistantLogs(aLogs || []);
+        setAssistantAttendance(aAtt || []);
         const txMap = {};
         await Promise.all(loans.map(async l => {
           txMap[l.id] = await fetchLoanTransactions(l.id).catch(() => []);
@@ -8861,7 +8871,9 @@ export default function MauxCRM() {
               escrows={escrows}
               expenseChecks={expenseChecks}
               onToggleExpenseCheck={toggleExpenseCheck}
-              onNav={k => { setMod(k); setMode("list"); setSel(null); }} />
+              onNav={k => { setMod(k); setMode("list"); setSel(null); }}
+              assistantLogs={assistantLogs}
+              assistantAttendance={assistantAttendance} />
           )}
 
           {/* VÝKAZ PRÁCE */}
