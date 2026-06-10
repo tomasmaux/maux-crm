@@ -47,6 +47,7 @@ const MODULES = [
 // Josef Řehák (asistent@maux.cz) vidí po přihlášení jen VÝKAZY a DOCHÁZKU,
 // žádná čísla ani fakturace. Tomas vidí Josefův přehled v listu "Josef · Asistent".
 const ASSISTANT_EMAILS = ["asistent@maux.cz"];
+const ASSISTANT_HOURLY_RATE = 170; // Kč/h — Josef Řehák
 
 // ── Privacy mode: čistě zobrazovací maska částek, NIKDY nepřepisuje reálná data ──
 let PRIVACY_MODE = false;
