@@ -777,8 +777,8 @@ function InvoiceEditModal({ inv, clients, workEntries, onPreview, onCancel, onSa
 
   // entries already linked to this invoice
   const linkedEntries = workEntries.filter(e => e.invoice_id === inv.id);
-  // all free entries (any client, unlinked)
-  const allFree = workEntries.filter(e => !e.invoice_id);
+  // free entries — same client only
+  const clientFree = workEntries.filter(e => !e.invoice_id && e.client_id === inv.client_id);
 
   const [selectedIds, setSelectedIds] = useState(() => new Set(linkedEntries.map(e => e.id)));
   const [customItems, setCustomItems] = useState(() =>
@@ -794,8 +794,6 @@ function InvoiceEditModal({ inv, clients, workEntries, onPreview, onCancel, onSa
   const [editing, setEditing] = useState({});
   // confirm-delete  { [entryId]: true }
   const [confirmDels, setConfirmDels] = useState({});
-  // free-entries search
-  const [freeSearch, setFreeSearch] = useState("");
   // saving-entry ids
   const [savingEntry, setSavingEntry] = useState(null);
 
@@ -806,7 +804,7 @@ function InvoiceEditModal({ inv, clients, workEntries, onPreview, onCancel, onSa
   useEffect(() => { setLocalEntries(workEntries); }, [workEntries]);
 
   const localLinked = localEntries.filter(e => e.invoice_id === inv.id);
-  const localFree   = localEntries.filter(e => !e.invoice_id);
+  const localFree   = localEntries.filter(e => !e.invoice_id && e.client_id === inv.client_id);
 
   const dueDate = adjustDueDate(dueDateBase, dueDateOffset);
   const duzp    = lastDayPrevMonth(issueDate);
@@ -908,25 +906,9 @@ function InvoiceEditModal({ inv, clients, workEntries, onPreview, onCancel, onSa
   const stepStyle = { width: 28, height: 28, borderRadius: 6, border: "1px solid var(--line)", background: "#fff", cursor: "pointer", fontSize: 16, color: "var(--ink)", display:"flex", alignItems:"center", justifyContent:"center", userSelect:"none", flexShrink:0 };
 
   // ── filtered free entries ─────────────────────────────────────────
-  const filteredFree = localFree.filter(e => {
-    if (!freeSearch) return true;
-    const q = freeSearch.toLowerCase();
-    const ec = clients.find(c => c.id === e.client_id);
-    return (e.description||"").toLowerCase().includes(q) || (ec?.name||"").toLowerCase().includes(q);
-  }).sort((a,b) => (b.entry_date||"").localeCompare(a.entry_date||""));
 
-  // group by client
-  const freeByClient = {};
-  filteredFree.forEach(e => {
-    const cname = clients.find(c => c.id === e.client_id)?.name || "—";
-    if (!freeByClient[cname]) freeByClient[cname] = [];
-    freeByClient[cname].push(e);
-  });
-  const freeClientNames = Object.keys(freeByClient).sort((a,b) => {
-    // current client first
-    const ai = a === client?.name ? -1 : 0, bi = b === client?.name ? -1 : 0;
-    return ai - bi || a.localeCompare(b, "cs");
-  });
+
+
 
   return (
     <div className="ov" onClick={onCancel}>
@@ -951,30 +933,19 @@ function InvoiceEditModal({ inv, clients, workEntries, onPreview, onCancel, onSa
           </div>
         )}
 
-        {/* ── Free entries (all clients) ── */}
-        <div style={{ marginBottom:18 }}>
-          <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:8 }}>
-            <div style={{ fontSize:9.5, letterSpacing:".12em", textTransform:"uppercase", color:"var(--mut)", fontWeight:500 }}>
-              Volné výkazy ({localFree.length})
+        {/* ── Free entries — same client ── */}
+        {localFree.length > 0 && (
+          <div style={{ marginBottom:18 }}>
+            <div style={{ fontSize:9.5, letterSpacing:".12em", textTransform:"uppercase", color:"var(--mut)", fontWeight:500, marginBottom:8 }}>
+              Přidat výkaz
             </div>
-            <input value={freeSearch} onChange={e => setFreeSearch(e.target.value)}
-              placeholder="Hledat…"
-              style={{ marginLeft:"auto", font:"inherit", fontSize:12, padding:"4px 10px", border:"1px solid var(--line2)", borderRadius:8, width:160 }} />
+            <div style={{ border:"1px solid var(--line)", borderRadius:10, overflow:"hidden" }}>
+              {[...localFree].sort((a,b)=>(b.entry_date||"").localeCompare(a.entry_date||"")).map(e =>
+                <EntryRow key={e.id} e={e} inv={inv} clients={clients} selectedIds={selectedIds} toggle={toggle} editing={editing} openEdit={openEdit} closeEdit={closeEdit} updateDraft={updateDraft} saveEntryEdit={saveEntryEdit} savingEntry={savingEntry} confirmDels={confirmDels} setConfirmDels={setConfirmDels} deleteEntry={deleteEntry} />
+              )}
+            </div>
           </div>
-          {freeClientNames.length === 0 && (
-            <div style={{ fontSize:12.5, color:"var(--mut)", padding:"10px 0" }}>Žádné volné výkazy</div>
-          )}
-          {freeClientNames.map(cname => (
-            <div key={cname} style={{ marginBottom:10 }}>
-              <div style={{ fontSize:10, letterSpacing:".08em", textTransform:"uppercase", color: cname === client?.name ? "var(--ink)" : "var(--mut)", fontWeight:600, marginBottom:4, paddingLeft:2 }}>
-                {cname === client?.name ? "▸ " : ""}{cname}
-              </div>
-              <div style={{ border:"1px solid var(--line)", borderRadius:10, overflow:"hidden" }}>
-                {freeByClient[cname].map(e => <EntryRow key={e.id} e={e} inv={inv} clients={clients} selectedIds={selectedIds} toggle={toggle} editing={editing} openEdit={openEdit} closeEdit={closeEdit} updateDraft={updateDraft} saveEntryEdit={saveEntryEdit} savingEntry={savingEntry} confirmDels={confirmDels} setConfirmDels={setConfirmDels} deleteEntry={deleteEntry} />)}
-              </div>
-            </div>
-          ))}
-        </div>
+        )}
 
         {/* ── Custom items ── */}
         <div style={{ marginBottom:18 }}>
