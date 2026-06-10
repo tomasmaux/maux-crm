@@ -4967,7 +4967,7 @@ function JosefPanel({ logs, attendance }) {
 }
 
 
-function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, loanTrackers, loanTransactions, escrows, expenseChecks, onToggleExpenseCheck, onNav, onSaveFinance, onDeleteFinance, onDpfoToggle, onLoanTxAdd, onLoanTxToggle, onLoanTxDelete, onLoanUpdate }) {
+function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, loanTrackers, loanTransactions, escrows, expenseChecks, onToggleExpenseCheck, onNav, onSaveFinance, onDeleteFinance, onDpfoToggle, onLoanTxAdd, onLoanTxToggle, onLoanTxDelete, onLoanUpdate, assistantLogs=[], assistantAttendance=[] }) {
   const [escrowAlertDismissed, setEscrowAlertDismissed] = useState(false);
   const [editLayout, setEditLayout] = useState(false);
   const [panelState, setPanelState] = useState(loadPanelState);
@@ -7867,6 +7867,29 @@ function AsistentVykazy({ email, clients }) {
   return (
     <div style={{padding:"32px 32px",display:"flex",flexDirection:"column",gap:20}}>
 
+      {/* ── Confirm retroactive day dialog ── */}
+      {confirmDay && (
+        <div className="ov" onClick={()=>setConfirmDay(null)}>
+          <div style={{background:"#fff",borderRadius:16,padding:28,maxWidth:380,width:"100%",boxShadow:"0 24px 64px rgba(0,0,0,.18)"}} onClick={e=>e.stopPropagation()}>
+            <div style={{fontFamily:"Fraunces,serif",fontWeight:300,fontSize:20,color:"var(--txt)",marginBottom:10}}>
+              {confirmDay < todayStr ? "Potvrzení docházky" : "Naplánovat den"}
+            </div>
+            <div style={{fontSize:13.5,color:"var(--mut)",marginBottom:24,lineHeight:1.6}}>
+              {confirmDay < todayStr
+                ? <>Potvrzuji, že jsem byl v kanceláři dne<br/><strong style={{color:"var(--ink)"}}>{fmtDate(confirmDay)}</strong>.</>
+                : <>Potvrzuji, že přijdu do kanceláře dne<br/><strong style={{color:"var(--ink)"}}>{fmtDate(confirmDay)}</strong>.</>
+              }
+            </div>
+            <div style={{display:"flex",gap:10}}>
+              <button className="btn" style={{flex:1}} onClick={()=>setConfirmDay(null)}>Zrušit</button>
+              <button className="btn pri" style={{flex:1}} onClick={()=>{commitToggleDay(confirmDay);setConfirmDay(null);}}>
+                {confirmDay < todayStr ? "Ano, byl jsem" : "Ano, přijdu"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Header */}
       <div>
         <div style={{fontSize:9,letterSpacing:".22em",textTransform:"uppercase",color:"var(--mut)",marginBottom:6}}>VÝKAZY PRÁCE</div>
@@ -7960,13 +7983,19 @@ function AsistentVykazy({ email, clients }) {
 
 function AsistentDochazka({ email, attendance, onRefreshAttendance }) {
   const [viewMonth, setViewMonth] = useState(() => {
-    const d = new Date(); d.setMonth(d.getMonth()+1);
+    const d = new Date();
     return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`;
   });
   const [availability, setAvailability] = useState(null);
   const [savingAvail, setSavingAvail]   = useState(false);
   const [saving, setSaving]             = useState(false);
   const [now, setNow] = useState(new Date());
+  // confirm dialog for adding a past/future day
+  const [confirmDay, setConfirmDay] = useState(null); // dateStr
+  // attendance inline edit
+  const [editingAtt, setEditingAtt] = useState(null); // { id, date, check_in, check_out } or "new:YYYY-MM-DD"
+  const [editDraft, setEditDraft]   = useState({});
+  const [savingAtt, setSavingAtt]   = useState(false);
 
   useEffect(() => { const id = setInterval(()=>setNow(new Date()), 30000); return ()=>clearInterval(id); }, []);
   useEffect(() => { fetchAssistantAvailability(email, viewMonth).then(setAvailability).catch(console.error); }, [email, viewMonth]);
@@ -8008,11 +8037,46 @@ function AsistentDochazka({ email, attendance, onRefreshAttendance }) {
     : 0;
 
   // Plan calendar
-  const toggleDay = async (dateStr) => {
+  const commitToggleDay = async (dateStr) => {
     const newDates = plannedDates.includes(dateStr)?plannedDates.filter(d=>d!==dateStr):[...plannedDates,dateStr].sort();
     setSavingAvail(true);
     try { const rec={id:availability?.id||uid(),assistant_email:email,year_month:viewMonth,planned_dates:newDates}; await upsertAssistantAvailability(rec); setAvailability(rec); }
     catch(e){alert("Chyba: "+e.message);} finally{setSavingAvail(false);}
+  };
+  const toggleDay = (dateStr) => {
+    const isPast = dateStr < todayStr, isSel = plannedDates.includes(dateStr);
+    if (isPast && !isSel) { setConfirmDay(dateStr); return; } // confirm before marking past day
+    commitToggleDay(dateStr);
+  };
+
+  // ── Attendance edit helpers ──
+  const openEditAtt = (a) => {
+    const toTimeInput = (ts) => ts ? new Date(ts).toLocaleTimeString("cs-CZ",{hour:"2-digit",minute:"2-digit",hour12:false}) : "";
+    setEditDraft({ date: a.date, check_in_t: toTimeInput(a.check_in), check_out_t: toTimeInput(a.check_out) });
+    setEditingAtt(a.id);
+  };
+  const openNewAtt = (dateStr) => {
+    setEditDraft({ date: dateStr, check_in_t: "", check_out_t: "" });
+    setEditingAtt("new:" + dateStr);
+  };
+  const saveEditAtt = async (origId) => {
+    const toISO = (dateStr, timeStr) => {
+      if (!timeStr) return null;
+      const [h,m] = timeStr.split(":").map(Number);
+      const d = new Date(dateStr + "T00:00:00");
+      d.setHours(h, m, 0, 0);
+      return d.toISOString();
+    };
+    const isNew = String(origId).startsWith("new:");
+    const id = isNew ? uid() : origId;
+    const rec = {
+      id, assistant_email: email, date: editDraft.date,
+      check_in:  toISO(editDraft.date, editDraft.check_in_t),
+      check_out: toISO(editDraft.date, editDraft.check_out_t),
+    };
+    setSavingAtt(true);
+    try { await upsertAssistantAttendance(rec); await onRefreshAttendance?.(); setEditingAtt(null); }
+    catch(e) { alert("Chyba: "+e.message); } finally { setSavingAtt(false); }
   };
   const [vy,vm] = viewMonth.split("-").map(Number);
   const monthNames = ["leden","únor","březen","duben","květen","červen","červenec","srpen","září","říjen","listopad","prosinec"];
@@ -8056,6 +8120,29 @@ function AsistentDochazka({ email, attendance, onRefreshAttendance }) {
 
   return (
     <div style={{padding:"32px 32px",display:"flex",flexDirection:"column",gap:20}}>
+
+      {/* ── Confirm retroactive day dialog ── */}
+      {confirmDay && (
+        <div className="ov" onClick={()=>setConfirmDay(null)}>
+          <div style={{background:"#fff",borderRadius:16,padding:28,maxWidth:380,width:"100%",boxShadow:"0 24px 64px rgba(0,0,0,.18)"}} onClick={e=>e.stopPropagation()}>
+            <div style={{fontFamily:"Fraunces,serif",fontWeight:300,fontSize:20,color:"var(--txt)",marginBottom:10}}>
+              {confirmDay < todayStr ? "Potvrzení docházky" : "Naplánovat den"}
+            </div>
+            <div style={{fontSize:13.5,color:"var(--mut)",marginBottom:24,lineHeight:1.6}}>
+              {confirmDay < todayStr
+                ? <>Potvrzuji, že jsem byl v kanceláři dne<br/><strong style={{color:"var(--ink)"}}>{fmtDate(confirmDay)}</strong>.</>
+                : <>Potvrzuji, že přijdu do kanceláře dne<br/><strong style={{color:"var(--ink)"}}>{fmtDate(confirmDay)}</strong>.</>
+              }
+            </div>
+            <div style={{display:"flex",gap:10}}>
+              <button className="btn" style={{flex:1}} onClick={()=>setConfirmDay(null)}>Zrušit</button>
+              <button className="btn pri" style={{flex:1}} onClick={()=>{commitToggleDay(confirmDay);setConfirmDay(null);}}>
+                {confirmDay < todayStr ? "Ano, byl jsem" : "Ano, přijdu"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Header */}
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-end"}}>
@@ -8137,10 +8224,10 @@ function AsistentDochazka({ email, attendance, onRefreshAttendance }) {
                   const isSel=plannedDates.includes(ds),isPast=ds<todayStr,isToday=ds===todayStr;
                   const attended=attendance.some(a=>a.date===ds&&a.check_in);
                   return (
-                    <button key={ds} onClick={()=>!isPast&&toggleDay(ds)} disabled={isPast}
+                    <button key={ds} onClick={()=>toggleDay(ds)}
                       style={{height:36,borderRadius:9,border:"none",textAlign:"center",fontSize:12.5,fontWeight:isToday?700:400,cursor:isPast?"default":"pointer",lineHeight:1,
                         background:attended?"#ECFDF5":isSel?"var(--ink)":isToday?"#EDE9FD":"transparent",
-                        color:attended?"#059669":isSel?"#fff":isPast?"rgba(0,0,0,.15)":isToday?"var(--ink)":"var(--txt)",
+                        color:attended?"#059669":isSel?"#fff":isPast?"rgba(0,0,0,.4)":isToday?"var(--ink)":"var(--txt)",
                         outline:isToday&&!isSel?"1.5px solid #C4B5FD":"none"}}>
                       <div>{dayNum}</div>
                       {attended&&<div style={{fontSize:6,marginTop:1,color:"#22C55E"}}>●</div>}
@@ -8160,32 +8247,98 @@ function AsistentDochazka({ email, attendance, onRefreshAttendance }) {
 
       {/* ── Historie ── */}
       <div style={{background:"#fff",borderRadius:18,overflow:"hidden",boxShadow:"0 0 0 1px rgba(0,0,0,.06), 0 4px 16px rgba(0,0,0,.04)"}}>
-        <div style={{fontSize:7.5,letterSpacing:".25em",textTransform:"uppercase",fontWeight:700,color:"var(--mut)",padding:"18px 22px 12px"}}>
-          ZÁZNAMY DOCHÁZKY
+        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"18px 22px 12px"}}>
+          <div style={{fontSize:7.5,letterSpacing:".25em",textTransform:"uppercase",fontWeight:700,color:"var(--mut)"}}>ZÁZNAMY DOCHÁZKY</div>
+          <button className="btn gho" style={{fontSize:11}} onClick={()=>openNewAtt(todayStr)}>+ Přidat záznam</button>
         </div>
         {attendance.length===0 ? (
           <div style={{fontSize:12.5,color:"var(--mut)",padding:"0 22px 18px",opacity:.6}}>Zatím žádné záznamy.</div>
         ) : (
           <div style={{padding:"0 22px 18px",display:"flex",flexDirection:"column",gap:2}}>
-            {attendance.slice(0,20).map(a=>{
+            {attendance.slice(0,30).map(a=>{
               const dur=a.check_in&&a.check_out?(new Date(a.check_out)-new Date(a.check_in))/36e5:null;
               const good=dur!=null&&dur>=ASISTENT_DAILY_H, isToday=a.date===todayStr;
+              const isEditing = editingAtt === a.id;
+              const tFld = {font:"inherit",fontSize:13,padding:"6px 8px",border:"1px solid var(--line2)",borderRadius:7,width:72};
               return (
-                <div key={a.id} style={{display:"flex",alignItems:"center",gap:12,padding:"8px 10px",borderRadius:9,background:isToday?"rgba(53,24,165,.04)":"transparent"}}>
-                  <div style={{width:7,height:7,borderRadius:"50%",background:good?"#22C55E":dur?"#FCA5A5":"rgba(0,0,0,.12)",flexShrink:0}}/>
-                  <div style={{flex:1,fontSize:11.5,color:"var(--txt)",fontWeight:isToday?600:400}}>{fmtDate(a.date)}</div>
-                  <div style={{fontSize:10.5,color:"var(--mut)",fontFamily:"JetBrains Mono,monospace"}}>
-                    {fmtTime(a.check_in)||"—"} – {fmtTime(a.check_out)||"—"}
+                <div key={a.id}>
+                  <div style={{display:"flex",alignItems:"center",gap:10,padding:"8px 10px",borderRadius:9,background:isEditing?"#F7F5FF":isToday?"rgba(53,24,165,.04)":"transparent"}}>
+                    <div style={{width:7,height:7,borderRadius:"50%",background:good?"#22C55E":dur?"#FCA5A5":"rgba(0,0,0,.12)",flexShrink:0}}/>
+                    <div style={{flex:1,fontSize:11.5,color:"var(--txt)",fontWeight:isToday?600:400}}>{fmtDate(a.date)}</div>
+                    <div style={{fontSize:10.5,color:"var(--mut)",fontFamily:"JetBrains Mono,monospace"}}>
+                      {fmtTime(a.check_in)||"—"} – {fmtTime(a.check_out)||"—"}
+                    </div>
+                    <div style={{fontSize:12,fontWeight:600,color:good?"#059669":"var(--mut)",minWidth:42,textAlign:"right"}}>{dur?fmtH(dur):"—"}</div>
+                    <button onClick={()=>isEditing?setEditingAtt(null):openEditAtt(a)}
+                      style={{background:"none",border:"none",cursor:"pointer",color:isEditing?"var(--ink)":"var(--mut)",fontSize:13,padding:"2px 4px",borderRadius:5}}>
+                      {isEditing?"✕":"✎"}
+                    </button>
                   </div>
-                  <div style={{fontSize:12,fontWeight:600,color:good?"#059669":"var(--mut)",minWidth:42,textAlign:"right"}}>
-                    {dur?fmtH(dur):"—"}
-                  </div>
+                  {isEditing && (
+                    <div style={{margin:"0 10px 8px",padding:"12px 14px",background:"#F7F5FF",borderRadius:10,display:"flex",flexDirection:"column",gap:10}}>
+                      <div style={{display:"flex",gap:10,alignItems:"center"}}>
+                        <label style={{display:"flex",flexDirection:"column",gap:3}}>
+                          <span style={{fontSize:9.5,color:"var(--mut)",letterSpacing:".08em",textTransform:"uppercase"}}>Příchod</span>
+                          <input type="time" style={tFld} value={editDraft.check_in_t} onChange={e=>setEditDraft(p=>({...p,check_in_t:e.target.value}))} />
+                        </label>
+                        <span style={{color:"var(--mut)",marginTop:14}}>–</span>
+                        <label style={{display:"flex",flexDirection:"column",gap:3}}>
+                          <span style={{fontSize:9.5,color:"var(--mut)",letterSpacing:".08em",textTransform:"uppercase"}}>Odchod</span>
+                          <input type="time" style={tFld} value={editDraft.check_out_t} onChange={e=>setEditDraft(p=>({...p,check_out_t:e.target.value}))} />
+                        </label>
+                        <label style={{display:"flex",flexDirection:"column",gap:3,flex:1}}>
+                          <span style={{fontSize:9.5,color:"var(--mut)",letterSpacing:".08em",textTransform:"uppercase"}}>Datum</span>
+                          <input type="date" style={{...tFld,width:"auto"}} value={editDraft.date} onChange={e=>setEditDraft(p=>({...p,date:e.target.value}))} />
+                        </label>
+                      </div>
+                      <div style={{display:"flex",gap:8}}>
+                        <button className="btn" style={{fontSize:11}} onClick={()=>setEditingAtt(null)}>Zrušit</button>
+                        <button className="btn pri" style={{fontSize:11,flex:1}} disabled={savingAtt} onClick={()=>saveEditAtt(a.id)}>
+                          {savingAtt?"Ukládám…":"Uložit"}
+                        </button>
+                      </div>
+                    </div>
+                  )}
                 </div>
               );
             })}
           </div>
         )}
       </div>
+
+      {/* ── Nový záznam docházky ── */}
+      {String(editingAtt).startsWith("new:") && (
+        <div className="ov" onClick={()=>setEditingAtt(null)}>
+          <div style={{background:"#fff",borderRadius:16,padding:28,maxWidth:380,width:"100%",boxShadow:"0 24px 64px rgba(0,0,0,.18)"}} onClick={e=>e.stopPropagation()}>
+            <div style={{fontFamily:"Fraunces,serif",fontWeight:300,fontSize:20,marginBottom:16,color:"var(--txt)"}}>Přidat záznam docházky</div>
+            {(()=>{
+              const tFld={font:"inherit",fontSize:13,padding:"7px 9px",border:"1px solid var(--line2)",borderRadius:8,width:"100%",boxSizing:"border-box"};
+              return <>
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:10}}>
+                  <label style={{display:"flex",flexDirection:"column",gap:4,gridColumn:"1 / -1"}}>
+                    <span style={{fontSize:10,color:"var(--mut)",letterSpacing:".08em",textTransform:"uppercase"}}>Datum</span>
+                    <input type="date" style={tFld} value={editDraft.date} onChange={e=>setEditDraft(p=>({...p,date:e.target.value}))} />
+                  </label>
+                  <label style={{display:"flex",flexDirection:"column",gap:4}}>
+                    <span style={{fontSize:10,color:"var(--mut)",letterSpacing:".08em",textTransform:"uppercase"}}>Příchod</span>
+                    <input type="time" style={tFld} value={editDraft.check_in_t} onChange={e=>setEditDraft(p=>({...p,check_in_t:e.target.value}))} />
+                  </label>
+                  <label style={{display:"flex",flexDirection:"column",gap:4}}>
+                    <span style={{fontSize:10,color:"var(--mut)",letterSpacing:".08em",textTransform:"uppercase"}}>Odchod</span>
+                    <input type="time" style={tFld} value={editDraft.check_out_t} onChange={e=>setEditDraft(p=>({...p,check_out_t:e.target.value}))} />
+                  </label>
+                </div>
+                <div style={{display:"flex",gap:10}}>
+                  <button className="btn" style={{flex:1}} onClick={()=>setEditingAtt(null)}>Zrušit</button>
+                  <button className="btn pri" style={{flex:1}} disabled={savingAtt||!editDraft.date} onClick={()=>saveEditAtt("new:"+editDraft.date)}>
+                    {savingAtt?"Ukládám…":"Uložit záznam"}
+                  </button>
+                </div>
+              </>;
+            })()}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
