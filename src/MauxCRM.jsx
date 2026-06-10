@@ -666,9 +666,165 @@ function InvoiceIssueModal({ clientId, entries, clients, invoices, onConfirm, on
 }
 
 /* ─── INVOICE PRINT PREVIEW — MAUX LEGAL design ─── */
-function InvoicePrintPreview({ invoice, client, workEntries, onBack, onIssue, saving, previewOnly = false }) {
+
+/* ─── INVOICE EDIT MODAL ─── */
+function InvoiceEditModal({ inv, clients, workEntries, onPreview, onCancel }) {
+  const client = clients.find(c => c.id === inv.client_id);
+
+  // entries already on this invoice
+  const linkedEntries = workEntries.filter(e => e.invoice_id === inv.id);
+  // free entries for same client (not yet invoiced)
+  const freeEntries = workEntries.filter(e => !e.invoice_id && e.client_id === inv.client_id);
+
+  const [selectedIds, setSelectedIds] = useState(() => new Set(linkedEntries.map(e => e.id)));
+  // custom items (no_vat / přefakturace)
+  const [customItems, setCustomItems] = useState(() =>
+    (inv.items || []).filter(it => it.no_vat).map(it => ({ ...it, id: it.id || uid() }))
+  );
+  const [invoiceNo, setInvoiceNo]   = useState(inv.invoice_number || "");
+  const [issueDate, setIssueDate]   = useState(inv.issue_date || today());
+  const [dueDateBase, setDueDateBase] = useState(inv.due_date || nextDueDate(inv.issue_date || today()));
+  const [dueDateOffset, setDueDateOffset] = useState(0);
+  const [varSymbol, setVarSymbol]   = useState(inv.var_symbol || inv.notes || "");
+
+  const dueDate = adjustDueDate(dueDateBase, dueDateOffset);
+  const duzp    = lastDayPrevMonth(issueDate);
+
+  const allEntries = [...linkedEntries, ...freeEntries.filter(e => !selectedIds.has(e.id) || !linkedEntries.find(l => l.id === e.id))];
+  const selEntries = allEntries.filter(e => selectedIds.has(e.id));
+
+  const workAmt   = selEntries.reduce((s, e) => s + (e.amount || 0), 0);
+  const customAmt = customItems.reduce((s, it) => s + (it.amount || 0), 0);
+  const vat       = Math.round(workAmt * 0.21);
+  const total     = workAmt + vat + customAmt;
+
+  const toggle = (id) => setSelectedIds(p => { const n = new Set(p); n.has(id) ? n.delete(id) : n.add(id); return n; });
+
+  const addCustomItem = () => setCustomItems(p => [...p, { id: uid(), description: "", amount: 0, no_vat: true }]);
+  const removeCustomItem = (id) => setCustomItems(p => p.filter(it => it.id !== id));
+  const updateCustomItem = (id, field, val) => setCustomItems(p => p.map(it => it.id === id ? { ...it, [field]: field === "amount" ? Number(val) || 0 : val } : it));
+
+  const buildUpdatedInvoice = () => ({
+    ...inv,
+    invoice_number: invoiceNo,
+    issue_date: issueDate,
+    due_date: dueDate,
+    duzp,
+    items: [
+      ...selEntries.map(e => ({ id: uid(), description: e.description, hours: e.hours || 0, rate: e.rate || 0, amount: e.amount || 0, no_vat: false, flat_rate: e.billing_type === "flat_rate" })),
+      ...customItems,
+    ],
+    subtotal: workAmt,
+    vat_rate: 21,
+    vat_amount: vat,
+    total,
+    var_symbol: varSymbol,
+    notes: varSymbol,
+    _editedEntryIds: [...selectedIds],
+    _linkedEntryIds: linkedEntries.map(e => e.id),
+  });
+
+  const stepStyle = { width: 28, height: 28, borderRadius: 6, border: "1px solid var(--line)", background: "#fff", cursor: "pointer", fontSize: 16, color: "var(--ink)", display:"flex", alignItems:"center", justifyContent:"center", userSelect:"none", flexShrink:0 };
+
+  return (
+    <div className="ov" onClick={onCancel}>
+      <div style={{ background:"#fff", borderRadius:16, padding:28, maxWidth:640, width:"100%", maxHeight:"90vh", overflowY:"auto", boxShadow:"0 24px 64px rgba(0,0,0,.18)" }}
+        onClick={e => e.stopPropagation()}>
+        <div style={{ fontFamily:"Fraunces, serif", fontSize:20, fontWeight:300, color:"var(--txt)", marginBottom:4 }}>Upravit fakturu</div>
+        <div style={{ fontSize:12.5, color:"var(--mut)", marginBottom:20 }}>{client?.name} · {inv.invoice_number}</div>
+
+        {/* Linked entries (already on invoice) */}
+        {linkedEntries.length > 0 && (
+          <>
+            <div style={{ fontSize:9.5, letterSpacing:".12em", textTransform:"uppercase", color:"var(--mut)", fontWeight:500, marginBottom:8 }}>Výkazy na faktuře</div>
+            <div style={{ border:"1px solid var(--line)", borderRadius:10, overflow:"hidden", marginBottom:16 }}>
+              {linkedEntries.sort((a,b)=>(a.entry_date||"").localeCompare(b.entry_date||"")).map(e => (
+                <label key={e.id} style={{ display:"flex", alignItems:"flex-start", gap:12, padding:"10px 14px", borderBottom:"1px solid var(--line)", cursor:"pointer", background:selectedIds.has(e.id)?"#F7F5FF":"#FFF8F8", transition:".1s" }}>
+                  <input type="checkbox" checked={selectedIds.has(e.id)} onChange={() => toggle(e.id)} style={{ marginTop:2, accentColor:"var(--ink)", flexShrink:0 }} />
+                  <div style={{ flex:1, minWidth:0 }}>
+                    <div style={{ fontSize:12.5, color:"var(--txt)", fontWeight:500 }}>{fmtDate(e.entry_date)} — {e.description?.slice(0,80)}</div>
+                    <div style={{ fontSize:11, color:"var(--mut)", marginTop:2 }}>{e.hours > 0 && `${e.hours} h × ${fmtKc(e.rate)}`}</div>
+                  </div>
+                  <div style={{ fontSize:12.5, fontFamily:"Fraunces, serif", fontWeight:300, color:selectedIds.has(e.id)?"var(--ink)":"var(--mut)", flexShrink:0 }}>{fmtKc(e.amount)}</div>
+                </label>
+              ))}
+            </div>
+          </>
+        )}
+
+        {/* Free entries to add */}
+        {freeEntries.length > 0 && (
+          <>
+            <div style={{ fontSize:9.5, letterSpacing:".12em", textTransform:"uppercase", color:"var(--mut)", fontWeight:500, marginBottom:8 }}>Přidat výkaz</div>
+            <div style={{ border:"1px solid var(--line)", borderRadius:10, overflow:"hidden", marginBottom:16 }}>
+              {freeEntries.sort((a,b)=>(a.entry_date||"").localeCompare(b.entry_date||"")).map(e => (
+                <label key={e.id} style={{ display:"flex", alignItems:"flex-start", gap:12, padding:"10px 14px", borderBottom:"1px solid var(--line)", cursor:"pointer", background:selectedIds.has(e.id)?"#F7F5FF":"#fff", transition:".1s" }}>
+                  <input type="checkbox" checked={selectedIds.has(e.id)} onChange={() => toggle(e.id)} style={{ marginTop:2, accentColor:"var(--ink)", flexShrink:0 }} />
+                  <div style={{ flex:1, minWidth:0 }}>
+                    <div style={{ fontSize:12.5, color:"var(--txt)", fontWeight:500 }}>{fmtDate(e.entry_date)} — {e.description?.slice(0,80)}</div>
+                    <div style={{ fontSize:11, color:"var(--mut)", marginTop:2 }}>{e.hours > 0 && `${e.hours} h × ${fmtKc(e.rate)}`}</div>
+                  </div>
+                  <div style={{ fontSize:12.5, fontFamily:"Fraunces, serif", fontWeight:300, color:"var(--ink)", flexShrink:0 }}>{fmtKc(e.amount)}</div>
+                </label>
+              ))}
+            </div>
+          </>
+        )}
+
+        {/* Custom items (přefakturace etc.) */}
+        <div style={{ fontSize:9.5, letterSpacing:".12em", textTransform:"uppercase", color:"var(--mut)", fontWeight:500, marginBottom:8 }}>Přefakturace / položky bez DPH</div>
+        {customItems.map(it => (
+          <div key={it.id} style={{ display:"flex", gap:8, marginBottom:8, alignItems:"center" }}>
+            <input value={it.description} onChange={e => updateCustomItem(it.id, "description", e.target.value)}
+              placeholder="Popis" style={{ flex:1, font:"inherit", fontSize:13, padding:"7px 10px", border:"1px solid var(--line2)", borderRadius:8 }} />
+            <input value={it.amount || ""} onChange={e => updateCustomItem(it.id, "amount", e.target.value)}
+              placeholder="Kč" type="number" style={{ width:90, font:"inherit", fontSize:13, padding:"7px 10px", border:"1px solid var(--line2)", borderRadius:8 }} />
+            <button onClick={() => removeCustomItem(it.id)} style={{ background:"none", border:"1px solid #FCA5A5", borderRadius:8, color:"#DC2626", padding:"7px 10px", cursor:"pointer", fontSize:13 }}>✕</button>
+          </div>
+        ))}
+        <button className="btn gho" style={{ fontSize:12, marginBottom:20 }} onClick={addCustomItem}>+ Přidat položku bez DPH</button>
+
+        {/* Invoice fields */}
+        <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:14, marginBottom:20 }}>
+          <label className="field"><span>Číslo faktury</span><input value={invoiceNo} onChange={e => setInvoiceNo(e.target.value)} /></label>
+          <label className="field"><span>Variabilní symbol</span><input value={varSymbol} onChange={e => setVarSymbol(e.target.value)} /></label>
+          <label className="field"><span>Datum vystavení</span><input type="date" value={issueDate} onChange={e => { setIssueDate(e.target.value); setDueDateBase(nextDueDate(e.target.value)); setDueDateOffset(0); }} /></label>
+          <div className="field"><span>DUZP (auto)</span><div style={{ padding:"8px 10px", background:"var(--bg)", borderRadius:8, border:"1px solid var(--line)", fontSize:13, color:"var(--mut)" }}>{fmtDate(duzp)}</div></div>
+          <div className="field" style={{ gridColumn:"1 / -1" }}>
+            <span>Datum splatnosti</span>
+            <div style={{ display:"flex", alignItems:"center", gap:10 }}>
+              <button style={stepStyle} onClick={() => setDueDateOffset(o => Math.max(-5, o-1))} disabled={dueDateOffset<=-5}>−</button>
+              <div style={{ flex:1, padding:"8px 12px", background:dueDateOffset!==0?"#F0EEFF":"var(--bg)", borderRadius:8, border:"1px solid var(--line)", fontSize:13, color:"var(--ink)", textAlign:"center", fontWeight:dueDateOffset!==0?500:400 }}>
+                {fmtDate(dueDate)}{dueDateOffset!==0 && <span style={{ fontSize:10, color:"var(--mut)", marginLeft:8 }}>{dueDateOffset>0?`+${dueDateOffset}`:dueDateOffset} dní od 15.</span>}
+              </div>
+              <button style={stepStyle} onClick={() => setDueDateOffset(o => Math.min(5, o+1))} disabled={dueDateOffset>=5}>+</button>
+            </div>
+          </div>
+        </div>
+
+        {/* Summary */}
+        <div style={{ background:"var(--bg)", borderRadius:10, padding:"14px 16px", marginBottom:20, display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+          <div style={{ fontSize:12, color:"var(--mut)" }}>
+            {selEntries.length} výkazů · základ {fmtKc(workAmt)}{customAmt>0?` · přefakturace ${fmtKc(customAmt)}`:""}
+          </div>
+          <div style={{ fontFamily:"Fraunces, serif", fontSize:20, fontWeight:300, color:"var(--ink)" }}>{fmtKc(total)}</div>
+        </div>
+
+        <div style={{ display:"flex", gap:10 }}>
+          <button className="btn" style={{ flex:1 }} onClick={onCancel}>Zrušit</button>
+          <button className="btn pri" style={{ flex:2 }} onClick={() => onPreview(buildUpdatedInvoice(), selEntries)}>
+            Náhled faktury →
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function InvoicePrintPreview({ invoice, client, workEntries, onBack, onIssue, saving, previewOnly = false, isEditMode = false, onConfirmEdit = null }) {
   const [qrUrl, setQrUrl] = useState("");
   const [sentDialog, setSentDialog] = useState(false);
+  const [editConfirmDialog, setEditConfirmDialog] = useState(false);
 
   const ibanRaw = FIRMA.iban.replace(/\s/g, "");
   const amountStr = (invoice.total / 100).toFixed(2);
@@ -676,7 +832,7 @@ function InvoicePrintPreview({ invoice, client, workEntries, onBack, onIssue, sa
   const qrData = `SPD*1.0*ACC:${ibanRaw}*AM:${amountStr}*CC:CZK*X-VS:${vsStr}*MSG:${invoice.invoice_number}*DT:${(invoice.due_date || "").replace(/-/g, "")}`;
 
   useEffect(() => {
-    QRCode.toDataURL(qrData, { width: 300, margin: 2, color: { dark: "#3518A5", light: "#FDFCFA" } })
+    QRCode.toDataURL(qrData, { width: 600, margin: 2, color: { dark: "#3518A5", light: "#FDFCFA" } })
       .then(setQrUrl).catch(console.error);
   }, [qrData]);
 
@@ -724,6 +880,10 @@ function InvoicePrintPreview({ invoice, client, workEntries, onBack, onIssue, sa
         <div style={{ flex: 1, color: "#fff", opacity: .7, fontSize: 13 }}>Náhled faktury {invoice.invoice_number} — {client?.name}</div>
         {previewOnly ? (
           <span style={{ fontSize: 12, color: "rgba(255,255,255,.5)" }}>Pouze náhled — pro vystavení použij "Vystavit fakturu →"</span>
+        ) : isEditMode ? (
+          <button className="btn pri" style={{ fontSize: 13 }} onClick={() => setEditConfirmDialog(true)} disabled={saving}>
+            Potvrdit →
+          </button>
         ) : (
           <button className="btn pri" style={{ fontSize: 13 }} onClick={handlePrintAndAsk} disabled={saving}>
             Stáhnout PDF a vystavit →
@@ -912,7 +1072,7 @@ function InvoicePrintPreview({ invoice, client, workEntries, onBack, onIssue, sa
                 {qrUrl && (
                   <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 0 }}>
                     {/* QR as design element */}
-                    <div style={{ position: "relative", width: 130, height: 130 }}>
+                    <div style={{ position: "relative", width: 200, height: 200 }}>
                       {/* Corner marks */}
                       {[["0 0","0","0"],["auto 0","0","0"],["0 auto","0","0"],["auto auto","0","0"]].map(([inset,_br,__],ci) => (
                         <div key={ci} style={{
@@ -927,8 +1087,8 @@ function InvoicePrintPreview({ invoice, client, workEntries, onBack, onIssue, sa
                         }} />
                       ))}
                       <img src={qrUrl} alt="QR platba" style={{
-                        position: "absolute", inset: 9,
-                        width: "calc(100% - 18px)", height: "calc(100% - 18px)",
+                        position: "absolute", inset: 13,
+                        width: "calc(100% - 26px)", height: "calc(100% - 26px)",
                         background: "#FDFCFA", display: "block",
                       }} />
                     </div>
@@ -1060,6 +1220,21 @@ function InvoicePrintPreview({ invoice, client, workEntries, onBack, onIssue, sa
       </div>
 
       {/* Sent dialog */}
+      {editConfirmDialog && isEditMode && (
+        <div className="ov no-print">
+          <div style={{ background:"#fff", borderRadius:16, padding:28, maxWidth:420, width:"100%", boxShadow:"0 24px 64px rgba(0,0,0,.18)" }}>
+            <div style={{ fontFamily:"Fraunces, serif", fontSize:22, fontWeight:300, color:"var(--txt)", marginBottom:10 }}>Uložit změny?</div>
+            <div style={{ fontSize:13, color:"var(--mut)", marginBottom:24 }}>
+              Chceš tuto fakturu <strong>opravit i historicky v databázi</strong>?<br/>
+              V obou případech se stáhne PDF.
+            </div>
+            <div style={{ display:"flex", gap:10 }}>
+              <button className="btn gho" style={{ flex:1 }} onClick={() => { setEditConfirmDialog(false); window.print(); if (onConfirmEdit) onConfirmEdit(false); }}>Ne — jen PDF</button>
+              <button className="btn pri" style={{ flex:1 }} onClick={() => { setEditConfirmDialog(false); window.print(); if (onConfirmEdit) onConfirmEdit(true); }}>Ano — uložit &amp; PDF</button>
+            </div>
+          </div>
+        </div>
+      )}
       {sentDialog && !previewOnly && (
         <div className="ov no-print">
           <div style={{ background: "#fff", borderRadius: 16, padding: 28, maxWidth: 400, width: "100%", boxShadow: "0 24px 64px rgba(0,0,0,.18)" }}>
@@ -5551,7 +5726,7 @@ function WorkEntryList({ entries, clients, invoices, onNew, onEdit, onDelete, on
 }
 
 /* ─── FAKTURACE ─── */
-function InvoiceList({ invoices, clients, workEntries, onOpen, onOpenClient, onToggleStatus, onGenerateInvoice, onPreviewInvoice, loading }) {
+function InvoiceList({ invoices, clients, workEntries, onOpen, onOpenClient, onToggleStatus, onGenerateInvoice, onPreviewInvoice, onEditInvoice, loading }) {
   const [search, setSearch] = useState("");
   const [filterStatus, setFilterStatus] = useState("vse");
   const [filterClient, setFilterClient] = useState("");
@@ -5847,8 +6022,9 @@ function InvoiceList({ invoices, clients, workEntries, onOpen, onOpenClient, onT
                   <StatusToggle inv={inv} />
                 </td>
                 <td style={{ textAlign: "right", whiteSpace: "nowrap" }} onClick={e => e.stopPropagation()}>
-                  <button className="btn gho" style={{ fontSize: 11, padding: "4px 8px" }}
-                    onClick={() => onOpen(inv.id, "edit")}>✎</button>
+                  <button className="btn gho" style={{ fontSize: 11, padding: "4px 8px", color: "var(--ink)" }}
+                    title="Upravit fakturu"
+                    onClick={() => onEditInvoice && onEditInvoice(inv)}>✎ Upravit</button>
                   <button className="btn gho" style={{ fontSize: 11, padding: "4px 8px", color: "#DC2626" }}
                     onClick={() => onOpen(inv.id, "delete")}>✕</button>
                 </td>
@@ -7952,6 +8128,7 @@ export default function MauxCRM() {
   const [issueModal, setIssueModal] = useState(null); // { clientId, entries }
   const [asistentPreview, setAsistentPreview] = useState(false); // Tom náhlíží pohled Josefa
   const [previewModal, setPreviewModal] = useState(null); // { invoice, client, workEntries }
+  const [editInvModal, setEditInvModal] = useState(null); // { inv } — edit existing invoice
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => setSession(session));
@@ -8080,6 +8257,29 @@ export default function MauxCRM() {
       status: "pripravena", notes: "", var_symbol: nextInvoiceNumber(invoices).replace(/\D/g,"").slice(-6),
     };
     setPreviewModal({ invoice: inv, client, workEntries: entries });
+  };
+
+  const openEditInvModal = (inv) => {
+    setEditInvModal({ inv });
+  };
+
+  const confirmEditInvoice = async (updatedInv, saveToDb) => {
+    if (!saveToDb) { setEditInvModal(null); return; }
+    setSaving(true);
+    try {
+      const { _editedEntryIds, _linkedEntryIds, ...cleanInv } = updatedInv;
+      await upsertInvoice(cleanInv);
+      // Re-link/unlink work entries
+      const toLink   = (_editedEntryIds || []).filter(id => !(_linkedEntryIds||[]).includes(id));
+      const toUnlink = (_linkedEntryIds || []).filter(id => !(_editedEntryIds||[]).includes(id));
+      const allWE = workEntries;
+      await Promise.all([
+        ...toLink.map(id => { const e = allWE.find(w => w.id === id); return e ? upsertWorkEntry({ ...e, invoice_id: cleanInv.id }) : Promise.resolve(); }),
+        ...toUnlink.map(id => { const e = allWE.find(w => w.id === id); return e ? upsertWorkEntry({ ...e, invoice_id: null }) : Promise.resolve(); }),
+      ]);
+      const [updInvs, updWE] = await Promise.all([fetchInvoices(), fetchWorkEntries()]);
+      setInvoices(updInvs); setWorkEntries(updWE);
+    } catch (e) { alert("Chyba: " + e.message); } finally { setSaving(false); setEditInvModal(null); }
   };
 
   const generateInvoiceFromEntries = async (clientId, entries) => {
@@ -8318,6 +8518,7 @@ export default function MauxCRM() {
               onOpenClient={openClientFromInvoice}
               onGenerateInvoice={openIssueModal}
               onPreviewInvoice={openPreviewModal}
+              onEditInvoice={openEditInvModal}
               loading={dataLoading}
             />
           )}
@@ -8430,6 +8631,30 @@ export default function MauxCRM() {
           onCancel={() => setIssueModal(null)}
           saving={saving}
         />
+      )}
+
+      {editInvModal && !editInvModal.previewInv && (
+        <InvoiceEditModal
+          inv={editInvModal.inv}
+          clients={clients}
+          workEntries={workEntries}
+          onPreview={(updatedInv, selEntries) => setEditInvModal({ ...editInvModal, previewInv: updatedInv, previewEntries: selEntries })}
+          onCancel={() => setEditInvModal(null)}
+        />
+      )}
+      {editInvModal && editInvModal.previewInv && (
+        <div style={{ position:"fixed", inset:0, zIndex:200, overflowY:"auto", background:"#f0eff8" }}>
+          <InvoicePrintPreview
+            invoice={editInvModal.previewInv}
+            client={clients.find(c => c.id === editInvModal.previewInv.client_id)}
+            workEntries={editInvModal.previewEntries || []}
+            onBack={() => setEditInvModal({ inv: editInvModal.inv })}
+            onIssue={() => {}}
+            saving={saving}
+            isEditMode={true}
+            onConfirmEdit={(saveToDb) => confirmEditInvoice(editInvModal.previewInv, saveToDb)}
+          />
+        </div>
       )}
 
       {confirmDel && (
