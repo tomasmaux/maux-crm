@@ -668,6 +668,110 @@ function InvoiceIssueModal({ clientId, entries, clients, invoices, onConfirm, on
 /* ─── INVOICE PRINT PREVIEW — MAUX LEGAL design ─── */
 
 /* ─── INVOICE EDIT MODAL ─── */
+/* ─── ENTRY ROW (used inside InvoiceEditModal) ─── */
+function EntryRow({ e, inv, clients, selectedIds, toggle, editing, openEdit, closeEdit, updateDraft, saveEntryEdit, savingEntry, confirmDels, setConfirmDels, deleteEntry }) {
+  const isEditing   = !!editing[e.id];
+  const isDeleting  = !!confirmDels[e.id];
+  const isSaving    = savingEntry === e.id;
+  const isSelected  = selectedIds.has(e.id);
+  const d           = editing[e.id] || {};
+  const entryClient = clients.find(c => c.id === e.client_id);
+  const fieldStyle  = { font:"inherit", fontSize:12.5, padding:"6px 9px", border:"1px solid var(--line2)", borderRadius:7, background:"#fff", width:"100%", boxSizing:"border-box" };
+
+  return (
+    <div style={{ borderBottom:"1px solid var(--line)", background: isEditing ? "#F7F5FF" : isSelected ? "#FAFAFF" : "#fff" }}>
+      {/* main row */}
+      <div style={{ display:"flex", alignItems:"center", gap:10, padding:"9px 14px", cursor:"pointer" }}
+        onClick={() => { if (!isEditing && !isDeleting) toggle(e.id); }}>
+        <input type="checkbox" checked={isSelected} onChange={() => toggle(e.id)}
+          onClick={ev => ev.stopPropagation()}
+          style={{ accentColor:"var(--ink)", flexShrink:0, cursor:"pointer" }} />
+        <div style={{ flex:1, minWidth:0 }}>
+          <div style={{ fontSize:12.5, color:"var(--txt)", fontWeight:500, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>
+            {fmtDate(e.entry_date)} — {e.description?.slice(0,72)}
+          </div>
+          <div style={{ fontSize:11, color:"var(--mut)", marginTop:1, display:"flex", gap:8 }}>
+            {e.hours > 0 && <span>{e.hours} h × {fmtKc(e.rate)}</span>}
+            {e.client_id !== inv.client_id && entryClient && (
+              <span style={{ color:"#7C3AED", fontWeight:500 }}>↳ {entryClient.name}</span>
+            )}
+          </div>
+        </div>
+        <div style={{ fontSize:12.5, fontFamily:"Fraunces, serif", fontWeight:300, color:isSelected?"var(--ink)":"var(--mut)", flexShrink:0, marginRight:4 }}>{fmtKc(e.amount)}</div>
+        <button title="Upravit výkaz" onClick={ev => { ev.stopPropagation(); isEditing ? closeEdit(e.id) : openEdit(e); }}
+          style={{ background:"none", border:"none", padding:"2px 5px", cursor:"pointer", color: isEditing ? "var(--ink)" : "var(--mut)", fontSize:14, borderRadius:5, flexShrink:0 }}>
+          {isEditing ? "✕" : "✎"}
+        </button>
+        <button title="Smazat výkaz" onClick={ev => { ev.stopPropagation(); setConfirmDels(p => ({ ...p, [e.id]: true })); }}
+          style={{ background:"none", border:"none", padding:"2px 5px", cursor:"pointer", color:"#FCA5A5", fontSize:14, borderRadius:5, flexShrink:0 }}>
+          🗑
+        </button>
+      </div>
+
+      {/* inline editor */}
+      {isEditing && (
+        <div style={{ padding:"12px 14px 14px", borderTop:"1px dashed var(--line)", background:"#F7F5FF" }}>
+          <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8, marginBottom:8 }}>
+            <label style={{ gridColumn:"1 / -1" }}>
+              <div style={{ fontSize:10.5, color:"var(--mut)", marginBottom:3 }}>Popis</div>
+              <input style={fieldStyle} value={d.description} onChange={ev => updateDraft(e.id, "description", ev.target.value)} />
+            </label>
+            <label>
+              <div style={{ fontSize:10.5, color:"var(--mut)", marginBottom:3 }}>Datum</div>
+              <input type="date" style={fieldStyle} value={d.entry_date} onChange={ev => updateDraft(e.id, "entry_date", ev.target.value)} />
+            </label>
+            <label>
+              <div style={{ fontSize:10.5, color:"var(--mut)", marginBottom:3 }}>Typ</div>
+              <select style={fieldStyle} value={d.billing_type} onChange={ev => updateDraft(e.id, "billing_type", ev.target.value)}>
+                <option value="hourly">Hodinová sazba</option>
+                <option value="flat_rate">Paušál</option>
+              </select>
+            </label>
+            {d.billing_type === "hourly" && <>
+              <label>
+                <div style={{ fontSize:10.5, color:"var(--mut)", marginBottom:3 }}>Hodiny</div>
+                <input type="number" style={fieldStyle} value={d.hours} step="0.5" min="0" onChange={ev => updateDraft(e.id, "hours", ev.target.value)} />
+              </label>
+              <label>
+                <div style={{ fontSize:10.5, color:"var(--mut)", marginBottom:3 }}>Sazba (Kč/h)</div>
+                <input type="number" style={fieldStyle} value={d.rate} onChange={ev => updateDraft(e.id, "rate", ev.target.value)} />
+              </label>
+            </>}
+            <label>
+              <div style={{ fontSize:10.5, color:"var(--mut)", marginBottom:3 }}>Částka (Kč)</div>
+              <input type="number" style={fieldStyle} value={d.amount} onChange={ev => updateDraft(e.id, "amount", ev.target.value)} />
+            </label>
+            <label>
+              <div style={{ fontSize:10.5, color:"var(--mut)", marginBottom:3 }}>Přiřadit klientovi</div>
+              <select style={fieldStyle} value={d.client_id} onChange={ev => updateDraft(e.id, "client_id", ev.target.value)}>
+                {clients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+              </select>
+            </label>
+          </div>
+          <div style={{ display:"flex", gap:8 }}>
+            <button className="btn" style={{ fontSize:12 }} onClick={() => closeEdit(e.id)}>Zrušit</button>
+            <button className="btn pri" style={{ fontSize:12, flex:1 }} disabled={isSaving} onClick={() => saveEntryEdit(e)}>
+              {isSaving ? "Ukládám…" : "Uložit výkaz"}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* delete confirm */}
+      {isDeleting && (
+        <div style={{ padding:"10px 14px", borderTop:"1px dashed #FCA5A5", background:"#FFF5F5", display:"flex", alignItems:"center", gap:10 }}>
+          <span style={{ flex:1, fontSize:12.5, color:"#DC2626" }}>Opravdu smazat tento výkaz?</span>
+          <button className="btn" style={{ fontSize:12 }} onClick={() => setConfirmDels(p => { const n={...p}; delete n[e.id]; return n; })}>Ne</button>
+          <button style={{ background:"#DC2626", color:"#fff", border:"none", borderRadius:8, padding:"6px 14px", fontSize:12, cursor:"pointer" }}
+            disabled={isSaving} onClick={() => deleteEntry(e.id)}>
+            {isSaving ? "…" : "Smazat"}
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function InvoiceEditModal({ inv, clients, workEntries, onPreview, onCancel, onSaveEntry, onDeleteEntry }) {
   const client = clients.find(c => c.id === inv.client_id);
 
@@ -699,7 +803,7 @@ function InvoiceEditModal({ inv, clients, workEntries, onPreview, onCancel, onSa
   const [localEntries, setLocalEntries] = useState(workEntries);
 
   // re-sync when parent workEntries change (e.g. after save)
-  React.useEffect(() => { setLocalEntries(workEntries); }, [workEntries]);
+  useEffect(() => { setLocalEntries(workEntries); }, [workEntries]);
 
   const localLinked = localEntries.filter(e => e.invoice_id === inv.id);
   const localFree   = localEntries.filter(e => !e.invoice_id);
@@ -802,113 +906,6 @@ function InvoiceEditModal({ inv, clients, workEntries, onPreview, onCancel, onSa
   });
 
   const stepStyle = { width: 28, height: 28, borderRadius: 6, border: "1px solid var(--line)", background: "#fff", cursor: "pointer", fontSize: 16, color: "var(--ink)", display:"flex", alignItems:"center", justifyContent:"center", userSelect:"none", flexShrink:0 };
-  const fieldStyle = { font:"inherit", fontSize:12.5, padding:"6px 9px", border:"1px solid var(--line2)", borderRadius:7, background:"#fff", width:"100%", boxSizing:"border-box" };
-
-  // ── Entry row renderer (used for both linked and free) ────────────
-  const EntryRow = ({ e, isLinked }) => {
-    const isEditing   = !!editing[e.id];
-    const isDeleting  = !!confirmDels[e.id];
-    const isSaving    = savingEntry === e.id;
-    const isSelected  = selectedIds.has(e.id);
-    const d           = editing[e.id] || {};
-    const entryClient = clients.find(c => c.id === e.client_id);
-
-    return (
-      <div key={e.id} style={{ borderBottom:"1px solid var(--line)", background: isEditing ? "#F7F5FF" : isSelected ? "#FAFAFF" : "#fff" }}>
-
-        {/* main row */}
-        <div style={{ display:"flex", alignItems:"center", gap:10, padding:"9px 14px", cursor:"pointer" }}
-          onClick={() => { if (!isEditing && !isDeleting) toggle(e.id); }}>
-          <input type="checkbox" checked={isSelected} onChange={() => toggle(e.id)}
-            onClick={ev => ev.stopPropagation()}
-            style={{ accentColor:"var(--ink)", flexShrink:0, cursor:"pointer" }} />
-          <div style={{ flex:1, minWidth:0 }}>
-            <div style={{ fontSize:12.5, color:"var(--txt)", fontWeight:500, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>
-              {fmtDate(e.entry_date)} — {e.description?.slice(0,72)}
-            </div>
-            <div style={{ fontSize:11, color:"var(--mut)", marginTop:1, display:"flex", gap:8 }}>
-              {e.hours > 0 && <span>{e.hours} h × {fmtKc(e.rate)}</span>}
-              {e.client_id !== inv.client_id && entryClient && (
-                <span style={{ color:"#7C3AED", fontWeight:500 }}>↳ {entryClient.name}</span>
-              )}
-            </div>
-          </div>
-          <div style={{ fontSize:12.5, fontFamily:"Fraunces, serif", fontWeight:300, color:isSelected?"var(--ink)":"var(--mut)", flexShrink:0, marginRight:4 }}>{fmtKc(e.amount)}</div>
-
-          {/* action icons */}
-          <button title="Upravit výkaz" onClick={ev => { ev.stopPropagation(); isEditing ? closeEdit(e.id) : openEdit(e); }}
-            style={{ background:"none", border:"none", padding:"2px 5px", cursor:"pointer", color: isEditing ? "var(--ink)" : "var(--mut)", fontSize:14, borderRadius:5, flexShrink:0 }}>
-            {isEditing ? "✕" : "✎"}
-          </button>
-          <button title="Smazat výkaz" onClick={ev => { ev.stopPropagation(); setConfirmDels(p => ({ ...p, [e.id]: true })); }}
-            style={{ background:"none", border:"none", padding:"2px 5px", cursor:"pointer", color:"#FCA5A5", fontSize:14, borderRadius:5, flexShrink:0 }}>
-            🗑
-          </button>
-        </div>
-
-        {/* inline editor */}
-        {isEditing && (
-          <div style={{ padding:"12px 14px 14px", borderTop:"1px dashed var(--line)", background:"#F7F5FF" }}>
-            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8, marginBottom:8 }}>
-              <label style={{ gridColumn:"1 / -1" }}>
-                <div style={{ fontSize:10.5, color:"var(--mut)", marginBottom:3 }}>Popis</div>
-                <input style={fieldStyle} value={d.description} onChange={ev => updateDraft(e.id, "description", ev.target.value)} />
-              </label>
-              <label>
-                <div style={{ fontSize:10.5, color:"var(--mut)", marginBottom:3 }}>Datum</div>
-                <input type="date" style={fieldStyle} value={d.entry_date} onChange={ev => updateDraft(e.id, "entry_date", ev.target.value)} />
-              </label>
-              <label>
-                <div style={{ fontSize:10.5, color:"var(--mut)", marginBottom:3 }}>Typ</div>
-                <select style={fieldStyle} value={d.billing_type} onChange={ev => updateDraft(e.id, "billing_type", ev.target.value)}>
-                  <option value="hourly">Hodinová sazba</option>
-                  <option value="flat_rate">Paušál</option>
-                </select>
-              </label>
-              {d.billing_type === "hourly" && <>
-                <label>
-                  <div style={{ fontSize:10.5, color:"var(--mut)", marginBottom:3 }}>Hodiny</div>
-                  <input type="number" style={fieldStyle} value={d.hours} step="0.5" min="0" onChange={ev => updateDraft(e.id, "hours", ev.target.value)} />
-                </label>
-                <label>
-                  <div style={{ fontSize:10.5, color:"var(--mut)", marginBottom:3 }}>Sazba (Kč/h)</div>
-                  <input type="number" style={fieldStyle} value={d.rate} onChange={ev => updateDraft(e.id, "rate", ev.target.value)} />
-                </label>
-              </>}
-              <label>
-                <div style={{ fontSize:10.5, color:"var(--mut)", marginBottom:3 }}>Částka (Kč)</div>
-                <input type="number" style={fieldStyle} value={d.amount} onChange={ev => updateDraft(e.id, "amount", ev.target.value)} />
-              </label>
-              <label>
-                <div style={{ fontSize:10.5, color:"var(--mut)", marginBottom:3 }}>Přiřadit klientovi</div>
-                <select style={fieldStyle} value={d.client_id} onChange={ev => updateDraft(e.id, "client_id", ev.target.value)}>
-                  {clients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-                </select>
-              </label>
-            </div>
-            <div style={{ display:"flex", gap:8 }}>
-              <button className="btn" style={{ fontSize:12 }} onClick={() => closeEdit(e.id)}>Zrušit</button>
-              <button className="btn pri" style={{ fontSize:12, flex:1 }} disabled={isSaving} onClick={() => saveEntryEdit(e)}>
-                {isSaving ? "Ukládám…" : "Uložit výkaz"}
-              </button>
-            </div>
-          </div>
-        )}
-
-        {/* delete confirm */}
-        {isDeleting && (
-          <div style={{ padding:"10px 14px", borderTop:"1px dashed #FCA5A5", background:"#FFF5F5", display:"flex", alignItems:"center", gap:10 }}>
-            <span style={{ flex:1, fontSize:12.5, color:"#DC2626" }}>Opravdu smazat tento výkaz?</span>
-            <button className="btn" style={{ fontSize:12 }} onClick={() => setConfirmDels(p => { const n={...p}; delete n[e.id]; return n; })}>Ne</button>
-            <button style={{ background:"#DC2626", color:"#fff", border:"none", borderRadius:8, padding:"6px 14px", fontSize:12, cursor:"pointer" }}
-              disabled={isSaving} onClick={() => deleteEntry(e.id)}>
-              {isSaving ? "…" : "Smazat"}
-            </button>
-          </div>
-        )}
-      </div>
-    );
-  };
 
   // ── filtered free entries ─────────────────────────────────────────
   const filteredFree = localFree.filter(e => {
@@ -948,7 +945,7 @@ function InvoiceEditModal({ inv, clients, workEntries, onPreview, onCancel, onSa
             </div>
             <div style={{ border:"1px solid var(--line)", borderRadius:10, overflow:"hidden" }}>
               {[...localLinked].sort((a,b)=>(a.entry_date||"").localeCompare(b.entry_date||"")).map(e =>
-                <EntryRow key={e.id} e={e} isLinked={true} />
+                <EntryRow key={e.id} e={e} inv={inv} clients={clients} selectedIds={selectedIds} toggle={toggle} editing={editing} openEdit={openEdit} closeEdit={closeEdit} updateDraft={updateDraft} saveEntryEdit={saveEntryEdit} savingEntry={savingEntry} confirmDels={confirmDels} setConfirmDels={setConfirmDels} deleteEntry={deleteEntry} />
               )}
             </div>
           </div>
@@ -973,7 +970,7 @@ function InvoiceEditModal({ inv, clients, workEntries, onPreview, onCancel, onSa
                 {cname === client?.name ? "▸ " : ""}{cname}
               </div>
               <div style={{ border:"1px solid var(--line)", borderRadius:10, overflow:"hidden" }}>
-                {freeByClient[cname].map(e => <EntryRow key={e.id} e={e} isLinked={false} />)}
+                {freeByClient[cname].map(e => <EntryRow key={e.id} e={e} inv={inv} clients={clients} selectedIds={selectedIds} toggle={toggle} editing={editing} openEdit={openEdit} closeEdit={closeEdit} updateDraft={updateDraft} saveEntryEdit={saveEntryEdit} savingEntry={savingEntry} confirmDels={confirmDels} setConfirmDels={setConfirmDels} deleteEntry={deleteEntry} />)}
               </div>
             </div>
           ))}
