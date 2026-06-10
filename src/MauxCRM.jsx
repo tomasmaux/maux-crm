@@ -668,30 +668,47 @@ function InvoiceIssueModal({ clientId, entries, clients, invoices, onConfirm, on
 /* ─── INVOICE PRINT PREVIEW — MAUX LEGAL design ─── */
 
 /* ─── INVOICE EDIT MODAL ─── */
-function InvoiceEditModal({ inv, clients, workEntries, onPreview, onCancel }) {
+function InvoiceEditModal({ inv, clients, workEntries, onPreview, onCancel, onSaveEntry, onDeleteEntry }) {
   const client = clients.find(c => c.id === inv.client_id);
 
-  // entries already on this invoice
+  // entries already linked to this invoice
   const linkedEntries = workEntries.filter(e => e.invoice_id === inv.id);
-  // free entries for same client (not yet invoiced)
-  const freeEntries = workEntries.filter(e => !e.invoice_id && e.client_id === inv.client_id);
+  // all free entries (any client, unlinked)
+  const allFree = workEntries.filter(e => !e.invoice_id);
 
   const [selectedIds, setSelectedIds] = useState(() => new Set(linkedEntries.map(e => e.id)));
-  // custom items (no_vat / přefakturace)
   const [customItems, setCustomItems] = useState(() =>
     (inv.items || []).filter(it => it.no_vat).map(it => ({ ...it, id: it.id || uid() }))
   );
-  const [invoiceNo, setInvoiceNo]   = useState(inv.invoice_number || "");
-  const [issueDate, setIssueDate]   = useState(inv.issue_date || today());
-  const [dueDateBase, setDueDateBase] = useState(inv.due_date || nextDueDate(inv.issue_date || today()));
+  const [invoiceNo, setInvoiceNo]       = useState(inv.invoice_number || "");
+  const [issueDate, setIssueDate]       = useState(inv.issue_date || today());
+  const [dueDateBase, setDueDateBase]   = useState(inv.due_date || nextDueDate(inv.issue_date || today()));
   const [dueDateOffset, setDueDateOffset] = useState(0);
-  const [varSymbol, setVarSymbol]   = useState(inv.var_symbol || inv.notes || "");
+  const [varSymbol, setVarSymbol]       = useState(inv.var_symbol || inv.notes || "");
+
+  // inline editor state  { [entryId]: draftObject | null }
+  const [editing, setEditing] = useState({});
+  // confirm-delete  { [entryId]: true }
+  const [confirmDels, setConfirmDels] = useState({});
+  // free-entries search
+  const [freeSearch, setFreeSearch] = useState("");
+  // saving-entry ids
+  const [savingEntry, setSavingEntry] = useState(null);
+
+  // local mirror of workEntries so edits reflect immediately
+  const [localEntries, setLocalEntries] = useState(workEntries);
+
+  // re-sync when parent workEntries change (e.g. after save)
+  React.useEffect(() => { setLocalEntries(workEntries); }, [workEntries]);
+
+  const localLinked = localEntries.filter(e => e.invoice_id === inv.id);
+  const localFree   = localEntries.filter(e => !e.invoice_id);
 
   const dueDate = adjustDueDate(dueDateBase, dueDateOffset);
   const duzp    = lastDayPrevMonth(issueDate);
 
-  const allEntries = [...linkedEntries, ...freeEntries.filter(e => !selectedIds.has(e.id) || !linkedEntries.find(l => l.id === e.id))];
-  const selEntries = allEntries.filter(e => selectedIds.has(e.id));
+  const selEntries = localLinked.filter(e => selectedIds.has(e.id))
+    .concat(localFree.filter(e => selectedIds.has(e.id)));
 
   const workAmt   = selEntries.reduce((s, e) => s + (e.amount || 0), 0);
   const customAmt = customItems.reduce((s, it) => s + (it.amount || 0), 0);
@@ -700,9 +717,69 @@ function InvoiceEditModal({ inv, clients, workEntries, onPreview, onCancel }) {
 
   const toggle = (id) => setSelectedIds(p => { const n = new Set(p); n.has(id) ? n.delete(id) : n.add(id); return n; });
 
+  // ── inline entry edit ──────────────────────────────────────────────
+  const openEdit = (e) => {
+    setEditing(p => ({ ...p, [e.id]: {
+      description: e.description || "",
+      entry_date: e.entry_date || today(),
+      hours: e.hours ?? "",
+      rate: e.rate ?? "",
+      amount: e.amount ?? "",
+      billing_type: e.billing_type || "hourly",
+      client_id: e.client_id || inv.client_id,
+    }}));
+  };
+  const closeEdit = (id) => setEditing(p => { const n = { ...p }; delete n[id]; return n; });
+  const updateDraft = (id, field, val) => setEditing(p => {
+    const d = { ...p[id], [field]: val };
+    if (field === "hours" || field === "rate") {
+      const h = field === "hours" ? Number(val) : Number(d.hours);
+      const r = field === "rate"  ? Number(val) : Number(d.rate);
+      if (d.billing_type === "hourly" && h > 0 && r > 0) d.amount = h * r;
+    }
+    return { ...p, [id]: d };
+  });
+
+  const saveEntryEdit = async (e) => {
+    const d = editing[e.id];
+    if (!d) return;
+    const updated = {
+      ...e,
+      description: d.description,
+      entry_date: d.entry_date,
+      hours: d.billing_type === "hourly" ? Number(d.hours) || 0 : 0,
+      rate: Number(d.rate) || 0,
+      amount: Number(d.amount) || 0,
+      billing_type: d.billing_type,
+      client_id: d.client_id,
+    };
+    setSavingEntry(e.id);
+    try {
+      await onSaveEntry(updated);
+      setLocalEntries(p => p.map(x => x.id === e.id ? updated : x));
+      closeEdit(e.id);
+    } catch(err) { alert("Chyba: " + err.message); }
+    finally { setSavingEntry(null); }
+  };
+
+  // ── delete entry ─────────────────────────────────────────────────
+  const deleteEntry = async (id) => {
+    setSavingEntry(id);
+    try {
+      await onDeleteEntry(id);
+      setLocalEntries(p => p.filter(x => x.id !== id));
+      setSelectedIds(p => { const n = new Set(p); n.delete(id); return n; });
+      setConfirmDels(p => { const n = { ...p }; delete n[id]; return n; });
+    } catch(err) { alert("Chyba: " + err.message); }
+    finally { setSavingEntry(null); }
+  };
+
+  // ── custom items ──────────────────────────────────────────────────
   const addCustomItem = () => setCustomItems(p => [...p, { id: uid(), description: "", amount: 0, no_vat: true }]);
   const removeCustomItem = (id) => setCustomItems(p => p.filter(it => it.id !== id));
-  const updateCustomItem = (id, field, val) => setCustomItems(p => p.map(it => it.id === id ? { ...it, [field]: field === "amount" ? Number(val) || 0 : val } : it));
+  const updateCustomItem = (id, field, val) => setCustomItems(p =>
+    p.map(it => it.id === id ? { ...it, [field]: field === "amount" ? Number(val) || 0 : val } : it)
+  );
 
   const buildUpdatedInvoice = () => ({
     ...inv,
@@ -721,71 +798,204 @@ function InvoiceEditModal({ inv, clients, workEntries, onPreview, onCancel }) {
     var_symbol: varSymbol,
     notes: varSymbol,
     _editedEntryIds: [...selectedIds],
-    _linkedEntryIds: linkedEntries.map(e => e.id),
+    _linkedEntryIds: localLinked.map(e => e.id),
   });
 
   const stepStyle = { width: 28, height: 28, borderRadius: 6, border: "1px solid var(--line)", background: "#fff", cursor: "pointer", fontSize: 16, color: "var(--ink)", display:"flex", alignItems:"center", justifyContent:"center", userSelect:"none", flexShrink:0 };
+  const fieldStyle = { font:"inherit", fontSize:12.5, padding:"6px 9px", border:"1px solid var(--line2)", borderRadius:7, background:"#fff", width:"100%", boxSizing:"border-box" };
+
+  // ── Entry row renderer (used for both linked and free) ────────────
+  const EntryRow = ({ e, isLinked }) => {
+    const isEditing   = !!editing[e.id];
+    const isDeleting  = !!confirmDels[e.id];
+    const isSaving    = savingEntry === e.id;
+    const isSelected  = selectedIds.has(e.id);
+    const d           = editing[e.id] || {};
+    const entryClient = clients.find(c => c.id === e.client_id);
+
+    return (
+      <div key={e.id} style={{ borderBottom:"1px solid var(--line)", background: isEditing ? "#F7F5FF" : isSelected ? "#FAFAFF" : "#fff" }}>
+
+        {/* main row */}
+        <div style={{ display:"flex", alignItems:"center", gap:10, padding:"9px 14px", cursor:"pointer" }}
+          onClick={() => { if (!isEditing && !isDeleting) toggle(e.id); }}>
+          <input type="checkbox" checked={isSelected} onChange={() => toggle(e.id)}
+            onClick={ev => ev.stopPropagation()}
+            style={{ accentColor:"var(--ink)", flexShrink:0, cursor:"pointer" }} />
+          <div style={{ flex:1, minWidth:0 }}>
+            <div style={{ fontSize:12.5, color:"var(--txt)", fontWeight:500, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>
+              {fmtDate(e.entry_date)} — {e.description?.slice(0,72)}
+            </div>
+            <div style={{ fontSize:11, color:"var(--mut)", marginTop:1, display:"flex", gap:8 }}>
+              {e.hours > 0 && <span>{e.hours} h × {fmtKc(e.rate)}</span>}
+              {e.client_id !== inv.client_id && entryClient && (
+                <span style={{ color:"#7C3AED", fontWeight:500 }}>↳ {entryClient.name}</span>
+              )}
+            </div>
+          </div>
+          <div style={{ fontSize:12.5, fontFamily:"Fraunces, serif", fontWeight:300, color:isSelected?"var(--ink)":"var(--mut)", flexShrink:0, marginRight:4 }}>{fmtKc(e.amount)}</div>
+
+          {/* action icons */}
+          <button title="Upravit výkaz" onClick={ev => { ev.stopPropagation(); isEditing ? closeEdit(e.id) : openEdit(e); }}
+            style={{ background:"none", border:"none", padding:"2px 5px", cursor:"pointer", color: isEditing ? "var(--ink)" : "var(--mut)", fontSize:14, borderRadius:5, flexShrink:0 }}>
+            {isEditing ? "✕" : "✎"}
+          </button>
+          <button title="Smazat výkaz" onClick={ev => { ev.stopPropagation(); setConfirmDels(p => ({ ...p, [e.id]: true })); }}
+            style={{ background:"none", border:"none", padding:"2px 5px", cursor:"pointer", color:"#FCA5A5", fontSize:14, borderRadius:5, flexShrink:0 }}>
+            🗑
+          </button>
+        </div>
+
+        {/* inline editor */}
+        {isEditing && (
+          <div style={{ padding:"12px 14px 14px", borderTop:"1px dashed var(--line)", background:"#F7F5FF" }}>
+            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8, marginBottom:8 }}>
+              <label style={{ gridColumn:"1 / -1" }}>
+                <div style={{ fontSize:10.5, color:"var(--mut)", marginBottom:3 }}>Popis</div>
+                <input style={fieldStyle} value={d.description} onChange={ev => updateDraft(e.id, "description", ev.target.value)} />
+              </label>
+              <label>
+                <div style={{ fontSize:10.5, color:"var(--mut)", marginBottom:3 }}>Datum</div>
+                <input type="date" style={fieldStyle} value={d.entry_date} onChange={ev => updateDraft(e.id, "entry_date", ev.target.value)} />
+              </label>
+              <label>
+                <div style={{ fontSize:10.5, color:"var(--mut)", marginBottom:3 }}>Typ</div>
+                <select style={fieldStyle} value={d.billing_type} onChange={ev => updateDraft(e.id, "billing_type", ev.target.value)}>
+                  <option value="hourly">Hodinová sazba</option>
+                  <option value="flat_rate">Paušál</option>
+                </select>
+              </label>
+              {d.billing_type === "hourly" && <>
+                <label>
+                  <div style={{ fontSize:10.5, color:"var(--mut)", marginBottom:3 }}>Hodiny</div>
+                  <input type="number" style={fieldStyle} value={d.hours} step="0.5" min="0" onChange={ev => updateDraft(e.id, "hours", ev.target.value)} />
+                </label>
+                <label>
+                  <div style={{ fontSize:10.5, color:"var(--mut)", marginBottom:3 }}>Sazba (Kč/h)</div>
+                  <input type="number" style={fieldStyle} value={d.rate} onChange={ev => updateDraft(e.id, "rate", ev.target.value)} />
+                </label>
+              </>}
+              <label>
+                <div style={{ fontSize:10.5, color:"var(--mut)", marginBottom:3 }}>Částka (Kč)</div>
+                <input type="number" style={fieldStyle} value={d.amount} onChange={ev => updateDraft(e.id, "amount", ev.target.value)} />
+              </label>
+              <label>
+                <div style={{ fontSize:10.5, color:"var(--mut)", marginBottom:3 }}>Přiřadit klientovi</div>
+                <select style={fieldStyle} value={d.client_id} onChange={ev => updateDraft(e.id, "client_id", ev.target.value)}>
+                  {clients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                </select>
+              </label>
+            </div>
+            <div style={{ display:"flex", gap:8 }}>
+              <button className="btn" style={{ fontSize:12 }} onClick={() => closeEdit(e.id)}>Zrušit</button>
+              <button className="btn pri" style={{ fontSize:12, flex:1 }} disabled={isSaving} onClick={() => saveEntryEdit(e)}>
+                {isSaving ? "Ukládám…" : "Uložit výkaz"}
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* delete confirm */}
+        {isDeleting && (
+          <div style={{ padding:"10px 14px", borderTop:"1px dashed #FCA5A5", background:"#FFF5F5", display:"flex", alignItems:"center", gap:10 }}>
+            <span style={{ flex:1, fontSize:12.5, color:"#DC2626" }}>Opravdu smazat tento výkaz?</span>
+            <button className="btn" style={{ fontSize:12 }} onClick={() => setConfirmDels(p => { const n={...p}; delete n[e.id]; return n; })}>Ne</button>
+            <button style={{ background:"#DC2626", color:"#fff", border:"none", borderRadius:8, padding:"6px 14px", fontSize:12, cursor:"pointer" }}
+              disabled={isSaving} onClick={() => deleteEntry(e.id)}>
+              {isSaving ? "…" : "Smazat"}
+            </button>
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  // ── filtered free entries ─────────────────────────────────────────
+  const filteredFree = localFree.filter(e => {
+    if (!freeSearch) return true;
+    const q = freeSearch.toLowerCase();
+    const ec = clients.find(c => c.id === e.client_id);
+    return (e.description||"").toLowerCase().includes(q) || (ec?.name||"").toLowerCase().includes(q);
+  }).sort((a,b) => (b.entry_date||"").localeCompare(a.entry_date||""));
+
+  // group by client
+  const freeByClient = {};
+  filteredFree.forEach(e => {
+    const cname = clients.find(c => c.id === e.client_id)?.name || "—";
+    if (!freeByClient[cname]) freeByClient[cname] = [];
+    freeByClient[cname].push(e);
+  });
+  const freeClientNames = Object.keys(freeByClient).sort((a,b) => {
+    // current client first
+    const ai = a === client?.name ? -1 : 0, bi = b === client?.name ? -1 : 0;
+    return ai - bi || a.localeCompare(b, "cs");
+  });
 
   return (
     <div className="ov" onClick={onCancel}>
-      <div style={{ background:"#fff", borderRadius:16, padding:28, maxWidth:640, width:"100%", maxHeight:"90vh", overflowY:"auto", boxShadow:"0 24px 64px rgba(0,0,0,.18)" }}
+      <div style={{ background:"#fff", borderRadius:16, padding:28, maxWidth:660, width:"100%", maxHeight:"92vh", overflowY:"auto", boxShadow:"0 24px 64px rgba(0,0,0,.18)" }}
         onClick={e => e.stopPropagation()}>
-        <div style={{ fontFamily:"Fraunces, serif", fontSize:20, fontWeight:300, color:"var(--txt)", marginBottom:4 }}>Upravit fakturu</div>
+
+        {/* Header */}
+        <div style={{ fontFamily:"Fraunces, serif", fontSize:20, fontWeight:300, color:"var(--txt)", marginBottom:3 }}>Upravit fakturu</div>
         <div style={{ fontSize:12.5, color:"var(--mut)", marginBottom:20 }}>{client?.name} · {inv.invoice_number}</div>
 
-        {/* Linked entries (already on invoice) */}
-        {linkedEntries.length > 0 && (
-          <>
-            <div style={{ fontSize:9.5, letterSpacing:".12em", textTransform:"uppercase", color:"var(--mut)", fontWeight:500, marginBottom:8 }}>Výkazy na faktuře</div>
-            <div style={{ border:"1px solid var(--line)", borderRadius:10, overflow:"hidden", marginBottom:16 }}>
-              {linkedEntries.sort((a,b)=>(a.entry_date||"").localeCompare(b.entry_date||"")).map(e => (
-                <label key={e.id} style={{ display:"flex", alignItems:"flex-start", gap:12, padding:"10px 14px", borderBottom:"1px solid var(--line)", cursor:"pointer", background:selectedIds.has(e.id)?"#F7F5FF":"#FFF8F8", transition:".1s" }}>
-                  <input type="checkbox" checked={selectedIds.has(e.id)} onChange={() => toggle(e.id)} style={{ marginTop:2, accentColor:"var(--ink)", flexShrink:0 }} />
-                  <div style={{ flex:1, minWidth:0 }}>
-                    <div style={{ fontSize:12.5, color:"var(--txt)", fontWeight:500 }}>{fmtDate(e.entry_date)} — {e.description?.slice(0,80)}</div>
-                    <div style={{ fontSize:11, color:"var(--mut)", marginTop:2 }}>{e.hours > 0 && `${e.hours} h × ${fmtKc(e.rate)}`}</div>
-                  </div>
-                  <div style={{ fontSize:12.5, fontFamily:"Fraunces, serif", fontWeight:300, color:selectedIds.has(e.id)?"var(--ink)":"var(--mut)", flexShrink:0 }}>{fmtKc(e.amount)}</div>
-                </label>
-              ))}
+        {/* ── Linked entries ── */}
+        {localLinked.length > 0 && (
+          <div style={{ marginBottom:18 }}>
+            <div style={{ fontSize:9.5, letterSpacing:".12em", textTransform:"uppercase", color:"var(--mut)", fontWeight:500, marginBottom:8 }}>
+              Výkazy na faktuře
             </div>
-          </>
-        )}
-
-        {/* Free entries to add */}
-        {freeEntries.length > 0 && (
-          <>
-            <div style={{ fontSize:9.5, letterSpacing:".12em", textTransform:"uppercase", color:"var(--mut)", fontWeight:500, marginBottom:8 }}>Přidat výkaz</div>
-            <div style={{ border:"1px solid var(--line)", borderRadius:10, overflow:"hidden", marginBottom:16 }}>
-              {freeEntries.sort((a,b)=>(a.entry_date||"").localeCompare(b.entry_date||"")).map(e => (
-                <label key={e.id} style={{ display:"flex", alignItems:"flex-start", gap:12, padding:"10px 14px", borderBottom:"1px solid var(--line)", cursor:"pointer", background:selectedIds.has(e.id)?"#F7F5FF":"#fff", transition:".1s" }}>
-                  <input type="checkbox" checked={selectedIds.has(e.id)} onChange={() => toggle(e.id)} style={{ marginTop:2, accentColor:"var(--ink)", flexShrink:0 }} />
-                  <div style={{ flex:1, minWidth:0 }}>
-                    <div style={{ fontSize:12.5, color:"var(--txt)", fontWeight:500 }}>{fmtDate(e.entry_date)} — {e.description?.slice(0,80)}</div>
-                    <div style={{ fontSize:11, color:"var(--mut)", marginTop:2 }}>{e.hours > 0 && `${e.hours} h × ${fmtKc(e.rate)}`}</div>
-                  </div>
-                  <div style={{ fontSize:12.5, fontFamily:"Fraunces, serif", fontWeight:300, color:"var(--ink)", flexShrink:0 }}>{fmtKc(e.amount)}</div>
-                </label>
-              ))}
+            <div style={{ border:"1px solid var(--line)", borderRadius:10, overflow:"hidden" }}>
+              {[...localLinked].sort((a,b)=>(a.entry_date||"").localeCompare(b.entry_date||"")).map(e =>
+                <EntryRow key={e.id} e={e} isLinked={true} />
+              )}
             </div>
-          </>
-        )}
-
-        {/* Custom items (přefakturace etc.) */}
-        <div style={{ fontSize:9.5, letterSpacing:".12em", textTransform:"uppercase", color:"var(--mut)", fontWeight:500, marginBottom:8 }}>Přefakturace / položky bez DPH</div>
-        {customItems.map(it => (
-          <div key={it.id} style={{ display:"flex", gap:8, marginBottom:8, alignItems:"center" }}>
-            <input value={it.description} onChange={e => updateCustomItem(it.id, "description", e.target.value)}
-              placeholder="Popis" style={{ flex:1, font:"inherit", fontSize:13, padding:"7px 10px", border:"1px solid var(--line2)", borderRadius:8 }} />
-            <input value={it.amount || ""} onChange={e => updateCustomItem(it.id, "amount", e.target.value)}
-              placeholder="Kč" type="number" style={{ width:90, font:"inherit", fontSize:13, padding:"7px 10px", border:"1px solid var(--line2)", borderRadius:8 }} />
-            <button onClick={() => removeCustomItem(it.id)} style={{ background:"none", border:"1px solid #FCA5A5", borderRadius:8, color:"#DC2626", padding:"7px 10px", cursor:"pointer", fontSize:13 }}>✕</button>
           </div>
-        ))}
-        <button className="btn gho" style={{ fontSize:12, marginBottom:20 }} onClick={addCustomItem}>+ Přidat položku bez DPH</button>
+        )}
 
-        {/* Invoice fields */}
-        <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:14, marginBottom:20 }}>
+        {/* ── Free entries (all clients) ── */}
+        <div style={{ marginBottom:18 }}>
+          <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:8 }}>
+            <div style={{ fontSize:9.5, letterSpacing:".12em", textTransform:"uppercase", color:"var(--mut)", fontWeight:500 }}>
+              Volné výkazy ({localFree.length})
+            </div>
+            <input value={freeSearch} onChange={e => setFreeSearch(e.target.value)}
+              placeholder="Hledat…"
+              style={{ marginLeft:"auto", font:"inherit", fontSize:12, padding:"4px 10px", border:"1px solid var(--line2)", borderRadius:8, width:160 }} />
+          </div>
+          {freeClientNames.length === 0 && (
+            <div style={{ fontSize:12.5, color:"var(--mut)", padding:"10px 0" }}>Žádné volné výkazy</div>
+          )}
+          {freeClientNames.map(cname => (
+            <div key={cname} style={{ marginBottom:10 }}>
+              <div style={{ fontSize:10, letterSpacing:".08em", textTransform:"uppercase", color: cname === client?.name ? "var(--ink)" : "var(--mut)", fontWeight:600, marginBottom:4, paddingLeft:2 }}>
+                {cname === client?.name ? "▸ " : ""}{cname}
+              </div>
+              <div style={{ border:"1px solid var(--line)", borderRadius:10, overflow:"hidden" }}>
+                {freeByClient[cname].map(e => <EntryRow key={e.id} e={e} isLinked={false} />)}
+              </div>
+            </div>
+          ))}
+        </div>
+
+        {/* ── Custom items ── */}
+        <div style={{ marginBottom:18 }}>
+          <div style={{ fontSize:9.5, letterSpacing:".12em", textTransform:"uppercase", color:"var(--mut)", fontWeight:500, marginBottom:8 }}>Přefakturace / bez DPH</div>
+          {customItems.map(it => (
+            <div key={it.id} style={{ display:"flex", gap:8, marginBottom:8, alignItems:"center" }}>
+              <input value={it.description} onChange={e => updateCustomItem(it.id, "description", e.target.value)}
+                placeholder="Popis" style={{ flex:1, font:"inherit", fontSize:12.5, padding:"7px 10px", border:"1px solid var(--line2)", borderRadius:8 }} />
+              <input value={it.amount || ""} onChange={e => updateCustomItem(it.id, "amount", e.target.value)}
+                placeholder="Kč" type="number" style={{ width:90, font:"inherit", fontSize:12.5, padding:"7px 10px", border:"1px solid var(--line2)", borderRadius:8 }} />
+              <button onClick={() => removeCustomItem(it.id)} style={{ background:"none", border:"1px solid #FCA5A5", borderRadius:8, color:"#DC2626", padding:"7px 10px", cursor:"pointer", fontSize:13 }}>✕</button>
+            </div>
+          ))}
+          <button className="btn gho" style={{ fontSize:12 }} onClick={addCustomItem}>+ Přidat položku bez DPH</button>
+        </div>
+
+        {/* ── Invoice metadata ── */}
+        <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12, marginBottom:18 }}>
           <label className="field"><span>Číslo faktury</span><input value={invoiceNo} onChange={e => setInvoiceNo(e.target.value)} /></label>
           <label className="field"><span>Variabilní symbol</span><input value={varSymbol} onChange={e => setVarSymbol(e.target.value)} /></label>
           <label className="field"><span>Datum vystavení</span><input type="date" value={issueDate} onChange={e => { setIssueDate(e.target.value); setDueDateBase(nextDueDate(e.target.value)); setDueDateOffset(0); }} /></label>
@@ -795,21 +1005,20 @@ function InvoiceEditModal({ inv, clients, workEntries, onPreview, onCancel }) {
             <div style={{ display:"flex", alignItems:"center", gap:10 }}>
               <button style={stepStyle} onClick={() => setDueDateOffset(o => Math.max(-5, o-1))} disabled={dueDateOffset<=-5}>−</button>
               <div style={{ flex:1, padding:"8px 12px", background:dueDateOffset!==0?"#F0EEFF":"var(--bg)", borderRadius:8, border:"1px solid var(--line)", fontSize:13, color:"var(--ink)", textAlign:"center", fontWeight:dueDateOffset!==0?500:400 }}>
-                {fmtDate(dueDate)}{dueDateOffset!==0 && <span style={{ fontSize:10, color:"var(--mut)", marginLeft:8 }}>{dueDateOffset>0?`+${dueDateOffset}`:dueDateOffset} dní od 15.</span>}
+                {fmtDate(dueDate)}{dueDateOffset!==0&&<span style={{ fontSize:10, color:"var(--mut)", marginLeft:8 }}>{dueDateOffset>0?`+${dueDateOffset}`:dueDateOffset} dní od 15.</span>}
               </div>
               <button style={stepStyle} onClick={() => setDueDateOffset(o => Math.min(5, o+1))} disabled={dueDateOffset>=5}>+</button>
             </div>
           </div>
         </div>
 
-        {/* Summary */}
-        <div style={{ background:"var(--bg)", borderRadius:10, padding:"14px 16px", marginBottom:20, display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+        {/* ── Summary + CTA ── */}
+        <div style={{ background:"var(--bg)", borderRadius:10, padding:"12px 16px", marginBottom:16, display:"flex", justifyContent:"space-between", alignItems:"center" }}>
           <div style={{ fontSize:12, color:"var(--mut)" }}>
             {selEntries.length} výkazů · základ {fmtKc(workAmt)}{customAmt>0?` · přefakturace ${fmtKc(customAmt)}`:""}
           </div>
           <div style={{ fontFamily:"Fraunces, serif", fontSize:20, fontWeight:300, color:"var(--ink)" }}>{fmtKc(total)}</div>
         </div>
-
         <div style={{ display:"flex", gap:10 }}>
           <button className="btn" style={{ flex:1 }} onClick={onCancel}>Zrušit</button>
           <button className="btn pri" style={{ flex:2 }} onClick={() => onPreview(buildUpdatedInvoice(), selEntries)}>
@@ -820,6 +1029,7 @@ function InvoiceEditModal({ inv, clients, workEntries, onPreview, onCancel }) {
     </div>
   );
 }
+
 
 function InvoicePrintPreview({ invoice, client, workEntries, onBack, onIssue, saving, previewOnly = false, isEditMode = false, onConfirmEdit = null }) {
   const [qrUrl, setQrUrl] = useState("");
@@ -8640,6 +8850,8 @@ export default function MauxCRM() {
           workEntries={workEntries}
           onPreview={(updatedInv, selEntries) => setEditInvModal({ ...editInvModal, previewInv: updatedInv, previewEntries: selEntries })}
           onCancel={() => setEditInvModal(null)}
+          onSaveEntry={async (e) => { await upsertWorkEntry(e); const updated = await fetchWorkEntries(); setWorkEntries(updated); }}
+          onDeleteEntry={async (id) => { await deleteWorkEntryDb(id); setWorkEntries(p => p.filter(x => x.id !== id)); }}
         />
       )}
       {editInvModal && editInvModal.previewInv && (
