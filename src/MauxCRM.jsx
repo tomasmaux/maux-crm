@@ -4177,7 +4177,7 @@ function BackupReminderBanner({ onDone }) {
 // Verze: zvýšit pokud chceme vynutit reset uloženého pořadí u všech uživatelů
 const PANEL_LAYOUT_VERSION = 4;
 const DEFAULT_PANELS = [
-  "finance","c35","kpi","minisporak","majetek","firma",
+  "finance","c35","kpi","minisporak","majetek","firma","josef",
   "chart","klienti","uschovy","fakturace","happylife","claude"
 ];
 function loadPanelState() {
@@ -5306,6 +5306,10 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
         loanTransactions={loanTransactions} escrows={escrows} onSaveFinance={onSaveFinance} />
       </Panel>
 
+      <Panel id="josef">
+        <JosefPanel logs={assistantLogs} attendance={assistantAttendance} />
+      </Panel>
+
       {/* ─── PULZ FIRMY — překvapivá novinka V.03: jeden pohled, který spojí vše dohromady ─── */}
       <Panel id="pulz">
       <Card style={{padding:"18px 24px"}}>
@@ -5880,9 +5884,6 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
         })()}
       </Panel>
 
-      <Panel id="josef">
-        <JosefPanel logs={assistantLogs} attendance={assistantAttendance} />
-      </Panel>
     </div>
   );
 }
@@ -7960,12 +7961,11 @@ function AsistentVykazy({ email, clients }) {
 }
 
 function AsistentDochazka({ email, attendance, onRefreshAttendance }) {
-  const [viewMonth, setViewMonth] = useState(() => {
-    const d = new Date();
-    return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`;
-  });
-  const [availability, setAvailability] = useState(null);
-  const [savingAvail, setSavingAvail]   = useState(false);
+  const [availThis, setAvailThis] = useState(null);
+  const [availNext, setAvailNext] = useState(null);
+  const [savingAvail, setSavingAvail] = useState(false);
+  const thisMonth = (() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`; })();
+  const nextMonth = (() => { const d = new Date(); d.setMonth(d.getMonth()+1); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`; })();
   const [saving, setSaving]             = useState(false);
   const [now, setNow] = useState(new Date());
   // confirm dialog for adding a past/future day
@@ -7976,11 +7976,16 @@ function AsistentDochazka({ email, attendance, onRefreshAttendance }) {
   const [savingAtt, setSavingAtt]   = useState(false);
 
   useEffect(() => { const id = setInterval(()=>setNow(new Date()), 30000); return ()=>clearInterval(id); }, []);
-  useEffect(() => { fetchAssistantAvailability(email, viewMonth).then(setAvailability).catch(console.error); }, [email, viewMonth]);
+  useEffect(() => {
+    Promise.all([
+      fetchAssistantAvailability(email, thisMonth),
+      fetchAssistantAvailability(email, nextMonth),
+    ]).then(([at, an]) => { setAvailThis(at); setAvailNext(an); }).catch(console.error);
+  }, [email]);
 
   const todayStr = localDs(now);
   const todayRec = attendance.find(a=>a.date===todayStr);
-  const plannedDates = availability?.planned_dates || [];
+  const plannedDates = [...(availThis?.planned_dates || []), ...(availNext?.planned_dates || [])];
 
   const fmtTime = (ts) => ts ? new Date(ts).toLocaleTimeString("cs-CZ",{hour:"2-digit",minute:"2-digit"}) : null;
   const fmtH    = (h)  => { if(!h||h<=0)return"0 h"; const f=Math.floor(h),m=Math.round((h-f)*60); return m>0?`${f}h ${m}m`:`${f} h`; };
@@ -8016,10 +8021,17 @@ function AsistentDochazka({ email, attendance, onRefreshAttendance }) {
 
   // Plan calendar
   const commitToggleDay = async (dateStr) => {
-    const newDates = plannedDates.includes(dateStr)?plannedDates.filter(d=>d!==dateStr):[...plannedDates,dateStr].sort();
+    const ym = dateStr.slice(0,7);
+    const isNext = ym === nextMonth;
+    const avail = isNext ? availNext : availThis;
+    const setAvail = isNext ? setAvailNext : setAvailThis;
+    const prevDates = avail?.planned_dates || [];
+    const newDates = prevDates.includes(dateStr) ? prevDates.filter(d=>d!==dateStr) : [...prevDates, dateStr].sort();
     setSavingAvail(true);
-    try { const rec={id:availability?.id||uid(),assistant_email:email,year_month:viewMonth,planned_dates:newDates}; await upsertAssistantAvailability(rec); setAvailability(rec); }
-    catch(e){alert("Chyba: "+e.message);} finally{setSavingAvail(false);}
+    try {
+      const rec = { id: avail?.id||uid(), assistant_email:email, year_month:ym, planned_dates:newDates };
+      await upsertAssistantAvailability(rec); setAvail(rec);
+    } catch(e){alert("Chyba: "+e.message);} finally{setSavingAvail(false);}
   };
   const toggleDay = (dateStr) => {
     const isPast = dateStr < todayStr, isSel = plannedDates.includes(dateStr);
@@ -8056,13 +8068,13 @@ function AsistentDochazka({ email, attendance, onRefreshAttendance }) {
     try { await upsertAssistantAttendance(rec); await onRefreshAttendance?.(); setEditingAtt(null); }
     catch(e) { alert("Chyba: "+e.message); } finally { setSavingAtt(false); }
   };
-  const [vy,vm] = viewMonth.split("-").map(Number);
   const monthNames = ["leden","únor","březen","duben","květen","červen","červenec","srpen","září","říjen","listopad","prosinec"];
-  const monthWorkDays = (() => {
-    const days=[]; const d=new Date(vy,vm-1,1);
-    while(d.getMonth()===vm-1){if(d.getDay()!==0&&d.getDay()!==6)days.push({ds:localDs(d),dow:d.getDay(),dayNum:d.getDate()});d.setDate(d.getDate()+1);}
+  const getWorkDays = (ym) => {
+    const [y,m] = ym.split("-").map(Number);
+    const days=[]; const d=new Date(y,m-1,1);
+    while(d.getMonth()===m-1){if(d.getDay()!==0&&d.getDay()!==6)days.push({ds:localDs(d),dow:d.getDay(),dayNum:d.getDate()});d.setDate(d.getDate()+1);}
     return days;
-  })();
+  };
 
   // Toggle card component
   const ToggleCard = ({label,subOn,subOff,isOn,color,onToggle,disabled}) => (
@@ -8170,58 +8182,77 @@ function AsistentDochazka({ email, attendance, onRefreshAttendance }) {
         </div>
       )}
 
-      {/* ── Plánovaná docházka ── */}
-      <div style={{background:"#fff",borderRadius:18,overflow:"hidden",boxShadow:"0 0 0 1px rgba(0,0,0,.06), 0 4px 16px rgba(0,0,0,.04)"}}>
-        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"18px 22px 12px"}}>
-          <div style={{fontSize:7.5,letterSpacing:".25em",textTransform:"uppercase",fontWeight:700,color:"var(--mut)"}}>
-            PLÁN — {monthNames[vm-1].toUpperCase()} {vy}
-          </div>
-          <div style={{display:"flex",gap:6,alignItems:"center"}}>
-            {savingAvail&&<span style={{fontSize:9,color:"var(--mut)"}}>Ukládám…</span>}
-            {[["←",vm-1],["→",vm+1]].map(([sym,month])=>(
-              <button key={sym} onClick={()=>{const d=new Date(vy,month-1,1);setViewMonth(`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`);}}
-                style={{width:28,height:28,display:"flex",alignItems:"center",justifyContent:"center",border:"1px solid rgba(0,0,0,.09)",borderRadius:8,background:"#fff",cursor:"pointer",fontSize:12,color:"var(--mut)"}}>
-                {sym}
-              </button>
-            ))}
-          </div>
-        </div>
-        <div style={{padding:"0 22px 18px"}}>
-          <div style={{display:"grid",gridTemplateColumns:"repeat(5,1fr)",gap:5,marginBottom:8}}>
-            {["Po","Út","St","Čt","Pá"].map(n=>(<div key={n} style={{textAlign:"center",fontSize:9,color:"var(--mut)",fontWeight:600,padding:"2px 0"}}>{n}</div>))}
-          </div>
-          {(()=>{
-            const pad=(monthWorkDays[0]?.dow||1)-1;
-            const cells=[...Array(pad).fill(null),...monthWorkDays];
-            const rows=[]; for(let i=0;i<cells.length;i+=5) rows.push(cells.slice(i,i+5));
-            return rows.map((row,ri)=>(
-              <div key={ri} style={{display:"grid",gridTemplateColumns:"repeat(5,1fr)",gap:5,marginBottom:5}}>
-                {row.map((cell,ci)=>{
-                  if(!cell) return <div key={ci}/>;
-                  const {ds,dayNum}=cell;
-                  const isSel=plannedDates.includes(ds),isPast=ds<todayStr,isToday=ds===todayStr;
-                  const attended=attendance.some(a=>a.date===ds&&a.check_in);
-                  return (
-                    <button key={ds} onClick={()=>toggleDay(ds)}
-                      style={{height:36,borderRadius:9,border:"none",textAlign:"center",fontSize:12.5,fontWeight:isToday?700:400,cursor:isPast?"default":"pointer",lineHeight:1,
-                        background:attended?"#ECFDF5":isSel?"var(--ink)":isToday?"#EDE9FD":"transparent",
-                        color:attended?"#059669":isSel?"#fff":isPast?"rgba(0,0,0,.4)":isToday?"var(--ink)":"var(--txt)",
-                        outline:isToday&&!isSel?"1.5px solid #C4B5FD":"none"}}>
-                      <div>{dayNum}</div>
-                      {attended&&<div style={{fontSize:6,marginTop:1,color:"#22C55E"}}>●</div>}
-                    </button>
-                  );
-                })}
+      {/* ── Plánovaná docházka — dva měsíce vedle sebe ── */}
+      {(()=>{
+        const renderCal = (ym, label, avail) => {
+          const [y,m] = ym.split("-").map(Number);
+          const workDays = getWorkDays(ym);
+          const pad = (workDays[0]?.dow||1)-1;
+          const cells = [...Array(pad).fill(null), ...workDays];
+          const rows = []; for(let i=0;i<cells.length;i+=5) rows.push(cells.slice(i,i+5));
+          const selCount = (avail?.planned_dates||[]).length;
+          return (
+            <div style={{flex:1,background:"#fff",borderRadius:18,overflow:"hidden",boxShadow:"0 0 0 1px rgba(0,0,0,.06), 0 4px 16px rgba(0,0,0,.04)"}}>
+              {/* Header */}
+              <div style={{padding:"20px 22px 14px",borderBottom:"1px solid rgba(0,0,0,.05)"}}>
+                <div style={{fontSize:8,letterSpacing:".28em",textTransform:"uppercase",fontWeight:700,color:"var(--mut)",marginBottom:4}}>{label}</div>
+                <div style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+                  <div style={{fontFamily:"Fraunces,serif",fontWeight:300,fontSize:22,color:"var(--ink)",lineHeight:1}}>
+                    {monthNames[m-1]} {y}
+                  </div>
+                  <div style={{display:"flex",alignItems:"center",gap:6}}>
+                    {savingAvail && <span style={{fontSize:9,color:"var(--mut)"}}>●</span>}
+                    {selCount>0 && (
+                      <span style={{fontSize:10,background:"#DCFCE7",color:"#16a34a",borderRadius:20,padding:"2px 10px",fontWeight:600}}>
+                        {selCount} {selCount===1?"den":"dní"}
+                      </span>
+                    )}
+                  </div>
+                </div>
               </div>
-            ));
-          })()}
-          {plannedDates.filter(d=>d.startsWith(viewMonth)).length>0&&(
-            <div style={{fontSize:10,color:"var(--mut)",marginTop:6}}>
-              {plannedDates.filter(d=>d.startsWith(viewMonth)).length} dní naplánováno
+              {/* Grid */}
+              <div style={{padding:"12px 16px 16px"}}>
+                <div style={{display:"grid",gridTemplateColumns:"repeat(5,1fr)",gap:4,marginBottom:6}}>
+                  {["Po","Út","St","Čt","Pá"].map(n=>(
+                    <div key={n} style={{textAlign:"center",fontSize:8.5,color:"var(--mut)",fontWeight:700,padding:"2px 0"}}>{n}</div>
+                  ))}
+                </div>
+                {rows.map((row,ri)=>(
+                  <div key={ri} style={{display:"grid",gridTemplateColumns:"repeat(5,1fr)",gap:4,marginBottom:4}}>
+                    {row.map((cell,ci)=>{
+                      if(!cell) return <div key={ci}/>;
+                      const {ds,dayNum}=cell;
+                      const isSel=plannedDates.includes(ds),isPast=ds<todayStr,isToday=ds===todayStr;
+                      const attended=attendance.some(a=>a.date===ds&&a.check_in);
+                      return (
+                        <button key={ds} onClick={()=>toggleDay(ds)}
+                          style={{height:38,borderRadius:10,border:"none",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",
+                            fontSize:13,fontWeight:isToday?700:isSel?600:400,cursor:"pointer",lineHeight:1,gap:2,transition:"all .15s",
+                            background: attended ? "#DCFCE7" : isSel ? "#16a34a" : isToday ? "#EDE9FD" : isPast ? "rgba(0,0,0,.03)" : "#F9FAFB",
+                            color: attended ? "#16a34a" : isSel ? "#fff" : isPast ? "rgba(0,0,0,.35)" : isToday ? "#7C3AED" : "var(--txt)",
+                            boxShadow: isSel ? "0 2px 8px rgba(22,163,74,.3)" : "none",
+                            transform: isSel ? "scale(1.04)" : "scale(1)",
+                            outline: isToday&&!isSel ? "2px solid #C4B5FD" : "none",
+                            outlineOffset: -2,
+                          }}>
+                          <span>{dayNum}</span>
+                          {attended && <span style={{fontSize:5,lineHeight:1,color:"#16a34a"}}>●</span>}
+                        </button>
+                      );
+                    })}
+                  </div>
+                ))}
+              </div>
             </div>
-          )}
-        </div>
-      </div>
+          );
+        };
+        return (
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:16}}>
+            {renderCal(thisMonth, "TENTO MĚSÍC", availThis)}
+            {renderCal(nextMonth, "PŘÍŠTÍ MĚSÍC", availNext)}
+          </div>
+        );
+      })()}
 
       {/* ── Historie ── */}
       <div style={{background:"#fff",borderRadius:18,overflow:"hidden",boxShadow:"0 0 0 1px rgba(0,0,0,.06), 0 4px 16px rgba(0,0,0,.04)"}}>
