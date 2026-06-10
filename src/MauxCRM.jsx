@@ -783,6 +783,9 @@ function InvoiceEditModal({ inv, clients, workEntries, onPreview, onCancel, onSa
   // inv.items = stored line items on invoice (always available, even without invoice_id FK)
   const storedItems = (inv.items || []).filter(it => !it.no_vat);
   const [selectedItemIds, setSelectedItemIds] = useState(() => new Set(storedItems.map(it => it.id || it.description)));
+  // inline edits for stored items (keyed by itemKey)
+  const [itemEdits, setItemEdits] = useState({});
+  const [editingItemKey, setEditingItemKey] = useState(null);
 
   const [selectedIds, setSelectedIds] = useState(() => new Set(linkedEntries.map(e => e.id)));
   const [customItems, setCustomItems] = useState(() =>
@@ -817,7 +820,12 @@ function InvoiceEditModal({ inv, clients, workEntries, onPreview, onCancel, onSa
 
   const selEntries = localLinked.filter(e => selectedIds.has(e.id))
     .concat(localFree.filter(e => selectedIds.has(e.id)));
-  const selStoredItems = storedItems.filter(it => selectedItemIds.has(it.id || it.description));
+  // merge any inline edits into stored items
+  const mergedStoredItems = storedItems.map(it => {
+    const k = it.id || it.description;
+    return itemEdits[k] ? { ...it, ...itemEdits[k] } : it;
+  });
+  const selStoredItems = mergedStoredItems.filter(it => selectedItemIds.has(it.id || it.description));
 
   // work amount: from FK entries if available, else from stored items
   const workAmtFromEntries = selEntries.reduce((s, e) => s + (e.amount || 0), 0);
@@ -895,7 +903,7 @@ function InvoiceEditModal({ inv, clients, workEntries, onPreview, onCancel, onSa
 
   const buildUpdatedInvoice = () => {
     const workItems = (useStoredItems && localLinked.length === 0)
-      ? selStoredItems
+      ? mergedStoredItems.filter(it => selectedItemIds.has(it.id || it.description))
       : selEntries.map(e => ({ id: uid(), description: e.description, hours: e.hours || 0, rate: e.rate || 0, amount: e.amount || 0, no_vat: false, flat_rate: e.billing_type === "flat_rate" }));
     const addedEntries = localFree.filter(e => selectedIds.has(e.id))
       .map(e => ({ id: uid(), description: e.description, hours: e.hours || 0, rate: e.rate || 0, amount: e.amount || 0, no_vat: false, flat_rate: e.billing_type === "flat_rate" }));
@@ -944,21 +952,77 @@ function InvoiceEditModal({ inv, clients, workEntries, onPreview, onCancel, onSa
             </div>
             <div style={{ border:"1px solid var(--line)", borderRadius:10, overflow:"hidden" }}>
               {useStoredItems && localLinked.length === 0
-                ? storedItems.map(it => {
+                ? mergedStoredItems.map(it => {
                     const itemKey = it.id || it.description;
                     const isSelected = selectedItemIds.has(itemKey);
+                    const isEditingThis = editingItemKey === itemKey;
+                    const draft = itemEdits[itemKey] || {};
+                    const fld = { font:"inherit", fontSize:12.5, padding:"6px 9px", border:"1px solid var(--line2)", borderRadius:7, background:"#fff", width:"100%", boxSizing:"border-box" };
+                    const updateItemDraft = (field, val) => {
+                      setItemEdits(p => {
+                        const d = { ...(p[itemKey] || {}), [field]: val };
+                        if ((field === "hours" || field === "rate") && !it.flat_rate) {
+                          const h = field === "hours" ? Number(val) : Number(d.hours ?? it.hours);
+                          const r = field === "rate"  ? Number(val) : Number(d.rate  ?? it.rate);
+                          if (h > 0 && r > 0) d.amount = h * r;
+                        }
+                        return { ...p, [itemKey]: d };
+                      });
+                    };
                     return (
-                      <label key={itemKey} style={{ display:"flex", alignItems:"center", gap:12, padding:"10px 14px", borderBottom:"1px solid var(--line)", cursor:"pointer", background: isSelected ? "#FAFAFF" : "#FFF8F8", transition:".1s" }}>
-                        <input type="checkbox" checked={isSelected} onChange={() => setSelectedItemIds(p => { const n = new Set(p); n.has(itemKey) ? n.delete(itemKey) : n.add(itemKey); return n; })}
-                          style={{ accentColor:"var(--ink)", flexShrink:0 }} />
-                        <div style={{ flex:1, minWidth:0 }}>
-                          <div style={{ fontSize:12.5, color:"var(--txt)", fontWeight:500, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>
-                            {it.description}
+                      <div key={itemKey} style={{ borderBottom:"1px solid var(--line)", background: isEditingThis ? "#F7F5FF" : isSelected ? "#FAFAFF" : "#FFF8F8" }}>
+                        <div style={{ display:"flex", alignItems:"center", gap:10, padding:"9px 14px" }}>
+                          <input type="checkbox" checked={isSelected}
+                            onChange={() => setSelectedItemIds(p => { const n = new Set(p); n.has(itemKey) ? n.delete(itemKey) : n.add(itemKey); return n; })}
+                            style={{ accentColor:"var(--ink)", flexShrink:0, cursor:"pointer" }} />
+                          <div style={{ flex:1, minWidth:0, cursor:"pointer" }} onClick={() => setSelectedItemIds(p => { const n = new Set(p); n.has(itemKey) ? n.delete(itemKey) : n.add(itemKey); return n; })}>
+                            <div style={{ fontSize:12.5, color:"var(--txt)", fontWeight:500, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>
+                              {(draft.description ?? it.description)}
+                            </div>
+                            <div style={{ fontSize:11, color:"var(--mut)", marginTop:1 }}>
+                              {(draft.hours ?? it.hours) > 0 && `${draft.hours ?? it.hours} h × ${fmtKc(draft.rate ?? it.rate)}`}
+                            </div>
                           </div>
-                          {it.hours > 0 && <div style={{ fontSize:11, color:"var(--mut)", marginTop:1 }}>{it.hours} h × {fmtKc(it.rate)}</div>}
+                          <div style={{ fontSize:12.5, fontFamily:"Fraunces, serif", fontWeight:300, color: isSelected ? "var(--ink)" : "var(--mut)", flexShrink:0, marginRight:4 }}>
+                            {fmtKc(draft.amount ?? it.amount)}
+                          </div>
+                          <button title="Upravit popisek" onClick={() => setEditingItemKey(isEditingThis ? null : itemKey)}
+                            style={{ background:"none", border:"none", padding:"2px 5px", cursor:"pointer", color: isEditingThis ? "var(--ink)" : "var(--mut)", fontSize:14, borderRadius:5, flexShrink:0 }}>
+                            {isEditingThis ? "✕" : "✎"}
+                          </button>
                         </div>
-                        <div style={{ fontSize:12.5, fontFamily:"Fraunces, serif", fontWeight:300, color: isSelected ? "var(--ink)" : "var(--mut)", flexShrink:0 }}>{fmtKc(it.amount)}</div>
-                      </label>
+                        {isEditingThis && (
+                          <div style={{ padding:"12px 14px 14px", borderTop:"1px dashed var(--line)", background:"#F7F5FF" }}>
+                            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8, marginBottom:10 }}>
+                              <label style={{ gridColumn:"1 / -1" }}>
+                                <div style={{ fontSize:10.5, color:"var(--mut)", marginBottom:3 }}>Popis</div>
+                                <input style={fld} value={draft.description ?? it.description}
+                                  onChange={ev => updateItemDraft("description", ev.target.value)} />
+                              </label>
+                              {!it.flat_rate && <>
+                                <label>
+                                  <div style={{ fontSize:10.5, color:"var(--mut)", marginBottom:3 }}>Hodiny</div>
+                                  <input type="number" step="0.25" style={fld} value={draft.hours ?? it.hours}
+                                    onChange={ev => updateItemDraft("hours", ev.target.value)} />
+                                </label>
+                                <label>
+                                  <div style={{ fontSize:10.5, color:"var(--mut)", marginBottom:3 }}>Sazba (Kč/h)</div>
+                                  <input type="number" style={fld} value={draft.rate ?? it.rate}
+                                    onChange={ev => updateItemDraft("rate", ev.target.value)} />
+                                </label>
+                              </>}
+                              <label>
+                                <div style={{ fontSize:10.5, color:"var(--mut)", marginBottom:3 }}>Částka (Kč)</div>
+                                <input type="number" style={fld} value={draft.amount ?? it.amount}
+                                  onChange={ev => updateItemDraft("amount", ev.target.value)} />
+                              </label>
+                            </div>
+                            <div style={{ fontSize:11, color:"var(--mut)" }}>
+                              Změny se uloží do DB při potvrzení náhledu.
+                            </div>
+                          </div>
+                        )}
+                      </div>
                     );
                   })
                 : [...localLinked].sort((a,b)=>(a.entry_date||"").localeCompare(b.entry_date||"")).map(e =>
