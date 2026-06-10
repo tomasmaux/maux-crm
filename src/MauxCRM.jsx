@@ -7868,29 +7868,6 @@ function AsistentVykazy({ email, clients }) {
   return (
     <div style={{padding:"32px 32px",display:"flex",flexDirection:"column",gap:20}}>
 
-      {/* ── Confirm retroactive day dialog ── */}
-      {confirmDay && (
-        <div className="ov" onClick={()=>setConfirmDay(null)}>
-          <div style={{background:"#fff",borderRadius:16,padding:28,maxWidth:380,width:"100%",boxShadow:"0 24px 64px rgba(0,0,0,.18)"}} onClick={e=>e.stopPropagation()}>
-            <div style={{fontFamily:"Fraunces,serif",fontWeight:300,fontSize:20,color:"var(--txt)",marginBottom:10}}>
-              {confirmDay < todayStr ? "Potvrzení docházky" : "Naplánovat den"}
-            </div>
-            <div style={{fontSize:13.5,color:"var(--mut)",marginBottom:24,lineHeight:1.6}}>
-              {confirmDay < todayStr
-                ? <>Potvrzuji, že jsem byl v kanceláři dne<br/><strong style={{color:"var(--ink)"}}>{fmtDate(confirmDay)}</strong>.</>
-                : <>Potvrzuji, že přijdu do kanceláře dne<br/><strong style={{color:"var(--ink)"}}>{fmtDate(confirmDay)}</strong>.</>
-              }
-            </div>
-            <div style={{display:"flex",gap:10}}>
-              <button className="btn" style={{flex:1}} onClick={()=>setConfirmDay(null)}>Zrušit</button>
-              <button className="btn pri" style={{flex:1}} onClick={()=>{commitToggleDay(confirmDay);setConfirmDay(null);}}>
-                {confirmDay < todayStr ? "Ano, byl jsem" : "Ano, přijdu"}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
       {/* Header */}
       <div>
         <div style={{fontSize:9,letterSpacing:".22em",textTransform:"uppercase",color:"var(--mut)",marginBottom:6}}>VÝKAZY PRÁCE</div>
