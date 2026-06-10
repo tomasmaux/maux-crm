@@ -780,6 +780,10 @@ function InvoiceEditModal({ inv, clients, workEntries, onPreview, onCancel, onSa
   // free entries — same client only
   const clientFree = workEntries.filter(e => !e.invoice_id && e.client_id === inv.client_id);
 
+  // inv.items = stored line items on invoice (always available, even without invoice_id FK)
+  const storedItems = (inv.items || []).filter(it => !it.no_vat);
+  const [selectedItemIds, setSelectedItemIds] = useState(() => new Set(storedItems.map(it => it.id || it.description)));
+
   const [selectedIds, setSelectedIds] = useState(() => new Set(linkedEntries.map(e => e.id)));
   const [customItems, setCustomItems] = useState(() =>
     (inv.items || []).filter(it => it.no_vat).map(it => ({ ...it, id: it.id || uid() }))
@@ -805,14 +809,20 @@ function InvoiceEditModal({ inv, clients, workEntries, onPreview, onCancel, onSa
 
   const localLinked = localEntries.filter(e => e.invoice_id === inv.id);
   const localFree   = localEntries.filter(e => !e.invoice_id && e.client_id === inv.client_id);
+  // use storedItems as primary "na faktuře" source; fall back to linkedEntries if FK present
+  const useStoredItems = storedItems.length > 0;
 
   const dueDate = adjustDueDate(dueDateBase, dueDateOffset);
   const duzp    = lastDayPrevMonth(issueDate);
 
   const selEntries = localLinked.filter(e => selectedIds.has(e.id))
     .concat(localFree.filter(e => selectedIds.has(e.id)));
+  const selStoredItems = storedItems.filter(it => selectedItemIds.has(it.id || it.description));
 
-  const workAmt   = selEntries.reduce((s, e) => s + (e.amount || 0), 0);
+  // work amount: from FK entries if available, else from stored items
+  const workAmtFromEntries = selEntries.reduce((s, e) => s + (e.amount || 0), 0);
+  const workAmtFromItems   = selStoredItems.reduce((s, it) => s + (it.amount || 0), 0);
+  const workAmt = useStoredItems && localLinked.length === 0 ? workAmtFromItems : workAmtFromEntries;
   const customAmt = customItems.reduce((s, it) => s + (it.amount || 0), 0);
   const vat       = Math.round(workAmt * 0.21);
   const total     = workAmt + vat + customAmt;
@@ -883,14 +893,21 @@ function InvoiceEditModal({ inv, clients, workEntries, onPreview, onCancel, onSa
     p.map(it => it.id === id ? { ...it, [field]: field === "amount" ? Number(val) || 0 : val } : it)
   );
 
-  const buildUpdatedInvoice = () => ({
+  const buildUpdatedInvoice = () => {
+    const workItems = (useStoredItems && localLinked.length === 0)
+      ? selStoredItems
+      : selEntries.map(e => ({ id: uid(), description: e.description, hours: e.hours || 0, rate: e.rate || 0, amount: e.amount || 0, no_vat: false, flat_rate: e.billing_type === "flat_rate" }));
+    const addedEntries = localFree.filter(e => selectedIds.has(e.id))
+      .map(e => ({ id: uid(), description: e.description, hours: e.hours || 0, rate: e.rate || 0, amount: e.amount || 0, no_vat: false, flat_rate: e.billing_type === "flat_rate" }));
+    return ({
     ...inv,
     invoice_number: invoiceNo,
     issue_date: issueDate,
     due_date: dueDate,
     duzp,
     items: [
-      ...selEntries.map(e => ({ id: uid(), description: e.description, hours: e.hours || 0, rate: e.rate || 0, amount: e.amount || 0, no_vat: false, flat_rate: e.billing_type === "flat_rate" })),
+      ...workItems,
+      ...addedEntries,
       ...customItems,
     ],
     subtotal: workAmt,
@@ -901,7 +918,7 @@ function InvoiceEditModal({ inv, clients, workEntries, onPreview, onCancel, onSa
     notes: varSymbol,
     _editedEntryIds: [...selectedIds],
     _linkedEntryIds: localLinked.map(e => e.id),
-  });
+  });};
 
   const stepStyle = { width: 28, height: 28, borderRadius: 6, border: "1px solid var(--line)", background: "#fff", cursor: "pointer", fontSize: 16, color: "var(--ink)", display:"flex", alignItems:"center", justifyContent:"center", userSelect:"none", flexShrink:0 };
 
@@ -919,16 +936,35 @@ function InvoiceEditModal({ inv, clients, workEntries, onPreview, onCancel, onSa
         <div style={{ fontFamily:"Fraunces, serif", fontSize:20, fontWeight:300, color:"var(--txt)", marginBottom:3 }}>Upravit fakturu</div>
         <div style={{ fontSize:12.5, color:"var(--mut)", marginBottom:20 }}>{client?.name} · {inv.invoice_number}</div>
 
-        {/* ── Linked entries ── */}
-        {localLinked.length > 0 && (
+        {/* ── Výkazy na faktuře ── */}
+        {(useStoredItems || localLinked.length > 0) && (
           <div style={{ marginBottom:18 }}>
             <div style={{ fontSize:9.5, letterSpacing:".12em", textTransform:"uppercase", color:"var(--mut)", fontWeight:500, marginBottom:8 }}>
               Výkazy na faktuře
             </div>
             <div style={{ border:"1px solid var(--line)", borderRadius:10, overflow:"hidden" }}>
-              {[...localLinked].sort((a,b)=>(a.entry_date||"").localeCompare(b.entry_date||"")).map(e =>
-                <EntryRow key={e.id} e={e} inv={inv} clients={clients} selectedIds={selectedIds} toggle={toggle} editing={editing} openEdit={openEdit} closeEdit={closeEdit} updateDraft={updateDraft} saveEntryEdit={saveEntryEdit} savingEntry={savingEntry} confirmDels={confirmDels} setConfirmDels={setConfirmDels} deleteEntry={deleteEntry} />
-              )}
+              {useStoredItems && localLinked.length === 0
+                ? storedItems.map(it => {
+                    const itemKey = it.id || it.description;
+                    const isSelected = selectedItemIds.has(itemKey);
+                    return (
+                      <label key={itemKey} style={{ display:"flex", alignItems:"center", gap:12, padding:"10px 14px", borderBottom:"1px solid var(--line)", cursor:"pointer", background: isSelected ? "#FAFAFF" : "#FFF8F8", transition:".1s" }}>
+                        <input type="checkbox" checked={isSelected} onChange={() => setSelectedItemIds(p => { const n = new Set(p); n.has(itemKey) ? n.delete(itemKey) : n.add(itemKey); return n; })}
+                          style={{ accentColor:"var(--ink)", flexShrink:0 }} />
+                        <div style={{ flex:1, minWidth:0 }}>
+                          <div style={{ fontSize:12.5, color:"var(--txt)", fontWeight:500, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>
+                            {it.description}
+                          </div>
+                          {it.hours > 0 && <div style={{ fontSize:11, color:"var(--mut)", marginTop:1 }}>{it.hours} h × {fmtKc(it.rate)}</div>}
+                        </div>
+                        <div style={{ fontSize:12.5, fontFamily:"Fraunces, serif", fontWeight:300, color: isSelected ? "var(--ink)" : "var(--mut)", flexShrink:0 }}>{fmtKc(it.amount)}</div>
+                      </label>
+                    );
+                  })
+                : [...localLinked].sort((a,b)=>(a.entry_date||"").localeCompare(b.entry_date||"")).map(e =>
+                    <EntryRow key={e.id} e={e} inv={inv} clients={clients} selectedIds={selectedIds} toggle={toggle} editing={editing} openEdit={openEdit} closeEdit={closeEdit} updateDraft={updateDraft} saveEntryEdit={saveEntryEdit} savingEntry={savingEntry} confirmDels={confirmDels} setConfirmDels={setConfirmDels} deleteEntry={deleteEntry} />
+                  )
+              }
             </div>
           </div>
         )}
