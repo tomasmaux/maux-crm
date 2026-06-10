@@ -786,6 +786,44 @@ function InvoiceEditModal({ inv, clients, workEntries, onPreview, onCancel, onSa
   // inline edits for stored items (keyed by itemKey)
   const [itemEdits, setItemEdits] = useState({});
   const [editingItemKey, setEditingItemKey] = useState(null);
+  // new entry form
+  const NEW_ENTRY_BLANK = { description:"", entry_date:today(), billing_type:"hourly", hours:"", rate:"", amount:"", client_id: inv.client_id };
+  const [showNewEntry, setShowNewEntry] = useState(false);
+  const [newEntry, setNewEntry] = useState(NEW_ENTRY_BLANK);
+  const [savingNew, setSavingNew] = useState(false);
+  const updateNewEntry = (field, val) => setNewEntry(p => {
+    const d = { ...p, [field]: val };
+    if ((field === "hours" || field === "rate") && d.billing_type === "hourly") {
+      const h = Number(field === "hours" ? val : d.hours);
+      const r = Number(field === "rate"  ? val : d.rate);
+      if (h > 0 && r > 0) d.amount = h * r;
+    }
+    return d;
+  });
+  const saveNewEntry = async () => {
+    if (!newEntry.description.trim()) return;
+    const entry = {
+      id: uid(),
+      description: newEntry.description.trim(),
+      entry_date: newEntry.entry_date,
+      billing_type: newEntry.billing_type,
+      hours: newEntry.billing_type === "hourly" ? Number(newEntry.hours) || 0 : 0,
+      rate: Number(newEntry.rate) || 0,
+      amount: Number(newEntry.amount) || 0,
+      client_id: newEntry.client_id,
+      invoice_id: inv.id,
+      created_at: new Date().toISOString(),
+    };
+    setSavingNew(true);
+    try {
+      await onSaveEntry(entry);
+      setLocalEntries(p => [...p, entry]);
+      setSelectedIds(p => new Set([...p, entry.id]));
+      setNewEntry(NEW_ENTRY_BLANK);
+      setShowNewEntry(false);
+    } catch(e) { alert("Chyba: " + e.message); }
+    finally { setSavingNew(false); }
+  };
 
   const [selectedIds, setSelectedIds] = useState(() => new Set(linkedEntries.map(e => e.id)));
   const [customItems, setCustomItems] = useState(() =>
@@ -1030,6 +1068,67 @@ function InvoiceEditModal({ inv, clients, workEntries, onPreview, onCancel, onSa
                   )
               }
             </div>
+
+            {/* ── New entry form ── */}
+            {showNewEntry ? (
+              <div style={{ border:"1px solid var(--line)", borderRadius:10, padding:"14px 16px", marginTop:10, background:"#F7F5FF" }}>
+                <div style={{ fontSize:10.5, letterSpacing:".1em", textTransform:"uppercase", color:"var(--ink)", fontWeight:600, marginBottom:12 }}>Nový výkaz</div>
+                {(() => {
+                  const fld = { font:"inherit", fontSize:12.5, padding:"6px 9px", border:"1px solid var(--line2)", borderRadius:7, background:"#fff", width:"100%", boxSizing:"border-box" };
+                  return (
+                    <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8, marginBottom:10 }}>
+                      <label style={{ gridColumn:"1 / -1" }}>
+                        <div style={{ fontSize:10.5, color:"var(--mut)", marginBottom:3 }}>Popis *</div>
+                        <input style={{ ...fld, borderColor: newEntry.description ? "var(--line2)" : "#FCA5A5" }}
+                          placeholder="Název úkonu…"
+                          value={newEntry.description} onChange={ev => updateNewEntry("description", ev.target.value)} />
+                      </label>
+                      <label>
+                        <div style={{ fontSize:10.5, color:"var(--mut)", marginBottom:3 }}>Datum</div>
+                        <input type="date" style={fld} value={newEntry.entry_date} onChange={ev => updateNewEntry("entry_date", ev.target.value)} />
+                      </label>
+                      <label>
+                        <div style={{ fontSize:10.5, color:"var(--mut)", marginBottom:3 }}>Typ</div>
+                        <select style={fld} value={newEntry.billing_type} onChange={ev => updateNewEntry("billing_type", ev.target.value)}>
+                          <option value="hourly">Hodinová sazba</option>
+                          <option value="flat_rate">Paušál</option>
+                        </select>
+                      </label>
+                      {newEntry.billing_type === "hourly" && <>
+                        <label>
+                          <div style={{ fontSize:10.5, color:"var(--mut)", marginBottom:3 }}>Hodiny</div>
+                          <input type="number" step="0.25" min="0" style={fld} value={newEntry.hours} onChange={ev => updateNewEntry("hours", ev.target.value)} />
+                        </label>
+                        <label>
+                          <div style={{ fontSize:10.5, color:"var(--mut)", marginBottom:3 }}>Sazba (Kč/h)</div>
+                          <input type="number" style={fld} value={newEntry.rate} onChange={ev => updateNewEntry("rate", ev.target.value)} />
+                        </label>
+                      </>}
+                      <label>
+                        <div style={{ fontSize:10.5, color:"var(--mut)", marginBottom:3 }}>Částka (Kč)</div>
+                        <input type="number" style={fld} value={newEntry.amount} onChange={ev => updateNewEntry("amount", ev.target.value)} />
+                      </label>
+                      <label>
+                        <div style={{ fontSize:10.5, color:"var(--mut)", marginBottom:3 }}>Klient</div>
+                        <select style={fld} value={newEntry.client_id} onChange={ev => updateNewEntry("client_id", ev.target.value)}>
+                          {clients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                        </select>
+                      </label>
+                    </div>
+                  );
+                })()}
+                <div style={{ display:"flex", gap:8 }}>
+                  <button className="btn" style={{ fontSize:12 }} onClick={() => { setShowNewEntry(false); setNewEntry(NEW_ENTRY_BLANK); }}>Zrušit</button>
+                  <button className="btn pri" style={{ fontSize:12, flex:1 }} disabled={savingNew || !newEntry.description.trim()} onClick={saveNewEntry}>
+                    {savingNew ? "Ukládám…" : "Uložit výkaz do DB"}
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <button className="btn gho" style={{ fontSize:12, marginTop:10, width:"100%" }} onClick={() => setShowNewEntry(true)}>
+                + Přidat nový historický výkaz
+              </button>
+            )}
           </div>
         )}
 
