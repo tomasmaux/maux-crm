@@ -4174,7 +4174,7 @@ function BackupReminderBanner({ onDone }) {
 /* ─── DASHBOARD ─── */
 // Drag-and-drop panel IDs — pořadí a viditelnost karet na dashboardu
 // Verze: zvýšit pokud chceme vynutit reset uloženého pořadí u všech uživatelů
-const PANEL_LAYOUT_VERSION = 3;
+const PANEL_LAYOUT_VERSION = 4;
 const DEFAULT_PANELS = [
   "finance","c35","kpi","minisporak","majetek","firma",
   "chart","klienti","uschovy","fakturace","happylife","claude"
@@ -4858,6 +4858,114 @@ function OstatniModule({ dpfoMonths, loanTrackers, loanTransactions, financeItem
     </div>
   );
 }
+
+/* ─── JOSEF PANEL — Dashboard widget ─── */
+function JosefPanel({ logs, attendance }) {
+  const now      = new Date();
+  const ym       = now.toISOString().slice(0,7);
+  const todayStr = now.toISOString().slice(0,10);
+
+  const workingDaysInMonth = () => {
+    const y = now.getFullYear(), m = now.getMonth();
+    const last = new Date(y, m+1, 0).getDate();
+    let n = 0;
+    for (let d = 1; d <= last; d++) { const dow = new Date(y,m,d).getDay(); if (dow!==0&&dow!==6) n++; }
+    return n;
+  };
+  const workingDaysPassed = () => {
+    const y = now.getFullYear(), m = now.getMonth(), today = now.getDate();
+    let n = 0;
+    for (let d = 1; d <= today; d++) { const dow = new Date(y,m,d).getDay(); if (dow!==0&&dow!==6) n++; }
+    return n;
+  };
+
+  const monthLogs = (logs||[]).filter(l => (l.entry_date||"").startsWith(ym));
+  const monthAtt  = (attendance||[]).filter(a => (a.date||"").startsWith(ym));
+
+  const totalHours = monthLogs.reduce((s,l) => s + (Number(l.hours)||0), 0);
+  const daysWorked = monthAtt.filter(a => a.check_in).length;
+  const wageToDate = Math.round(totalHours * ASSISTANT_HOURLY_RATE);
+  const wdTotal    = workingDaysInMonth();
+  const wdPassed   = workingDaysPassed();
+  const progress   = wdTotal > 0 ? Math.min(1, daysWorked / wdTotal) : 0;
+  const projectedWage = wdPassed > 0 ? Math.round((wageToDate / wdPassed) * wdTotal) : 0;
+
+  const todayAtt   = (attendance||[]).find(a => a.date === todayStr);
+  const isIn       = !!(todayAtt?.check_in && !todayAtt?.check_out);
+  const isOut      = !!(todayAtt?.check_in && todayAtt?.check_out);
+  const statusLabel = isIn ? "Přítomen" : isOut ? "Odhlášen" : "Nezaznamenán";
+  const statusColor = isIn ? "#059669" : isOut ? "var(--mut)" : "#D97706";
+
+  // mini bar chart — last days with logs
+  const dayMap = {};
+  monthLogs.forEach(l => { if (l.entry_date) dayMap[l.entry_date] = (dayMap[l.entry_date]||0) + (Number(l.hours)||0); });
+  const recentKeys = Object.keys(dayMap).sort().slice(-5);
+  const maxH = recentKeys.length > 0 ? Math.max(...recentKeys.map(k => dayMap[k]), 1) : 1;
+
+  return (
+    <div style={{ background:"#fff", borderRadius:16, border:"1px solid var(--line)", overflow:"hidden" }}>
+      <div style={{ background:"linear-gradient(135deg, #1A0E5C 0%, #3518A5 100%)", padding:"16px 20px", display:"flex", alignItems:"center", justifyContent:"space-between" }}>
+        <div>
+          <div style={{ fontFamily:"Fraunces, serif", fontWeight:300, fontSize:17, color:"#fff", letterSpacing:".01em" }}>Josef · Asistent</div>
+          <div style={{ fontSize:11, color:"rgba(255,255,255,.5)", marginTop:2 }}>Tento měsíc · {ASSISTANT_HOURLY_RATE} Kč/h</div>
+        </div>
+        <div style={{ display:"flex", alignItems:"center", gap:6, background:"rgba(255,255,255,.12)", borderRadius:20, padding:"4px 12px" }}>
+          <div style={{ width:7, height:7, borderRadius:"50%", background:statusColor, flexShrink:0 }} />
+          <span style={{ fontSize:11.5, color:"#fff", fontWeight:500 }}>{statusLabel}</span>
+        </div>
+      </div>
+
+      <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", borderBottom:"1px solid var(--line)" }}>
+        {[
+          { label:"Hodiny", value: totalHours % 1 === 0 ? `${totalHours} h` : `${totalHours.toFixed(1)} h`, sub: `${daysWorked} dní` },
+          { label:"Mzda k dnešku", value: `${wageToDate.toLocaleString("cs-CZ")} Kč`, sub: `ze ${wdPassed} prac. dní` },
+          { label:"Projekce měsíc", value: projectedWage > 0 ? `${projectedWage.toLocaleString("cs-CZ")} Kč` : "—", sub: `z ${wdTotal} dní celkem` },
+        ].map((m,i) => (
+          <div key={i} style={{ padding:"14px 16px", borderRight: i < 2 ? "1px solid var(--line)" : "none" }}>
+            <div style={{ fontSize:9.5, letterSpacing:".1em", textTransform:"uppercase", color:"var(--mut)", fontWeight:500, marginBottom:5 }}>{m.label}</div>
+            <div style={{ fontFamily:"Fraunces, serif", fontWeight:300, fontSize:18, color:"var(--ink)", lineHeight:1 }}>{m.value}</div>
+            <div style={{ fontSize:10.5, color:"var(--mut)", marginTop:4 }}>{m.sub}</div>
+          </div>
+        ))}
+      </div>
+
+      <div style={{ padding:"12px 20px 10px" }}>
+        <div style={{ display:"flex", justifyContent:"space-between", marginBottom:6 }}>
+          <span style={{ fontSize:10.5, color:"var(--mut)" }}>Docházka tento měsíc</span>
+          <span style={{ fontSize:10.5, color:"var(--ink)", fontWeight:500 }}>{daysWorked} / {wdTotal} dní</span>
+        </div>
+        <div style={{ height:6, background:"var(--line)", borderRadius:99, overflow:"hidden" }}>
+          <div style={{ height:"100%", width:`${progress*100}%`, background:"linear-gradient(90deg,#3518A5,#7C3AED)", borderRadius:99, transition:"width .5s ease" }} />
+        </div>
+      </div>
+
+      {recentKeys.length > 0 && (
+        <div style={{ padding:"0 20px 14px" }}>
+          <div style={{ fontSize:10.5, color:"var(--mut)", marginBottom:8 }}>Posledních {recentKeys.length} dní s výkazy</div>
+          <div style={{ display:"flex", gap:6, alignItems:"flex-end", height:36 }}>
+            {recentKeys.map(d => {
+              const h = dayMap[d];
+              const pct = h / maxH;
+              const date = new Date(d + "T12:00:00");
+              const label = `${date.getDate()}.${date.getMonth()+1}.`;
+              return (
+                <div key={d} style={{ flex:1, display:"flex", flexDirection:"column", alignItems:"center", gap:3 }}>
+                  <div title={`${h} h`} style={{ width:"100%", height: Math.max(4, pct*32), background: d===todayStr?"#7C3AED":"var(--ink)", borderRadius:"3px 3px 0 0", opacity:d===todayStr?1:0.55 }} />
+                  <div style={{ fontSize:9, color:"var(--mut)", whiteSpace:"nowrap" }}>{label}</div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {monthLogs.length === 0 && monthAtt.length === 0 && (
+        <div style={{ padding:"14px 20px", fontSize:12.5, color:"var(--mut)" }}>Josef zatím tento měsíc nemá záznamy.</div>
+      )}
+    </div>
+  );
+}
+
 
 function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, loanTrackers, loanTransactions, escrows, expenseChecks, onToggleExpenseCheck, onNav, onSaveFinance, onDeleteFinance, onDpfoToggle, onLoanTxAdd, onLoanTxToggle, onLoanTxDelete, onLoanUpdate }) {
   const [escrowAlertDismissed, setEscrowAlertDismissed] = useState(false);
