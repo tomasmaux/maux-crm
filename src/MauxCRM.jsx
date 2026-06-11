@@ -8005,8 +8005,10 @@ function AsistentVykazy({ email, clients }) {
         </div>
         <div style={{display:"grid",gridTemplateColumns:"1fr auto",gap:14,alignItems:"flex-end"}}>
           <div>
-            <label style={iL}>Hodiny *</label>
-            <input type="number" step="0.25" min="0" value={form.hours} onChange={e=>set("hours",e.target.value)} placeholder="0" style={iS}/>
+            <label style={iL}>Hodiny * <span style={{fontWeight:400,opacity:.55,letterSpacing:0,textTransform:"none",fontSize:9}}>(např. 1.5 nebo 0.75)</span></label>
+            <input type="text" inputMode="decimal" value={form.hours} onChange={e=>{const v=e.target.value.replace(",",".");set("hours",v);}}
+              placeholder="0.5" style={iS}
+              onKeyDown={e=>{if(e.key==="Enter"&&form.client_id&&form.description.trim()&&Number(form.hours)>0)save();}}/>
           </div>
           <button onClick={save} disabled={saving||!form.client_id||!form.description.trim()||!form.hours}
             style={{padding:"11px 28px",background:"var(--ink)",color:"#fff",border:"none",borderRadius:12,fontSize:13,fontWeight:600,cursor:"pointer",
