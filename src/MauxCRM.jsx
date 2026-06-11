@@ -83,6 +83,8 @@ const addDays = (d, n) => { const dt = new Date(d); dt.setDate(dt.getDate() + n)
 /* ─── CSS ─── */
 const CSS = `
 @import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,300;9..144,400;9..144,500&family=Inter:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500&display=swap');
+@keyframes josefPulse { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:.75;transform:scale(1.15)} }
+@keyframes josefRing  { 0%{transform:scale(1);opacity:.45} 70%{transform:scale(2.4);opacity:0} 100%{transform:scale(2.4);opacity:0} }
 *{box-sizing:border-box;margin:0;padding:0}
 html,body,#root{height:100%;background:#FAFAFA}
 .mx{--ink:#3518A5;--ink2:#2810a0;--ink3:#4a2bc4;--gold:#B8923D;--gold2:#CF9B3E;--green:#059669;--red:#DC2626;
@@ -462,6 +464,10 @@ async function upsertAssistantWorkLog(log) {
 }
 async function deleteAssistantWorkLog(id) {
   const { error } = await supabase.from("assistant_work_logs").delete().eq("id", id);
+  if (error) throw error;
+}
+async function deleteAssistantAttendance(id) {
+  const { error } = await supabase.from("assistant_attendance").delete().eq("id", id);
   if (error) throw error;
 }
 async function fetchAssistantAvailability(email, yearMonth) {
@@ -1652,6 +1658,24 @@ function Sidebar({ mod, setMod, onLogout, privacyMode, onTogglePrivacy }) {
   const [noteSavedAt, setNoteSavedAt] = useState(null);
   const noteSaveTimer = useRef(null);
 
+  // — Josef status: je v kanceláři? přijde zítra? —
+  const [josefInOffice, setJosefInOffice] = useState(null); // null=loading, true/false
+  const [josefTomorrow, setJosefTomorrow] = useState(null); // null=loading, true/false
+  useEffect(() => {
+    const todayDs = localDs(new Date());
+    const tomorrowDs = localDs(new Date(Date.now() + 86400000));
+    const tomorrowYm = tomorrowDs.slice(0,7);
+    Promise.all([
+      fetchAssistantAttendance("asistent@maux.cz"),
+      fetchAssistantAvailability("asistent@maux.cz", tomorrowYm),
+    ]).then(([att, avail]) => {
+      const todayAtt = att.find(a => a.date === todayDs);
+      setJosefInOffice(!!(todayAtt?.check_in && !todayAtt?.check_out));
+      const planned = avail?.planned_dates || [];
+      setJosefTomorrow(planned.includes(tomorrowDs));
+    }).catch(() => { setJosefInOffice(false); setJosefTomorrow(false); });
+  }, []);
+
   const onNoteChange = (v) => {
     setNote(v);
     if (noteSaveTimer.current) clearTimeout(noteSaveTimer.current);
@@ -1678,6 +1702,34 @@ function Sidebar({ mod, setMod, onLogout, privacyMode, onTogglePrivacy }) {
         <div className="sub">Legal · CRM</div>
         <div className="sub2">Poděbrady · advokat@maux.cz</div>
       </div>
+      {/* Josef status — přítomnost v kanceláři */}
+      {josefInOffice !== null && (
+        <div style={{margin:"0 0 10px",padding:"9px 11px",background: josefInOffice?"rgba(22,163,74,.07)":"rgba(0,0,0,.03)",borderRadius:9,border:`1px solid ${josefInOffice?"rgba(22,163,74,.2)":"var(--line)"}`,display:"flex",alignItems:"center",gap:8}}>
+          {/* Blikající tečka */}
+          <span style={{position:"relative",flexShrink:0,width:8,height:8}}>
+            <span style={{
+              display:"block",width:8,height:8,borderRadius:"50%",
+              background: josefInOffice?"#16a34a":"#9CA3AF",
+              animation: josefInOffice?"josefPulse 2s ease-in-out infinite":"none"
+            }}/>
+            {josefInOffice && (
+              <span style={{
+                position:"absolute",top:0,left:0,width:8,height:8,borderRadius:"50%",
+                background:"#16a34a",opacity:.4,
+                animation:"josefRing 2s ease-in-out infinite"
+              }}/>
+            )}
+          </span>
+          <div style={{flex:1,minWidth:0}}>
+            <div style={{fontSize:10.5,fontWeight:600,color:josefInOffice?"#15803D":"var(--mut)",lineHeight:1.2}}>
+              {josefInOffice?"Josef je v kanceláři":"Josef není v kanceláři"}
+            </div>
+            <div style={{fontSize:9.5,color:"var(--mut)",marginTop:1}}>
+              Zítra: {josefTomorrow===null?"…":josefTomorrow?"přijde ✓":"neplánuje"}
+            </div>
+          </div>
+        </div>
+      )}
       <nav className="nav">
         {MODULES.map(m => (
           <button key={m.key} className={"ni" + (mod === m.key ? " on" : "")} onClick={() => setMod(m.key)}>
@@ -4861,10 +4913,21 @@ function OstatniModule({ dpfoMonths, loanTrackers, loanTransactions, financeItem
 }
 
 /* ─── JOSEF PANEL — Dashboard widget ─── */
-function JosefPanel({ logs, attendance }) {
+function JosefPanel({ logs, attendance: attendanceProp }) {
   const now      = new Date();
-  const ym       = now.toISOString().slice(0,7);
-  const todayStr = now.toISOString().slice(0,10);
+  // Use local date string (not UTC) to avoid timezone mismatch with stored dates
+  const ym       = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,"0")}`;
+  const todayStr = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,"0")}-${String(now.getDate()).padStart(2,"0")}`;
+
+  // JosefPanel fetches its own fresh data so stale props from parent don't cause 0h
+  const [freshAtt, setFreshAtt] = useState(null);
+  useEffect(() => {
+    fetchAssistantAttendance("asistent@maux.cz")
+      .then(setFreshAtt)
+      .catch(() => setFreshAtt([]));
+  }, []);
+  // Use fresh data if available, fallback to prop
+  const attendance = freshAtt !== null ? freshAtt : (attendanceProp||[]);
 
   const workingDaysInMonth = () => {
     const y = now.getFullYear(), m = now.getMonth();
@@ -4883,13 +4946,18 @@ function JosefPanel({ logs, attendance }) {
   const monthLogs = (logs||[]).filter(l => (l.entry_date||"").startsWith(ym));
   const monthAtt  = (attendance||[]).filter(a => (a.date||"").startsWith(ym));
 
-  const totalHours = monthLogs.reduce((s,l) => s + (Number(l.hours)||0), 0);
   const daysWorked = monthAtt.filter(a => a.check_in).length;
+  const totalHours = monthAtt.reduce((s,a) => {
+    if (!a.check_in || !a.check_out) return s;
+    const h = netAttHours(a.check_in, a.check_out);
+    return s + (isFinite(h) && h > 0 ? h : 0);
+  }, 0);
   const wageToDate = Math.round(totalHours * ASSISTANT_HOURLY_RATE);
   const wdTotal    = workingDaysInMonth();
   const wdPassed   = workingDaysPassed();
   const progress   = wdTotal > 0 ? Math.min(1, daysWorked / wdTotal) : 0;
   const projectedWage = wdPassed > 0 ? Math.round((wageToDate / wdPassed) * wdTotal) : 0;
+  const missingCheckout = daysWorked > 0 && totalHours === 0;
 
   const todayAtt   = (attendance||[]).find(a => a.date === todayStr);
   const isIn       = !!(todayAtt?.check_in && !todayAtt?.check_out);
@@ -4918,9 +4986,9 @@ function JosefPanel({ logs, attendance }) {
 
       <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", borderBottom:"1px solid var(--line)" }}>
         {[
-          { label:"Hodiny", value: totalHours % 1 === 0 ? `${totalHours} h` : `${totalHours.toFixed(1)} h`, sub: `${daysWorked} dní` },
+          { label:"Hodiny v kanceláři", value: totalHours > 0 ? (totalHours % 1 === 0 ? `${totalHours} h` : `${totalHours.toFixed(1)} h`) : (missingCheckout ? "⚠ chybí odchod" : "0 h"), sub: `${daysWorked} dní · po obědové pauze` },
           { label:"Mzda k dnešku", value: `${wageToDate.toLocaleString("cs-CZ")} Kč`, sub: `ze ${wdPassed} prac. dní` },
-          { label:"Projekce měsíc", value: projectedWage > 0 ? `${projectedWage.toLocaleString("cs-CZ")} Kč` : "—", sub: `z ${wdTotal} dní celkem` },
+          { label:"Projekce měsíc", value: projectedWage > 0 ? `${projectedWage.toLocaleString("cs-CZ")} Kč` : (missingCheckout ? "⚠" : "—"), sub: `z ${wdTotal} dní celkem` },
         ].map((m,i) => (
           <div key={i} style={{ padding:"14px 16px", borderRight: i < 2 ? "1px solid var(--line)" : "none" }}>
             <div style={{ fontSize:9.5, letterSpacing:".1em", textTransform:"uppercase", color:"var(--mut)", fontWeight:500, marginBottom:5 }}>{m.label}</div>
@@ -7657,6 +7725,14 @@ function Placeholder({ m }) {
 
 // ── Konstanta: denní cíl klientské práce (hodiny) ─────────────────────────────
 const ASISTENT_DAILY_H = 3;
+const LUNCH_BREAK_H = 1;       // 1h obědová pauza (zákoník práce §88)
+const LUNCH_THRESHOLD_H = 6;   // automaticky odečítá od směn ≥ 6 h
+// Čisté hodiny v kanceláři po odečtení obědové pauzy
+const netAttHours = (ci, co) => {
+  if (!ci || !co) return 0;
+  const dur = (new Date(co) - new Date(ci)) / 36e5;
+  return Math.max(0, dur >= LUNCH_THRESHOLD_H ? dur - LUNCH_BREAK_H : dur);
+};
 const UNDO_WINDOW_MS   = 10 * 60 * 1000; // 10 minut
 
 // Lokální formát data bez UTC problémů (reuse today() pattern)
@@ -8260,32 +8336,64 @@ function AsistentDochazka({ email, attendance, onRefreshAttendance }) {
           <div style={{fontSize:7.5,letterSpacing:".25em",textTransform:"uppercase",fontWeight:700,color:"var(--mut)"}}>ZÁZNAMY DOCHÁZKY</div>
           <button className="btn gho" style={{fontSize:11}} onClick={()=>openNewAtt(todayStr)}>+ Přidat záznam</button>
         </div>
+        {/* Info o obědové pauze */}
+        <div style={{margin:"0 22px 10px",padding:"8px 12px",background:"rgba(53,24,165,.04)",borderRadius:8,display:"flex",alignItems:"center",gap:8}}>
+          <span style={{fontSize:11,color:"var(--mut)"}}>ℹ️</span>
+          <span style={{fontSize:10.5,color:"var(--mut)",lineHeight:1.5}}>
+            Ze směn ≥ {LUNCH_THRESHOLD_H} h se automaticky odečítá {LUNCH_BREAK_H} h obědová pauza (zákoník práce §88). Čisté hodiny = základ pro výpočet odměny.
+          </span>
+        </div>
         {attendance.length===0 ? (
           <div style={{fontSize:12.5,color:"var(--mut)",padding:"0 22px 18px",opacity:.6}}>Zatím žádné záznamy.</div>
         ) : (
           <div style={{padding:"0 22px 18px",display:"flex",flexDirection:"column",gap:2}}>
             {attendance.slice(0,30).map(a=>{
-              const dur=a.check_in&&a.check_out?(new Date(a.check_out)-new Date(a.check_in))/36e5:null;
-              const good=dur!=null&&dur>=ASISTENT_DAILY_H, isToday=a.date===todayStr;
+              const grossDur=a.check_in&&a.check_out?(new Date(a.check_out)-new Date(a.check_in))/36e5:null;
+              const net = grossDur!=null ? netAttHours(a.check_in,a.check_out) : null;
+              const lunchDeducted = grossDur!=null && grossDur>=LUNCH_THRESHOLD_H;
+              const good=net!=null&&net>=ASISTENT_DAILY_H, isToday=a.date===todayStr;
               const isEditing = editingAtt === a.id;
               const tFld = {font:"inherit",fontSize:13,padding:"6px 8px",border:"1px solid var(--line2)",borderRadius:7,width:72};
+              const deleteAtt = async () => {
+                if(!window.confirm(`Smazat záznam docházky ${fmtDate(a.date)}?`)) return;
+                try { await deleteAssistantAttendance(a.id); await onRefreshAttendance?.(); }
+                catch(e){alert("Chyba: "+e.message);}
+              };
               return (
                 <div key={a.id}>
                   <div style={{display:"flex",alignItems:"center",gap:10,padding:"8px 10px",borderRadius:9,background:isEditing?"#F7F5FF":isToday?"rgba(53,24,165,.04)":"transparent"}}>
-                    <div style={{width:7,height:7,borderRadius:"50%",background:good?"#22C55E":dur?"#FCA5A5":"rgba(0,0,0,.12)",flexShrink:0}}/>
+                    <div style={{width:7,height:7,borderRadius:"50%",background:good?"#22C55E":grossDur?"#FCA5A5":"rgba(0,0,0,.12)",flexShrink:0}}/>
                     <div style={{flex:1,fontSize:11.5,color:"var(--txt)",fontWeight:isToday?600:400}}>{fmtDate(a.date)}</div>
                     <div style={{fontSize:10.5,color:"var(--mut)",fontFamily:"JetBrains Mono,monospace"}}>
                       {fmtTime(a.check_in)||"—"} – {fmtTime(a.check_out)||"—"}
                     </div>
-                    <div style={{fontSize:12,fontWeight:600,color:good?"#059669":"var(--mut)",minWidth:42,textAlign:"right"}}>{dur?fmtH(dur):"—"}</div>
-                    <button onClick={()=>isEditing?setEditingAtt(null):openEditAtt(a)}
+                    {/* Hodiny: čisté + pauza badge */}
+                    <div style={{display:"flex",alignItems:"center",gap:5,flexShrink:0}}>
+                      {lunchDeducted && (
+                        <span style={{fontSize:9,background:"#FEF9C3",color:"#854D0E",borderRadius:4,padding:"1px 5px",fontWeight:600,whiteSpace:"nowrap"}}>
+                          −{LUNCH_BREAK_H}h pauza
+                        </span>
+                      )}
+                      <span style={{fontSize:12,fontWeight:600,color:good?"#059669":"var(--mut)",minWidth:42,textAlign:"right"}}>
+                        {net!=null?fmtH(net):"—"}
+                      </span>
+                    </div>
+                    {/* Editace */}
+                    <button onClick={()=>isEditing?setEditingAtt(null):openEditAtt(a)} title="Upravit"
                       style={{background:"none",border:"none",cursor:"pointer",color:isEditing?"var(--ink)":"var(--mut)",fontSize:13,padding:"2px 4px",borderRadius:5}}>
                       {isEditing?"✕":"✎"}
                     </button>
+                    {/* Smazat */}
+                    {!isEditing && (
+                      <button onClick={deleteAtt} title="Smazat záznam"
+                        style={{background:"none",border:"none",cursor:"pointer",color:"#EF4444",fontSize:12,padding:"2px 4px",borderRadius:5,opacity:.6}}>
+                        🗑
+                      </button>
+                    )}
                   </div>
                   {isEditing && (
                     <div style={{margin:"0 10px 8px",padding:"12px 14px",background:"#F7F5FF",borderRadius:10,display:"flex",flexDirection:"column",gap:10}}>
-                      <div style={{display:"flex",gap:10,alignItems:"center"}}>
+                      <div style={{display:"flex",gap:10,alignItems:"center",flexWrap:"wrap"}}>
                         <label style={{display:"flex",flexDirection:"column",gap:3}}>
                           <span style={{fontSize:9.5,color:"var(--mut)",letterSpacing:".08em",textTransform:"uppercase"}}>Příchod</span>
                           <input type="time" style={tFld} value={editDraft.check_in_t} onChange={e=>setEditDraft(p=>({...p,check_in_t:e.target.value}))} />
@@ -8295,9 +8403,9 @@ function AsistentDochazka({ email, attendance, onRefreshAttendance }) {
                           <span style={{fontSize:9.5,color:"var(--mut)",letterSpacing:".08em",textTransform:"uppercase"}}>Odchod</span>
                           <input type="time" style={tFld} value={editDraft.check_out_t} onChange={e=>setEditDraft(p=>({...p,check_out_t:e.target.value}))} />
                         </label>
-                        <label style={{display:"flex",flexDirection:"column",gap:3,flex:1}}>
+                        <label style={{display:"flex",flexDirection:"column",gap:3,flex:1,minWidth:120}}>
                           <span style={{fontSize:9.5,color:"var(--mut)",letterSpacing:".08em",textTransform:"uppercase"}}>Datum</span>
-                          <input type="date" style={{...tFld,width:"auto"}} value={editDraft.date} onChange={e=>setEditDraft(p=>({...p,date:e.target.value}))} />
+                          <input type="date" style={{...tFld,width:"100%"}} value={editDraft.date} onChange={e=>setEditDraft(p=>({...p,date:e.target.value}))} />
                         </label>
                       </div>
                       <div style={{display:"flex",gap:8}}>
@@ -8457,6 +8565,10 @@ function AsistentPanel({ clients, onPreview }) {
   const [availability, setAvailability] = useState(null);
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState("prehled");
+  // Admin docházka — inline edit
+  const [editingAdminAtt, setEditingAdminAtt] = useState(null);
+  const [editAdminDraft, setEditAdminDraft] = useState({});
+  const [savingAdminAtt, setSavingAdminAtt] = useState(false);
 
   const nextMonth = (() => {
     const d = new Date(); d.setMonth(d.getMonth()+1);
@@ -8601,50 +8713,142 @@ function AsistentPanel({ clients, onPreview }) {
           )
         )}
 
-        {/* Docházka */}
-        {tab==="dochazka" && (() => {
-          const todayDs = localDs(new Date());
-          const [clearing, setClearing] = useState(false);
-          const clearCheckout = async (a) => {
-            setClearing(true);
-            try {
-              await upsertAssistantAttendance({ id:a.id, assistant_email:email, date:a.date, check_in:a.check_in, check_out:null });
-              setAttendance(await fetchAssistantAttendance(email));
-            } catch(e){ alert("Chyba: "+e.message); } finally { setClearing(false); }
-          };
-          if(attendance.length===0) return <div style={{color:"var(--mut)",fontSize:13}}>Žádné záznamy docházky.</div>;
-          return (
-            <table style={{width:"100%",borderCollapse:"collapse",border:"1px solid var(--line)",borderRadius:12,overflow:"hidden"}}>
-              <thead><tr style={{background:"var(--bg)"}}>
-                {["Datum","Příchod","Odchod","Odpracováno",""].map(h=>(
-                  <th key={h} style={{padding:"9px 14px",textAlign:"left",fontSize:9,letterSpacing:".1em",textTransform:"uppercase",color:"var(--mut)",fontWeight:500}}>{h}</th>
-                ))}
-              </tr></thead>
-              <tbody>
-                {attendance.map((a,i)=>{
-                  const dur = a.check_in&&a.check_out?(new Date(a.check_out)-new Date(a.check_in))/36e5:null;
-                  const isToday = a.date===todayDs;
-                  return (
-                    <tr key={a.id} style={{borderTop:"1px solid var(--line)",background:isToday?"#FDFBFF":i%2?"#FAFAFE":"#fff"}}>
-                      <td style={{padding:"10px 14px",fontSize:13,fontWeight:isToday?600:400}}>{fmtDate(a.date)}</td>
-                      <td style={{padding:"10px 14px",fontSize:13}}>{fmtTime(a.check_in)}</td>
-                      <td style={{padding:"10px 14px",fontSize:13}}>{fmtTime(a.check_out)}</td>
-                      <td style={{padding:"10px 14px",fontSize:13,fontWeight:600,color:dur&&dur>=ASISTENT_DAILY_H?"#059669":"var(--ink)"}}>{dur?fmtH(dur):"—"}</td>
-                      <td style={{padding:"10px 14px",fontSize:12}}>
-                        {isToday && a.check_out && (
-                          <button onClick={()=>clearCheckout(a)} disabled={clearing}
-                            style={{padding:"4px 10px",borderRadius:6,border:"1px solid #FCA5A5",background:"#FEF2F2",color:"#991B1B",fontSize:11,cursor:"pointer",fontWeight:600,whiteSpace:"nowrap"}}>
-                            {clearing?"…":"🔧 Zrušit odchod"}
-                          </button>
-                        )}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          );
-        })()}
+        {/* Docházka — admin správa */}
+        {tab==="dochazka" && (
+          attendance.length===0 ? <div style={{color:"var(--mut)",fontSize:13}}>Žádné záznamy docházky.</div> : (
+            <div>
+              {/* Toolbar: info + export */}
+              <div style={{marginBottom:12,display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
+                <div style={{flex:1,padding:"8px 12px",background:"rgba(53,24,165,.04)",borderRadius:8,display:"flex",alignItems:"center",gap:8}}>
+                  <span style={{fontSize:11}}>ℹ️</span>
+                  <span style={{fontSize:10.5,color:"var(--mut)"}}>Ze směn ≥ {LUNCH_THRESHOLD_H} h se odečítá {LUNCH_BREAK_H} h pauza. Čisté hodiny = základ pro odměnu (170 Kč/h).</span>
+                </div>
+                <button
+                  onClick={() => {
+                    const rows = [["Datum","Příchod","Odchod","Hrubé hodiny","Čisté hodiny","Pauza","Odměna (Kč)"]];
+                    attendance.forEach(a => {
+                      const fmtTs = ts => ts ? new Date(ts).toLocaleTimeString("cs-CZ",{hour:"2-digit",minute:"2-digit"}) : "";
+                      const gross = a.check_in&&a.check_out?(new Date(a.check_out)-new Date(a.check_in))/36e5:null;
+                      const net   = gross!=null ? netAttHours(a.check_in,a.check_out) : null;
+                      const lunch = gross!=null&&gross>=LUNCH_THRESHOLD_H ? LUNCH_BREAK_H : 0;
+                      rows.push([
+                        a.date,
+                        fmtTs(a.check_in),
+                        fmtTs(a.check_out),
+                        gross!=null ? gross.toFixed(2) : "",
+                        net!=null   ? net.toFixed(2)   : "",
+                        lunch,
+                        net!=null   ? Math.round(net*ASSISTANT_HOURLY_RATE) : "",
+                      ]);
+                    });
+                    const csv = rows.map(r => r.join(";")).join("\n");
+                    const blob = new Blob(["﻿"+csv],{type:"text/csv;charset=utf-8;"});
+                    const url  = URL.createObjectURL(blob);
+                    const a    = document.createElement("a");
+                    a.href = url; a.download = `dochazka_Josef_${new Date().toISOString().slice(0,7)}.csv`; a.click();
+                    URL.revokeObjectURL(url);
+                  }}
+                  style={{padding:"8px 14px",borderRadius:8,border:"1px solid var(--line2)",background:"#fff",color:"var(--ink)",fontSize:12,fontWeight:500,cursor:"pointer",whiteSpace:"nowrap",display:"flex",alignItems:"center",gap:6}}>
+                  ⬇ Export pro účetní
+                </button>
+              </div>
+              <div style={{border:"1px solid var(--line)",borderRadius:12,overflow:"hidden"}}>
+                <table style={{width:"100%",borderCollapse:"collapse"}}>
+                  <thead><tr style={{background:"var(--bg)"}}>
+                    {["Datum","Příchod","Odchod","Hrubé","Čisté","Akce"].map(h=>(
+                      <th key={h} style={{padding:"9px 14px",textAlign:"left",fontSize:9,letterSpacing:".1em",textTransform:"uppercase",color:"var(--mut)",fontWeight:500}}>{h}</th>
+                    ))}
+                  </tr></thead>
+                  <tbody>
+                    {attendance.map((a,i)=>{
+                      const grossDur = a.check_in&&a.check_out?(new Date(a.check_out)-new Date(a.check_in))/36e5:null;
+                      const net = grossDur!=null?netAttHours(a.check_in,a.check_out):null;
+                      const lunchDeducted = grossDur!=null&&grossDur>=LUNCH_THRESHOLD_H;
+                      const good = net!=null&&net>=ASISTENT_DAILY_H;
+                      const todayDs = localDs(new Date());
+                      const isToday = a.date===todayDs;
+                      const isEditing = editingAdminAtt===a.id;
+                      const tFld = {font:"inherit",fontSize:12,padding:"5px 7px",border:"1px solid var(--line2)",borderRadius:6,width:80};
+                      const openEdit = () => {
+                        const ciT = a.check_in?new Date(a.check_in).toLocaleTimeString("cs-CZ",{hour:"2-digit",minute:"2-digit",hour12:false}):"";
+                        const coT = a.check_out?new Date(a.check_out).toLocaleTimeString("cs-CZ",{hour:"2-digit",minute:"2-digit",hour12:false}):"";
+                        setEditAdminDraft({date:a.date,check_in_t:ciT,check_out_t:coT});
+                        setEditingAdminAtt(a.id);
+                      };
+                      const saveEdit = async () => {
+                        setSavingAdminAtt(true);
+                        try {
+                          const d = editAdminDraft.date;
+                          const ci = editAdminDraft.check_in_t?`${d}T${editAdminDraft.check_in_t}:00`:null;
+                          const co = editAdminDraft.check_out_t?`${d}T${editAdminDraft.check_out_t}:00`:null;
+                          await upsertAssistantAttendance({id:a.id,assistant_email:email,date:d,check_in:ci,check_out:co});
+                          setAttendance(await fetchAssistantAttendance(email));
+                          setEditingAdminAtt(null);
+                        } catch(e){alert("Chyba: "+e.message);} finally{setSavingAdminAtt(false);}
+                      };
+                      const deleteRow = async () => {
+                        if(!window.confirm(`Smazat záznam docházky ${fmtDate(a.date)}?`)) return;
+                        try {
+                          await deleteAssistantAttendance(a.id);
+                          setAttendance(await fetchAssistantAttendance(email));
+                        } catch(e){alert("Chyba: "+e.message);}
+                      };
+                      return (
+                        <React.Fragment key={a.id}>
+                          <tr style={{borderTop:"1px solid var(--line)",background:isEditing?"#F7F5FF":isToday?"#FDFBFF":i%2?"#FAFAFE":"#fff"}}>
+                            <td style={{padding:"10px 14px",fontSize:13,fontWeight:isToday?600:400}}>{fmtDate(a.date)}</td>
+                            <td style={{padding:"10px 14px",fontSize:13,fontFamily:"JetBrains Mono,monospace"}}>{fmtTime(a.check_in)}</td>
+                            <td style={{padding:"10px 14px",fontSize:13,fontFamily:"JetBrains Mono,monospace"}}>{fmtTime(a.check_out)}</td>
+                            <td style={{padding:"10px 14px",fontSize:12,color:"var(--mut)"}}>{grossDur?fmtH(grossDur):"—"}</td>
+                            <td style={{padding:"10px 14px",fontSize:13,fontWeight:600,color:good?"#059669":"var(--ink)"}}>
+                              {net!=null?fmtH(net):"—"}
+                              {lunchDeducted&&<span style={{marginLeft:4,fontSize:9,background:"#FEF9C3",color:"#854D0E",borderRadius:3,padding:"1px 4px"}}>−{LUNCH_BREAK_H}h</span>}
+                            </td>
+                            <td style={{padding:"10px 14px",display:"flex",gap:6,alignItems:"center"}}>
+                              <button onClick={()=>isEditing?setEditingAdminAtt(null):openEdit()} title={isEditing?"Zavřít":"Upravit"}
+                                style={{padding:"4px 9px",borderRadius:6,border:"1px solid var(--line2)",background:"#fff",color:"var(--ink)",fontSize:11,cursor:"pointer",fontWeight:500}}>
+                                {isEditing?"✕ Zrušit":"✎ Upravit"}
+                              </button>
+                              {!isEditing&&(
+                                <button onClick={deleteRow} title="Smazat"
+                                  style={{padding:"4px 8px",borderRadius:6,border:"1px solid #FECACA",background:"#FEF2F2",color:"#991B1B",fontSize:11,cursor:"pointer"}}>
+                                  🗑
+                                </button>
+                              )}
+                            </td>
+                          </tr>
+                          {isEditing&&(
+                            <tr style={{background:"#F7F5FF",borderTop:"none"}}>
+                              <td colSpan={6} style={{padding:"10px 14px"}}>
+                                <div style={{display:"flex",gap:10,alignItems:"flex-end",flexWrap:"wrap"}}>
+                                  <label style={{display:"flex",flexDirection:"column",gap:3}}>
+                                    <span style={{fontSize:9,color:"var(--mut)",textTransform:"uppercase",letterSpacing:".08em"}}>Datum</span>
+                                    <input type="date" style={tFld} value={editAdminDraft.date} onChange={e=>setEditAdminDraft(p=>({...p,date:e.target.value}))} />
+                                  </label>
+                                  <label style={{display:"flex",flexDirection:"column",gap:3}}>
+                                    <span style={{fontSize:9,color:"var(--mut)",textTransform:"uppercase",letterSpacing:".08em"}}>Příchod</span>
+                                    <input type="time" style={tFld} value={editAdminDraft.check_in_t} onChange={e=>setEditAdminDraft(p=>({...p,check_in_t:e.target.value}))} />
+                                  </label>
+                                  <label style={{display:"flex",flexDirection:"column",gap:3}}>
+                                    <span style={{fontSize:9,color:"var(--mut)",textTransform:"uppercase",letterSpacing:".08em"}}>Odchod</span>
+                                    <input type="time" style={tFld} value={editAdminDraft.check_out_t} onChange={e=>setEditAdminDraft(p=>({...p,check_out_t:e.target.value}))} />
+                                  </label>
+                                  <button className="btn pri" style={{fontSize:11,padding:"7px 16px"}} disabled={savingAdminAtt} onClick={saveEdit}>
+                                    {savingAdminAtt?"Ukládám…":"💾 Uložit"}
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
+                          )}
+                        </React.Fragment>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )
+        )}
 
         {/* Plán */}
         {tab==="plan" && (
