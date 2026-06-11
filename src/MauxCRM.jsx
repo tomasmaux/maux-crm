@@ -5155,7 +5155,15 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
   const luxus = (financeItems||[]).filter(i => i.category === "luxus");
   const totalNutne = nutne.reduce((s,i) => s+(i.amount||0), 0);
   const totalLuxus = luxus.reduce((s,i) => s+(i.amount||0), 0);
-  const totalVydaje = totalNutne + totalLuxus;
+  // Josef Řehák — automatický náklad z docházky (170 Kč/h × čisté hodiny tento měsíc)
+  const _josefYm = `${new Date().getFullYear()}-${String(new Date().getMonth()+1).padStart(2,"0")}`;
+  const _josefAtt = (assistantAttendance||[]).filter(a=>(a.date||"").startsWith(_josefYm));
+  const josefWage = Math.round(_josefAtt.reduce((s,a)=>{
+    if(!a.check_in||!a.check_out) return s;
+    const h = netAttHours(a.check_in, a.check_out);
+    return s + (isFinite(h)&&h>0?h:0);
+  },0) * ASSISTANT_HOURLY_RATE);
+  const totalVydaje = totalNutne + totalLuxus + josefWage;
   const cashflow = mRev + totalVydaje;
   // DPH — nadměrný odpočet (na žádost): kolik mi reálně ZŮSTANE díky účtenkám, které posílám Čechmanové
   // jako odpočet proti DPH z vystavených faktur. Nemění se tím "to číslo shrnující daň" v modulu Daně —
@@ -5519,7 +5527,7 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
                 </div>
               </div>
               <div style={{display:"flex",gap:8,alignItems:"baseline",flexWrap:"wrap"}}>
-                <span style={{fontFamily:"Fraunces,serif",fontSize:22,fontWeight:300,color:"#DC2626",lineHeight:1}}>{fmtKc(Math.abs(totalNutne))}</span>
+                <span style={{fontFamily:"Fraunces,serif",fontSize:22,fontWeight:300,color:"#DC2626",lineHeight:1}}>{fmtKc(Math.abs(totalNutne)+josefWage)}</span>
                 <span style={{fontSize:9,color:"var(--mut)"}}>nutné</span>
                 <span style={{fontSize:11,color:"var(--mut)",opacity:.35,fontWeight:300}}>+</span>
                 <span style={{fontFamily:"Fraunces,serif",fontSize:22,fontWeight:300,color:"#7C3AED",lineHeight:1}}>{fmtKc(Math.abs(totalLuxus))}</span>
@@ -5575,7 +5583,7 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
               ))}
               <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",paddingTop:10,marginTop:8,borderTop:"1px solid rgba(0,0,0,.05)"}}>
                 <span style={{fontSize:10.5,color:"var(--mut)",letterSpacing:".02em"}}>Celkové náklady</span>
-                <span style={{fontSize:13,fontFamily:"Fraunces,serif",fontWeight:300,color:"#DC2626",letterSpacing:"-.01em"}}>−{fmtKc(Math.abs(totalNutne)+Math.abs(totalLuxus))}</span>
+                <span style={{fontSize:13,fontFamily:"Fraunces,serif",fontWeight:300,color:"#DC2626",letterSpacing:"-.01em"}}>−{fmtKc(Math.abs(totalVydaje))}</span>
               </div>
             </div>
 
@@ -5594,6 +5602,17 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
                 </div>
               ))}
               <AddExpenseRow category="nutne" color="#DC2626" onSaveFinance={onSaveFinance} />
+              {/* Josef Řehák — automatický náklad */}
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",fontSize:11.5,padding:"3px 0",gap:6,opacity:.85}}>
+                <span style={{display:"flex",alignItems:"center",gap:5,color:"var(--txt)"}}>
+                  <span style={{display:"inline-block",width:13,height:13,borderRadius:3,border:"1.5px solid #DC2626",flexShrink:0}}/>
+                  <span>Josef Řehák</span>
+                  <span style={{fontSize:8.5,background:"rgba(53,24,165,.08)",color:"var(--ink)",borderRadius:4,padding:"1px 5px",fontWeight:600,letterSpacing:".04em"}}>auto</span>
+                </span>
+                <span style={{color:"#DC2626",fontVariantNumeric:"tabular-nums",fontFamily:"var(--mono)",fontSize:11}}>
+                  {josefWage > 0 ? josefWage.toLocaleString("cs-CZ") + " Kč" : "— Kč"}
+                </span>
+              </div>
               <div style={{fontSize:7,letterSpacing:".28em",textTransform:"uppercase",color:"#7C3AED",fontWeight:700,marginTop:10,marginBottom:6,opacity:.8}}>Lusus</div>
               {luxus.map((i,idx) => (
                 <div key={idx} style={{display:"flex",justifyContent:"space-between",alignItems:"center",fontSize:11.5,color:isPaid(i.id)?"var(--mut)":"var(--txt)",padding:"3px 0",gap:6}}>
