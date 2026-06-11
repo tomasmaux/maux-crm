@@ -459,7 +459,7 @@ async function fetchAssistantWorkLogs(email) {
   return data || [];
 }
 async function upsertAssistantWorkLog(log) {
-  const { error } = await supabase.from("assistant_work_logs").upsert({ ...log, updated_at: new Date().toISOString() });
+  const { error } = await supabase.from("assistant_work_logs").upsert({ ...log });
   if (error) throw error;
 }
 async function deleteAssistantWorkLog(id) {
@@ -476,7 +476,7 @@ async function fetchAssistantAvailability(email, yearMonth) {
   return data;
 }
 async function upsertAssistantAvailability(rec) {
-  const { error } = await supabase.from("assistant_availability").upsert({ ...rec, updated_at: new Date().toISOString() }, { onConflict: "assistant_email,year_month" });
+  const { error } = await supabase.from("assistant_availability").upsert({ ...rec }, { onConflict: "assistant_email,year_month" });
   if (error) throw error;
 }
 async function fetchAssistantAttendance(email) {
@@ -8506,7 +8506,7 @@ function AsistentApp({ session, onLogout, previewMode }) {
   ];
 
   return (
-    <div style={{minHeight:"100vh",background:"var(--bg)",display:"flex",flexDirection:"column"}}>
+    <div className="mx" style={{minHeight:"100vh",background:"var(--bg)",display:"flex",flexDirection:"column"}}>
       <style>{CSS}</style>
 
       {/* ── Top navigation bar ── */}
