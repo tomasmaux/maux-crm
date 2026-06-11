@@ -9003,6 +9003,10 @@ export default function MauxCRM() {
   const navTo = (k) => { setModHistory(h => [...h, { mod, mode }]); setMod(k); setMode("list"); setSel(null); setEscrowMode("list"); setSelEscrow(null); };
   const goBack = () => { if (mode !== "list" && mode !== "") { setMode("list"); setSel(null); return; } const prev = modHistory[modHistory.length-1]; if (prev) { setModHistory(h => h.slice(0,-1)); setMod(prev.mod); setMode("list"); setSel(null); } };
   const canGoBack = (mode !== "list" && mode !== "") || modHistory.length > 0;
+  const [monthlyGoal, setMonthlyGoal] = useState(() => { try { const v = localStorage.getItem("maux_monthly_goal"); return v ? Number(v) : 0; } catch { return 0; } });
+  const [editingGoal, setEditingGoal] = useState(false);
+  const [goalDraft, setGoalDraft] = useState("");
+  const saveGoal = () => { const v = Number(String(goalDraft).replace(/\s/g,"").replace(",",".")); if (v > 0) { setMonthlyGoal(v); try { localStorage.setItem("maux_monthly_goal", v); } catch {} } setEditingGoal(false); };
   const [sel, setSel] = useState(null);
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState(null);
@@ -9344,6 +9348,68 @@ export default function MauxCRM() {
       <Sidebar mod={mod} setMod={navTo} onLogout={handleLogout}
         privacyMode={privacyMode} onTogglePrivacy={togglePrivacy} />
       <div className="main">
+        {(() => {
+          const _now = new Date();
+          const _todayStr = `${_now.getFullYear()}-${String(_now.getMonth()+1).padStart(2,"0")}-${String(_now.getDate()).padStart(2,"0")}`;
+          const _ym = _todayStr.slice(0,7);
+          const _todayAmt = workEntries.filter(e => e.entry_date === _todayStr).reduce((s,e) => s + (Number(e.amount)||0), 0);
+          const _monthAmt = workEntries.filter(e => (e.entry_date||"").startsWith(_ym)).reduce((s,e) => s + (Number(e.amount)||0), 0);
+          const _goal = monthlyGoal || 0;
+          const _rem = Math.max(0, _goal - _monthAmt);
+          const _pct = _goal > 0 ? Math.min(1, _monthAmt / _goal) : 0;
+          const _h = _now.getHours();
+          const _gr = _h < 12 ? "Dobré ráno" : _h < 18 ? "Dobré odpoledne" : "Dobrý večer";
+          const _fmt = v => privacyMode ? "·····" : v.toLocaleString("cs-CZ") + " Kč";
+          return (
+            <div style={{background:"linear-gradient(135deg,#2d14a0,#4a2bc4)",padding:"10px 40px",display:"flex",alignItems:"center",justifyContent:"space-between",gap:12,flexWrap:"wrap"}}>
+              <div style={{display:"flex",alignItems:"center",gap:20,flexWrap:"wrap"}}>
+                <span style={{fontSize:12.5,color:"rgba(255,255,255,.75)",fontWeight:500,letterSpacing:".01em"}}>{_gr}, Tomáši</span>
+                <div style={{width:1,height:14,background:"rgba(255,255,255,.2)",flexShrink:0}} />
+                <div style={{display:"flex",alignItems:"baseline",gap:6}}>
+                  <span style={{fontSize:9.5,color:"rgba(255,255,255,.45)",letterSpacing:".1em",textTransform:"uppercase"}}>Dnes vydělal</span>
+                  <span style={{fontSize:15,fontFamily:"Fraunces,serif",fontWeight:300,color:"#fff"}}>{_fmt(_todayAmt)}</span>
+                </div>
+                <div style={{width:1,height:14,background:"rgba(255,255,255,.2)",flexShrink:0}} />
+                <div style={{display:"flex",alignItems:"baseline",gap:6}}>
+                  <span style={{fontSize:9.5,color:"rgba(255,255,255,.45)",letterSpacing:".1em",textTransform:"uppercase"}}>Tento měsíc</span>
+                  <span style={{fontSize:15,fontFamily:"Fraunces,serif",fontWeight:300,color:"#fff"}}>{_fmt(_monthAmt)}</span>
+                </div>
+                {_goal > 0 && <>
+                  <div style={{width:1,height:14,background:"rgba(255,255,255,.2)",flexShrink:0}} />
+                  <div style={{display:"flex",alignItems:"baseline",gap:6}}>
+                    <span style={{fontSize:9.5,color:"rgba(255,255,255,.45)",letterSpacing:".1em",textTransform:"uppercase"}}>Do cíle zbývá</span>
+                    <span style={{fontSize:15,fontFamily:"Fraunces,serif",fontWeight:300,color:_rem===0?"#4ade80":"#fff"}}>{_rem===0?"✓ Splněno":_fmt(_rem)}</span>
+                  </div>
+                  <div style={{display:"flex",alignItems:"center",gap:5}}>
+                    <div style={{width:60,height:3,background:"rgba(255,255,255,.15)",borderRadius:99,overflow:"hidden"}}>
+                      <div style={{width:`${_pct*100}%`,height:"100%",background:_pct>=1?"#4ade80":"rgba(255,255,255,.7)",borderRadius:99,transition:"width .5s ease"}} />
+                    </div>
+                    <span style={{fontSize:10,color:"rgba(255,255,255,.5)"}}>{Math.round(_pct*100)}%</span>
+                  </div>
+                </>}
+              </div>
+              <div style={{display:"flex",alignItems:"center",gap:6}}>
+                {editingGoal ? (
+                  <div style={{display:"flex",alignItems:"center",gap:5}}>
+                    <input type="text" value={goalDraft} onChange={e=>setGoalDraft(e.target.value)}
+                      onKeyDown={e=>{if(e.key==="Enter")saveGoal();if(e.key==="Escape")setEditingGoal(false);}}
+                      placeholder="150000" autoFocus
+                      style={{width:88,padding:"4px 8px",borderRadius:6,border:"none",fontSize:12,fontFamily:"var(--mono)",outline:"none"}} />
+                    <button onClick={saveGoal} style={{padding:"4px 10px",borderRadius:6,background:"#4ade80",border:"none",fontSize:11,fontWeight:700,cursor:"pointer",color:"#166534"}}>OK</button>
+                    <button onClick={()=>setEditingGoal(false)} style={{padding:"4px 8px",borderRadius:6,background:"rgba(255,255,255,.12)",border:"none",fontSize:12,cursor:"pointer",color:"rgba(255,255,255,.7)"}}>✕</button>
+                  </div>
+                ) : (
+                  <button onClick={()=>{setGoalDraft(_goal>0?String(_goal):"");setEditingGoal(true);}}
+                    style={{padding:"5px 12px",borderRadius:8,background:"rgba(255,255,255,.1)",border:"1px solid rgba(255,255,255,.18)",color:"rgba(255,255,255,.75)",fontSize:11,cursor:"pointer",letterSpacing:".03em",transition:"background .15s"}}
+                    onMouseEnter={e=>e.currentTarget.style.background="rgba(255,255,255,.18)"}
+                    onMouseLeave={e=>e.currentTarget.style.background="rgba(255,255,255,.1)"}>
+                    {_goal>0?`✏ Cíl: ${_fmt(_goal)}`:"+ Nastavit měsíční cíl"}
+                  </button>
+                )}
+              </div>
+            </div>
+          );
+        })()}
         <div className="top">
           <div className="top-l">
             <div className="eyebrow">MAUX Legal · {curMod?.label}</div>
