@@ -5011,16 +5011,18 @@ function JosefPanel({ logs, attendance: attendanceProp }) {
       {recentKeys.length > 0 && (
         <div style={{ padding:"0 20px 14px" }}>
           <div style={{ fontSize:10.5, color:"var(--mut)", marginBottom:8 }}>Posledních {recentKeys.length} dní s výkazy</div>
-          <div style={{ display:"flex", gap:6, alignItems:"flex-end", height:36 }}>
+          <div style={{ display:"flex", gap:5, alignItems:"flex-end", height:48, justifyContent:"flex-start" }}>
             {recentKeys.map(d => {
               const h = dayMap[d];
               const pct = h / maxH;
               const date = new Date(d + "T12:00:00");
               const label = `${date.getDate()}.${date.getMonth()+1}.`;
+              const isToday = d === todayStr;
               return (
-                <div key={d} style={{ flex:1, display:"flex", flexDirection:"column", alignItems:"center", gap:3 }}>
-                  <div title={`${h} h`} style={{ width:"100%", height: Math.max(4, pct*32), background: d===todayStr?"#7C3AED":"var(--ink)", borderRadius:"3px 3px 0 0", opacity:d===todayStr?1:0.55 }} />
-                  <div style={{ fontSize:9, color:"var(--mut)", whiteSpace:"nowrap" }}>{label}</div>
+                <div key={d} style={{ width:28, flexShrink:0, display:"flex", flexDirection:"column", alignItems:"center", gap:3 }}>
+                  <div style={{ fontSize:8, color: isToday?"#7C3AED":"var(--mut)", fontWeight: isToday?600:400 }}>{h % 1 === 0 ? h : h.toFixed(1)}</div>
+                  <div title={`${h} h`} style={{ width:18, height: Math.max(4, pct*28), background: isToday?"#7C3AED":"var(--ink)", borderRadius:"3px 3px 0 0", opacity:isToday?1:0.45, transition:"height .3s ease" }} />
+                  <div style={{ fontSize:8.5, color:"var(--mut)", whiteSpace:"nowrap" }}>{label}</div>
                 </div>
               );
             })}
