@@ -94,7 +94,7 @@ html,body,#root{height:100%;background:#FAFAFA}
 .serif{font-family:'Fraunces',Georgia,serif}
 .num{font-family:var(--mono);font-variant-numeric:tabular-nums;letter-spacing:.01em}
 .mx table td.r,.mx table th.r{text-align:right;font-family:var(--mono);font-variant-numeric:tabular-nums;letter-spacing:.01em}
-.sb{width:220px;flex:0 0 220px;background:#FFFFFF;border-right:1px solid #EEEDF5;display:flex;flex-direction:column;padding:32px 16px 24px;min-height:100vh;position:sticky;top:0}
+.sb{width:220px;flex:0 0 220px;background:#FFFFFF;border-right:1px solid #EEEDF5;display:flex;flex-direction:column;padding:32px 16px 24px;height:100vh;overflow-y:auto;position:sticky;top:0;scrollbar-width:none}
 .brand{padding:0 8px 36px}
 .brand .wm{font-family:'Fraunces',serif;font-size:22px;font-weight:400;color:var(--ink);letter-spacing:.06em;line-height:1}
 .brand .sub{font-size:7.5px;letter-spacing:.42em;text-transform:uppercase;color:var(--gold);margin-top:5px;font-weight:600;opacity:.85}
@@ -8999,6 +8999,10 @@ export default function MauxCRM() {
   const togglePrivacy = () => { setPrivacyMode(p => { savePrivacyMode(!p); return !p; }); };
   const [mod, setMod] = useState("dashboard");
   const [mode, setMode] = useState("list");
+  const [modHistory, setModHistory] = useState([]);
+  const navTo = (k) => { setModHistory(h => [...h, { mod, mode }]); setMod(k); setMode("list"); setSel(null); setEscrowMode("list"); setSelEscrow(null); };
+  const goBack = () => { if (mode !== "list" && mode !== "") { setMode("list"); setSel(null); return; } const prev = modHistory[modHistory.length-1]; if (prev) { setModHistory(h => h.slice(0,-1)); setMod(prev.mod); setMode("list"); setSel(null); } };
+  const canGoBack = (mode !== "list" && mode !== "") || modHistory.length > 0;
   const [sel, setSel] = useState(null);
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState(null);
@@ -9184,7 +9188,7 @@ export default function MauxCRM() {
       setInvoices(updatedInvoices);
       setWorkEntries(updatedWork);
       setSel(inv.id);
-      setMod("fakturace");
+      navTo("fakturace");
       setMode("detail");
     } catch (err) { alert("Chyba: " + err.message); } finally { setSaving(false); }
   };
@@ -9250,7 +9254,7 @@ export default function MauxCRM() {
     catch (e) { setInvoices(p => p.map(i => i.id === inv.id ? cleanInv : i)); alert("Chyba: " + e.message); }
   };
   const openClientFromInvoice = (clientId) => {
-    setSel(clientId); setMod("klienti"); setMode("detail");
+    setSel(clientId); navTo("klienti"); setMode("detail");
   };
 
   // Escrow handlers
@@ -9337,7 +9341,7 @@ export default function MauxCRM() {
   return (
     <div className="mx">
       <style>{CSS}</style>
-      <Sidebar mod={mod} setMod={k => { setMod(k); setMode("list"); setSel(null); setEscrowMode("list"); setSelEscrow(null); }} onLogout={handleLogout}
+      <Sidebar mod={mod} setMod={navTo} onLogout={handleLogout}
         privacyMode={privacyMode} onTogglePrivacy={togglePrivacy} />
       <div className="main">
         <div className="top">
@@ -9346,6 +9350,9 @@ export default function MauxCRM() {
             <h1 className="serif">{pageTitle()}</h1>
           </div>
           <div className="top-r">
+            {canGoBack && (
+              <button onClick={goBack} style={{display:"flex",alignItems:"center",gap:6,padding:"7px 16px",borderRadius:10,border:"1.5px solid var(--line2)",background:"#fff",color:"var(--ink)",fontWeight:500,fontSize:12.5,cursor:"pointer",letterSpacing:".02em",boxShadow:"0 1px 4px rgba(0,0,0,.06)"}}>← Zpět</button>
+            )}
           </div>
         </div>
         <div className="hr" />
@@ -9369,7 +9376,7 @@ export default function MauxCRM() {
               escrows={escrows}
               expenseChecks={expenseChecks}
               onToggleExpenseCheck={toggleExpenseCheck}
-              onNav={k => { setMod(k); setMode("list"); setSel(null); }}
+              onNav={k => navTo(k)}
               assistantLogs={assistantLogs}
               assistantAttendance={assistantAttendance} />
           )}
