@@ -4067,7 +4067,8 @@ function FirmaBar({ financeItems, invoices, dpfoMonths, loanTransactions, escrow
   const planKapItem = (financeItems||[]).find(i => i.id === "fi_plan_kapital");
   const planKap    = planKapItem?.amount || 130000;
   const setPlanKap = (val) => onSaveFinance({ ...(planKapItem||{category:"plan",label:"Cíl — kapitál"}), id: "fi_plan_kapital", amount: val });
-  const onTheWayF  = (invoices||[]).filter(i => invoiceStatus(i) === "vystavena").reduce((s,i)=>s+(i.subtotal||0),0);
+  const onTheWayF  = (invoices||[]).filter(i => ["vystavena","po_splatnosti"].includes(invoiceStatus(i))).reduce((s,i)=>s+(i.subtotal||0),0);
+  const overdueF   = (invoices||[]).filter(i => invoiceStatus(i) === "po_splatnosti").reduce((s,i)=>s+(i.subtotal||0),0);
   const mRevF      = (invoices||[]).filter(i=>(i.issue_date||"").startsWith(new Date().toISOString().slice(0,7))).reduce((s,i)=>s+(i.subtotal||0),0);
   const zdravi     = totalVyd > 0 ? (mRevF / totalVyd).toFixed(2) : "—";
   const rezervaDiff = firmaRez - planKap;
@@ -4101,8 +4102,8 @@ function FirmaBar({ financeItems, invoices, dpfoMonths, loanTransactions, escrow
       <div style={{display:"flex",gap:28,alignItems:"center",flexWrap:"wrap"}}>
         <div>
           <div style={{fontSize:11,color:"var(--mut)",marginBottom:4}}>💳 Na cestě (faktury)</div>
-          <div style={{fontFamily:"Fraunces,serif",fontSize:22,fontWeight:300,color:"#D97706"}}>{fmtKc(onTheWayF)}</div>
-          <div style={{fontSize:10,color:"var(--mut)"}}>vystaveno, čeká na úhradu</div>
+          <div style={{fontFamily:"Fraunces,serif",fontSize:22,fontWeight:300,color:overdueF>0?"#DC2626":"#D97706"}}>{fmtKc(onTheWayF)}</div>
+          <div style={{fontSize:10,color:"var(--mut)"}}>{overdueF>0?<span style={{color:"#DC2626",fontWeight:600}}>⚠ {fmtKc(overdueF)} po splatnosti</span>:"vystaveno, čeká na úhradu"}</div>
         </div>
         <div>
           <div style={{fontSize:11,color:"var(--mut)",marginBottom:4}}>📈 Zdraví skóre</div>
