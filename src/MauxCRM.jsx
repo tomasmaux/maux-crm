@@ -4050,10 +4050,10 @@ function _donutArcPath(cx, cy, ro, ri, a1, a2) {
 }
 
 /* ─── FIN DONUT CHART (interaktivní, explode on hover — pro TriGrafyPanel) ─── */
-function FinDonutChart({ segments, centerDefault, centerColor, glowColor, size = 200 }) {
+function FinDonutChart({ segments, centerDefault, centerColor, glowColor, trackColor = "rgba(255,255,255,0.07)", mutedColor = "rgba(255,255,255,0.38)", size = 220 }) {
   const [hov, setHov] = useState(null);
   if (!segments || segments.length === 0) return null;
-  const cx = size/2, cy = size/2, ro = size/2 - 8, ri = Math.round(ro * 0.59);
+  const cx = size/2, cy = size/2, ro = size/2 - 10, ri = Math.round(ro * 0.60);
   const GAP = segments.length > 1 ? 2.5 : 0;
   const total = segments.reduce((s, d) => s + (d.value || 0), 0);
   if (total <= 0) return null;
@@ -4066,26 +4066,26 @@ function FinDonutChart({ segments, centerDefault, centerColor, glowColor, size =
   });
   const hSeg = hov !== null ? segs[hov] : null;
   const cVal = hSeg ? fmtKc(hSeg.value) : (centerDefault || fmtKc(total));
-  const cCol = hSeg ? hSeg.color : (centerColor || "var(--ink)");
+  const cCol = hSeg ? hSeg.color : (centerColor || "#fff");
   const cLbl = hSeg ? hSeg.label : "";
   const cPct = hSeg ? (hSeg.value / total * 100).toFixed(1) + " %" : "";
-  const glowFilter = glowColor ? `drop-shadow(0 0 10px ${glowColor}) drop-shadow(0 0 22px ${glowColor}55)` : undefined;
+  const glowFilter = glowColor ? `drop-shadow(0 0 12px ${glowColor}) drop-shadow(0 0 28px ${glowColor}66)` : undefined;
   return (
     <svg viewBox={`0 0 ${size} ${size}`} style={{ width: "100%", display: "block", filter: glowFilter, transition: "filter .3s" }}>
-      <circle cx={cx} cy={cy} r={(ro + ri) / 2} style={{ fill: "none", stroke: "var(--line)", strokeWidth: ro - ri }} />
+      <circle cx={cx} cy={cy} r={(ro + ri) / 2} style={{ fill: "none", stroke: trackColor, strokeWidth: ro - ri }} />
       {segs.map((s, i) => {
         const isH = hov === i, anyH = hov !== null;
         const rad = (s.mid - 90) * Math.PI / 180;
-        const tx = isH ? Math.cos(rad) * 10 : 0, ty = isH ? Math.sin(rad) * 10 : 0;
+        const tx = isH ? Math.cos(rad) * 11 : 0, ty = isH ? Math.sin(rad) * 11 : 0;
         return (
           <path key={i} d={_donutArcPath(cx, cy, ro, ri, s.a1, s.a2)}
-            style={{ fill: s.color, transform: `translate(${tx}px,${ty}px)`, opacity: anyH ? (isH ? 1 : 0.18) : 1, cursor: "pointer", transition: "transform .22s cubic-bezier(.34,1.4,.64,1), opacity .15s" }}
+            style={{ fill: s.color, transform: `translate(${tx}px,${ty}px)`, opacity: anyH ? (isH ? 1 : 0.15) : 1, cursor: "pointer", transition: "transform .22s cubic-bezier(.34,1.4,.64,1), opacity .15s" }}
             onMouseEnter={() => setHov(i)} onMouseLeave={() => setHov(null)} />
         );
       })}
-      <text x={cx} y={cy + (cLbl ? -10 : -4)} textAnchor="middle" fontSize={12} fontWeight="500" fontFamily="inherit" style={{ fill: cCol }}>{cVal}</text>
-      {cLbl && <text x={cx} y={cy + 8} textAnchor="middle" fontSize={8.5} fontFamily="inherit" style={{ fill: "var(--mut)" }}>{cLbl}</text>}
-      {cPct && <text x={cx} y={cy + (cLbl ? 21 : 11)} textAnchor="middle" fontSize={9} fontWeight="500" fontFamily="inherit" style={{ fill: cCol }}>{cPct}</text>}
+      <text x={cx} y={cy + (cLbl ? -8 : 6)} textAnchor="middle" fontSize={cVal.length > 12 ? 13 : 15} fontWeight="600" fontFamily="inherit" style={{ fill: cCol }}>{cVal}</text>
+      {cLbl && <text x={cx} y={cy + 11} textAnchor="middle" fontSize={9} fontFamily="inherit" style={{ fill: mutedColor }}>{cLbl}</text>}
+      {cPct && <text x={cx} y={cy + (cLbl ? 24 : 21)} textAnchor="middle" fontSize={10} fontWeight="500" fontFamily="inherit" style={{ fill: cCol }}>{cPct}</text>}
     </svg>
   );
 }
@@ -4163,112 +4163,110 @@ function TriGrafyPanel({ financeItems, onSaveFinance, invoices, dpfoMonths, loan
     setNewLabel(""); setNewAmt(0); setAdding(false);
   };
 
-  const S_COL = "#534AB7", M_COL = "#1D9E75";
-  const R_COL = firmaRez >= 0 ? "#1D9E75" : "#6B62D8";
-  const eBtn  = (onClick, active) => (
-    <button onClick={onClick} style={{ width: 26, height: 26, borderRadius: 7, border: "1px solid var(--line)", background: active ? "var(--line)" : "none", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", color: "var(--mut)", fontSize: 12, flexShrink: 0 }}>
+  const S_COL = "#8B83F0", M_COL = "#3DC99A";
+  const R_COL = firmaRez >= 0 ? "#3DC99A" : "#9C95E8";
+  const R_GLOW = firmaRez >= 0 ? "rgba(61,201,154,0.7)" : "rgba(107,98,216,0.7)";
+  const DIV = "1px solid rgba(255,255,255,0.08)";
+  const MUT = "rgba(255,255,255,0.38)";
+  const eBtn = (onClick, active, col) => (
+    <button onClick={onClick} style={{ width: 24, height: 24, borderRadius: 6, border: `1px solid rgba(255,255,255,0.12)`, background: active ? `${col}22` : "none", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", color: active ? col : MUT, fontSize: 11, flexShrink: 0, transition: "all .15s" }}>
       {active ? "✕" : "✎"}
     </button>
   );
 
   return (
-    <div style={{ background: "var(--card)", border: "1px solid var(--line)", borderRadius: 16, padding: "20px 0 16px" }}>
-      <div style={{ display: "flex", alignItems: "flex-start" }}>
+    <div style={{ background: "linear-gradient(145deg, #0F0D1E 0%, #0B1611 55%, #0F0D1E 100%)", border: "1px solid rgba(255,255,255,0.07)", borderRadius: 20, overflow: "hidden", position: "relative" }}>
+
+      {/* ambient blobs */}
+      <div style={{ position: "absolute", inset: 0, pointerEvents: "none", zIndex: 0 }}>
+        <div style={{ position: "absolute", left: "5%", top: "20%", width: 260, height: 260, borderRadius: "50%", background: "radial-gradient(circle, rgba(83,74,183,0.18) 0%, transparent 70%)", filter: "blur(32px)" }} />
+        <div style={{ position: "absolute", left: "38%", top: "10%", width: 280, height: 280, borderRadius: "50%", background: "radial-gradient(circle, rgba(29,158,117,0.15) 0%, transparent 70%)", filter: "blur(32px)" }} />
+        <div style={{ position: "absolute", right: "5%", top: "20%", width: 240, height: 240, borderRadius: "50%", background: `radial-gradient(circle, ${firmaRez >= 0 ? "rgba(29,158,117,0.14)" : "rgba(107,98,216,0.18)"} 0%, transparent 70%)`, filter: "blur(32px)" }} />
+      </div>
+
+      <div style={{ display: "flex", alignItems: "stretch", position: "relative", zIndex: 1 }}>
 
         {/* ── SPOŘÁK ── */}
-        <div style={{ flex: 1, padding: "0 22px 0 24px", borderRight: "1px solid var(--line)" }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 6 }}>
-            <div>
-              <div style={{ fontSize: 9, letterSpacing: ".1em", color: S_COL, fontWeight: 600, marginBottom: 2 }}>Spořící účet · obálky</div>
-              <div style={{ fontSize: 20, fontWeight: 500, color: "var(--ink)" }}>{fmtKc(actualBal)}</div>
-            </div>
-            {eBtn(() => { setBalInput(actualBal); setEditBal(e => !e); }, editBal)}
+        <div style={{ flex: 1, padding: "24px 28px 20px", borderRight: DIV }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 4 }}>
+            <div style={{ fontSize: 8.5, letterSpacing: ".14em", color: S_COL, fontWeight: 700, textTransform: "uppercase" }}>Spořící účet · obálky</div>
+            {eBtn(() => { setBalInput(actualBal); setEditBal(e => !e); }, editBal, S_COL)}
           </div>
+          <div style={{ fontFamily: "Fraunces,serif", fontSize: 30, fontWeight: 300, color: "#fff", lineHeight: 1, marginBottom: 18 }}>{fmtKc(actualBal)}</div>
           {editBal && (
-            <div style={{ display: "flex", gap: 5, marginBottom: 10, alignItems: "center" }}>
-              <input type="number" value={balInput} autoFocus
-                onChange={e => setBalInput(Number(e.target.value))}
+            <div style={{ display: "flex", gap: 5, marginBottom: 14, alignItems: "center" }}>
+              <input type="number" value={balInput} autoFocus onChange={e => setBalInput(Number(e.target.value))}
                 onKeyDown={e => { if (e.key === "Enter") { onSaveFinance({ ...zItem, amount: balInput }); setEditBal(false); } if (e.key === "Escape") setEditBal(false); }}
-                style={{ flex: 1, fontSize: 16, padding: "5px 8px", border: `2px solid ${S_COL}`, borderRadius: 7, outline: "none", fontFamily: "inherit" }} />
-              <button onClick={() => { onSaveFinance({ ...zItem, amount: balInput }); setEditBal(false); }}
-                style={{ background: S_COL, color: "#fff", border: "none", borderRadius: 7, padding: "5px 10px", cursor: "pointer", fontWeight: 700 }}>✓</button>
-              <button onClick={() => setEditBal(false)}
-                style={{ background: "none", border: "1px solid var(--line)", borderRadius: 7, padding: "5px 8px", cursor: "pointer", color: "var(--mut)" }}>✕</button>
+                style={{ flex: 1, fontSize: 15, padding: "5px 8px", border: `2px solid ${S_COL}`, borderRadius: 7, outline: "none", fontFamily: "inherit", background: "rgba(255,255,255,0.07)", color: "#fff" }} />
+              <button onClick={() => { onSaveFinance({ ...zItem, amount: balInput }); setEditBal(false); }} style={{ background: S_COL, color: "#fff", border: "none", borderRadius: 7, padding: "5px 10px", cursor: "pointer", fontWeight: 700 }}>✓</button>
+              <button onClick={() => setEditBal(false)} style={{ background: "none", border: `1px solid rgba(255,255,255,0.15)`, borderRadius: 7, padding: "5px 8px", cursor: "pointer", color: MUT }}>✕</button>
             </div>
           )}
-          <FinDonutChart segments={sporSegs} centerDefault={fmtKc(actualBal)} centerColor={S_COL} glowColor="rgba(83,74,183,0.55)" size={200} />
-          <div style={{ fontSize: 8.5, color: "var(--mut)", textAlign: "center", marginTop: 4 }}>
-            Zaúčtováno {fmtKc(totalEar)} · najetím → detail
+          <FinDonutChart segments={sporSegs} centerDefault={fmtKc(actualBal)} centerColor={S_COL} glowColor="rgba(83,74,183,0.75)" size={220} />
+          <div style={{ fontSize: 8.5, color: MUT, textAlign: "center", marginTop: 8, letterSpacing: ".04em" }}>
+            Zaúčtováno {fmtKc(totalEar)} · hover → segment
           </div>
         </div>
 
         {/* ── MAJETEK ── */}
-        <div style={{ flex: 1, padding: "0 22px", borderRight: "1px solid var(--line)" }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 6 }}>
-            <div>
-              <div style={{ fontSize: 9, letterSpacing: ".1em", color: M_COL, fontWeight: 600, marginBottom: 2 }}>Osobní majetek</div>
-              <div style={{ fontSize: 20, fontWeight: 500, color: "var(--ink)" }}>{fmtKc(totalMaj)}</div>
-            </div>
-            {eBtn(() => setEditMaj(e => !e), editMaj)}
+        <div style={{ flex: 1, padding: "24px 28px 20px", borderRight: DIV }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 4 }}>
+            <div style={{ fontSize: 8.5, letterSpacing: ".14em", color: M_COL, fontWeight: 700, textTransform: "uppercase" }}>Osobní majetek</div>
+            {eBtn(() => setEditMaj(e => !e), editMaj, M_COL)}
           </div>
+          <div style={{ fontFamily: "Fraunces,serif", fontSize: 30, fontWeight: 300, color: "#fff", lineHeight: 1, marginBottom: 18 }}>{fmtKc(totalMaj)}</div>
           {editMaj ? (
             <div>
               {allMajSegs.map((seg, i) => (
-                <div key={i} style={{ display: "flex", alignItems: "center", gap: 5, marginBottom: 5 }}>
+                <div key={i} style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6 }}>
                   <span style={{ width: 7, height: 7, borderRadius: "50%", background: seg.color, flexShrink: 0, display: "block" }} />
-                  <span style={{ flex: 1, fontSize: 11, color: "var(--ink)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{seg.label}</span>
+                  <span style={{ flex: 1, fontSize: 11, color: "rgba(255,255,255,0.75)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{seg.label}</span>
                   {editId === seg.item?.id ? (
                     <>
                       <input type="number" value={editVal} autoFocus onChange={e => setEditVal(Number(e.target.value))}
                         onKeyDown={e => { if (e.key === "Enter") saveEdit(seg.item); if (e.key === "Escape") setEditId(null); }}
-                        style={{ width: 90, fontSize: 12, padding: "3px 6px", border: `2px solid ${seg.color}`, borderRadius: 6, outline: "none", fontFamily: "inherit" }} />
+                        style={{ width: 88, fontSize: 12, padding: "3px 6px", border: `2px solid ${seg.color}`, borderRadius: 6, outline: "none", fontFamily: "inherit", background: "rgba(255,255,255,0.07)", color: "#fff" }} />
                       <button onClick={() => saveEdit(seg.item)} style={{ background: seg.color, color: "#fff", border: "none", borderRadius: 5, padding: "3px 7px", cursor: "pointer", fontWeight: 700, fontSize: 11 }}>✓</button>
-                      <button onClick={() => setEditId(null)} style={{ background: "none", border: "1px solid var(--line)", borderRadius: 5, padding: "3px 6px", cursor: "pointer", color: "var(--mut)", fontSize: 11 }}>✕</button>
+                      <button onClick={() => setEditId(null)} style={{ background: "none", border: "1px solid rgba(255,255,255,0.15)", borderRadius: 5, padding: "3px 6px", cursor: "pointer", color: MUT, fontSize: 11 }}>✕</button>
                     </>
                   ) : (
                     <>
-                      <span style={{ fontSize: 12, fontWeight: 500, color: "var(--ink)", whiteSpace: "nowrap" }}>{fmtKc(seg.value)}</span>
-                      <button onClick={() => { setEditVal(seg.value); setEditId(seg.item?.id); }}
-                        style={{ background: "none", border: "none", cursor: "pointer", color: "var(--mut)", fontSize: 11, padding: "0 2px" }}>✎</button>
+                      <span style={{ fontSize: 12, fontWeight: 500, color: "#fff", whiteSpace: "nowrap" }}>{fmtKc(seg.value)}</span>
+                      <button onClick={() => { setEditVal(seg.value); setEditId(seg.item?.id); }} style={{ background: "none", border: "none", cursor: "pointer", color: MUT, fontSize: 11, padding: "0 2px" }}>✎</button>
                     </>
                   )}
                 </div>
               ))}
               {!adding ? (
-                <button onClick={() => setAdding(true)}
-                  style={{ width: "100%", marginTop: 5, background: "none", border: `1px dashed ${M_COL}`, borderRadius: 7, padding: "5px", fontSize: 11, color: M_COL, cursor: "pointer" }}>
-                  + Přidat položku
-                </button>
+                <button onClick={() => setAdding(true)} style={{ width: "100%", marginTop: 6, background: "none", border: `1px dashed ${M_COL}66`, borderRadius: 7, padding: "5px", fontSize: 11, color: M_COL, cursor: "pointer" }}>+ Přidat položku</button>
               ) : (
-                <div style={{ display: "flex", gap: 4, marginTop: 5, flexWrap: "wrap" }}>
+                <div style={{ display: "flex", gap: 4, marginTop: 6, flexWrap: "wrap" }}>
                   <input placeholder="Název" value={newLabel} onChange={e => setNewLabel(e.target.value)}
-                    style={{ flex: 1, fontSize: 11, padding: "4px 7px", border: `2px solid ${M_COL}`, borderRadius: 6, outline: "none", minWidth: 80, fontFamily: "inherit" }} />
+                    style={{ flex: 1, fontSize: 11, padding: "4px 7px", border: `2px solid ${M_COL}`, borderRadius: 6, outline: "none", minWidth: 80, fontFamily: "inherit", background: "rgba(255,255,255,0.07)", color: "#fff" }} />
                   <input type="number" placeholder="Kč" value={newAmt||""} onChange={e => setNewAmt(Number(e.target.value))}
                     onKeyDown={e => { if (e.key === "Enter") saveNew(); if (e.key === "Escape") setAdding(false); }}
-                    style={{ width: 80, fontSize: 11, padding: "4px 7px", border: `2px solid ${M_COL}`, borderRadius: 6, outline: "none", fontFamily: "inherit" }} />
+                    style={{ width: 80, fontSize: 11, padding: "4px 7px", border: `2px solid ${M_COL}`, borderRadius: 6, outline: "none", fontFamily: "inherit", background: "rgba(255,255,255,0.07)", color: "#fff" }} />
                   <button onClick={saveNew} style={{ background: M_COL, color: "#fff", border: "none", borderRadius: 6, padding: "4px 8px", cursor: "pointer", fontWeight: 700, fontSize: 11 }}>✓</button>
-                  <button onClick={() => setAdding(false)} style={{ background: "none", border: "1px solid var(--line)", borderRadius: 6, padding: "4px 7px", cursor: "pointer", color: "var(--mut)", fontSize: 11 }}>✕</button>
+                  <button onClick={() => setAdding(false)} style={{ background: "none", border: "1px solid rgba(255,255,255,0.15)", borderRadius: 6, padding: "4px 7px", cursor: "pointer", color: MUT, fontSize: 11 }}>✕</button>
                 </div>
               )}
             </div>
           ) : (
             <>
-              <FinDonutChart segments={allMajSegs.map(s => ({ label: s.label, value: s.value, color: s.color }))} centerDefault={fmtKc(totalMaj)} centerColor={M_COL} glowColor="rgba(29,158,117,0.55)" size={200} />
-              <div style={{ fontSize: 8.5, color: "var(--mut)", textAlign: "center", marginTop: 4 }}>{allMajSegs.length} aktiva · najetím → detail</div>
+              <FinDonutChart segments={allMajSegs.map(s => ({ label: s.label, value: s.value, color: s.color }))} centerDefault={fmtKc(totalMaj)} centerColor={M_COL} glowColor="rgba(29,158,117,0.75)" size={220} />
+              <div style={{ fontSize: 8.5, color: MUT, textAlign: "center", marginTop: 8, letterSpacing: ".04em" }}>{allMajSegs.length} aktiva · hover → segment</div>
             </>
           )}
         </div>
 
         {/* ── REZERVA ── */}
-        <div style={{ flex: 1, padding: "0 24px 0 22px" }}>
-          <div style={{ marginBottom: 6 }}>
-            <div style={{ fontSize: 9, letterSpacing: ".1em", color: R_COL, fontWeight: 600, marginBottom: 2 }}>Firemní rezerva</div>
-            <div style={{ fontSize: 20, fontWeight: 500, color: firmaRez >= 0 ? "var(--ink)" : "#DC2626" }}>
-              {firmaRez >= 0 ? fmtKc(firmaRez) : `−${fmtKc(Math.abs(firmaRez))}`}
-            </div>
+        <div style={{ flex: 1, padding: "24px 28px 20px" }}>
+          <div style={{ fontSize: 8.5, letterSpacing: ".14em", color: R_COL, fontWeight: 700, textTransform: "uppercase", marginBottom: 4 }}>Firemní rezerva</div>
+          <div style={{ fontFamily: "Fraunces,serif", fontSize: 30, fontWeight: 300, color: firmaRez >= 0 ? "#fff" : "#F87171", lineHeight: 1, marginBottom: 18 }}>
+            {firmaRez >= 0 ? fmtKc(firmaRez) : `−${fmtKc(Math.abs(firmaRez))}`}
           </div>
-          <FinDonutChart segments={rezSegs} centerDefault={firmaRez >= 0 ? fmtKc(firmaRez) : `−${fmtKc(Math.abs(firmaRez))}`} centerColor={R_COL} glowColor={firmaRez >= 0 ? "rgba(29,158,117,0.55)" : "rgba(107,98,216,0.55)"} size={200} />
-          <div style={{ fontSize: 8.5, color: "var(--mut)", textAlign: "center", marginTop: 4 }}>
+          <FinDonutChart segments={rezSegs} centerDefault={firmaRez >= 0 ? fmtKc(firmaRez) : `−${fmtKc(Math.abs(firmaRez))}`} centerColor={R_COL} glowColor={R_GLOW} size={220} />
+          <div style={{ fontSize: 8.5, color: MUT, textAlign: "center", marginTop: 8, letterSpacing: ".04em" }}>
             {firmaRez >= 0
               ? `✓ ${Math.round((firmaRez/Math.max(planKap,1))*100)} % cíle · cíl ${fmtKc(planKap)}`
               : `↓ chybí ${fmtKc(planKap + Math.abs(firmaRez))} · cíl ${fmtKc(planKap)}`}
