@@ -4050,7 +4050,7 @@ function _donutArcPath(cx, cy, ro, ri, a1, a2) {
 }
 
 /* ─── FIN DONUT CHART (interaktivní, explode on hover — pro TriGrafyPanel) ─── */
-function FinDonutChart({ segments, centerDefault, centerColor, size = 200 }) {
+function FinDonutChart({ segments, centerDefault, centerColor, glowColor, size = 200 }) {
   const [hov, setHov] = useState(null);
   if (!segments || segments.length === 0) return null;
   const cx = size/2, cy = size/2, ro = size/2 - 8, ri = Math.round(ro * 0.59);
@@ -4069,8 +4069,9 @@ function FinDonutChart({ segments, centerDefault, centerColor, size = 200 }) {
   const cCol = hSeg ? hSeg.color : (centerColor || "var(--ink)");
   const cLbl = hSeg ? hSeg.label : "";
   const cPct = hSeg ? (hSeg.value / total * 100).toFixed(1) + " %" : "";
+  const glowFilter = glowColor ? `drop-shadow(0 0 10px ${glowColor}) drop-shadow(0 0 22px ${glowColor}55)` : undefined;
   return (
-    <svg viewBox={`0 0 ${size} ${size}`} style={{ width: "100%", display: "block" }}>
+    <svg viewBox={`0 0 ${size} ${size}`} style={{ width: "100%", display: "block", filter: glowFilter, transition: "filter .3s" }}>
       <circle cx={cx} cy={cy} r={(ro + ri) / 2} style={{ fill: "none", stroke: "var(--line)", strokeWidth: ro - ri }} />
       {segs.map((s, i) => {
         const isH = hov === i, anyH = hov !== null;
@@ -4195,7 +4196,7 @@ function TriGrafyPanel({ financeItems, onSaveFinance, invoices, dpfoMonths, loan
                 style={{ background: "none", border: "1px solid var(--line)", borderRadius: 7, padding: "5px 8px", cursor: "pointer", color: "var(--mut)" }}>✕</button>
             </div>
           )}
-          <FinDonutChart segments={sporSegs} centerDefault={fmtKc(actualBal)} centerColor={S_COL} size={200} />
+          <FinDonutChart segments={sporSegs} centerDefault={fmtKc(actualBal)} centerColor={S_COL} glowColor="rgba(83,74,183,0.55)" size={200} />
           <div style={{ fontSize: 8.5, color: "var(--mut)", textAlign: "center", marginTop: 4 }}>
             Zaúčtováno {fmtKc(totalEar)} · najetím → detail
           </div>
@@ -4252,7 +4253,7 @@ function TriGrafyPanel({ financeItems, onSaveFinance, invoices, dpfoMonths, loan
             </div>
           ) : (
             <>
-              <FinDonutChart segments={allMajSegs.map(s => ({ label: s.label, value: s.value, color: s.color }))} centerDefault={fmtKc(totalMaj)} centerColor={M_COL} size={200} />
+              <FinDonutChart segments={allMajSegs.map(s => ({ label: s.label, value: s.value, color: s.color }))} centerDefault={fmtKc(totalMaj)} centerColor={M_COL} glowColor="rgba(29,158,117,0.55)" size={200} />
               <div style={{ fontSize: 8.5, color: "var(--mut)", textAlign: "center", marginTop: 4 }}>{allMajSegs.length} aktiva · najetím → detail</div>
             </>
           )}
@@ -4266,7 +4267,7 @@ function TriGrafyPanel({ financeItems, onSaveFinance, invoices, dpfoMonths, loan
               {firmaRez >= 0 ? fmtKc(firmaRez) : `−${fmtKc(Math.abs(firmaRez))}`}
             </div>
           </div>
-          <FinDonutChart segments={rezSegs} centerDefault={firmaRez >= 0 ? fmtKc(firmaRez) : `−${fmtKc(Math.abs(firmaRez))}`} centerColor={R_COL} size={200} />
+          <FinDonutChart segments={rezSegs} centerDefault={firmaRez >= 0 ? fmtKc(firmaRez) : `−${fmtKc(Math.abs(firmaRez))}`} centerColor={R_COL} glowColor={firmaRez >= 0 ? "rgba(29,158,117,0.55)" : "rgba(107,98,216,0.55)"} size={200} />
           <div style={{ fontSize: 8.5, color: "var(--mut)", textAlign: "center", marginTop: 4 }}>
             {firmaRez >= 0
               ? `✓ ${Math.round((firmaRez/Math.max(planKap,1))*100)} % cíle · cíl ${fmtKc(planKap)}`
@@ -4450,9 +4451,9 @@ function BackupReminderBanner({ onDone }) {
 /* ─── DASHBOARD ─── */
 // Drag-and-drop panel IDs — pořadí a viditelnost karet na dashboardu
 // Verze: zvýšit pokud chceme vynutit reset uloženého pořadí u všech uživatelů
-const PANEL_LAYOUT_VERSION = 4;
+const PANEL_LAYOUT_VERSION = 5;
 const DEFAULT_PANELS = [
-  "finance","c35","kpi","minisporak","majetek","firma","josef",
+  "finance","c35","kpi","trigrafy","firma","josef",
   "chart","klienti","uschovy","fakturace","happylife","claude"
 ];
 function loadPanelState() {
