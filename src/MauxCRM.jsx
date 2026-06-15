@@ -4049,6 +4049,39 @@ function _donutArcPath(cx, cy, ro, ri, a1, a2) {
   return `M${x1} ${y1} A${ro} ${ro} 0 ${lg} 1 ${x2} ${y2} L${x3} ${y3} A${ri} ${ri} 0 ${lg} 0 ${x4} ${y4}Z`;
 }
 
+/* ─── SQUARE GLASS — plnící sklenice, jeden segment ─── */
+function SquareGlass({ label, value, color, pct, glassH = 88, glassW = 50 }) {
+  const fill = Math.min(Math.max(pct, 0), 1);
+  return (
+    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 5 }} title={`${label}: ${fmtKc(value)}`}>
+      <div style={{ width: glassW, height: glassH, borderRadius: 10, border: `1.5px solid ${color}35`, background: `${color}07`, position: "relative", overflow: "hidden" }}>
+        {/* liquid fill */}
+        <div style={{ position: "absolute", bottom: 0, left: 0, right: 0, height: `${fill * 100}%`, background: `linear-gradient(0deg, ${color} 0%, ${color}BB 100%)`, transition: "height .9s cubic-bezier(.34,1.05,.64,1)" }} />
+        {/* shine */}
+        <div style={{ position: "absolute", inset: 0, background: "linear-gradient(90deg, rgba(255,255,255,0.10) 0%, transparent 35%)", pointerEvents: "none" }} />
+        {/* % label inside */}
+        <div style={{ position: "absolute", bottom: 4, left: 0, right: 0, textAlign: "center", fontSize: 9, fontWeight: 700, color: fill > 0.25 ? "rgba(255,255,255,0.85)" : color, lineHeight: 1 }}>
+          {Math.round(fill * 100)}%
+        </div>
+      </div>
+      <div style={{ fontSize: 8, color: "var(--mut)", textAlign: "center", maxWidth: glassW + 6, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", letterSpacing: ".02em" }}>{label}</div>
+    </div>
+  );
+}
+
+/* ─── SQUARE GLASS ROW — řada plnících sklenic pro sadu segmentů ─── */
+function SquareGlassRow({ segments, totalOverride, glassH, glassW }) {
+  const total = totalOverride || segments.reduce((s, d) => s + (d.value || 0), 0);
+  if (!total) return null;
+  return (
+    <div style={{ display: "flex", gap: 7, justifyContent: "center", alignItems: "flex-end", flexWrap: "wrap", padding: "6px 0 2px" }}>
+      {segments.filter(s => s.value > 0).map((seg, i) => (
+        <SquareGlass key={i} label={seg.label} value={seg.value} color={seg.color} pct={seg.value / total} glassH={glassH} glassW={glassW} />
+      ))}
+    </div>
+  );
+}
+
 /* ─── FIN DONUT CHART (interaktivní, explode on hover — pro TriGrafyPanel) ─── */
 function FinDonutChart({ segments, centerDefault, centerColor, size = 170 }) {
   const [hov, setHov] = useState(null);
@@ -4107,11 +4140,11 @@ function TriGrafyPanel({ financeItems, onSaveFinance, invoices, dpfoMonths, loan
     && !autoLbls.has((i.label||"").toLowerCase().trim())
   );
   const envSegs    = [
-    { label: "DPH",          amount: dphAuto,   color: "#534AB7" },
-    { label: "DPFO 2026",    amount: dpfoAcc,   color: "#7F77DD" },
-    ...(bobBal > 0 ? [{ label: "Bobnice", amount: bobBal, color: "#A89FF5" }] : []),
-    { label: "Daň z úschov", amount: danUschov, color: "#C4BEF8" },
-    ...manObálky.map((o,idx) => ({ label: o.label, amount: o.amount||0, color: ["#6B62D8","#9C95E8"][idx%2] })),
+    { label: "DPH",          amount: dphAuto,   color: "#5B4AD4" },
+    { label: "DPFO 2026",    amount: dpfoAcc,   color: "#7B6EE8" },
+    ...(bobBal > 0 ? [{ label: "Bobnice", amount: bobBal, color: "#9C94F0" }] : []),
+    { label: "Daň z úschov", amount: danUschov, color: "#BDB8F7" },
+    ...manObálky.map((o,idx) => ({ label: o.label, amount: o.amount||0, color: ["#4338CA","#6D64E8"][idx%2] })),
   ].filter(e => e.amount > 0);
   const totalEar   = envSegs.reduce((s,e) => s+e.amount, 0);
   const volné      = actualBal - totalEar;
@@ -4124,7 +4157,7 @@ function TriGrafyPanel({ financeItems, onSaveFinance, invoices, dpfoMonths, loan
   const akcieItem  = (financeItems||[]).find(i => i.id === "fi_ma_01");
   const stavItem   = (financeItems||[]).find(i => i.id === "fi_ma_02");
   const extraMaj   = (financeItems||[]).filter(i => i.category === "majetek" && !["fi_ma_01","fi_ma_02","fi_ma_03"].includes(i.id));
-  const MAJ_C      = ["#1D9E75","#82D4B5","#3BBF8E","#0F6E56","#6AD4B0","#A6E6CE"];
+  const MAJ_C      = ["#D97706","#F59E0B","#B45309","#FBBF24","#92400E","#FDE68A"];
   const allMajSegs = [
     akcieItem && { item: akcieItem, label: "Akcie / ETF",      value: akcieItem.amount||0, color: MAJ_C[0] },
     stavItem  && { item: stavItem,  label: "Stavební spoření", value: stavItem.amount||0,  color: MAJ_C[1] },
@@ -4162,49 +4195,31 @@ function TriGrafyPanel({ financeItems, onSaveFinance, invoices, dpfoMonths, loan
     setNewLabel(""); setNewAmt(0); setAdding(false);
   };
 
-  const S_COL = "#534AB7", M_COL = "#1D9E75";
-  const R_COL = firmaRez >= 0 ? "#1D9E75" : "#6B62D8";
+  const S_COL = "#5B4AD4", M_COL = "#D97706";
+  const R_COL = firmaRez >= 0 ? "#059669" : "#6B62D8";
 
-  const card = (accentColor) => ({
-    flex: 1,
-    background: "var(--card)",
-    border: "1px solid var(--line)",
-    borderRadius: 16,
-    padding: "22px 24px 18px",
-    display: "flex",
-    flexDirection: "column",
-    boxShadow: `0 1px 3px rgba(0,0,0,0.04), 0 8px 32px ${accentColor}18`,
+  const card = (accentColor, extraShadow) => ({
+    flex: 1, background: "var(--card)", border: "1px solid var(--line)", borderRadius: 16,
+    padding: "22px 24px 18px", display: "flex", flexDirection: "column",
+    boxShadow: extraShadow || `0 1px 3px rgba(0,0,0,0.04), 0 8px 32px ${accentColor}22`,
   });
-
-  const lbl = (col) => ({
-    fontSize: 8.5, letterSpacing: ".13em", color: col,
-    fontWeight: 700, textTransform: "uppercase", marginBottom: 3,
-  });
-
-  const bigNum = (col) => ({
-    fontFamily: "Fraunces,serif", fontSize: 26, fontWeight: 300,
-    color: col || "var(--ink)", lineHeight: 1, marginBottom: 16,
-  });
-
+  const lbl = (col) => ({ fontSize: 8.5, letterSpacing: ".13em", color: col, fontWeight: 700, textTransform: "uppercase", marginBottom: 3 });
+  const bigNum = (col) => ({ fontFamily: "Fraunces,serif", fontSize: 26, fontWeight: 300, color: col || "var(--ink)", lineHeight: 1, marginBottom: 14 });
   const eBtn = (onClick, active, col) => (
-    <button onClick={onClick} style={{ width: 24, height: 24, borderRadius: 6, border: "1px solid var(--line)", background: active ? `${col}15` : "none", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", color: active ? col : "var(--mut)", fontSize: 11, flexShrink: 0 }}>
+    <button onClick={onClick} style={{ width: 24, height: 24, borderRadius: 6, border: "1px solid var(--line)", background: active ? `${col}18` : "none", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", color: active ? col : "var(--mut)", fontSize: 11, flexShrink: 0 }}>
       {active ? "✕" : "✎"}
     </button>
   );
 
-  const aura = (col) => (
-    <div style={{ position: "relative", margin: "0 auto", width: "100%", maxWidth: 200 }}>
-      <div style={{ position: "absolute", inset: 0, background: `radial-gradient(circle at center, ${col}14 0%, ${col}06 45%, transparent 70%)`, borderRadius: "50%", pointerEvents: "none" }} />
-      <div style={{ position: "relative" }}>{col}</div>
-    </div>
-  );
-
-  const DonutWithAura = ({ segments, centerDefault, centerColor, auraColor, size = 170 }) => (
-    <div style={{ position: "relative", margin: "0 -4px" }}>
-      <div style={{ position: "absolute", inset: "10%", background: `radial-gradient(circle, ${auraColor}18 0%, ${auraColor}08 50%, transparent 75%)`, borderRadius: "50%", pointerEvents: "none" }} />
-      <FinDonutChart segments={segments} centerDefault={centerDefault} centerColor={centerColor} size={size} />
-    </div>
-  );
+  // spořák segments for glass row (excluding Volné)
+  const sporGlassSegs = envSegs.map(e => ({ label: e.label, value: e.amount, color: e.color }));
+  // majetek segments
+  const majGlassSegs = allMajSegs.map(s => ({ label: s.label, value: s.value, color: s.color }));
+  // rezerva — one glass filling to % of goal
+  const rezPct = planKap > 0 ? firmaRez / planKap : 0;
+  const rezGlassSegs = firmaRez >= 0
+    ? [{ label: "Rezerva", value: firmaRez, color: "#059669" }, ...(firmaRez < planKap ? [{ label: "Do cíle", value: planKap - firmaRez, color: "#D1FAE5" }] : [])]
+    : [{ label: "Deficit", value: Math.abs(firmaRez), color: "#6B62D8" }, { label: "Do cíle", value: planKap, color: "#EDE9FE" }];
 
   return (
     <div style={{ display: "flex", gap: 12 }}>
@@ -4225,14 +4240,14 @@ function TriGrafyPanel({ financeItems, onSaveFinance, invoices, dpfoMonths, loan
             <button onClick={() => setEditBal(false)} style={{ background: "none", border: "1px solid var(--line)", borderRadius: 7, padding: "5px 8px", cursor: "pointer", color: "var(--mut)" }}>✕</button>
           </div>
         )}
-        <DonutWithAura segments={sporSegs} centerDefault={fmtKc(actualBal)} centerColor={S_COL} auraColor={S_COL} />
-        <div style={{ fontSize: 8.5, color: "var(--mut)", textAlign: "center", marginTop: 10 }}>
-          Zaúčtováno {fmtKc(totalEar)} · hover → detail
+        <SquareGlassRow segments={sporGlassSegs} glassH={90} glassW={48} />
+        <div style={{ fontSize: 8.5, color: "var(--mut)", textAlign: "center", marginTop: 8 }}>
+          Zaúčtováno {fmtKc(totalEar)} z {fmtKc(actualBal)}
         </div>
       </div>
 
       {/* ── MAJETEK ── */}
-      <div style={card(M_COL)}>
+      <div style={card(M_COL, "0 1px 3px rgba(0,0,0,0.04), 0 8px 40px rgba(217,119,6,0.20)")}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 2 }}>
           <div style={lbl(M_COL)}>Osobní majetek</div>
           {eBtn(() => setEditMaj(e => !e), editMaj, M_COL)}
@@ -4276,8 +4291,8 @@ function TriGrafyPanel({ financeItems, onSaveFinance, invoices, dpfoMonths, loan
           </div>
         ) : (
           <>
-            <DonutWithAura segments={allMajSegs.map(s => ({ label: s.label, value: s.value, color: s.color }))} centerDefault={fmtKc(totalMaj)} centerColor={M_COL} auraColor={M_COL} />
-            <div style={{ fontSize: 8.5, color: "var(--mut)", textAlign: "center", marginTop: 10 }}>{allMajSegs.length} aktiva · hover → detail</div>
+            <SquareGlassRow segments={majGlassSegs} glassH={90} glassW={48} />
+            <div style={{ fontSize: 8.5, color: "var(--mut)", textAlign: "center", marginTop: 8 }}>{allMajSegs.length} aktiva · hover → hodnota</div>
           </>
         )}
       </div>
@@ -4288,10 +4303,10 @@ function TriGrafyPanel({ financeItems, onSaveFinance, invoices, dpfoMonths, loan
         <div style={bigNum(firmaRez < 0 ? "#DC2626" : undefined)}>
           {firmaRez >= 0 ? fmtKc(firmaRez) : `−${fmtKc(Math.abs(firmaRez))}`}
         </div>
-        <DonutWithAura segments={rezSegs} centerDefault={firmaRez >= 0 ? fmtKc(firmaRez) : `−${fmtKc(Math.abs(firmaRez))}`} centerColor={R_COL} auraColor={R_COL} />
-        <div style={{ fontSize: 8.5, color: "var(--mut)", textAlign: "center", marginTop: 10 }}>
+        <SquareGlassRow segments={rezGlassSegs} glassH={90} glassW={80} />
+        <div style={{ fontSize: 8.5, color: "var(--mut)", textAlign: "center", marginTop: 8 }}>
           {firmaRez >= 0
-            ? `✓ ${Math.round((firmaRez/Math.max(planKap,1))*100)} % cíle · cíl ${fmtKc(planKap)}`
+            ? `✓ ${Math.round(Math.min(rezPct,1)*100)} % cíle · cíl ${fmtKc(planKap)}`
             : `↓ chybí ${fmtKc(planKap + Math.abs(firmaRez))} · cíl ${fmtKc(planKap)}`}
         </div>
       </div>
