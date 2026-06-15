@@ -4041,6 +4041,244 @@ function EscrowLiveTile({ escrows }) {
   );
 }
 
+/* ─── DONUT ARC HELPER ─── */
+function _donutArcPath(cx, cy, ro, ri, a1, a2) {
+  const pt = (r, deg) => { const rad = (deg - 90) * Math.PI / 180; return [cx + r * Math.cos(rad), cy + r * Math.sin(rad)]; };
+  const [x1,y1]=pt(ro,a1),[x2,y2]=pt(ro,a2),[x3,y3]=pt(ri,a2),[x4,y4]=pt(ri,a1);
+  const lg = (a2 - a1) > 180 ? 1 : 0;
+  return `M${x1} ${y1} A${ro} ${ro} 0 ${lg} 1 ${x2} ${y2} L${x3} ${y3} A${ri} ${ri} 0 ${lg} 0 ${x4} ${y4}Z`;
+}
+
+/* ─── FIN DONUT CHART (interaktivní, explode on hover — pro TriGrafyPanel) ─── */
+function FinDonutChart({ segments, centerDefault, centerColor, size = 200 }) {
+  const [hov, setHov] = useState(null);
+  if (!segments || segments.length === 0) return null;
+  const cx = size/2, cy = size/2, ro = size/2 - 8, ri = Math.round(ro * 0.59);
+  const GAP = segments.length > 1 ? 2.5 : 0;
+  const total = segments.reduce((s, d) => s + (d.value || 0), 0);
+  if (total <= 0) return null;
+  let angle = 0;
+  const segs = segments.map(seg => {
+    const sweep = (seg.value / total) * 360 - GAP;
+    const s = { ...seg, a1: angle, a2: angle + Math.max(sweep, 0.01), mid: angle + sweep / 2 };
+    angle += sweep + GAP;
+    return s;
+  });
+  const hSeg = hov !== null ? segs[hov] : null;
+  const cVal = hSeg ? fmtKc(hSeg.value) : (centerDefault || fmtKc(total));
+  const cCol = hSeg ? hSeg.color : (centerColor || "var(--ink)");
+  const cLbl = hSeg ? hSeg.label : "";
+  const cPct = hSeg ? (hSeg.value / total * 100).toFixed(1) + " %" : "";
+  return (
+    <svg viewBox={`0 0 ${size} ${size}`} style={{ width: "100%", display: "block" }}>
+      <circle cx={cx} cy={cy} r={(ro + ri) / 2} style={{ fill: "none", stroke: "var(--line)", strokeWidth: ro - ri }} />
+      {segs.map((s, i) => {
+        const isH = hov === i, anyH = hov !== null;
+        const rad = (s.mid - 90) * Math.PI / 180;
+        const tx = isH ? Math.cos(rad) * 10 : 0, ty = isH ? Math.sin(rad) * 10 : 0;
+        return (
+          <path key={i} d={_donutArcPath(cx, cy, ro, ri, s.a1, s.a2)}
+            style={{ fill: s.color, transform: `translate(${tx}px,${ty}px)`, opacity: anyH ? (isH ? 1 : 0.18) : 1, cursor: "pointer", transition: "transform .22s cubic-bezier(.34,1.4,.64,1), opacity .15s" }}
+            onMouseEnter={() => setHov(i)} onMouseLeave={() => setHov(null)} />
+        );
+      })}
+      <text x={cx} y={cy + (cLbl ? -10 : -4)} textAnchor="middle" fontSize={12} fontWeight="500" fontFamily="inherit" style={{ fill: cCol }}>{cVal}</text>
+      {cLbl && <text x={cx} y={cy + 8} textAnchor="middle" fontSize={8.5} fontFamily="inherit" style={{ fill: "var(--mut)" }}>{cLbl}</text>}
+      {cPct && <text x={cx} y={cy + (cLbl ? 21 : 11)} textAnchor="middle" fontSize={9} fontWeight="500" fontFamily="inherit" style={{ fill: cCol }}>{cPct}</text>}
+    </svg>
+  );
+}
+
+/* ─── TRI GRAFY PANEL — Spořák + Majetek + Rezerva jako interaktivní donut grafy ─── */
+function TriGrafyPanel({ financeItems, onSaveFinance, invoices, dpfoMonths, loanTransactions, escrows }) {
+  // ── SPOŘÁK ──
+  const sporaci    = (financeItems||[]).filter(i => i.category === "sporaci" && i.notes !== "SKIP_DISPLAY");
+  const zItem      = sporaci.find(i => i.id === "fi_sp_99");
+  const actualBal  = zItem?.amount || 0;
+  const dphAuto    = (invoices||[]).filter(i => i.status === "uhrazena").reduce((s,i) => s+(i.vat_amount||0), 0);
+  const dpfoAcc    = (dpfoMonths||[]).filter(m => m.is_paid).reduce((s,m) => s+(m.amount||8050), 0);
+  const bobloanBal = (loanTransactions?.loan_bobnice||[]).reduce((s,t) => s+t.amount, 0);
+  const bobFb      = (financeItems||[]).find(i => i.id === "fi_sp_02")?.amount || 0;
+  const bobBal     = Math.max(bobloanBal > 0 ? bobloanBal : bobFb, 0);
+  const danUschov  = Math.round(escrowTotalTax(escrows||[]));
+  const autoLbls   = new Set(["dph","dpfo 2026","bobnice","daň z úschov"]);
+  const manObálky  = sporaci.filter(i =>
+    i.id !== "fi_sp_99" && i.id !== "fi_sp_01" && i.id !== "fi_sp_02"
+    && !autoLbls.has((i.label||"").toLowerCase().trim())
+  );
+  const envSegs    = [
+    { label: "DPH",          amount: dphAuto,   color: "#534AB7" },
+    { label: "DPFO 2026",    amount: dpfoAcc,   color: "#7F77DD" },
+    ...(bobBal > 0 ? [{ label: "Bobnice", amount: bobBal, color: "#A89FF5" }] : []),
+    { label: "Daň z úschov", amount: danUschov, color: "#C4BEF8" },
+    ...manObálky.map((o,idx) => ({ label: o.label, amount: o.amount||0, color: ["#6B62D8","#9C95E8"][idx%2] })),
+  ].filter(e => e.amount > 0);
+  const totalEar   = envSegs.reduce((s,e) => s+e.amount, 0);
+  const volné      = actualBal - totalEar;
+  const sporSegs   = [
+    ...envSegs.map(e => ({ label: e.label, value: e.amount, color: e.color })),
+    ...(volné > 0 ? [{ label: "Volné", value: volné, color: "rgba(83,74,183,0.1)" }] : []),
+  ];
+
+  // ── MAJETEK ──
+  const akcieItem  = (financeItems||[]).find(i => i.id === "fi_ma_01");
+  const stavItem   = (financeItems||[]).find(i => i.id === "fi_ma_02");
+  const extraMaj   = (financeItems||[]).filter(i => i.category === "majetek" && !["fi_ma_01","fi_ma_02","fi_ma_03"].includes(i.id));
+  const MAJ_C      = ["#1D9E75","#82D4B5","#3BBF8E","#0F6E56","#6AD4B0","#A6E6CE"];
+  const allMajSegs = [
+    akcieItem && { item: akcieItem, label: "Akcie / ETF",      value: akcieItem.amount||0, color: MAJ_C[0] },
+    stavItem  && { item: stavItem,  label: "Stavební spoření", value: stavItem.amount||0,  color: MAJ_C[1] },
+    ...extraMaj.map((it,idx) => ({ item: it, label: it.label, value: it.amount||0, color: MAJ_C[(2+idx)%MAJ_C.length] })),
+  ].filter(Boolean).filter(s => s.value > 0 || s.item);
+  const totalMaj   = allMajSegs.reduce((s,a) => s+a.value, 0);
+
+  // ── REZERVA ──
+  const firmaRez   = actualBal - totalEar;
+  const planKapItem = (financeItems||[]).find(i => i.id === "fi_plan_kapital");
+  const planKap    = planKapItem?.amount || 130000;
+  const rezSegs    = firmaRez >= 0
+    ? [
+        { label: "Rezerva",  value: firmaRez,           color: "#1D9E75" },
+        ...(firmaRez < planKap ? [{ label: "Do cíle", value: planKap - firmaRez, color: "rgba(83,74,183,0.12)" }] : []),
+      ]
+    : [
+        { label: "Deficit",  value: Math.abs(firmaRez), color: "#6B62D8" },
+        { label: "Do cíle",  value: planKap,             color: "rgba(83,74,183,0.12)" },
+      ];
+
+  // ── STATE ──
+  const [editBal,  setEditBal]  = useState(false);
+  const [balInput, setBalInput] = useState(actualBal);
+  const [editMaj,  setEditMaj]  = useState(false);
+  const [editId,   setEditId]   = useState(null);
+  const [editVal,  setEditVal]  = useState(0);
+  const [adding,   setAdding]   = useState(false);
+  const [newLabel, setNewLabel] = useState("");
+  const [newAmt,   setNewAmt]   = useState(0);
+  const saveEdit = (item) => { onSaveFinance({ ...item, amount: editVal }); setEditId(null); };
+  const saveNew  = () => {
+    if (!newLabel.trim()) return;
+    onSaveFinance({ id: `fi_ma_${Date.now()}`, category: "majetek", label: newLabel.trim(), amount: newAmt });
+    setNewLabel(""); setNewAmt(0); setAdding(false);
+  };
+
+  const S_COL = "#534AB7", M_COL = "#1D9E75";
+  const R_COL = firmaRez >= 0 ? "#1D9E75" : "#6B62D8";
+  const eBtn  = (onClick, active) => (
+    <button onClick={onClick} style={{ width: 26, height: 26, borderRadius: 7, border: "1px solid var(--line)", background: active ? "var(--line)" : "none", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", color: "var(--mut)", fontSize: 12, flexShrink: 0 }}>
+      {active ? "✕" : "✎"}
+    </button>
+  );
+
+  return (
+    <div style={{ background: "var(--card)", border: "1px solid var(--line)", borderRadius: 16, padding: "20px 0 16px" }}>
+      <div style={{ display: "flex", alignItems: "flex-start" }}>
+
+        {/* ── SPOŘÁK ── */}
+        <div style={{ flex: 1, padding: "0 22px 0 24px", borderRight: "1px solid var(--line)" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 6 }}>
+            <div>
+              <div style={{ fontSize: 9, letterSpacing: ".1em", color: S_COL, fontWeight: 600, marginBottom: 2 }}>Spořící účet · obálky</div>
+              <div style={{ fontSize: 20, fontWeight: 500, color: "var(--ink)" }}>{fmtKc(actualBal)}</div>
+            </div>
+            {eBtn(() => { setBalInput(actualBal); setEditBal(e => !e); }, editBal)}
+          </div>
+          {editBal && (
+            <div style={{ display: "flex", gap: 5, marginBottom: 10, alignItems: "center" }}>
+              <input type="number" value={balInput} autoFocus
+                onChange={e => setBalInput(Number(e.target.value))}
+                onKeyDown={e => { if (e.key === "Enter") { onSaveFinance({ ...zItem, amount: balInput }); setEditBal(false); } if (e.key === "Escape") setEditBal(false); }}
+                style={{ flex: 1, fontSize: 16, padding: "5px 8px", border: `2px solid ${S_COL}`, borderRadius: 7, outline: "none", fontFamily: "inherit" }} />
+              <button onClick={() => { onSaveFinance({ ...zItem, amount: balInput }); setEditBal(false); }}
+                style={{ background: S_COL, color: "#fff", border: "none", borderRadius: 7, padding: "5px 10px", cursor: "pointer", fontWeight: 700 }}>✓</button>
+              <button onClick={() => setEditBal(false)}
+                style={{ background: "none", border: "1px solid var(--line)", borderRadius: 7, padding: "5px 8px", cursor: "pointer", color: "var(--mut)" }}>✕</button>
+            </div>
+          )}
+          <FinDonutChart segments={sporSegs} centerDefault={fmtKc(actualBal)} centerColor={S_COL} size={200} />
+          <div style={{ fontSize: 8.5, color: "var(--mut)", textAlign: "center", marginTop: 4 }}>
+            Zaúčtováno {fmtKc(totalEar)} · najetím → detail
+          </div>
+        </div>
+
+        {/* ── MAJETEK ── */}
+        <div style={{ flex: 1, padding: "0 22px", borderRight: "1px solid var(--line)" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 6 }}>
+            <div>
+              <div style={{ fontSize: 9, letterSpacing: ".1em", color: M_COL, fontWeight: 600, marginBottom: 2 }}>Osobní majetek</div>
+              <div style={{ fontSize: 20, fontWeight: 500, color: "var(--ink)" }}>{fmtKc(totalMaj)}</div>
+            </div>
+            {eBtn(() => setEditMaj(e => !e), editMaj)}
+          </div>
+          {editMaj ? (
+            <div>
+              {allMajSegs.map((seg, i) => (
+                <div key={i} style={{ display: "flex", alignItems: "center", gap: 5, marginBottom: 5 }}>
+                  <span style={{ width: 7, height: 7, borderRadius: "50%", background: seg.color, flexShrink: 0, display: "block" }} />
+                  <span style={{ flex: 1, fontSize: 11, color: "var(--ink)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{seg.label}</span>
+                  {editId === seg.item?.id ? (
+                    <>
+                      <input type="number" value={editVal} autoFocus onChange={e => setEditVal(Number(e.target.value))}
+                        onKeyDown={e => { if (e.key === "Enter") saveEdit(seg.item); if (e.key === "Escape") setEditId(null); }}
+                        style={{ width: 90, fontSize: 12, padding: "3px 6px", border: `2px solid ${seg.color}`, borderRadius: 6, outline: "none", fontFamily: "inherit" }} />
+                      <button onClick={() => saveEdit(seg.item)} style={{ background: seg.color, color: "#fff", border: "none", borderRadius: 5, padding: "3px 7px", cursor: "pointer", fontWeight: 700, fontSize: 11 }}>✓</button>
+                      <button onClick={() => setEditId(null)} style={{ background: "none", border: "1px solid var(--line)", borderRadius: 5, padding: "3px 6px", cursor: "pointer", color: "var(--mut)", fontSize: 11 }}>✕</button>
+                    </>
+                  ) : (
+                    <>
+                      <span style={{ fontSize: 12, fontWeight: 500, color: "var(--ink)", whiteSpace: "nowrap" }}>{fmtKc(seg.value)}</span>
+                      <button onClick={() => { setEditVal(seg.value); setEditId(seg.item?.id); }}
+                        style={{ background: "none", border: "none", cursor: "pointer", color: "var(--mut)", fontSize: 11, padding: "0 2px" }}>✎</button>
+                    </>
+                  )}
+                </div>
+              ))}
+              {!adding ? (
+                <button onClick={() => setAdding(true)}
+                  style={{ width: "100%", marginTop: 5, background: "none", border: `1px dashed ${M_COL}`, borderRadius: 7, padding: "5px", fontSize: 11, color: M_COL, cursor: "pointer" }}>
+                  + Přidat položku
+                </button>
+              ) : (
+                <div style={{ display: "flex", gap: 4, marginTop: 5, flexWrap: "wrap" }}>
+                  <input placeholder="Název" value={newLabel} onChange={e => setNewLabel(e.target.value)}
+                    style={{ flex: 1, fontSize: 11, padding: "4px 7px", border: `2px solid ${M_COL}`, borderRadius: 6, outline: "none", minWidth: 80, fontFamily: "inherit" }} />
+                  <input type="number" placeholder="Kč" value={newAmt||""} onChange={e => setNewAmt(Number(e.target.value))}
+                    onKeyDown={e => { if (e.key === "Enter") saveNew(); if (e.key === "Escape") setAdding(false); }}
+                    style={{ width: 80, fontSize: 11, padding: "4px 7px", border: `2px solid ${M_COL}`, borderRadius: 6, outline: "none", fontFamily: "inherit" }} />
+                  <button onClick={saveNew} style={{ background: M_COL, color: "#fff", border: "none", borderRadius: 6, padding: "4px 8px", cursor: "pointer", fontWeight: 700, fontSize: 11 }}>✓</button>
+                  <button onClick={() => setAdding(false)} style={{ background: "none", border: "1px solid var(--line)", borderRadius: 6, padding: "4px 7px", cursor: "pointer", color: "var(--mut)", fontSize: 11 }}>✕</button>
+                </div>
+              )}
+            </div>
+          ) : (
+            <>
+              <FinDonutChart segments={allMajSegs.map(s => ({ label: s.label, value: s.value, color: s.color }))} centerDefault={fmtKc(totalMaj)} centerColor={M_COL} size={200} />
+              <div style={{ fontSize: 8.5, color: "var(--mut)", textAlign: "center", marginTop: 4 }}>{allMajSegs.length} aktiva · najetím → detail</div>
+            </>
+          )}
+        </div>
+
+        {/* ── REZERVA ── */}
+        <div style={{ flex: 1, padding: "0 24px 0 22px" }}>
+          <div style={{ marginBottom: 6 }}>
+            <div style={{ fontSize: 9, letterSpacing: ".1em", color: R_COL, fontWeight: 600, marginBottom: 2 }}>Firemní rezerva</div>
+            <div style={{ fontSize: 20, fontWeight: 500, color: firmaRez >= 0 ? "var(--ink)" : "#DC2626" }}>
+              {firmaRez >= 0 ? fmtKc(firmaRez) : `−${fmtKc(Math.abs(firmaRez))}`}
+            </div>
+          </div>
+          <FinDonutChart segments={rezSegs} centerDefault={firmaRez >= 0 ? fmtKc(firmaRez) : `−${fmtKc(Math.abs(firmaRez))}`} centerColor={R_COL} size={200} />
+          <div style={{ fontSize: 8.5, color: "var(--mut)", textAlign: "center", marginTop: 4 }}>
+            {firmaRez >= 0
+              ? `✓ ${Math.round((firmaRez/Math.max(planKap,1))*100)} % cíle · cíl ${fmtKc(planKap)}`
+              : `↓ chybí ${fmtKc(planKap + Math.abs(firmaRez))} · cíl ${fmtKc(planKap)}`}
+          </div>
+        </div>
+
+      </div>
+    </div>
+  );
+}
+
 /* ─── FIRMA BAR (firemní přehled — dedikovaný třetí řádek) ─── */
 function FirmaBar({ financeItems, invoices, dpfoMonths, loanTransactions, escrows, onSaveFinance }) {
   // Firemní rezerva = spořák − obálky (stejná logika jako MajetekBar)
@@ -4076,23 +4314,8 @@ function FirmaBar({ financeItems, invoices, dpfoMonths, loanTransactions, escrow
   const [editVal, setEditVal] = useState(0);
 
   return (
-    <div style={{background:"#fff",border:"2px solid #059669",borderRadius:14,padding:"28px 36px",display:"flex",alignItems:"stretch",gap:24,flexWrap:"wrap"}}>
-      {/* === FIRMA REZERVA === */}
-      <div style={{minWidth:220,display:"flex",alignItems:"center",gap:18}}>
-        <LiquidTank pct={planKap > 0 ? firmaRez / planKap : 0} color="#059669" value={firmaRez} goal={planKap} onSetGoal={setPlanKap} size={56} />
-        <div style={{display:"flex",flexDirection:"column",justifyContent:"center"}}>
-          <div style={{fontSize:11,letterSpacing:".22em",textTransform:"uppercase",color:"#059669",fontWeight:700,marginBottom:10}}>FIREMNÍ REZERVA · RUNWAY</div>
-          <div style={{fontFamily:"Fraunces,serif",fontSize:44,fontWeight:300,color:"#059669",lineHeight:1,marginBottom:6}}>{fmtKc(firmaRez)}</div>
-          <div style={{fontSize:11,color:rezervaDiff>=0?"#059669":"#DC2626",fontWeight:600}}>
-            {rezervaDiff>=0 ? `✓ Cíl splněn +${fmtKc(rezervaDiff)}` : `↓ Do cíle chybí ${fmtKc(Math.abs(rezervaDiff))}`}
-          </div>
-          <div style={{fontSize:10,color:"var(--mut)",marginTop:2}}>Cíl: {fmtKc(planKap)} <span style={{opacity:.6}}>(klikni na nádržku pro úpravu)</span></div>
-        </div>
-      </div>
-
-      <div style={{width:1,alignSelf:"stretch",background:"var(--line)",margin:"0 4px",flexShrink:0}} />
-
-      {/* === ŽIVÝ VÝDĚLEK Z ÚSCHOV (náhrada za RUNWAY) === */}
+    <div style={{background:"var(--card)",border:"1px solid var(--line)",borderRadius:14,padding:"20px 28px",display:"flex",alignItems:"stretch",gap:24,flexWrap:"wrap"}}>
+      {/* === ŽIVÝ VÝDĚLEK Z ÚSCHOV === */}
       <EscrowLiveTile escrows={escrows} />
 
       <div style={{width:1,alignSelf:"stretch",background:"var(--line)",margin:"0 4px",flexShrink:0}} />
@@ -5487,20 +5710,14 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
       })()}
       </Panel>
 
-      {/* MINI SPOŘÁK BAR */}
-      <Panel id="minisporak">
-      <MiniSpořák
-        financeItems={financeItems} invoices={invoices} dpfoMonths={dpfoMonths}
-        loanTransactions={loanTransactions} escrows={escrows} onSaveFinance={onSaveFinance} />
+      {/* TRI GRAFY — Spořák + Majetek + Rezerva (interaktivní donut grafy) */}
+      <Panel id="trigrafy">
+      <TriGrafyPanel financeItems={financeItems} onSaveFinance={onSaveFinance}
+        invoices={invoices} dpfoMonths={dpfoMonths}
+        loanTransactions={loanTransactions} escrows={escrows} />
       </Panel>
 
-      {/* MAJETEK BAR */}
-      <Panel id="majetek">
-      <MajetekBar financeItems={financeItems} onSaveFinance={onSaveFinance}
-        invoices={invoices} dpfoMonths={dpfoMonths} loanTransactions={loanTransactions} escrows={escrows} />
-      </Panel>
-
-      {/* FIRMA BAR */}
+      {/* FIRMA METRIKY — živý výdělek z úschov + rychlé metriky */}
       <Panel id="firma">
       <FirmaBar financeItems={financeItems} invoices={invoices} dpfoMonths={dpfoMonths}
         loanTransactions={loanTransactions} escrows={escrows} onSaveFinance={onSaveFinance} />
