@@ -4049,58 +4049,57 @@ function _donutArcPath(cx, cy, ro, ri, a1, a2) {
   return `M${x1} ${y1} A${ro} ${ro} 0 ${lg} 1 ${x2} ${y2} L${x3} ${y3} A${ri} ${ri} 0 ${lg} 0 ${x4} ${y4}Z`;
 }
 
-/* ─── LIQUID GLASS — plnící sklenice s gradientem, vlnou a leskem ─── */
-function LiquidGlass({ label, value, color, pct, glassH = 130, glassW = 52 }) {
+/* ─── LIQUID GLASS — plnící sklenice s gradientem a leskem ─── */
+function LiquidGlass({ label, value, color, pct, glassH = 150, glassW = 64 }) {
   const fill = Math.min(Math.max(pct, 0), 1);
   const pctLabel = Math.round(fill * 100);
-  // lighter tint for the glass container bg
   return (
-    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 8 }} title={`${label}: ${fmtKc(value)}`}>
+    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 9 }} title={`${label}: ${fmtKc(value)}`}>
       <div style={{
-        width: glassW, height: glassH, borderRadius: 18,
-        background: `${color}0C`,
-        border: `1.5px solid ${color}28`,
+        width: glassW, height: glassH, borderRadius: 20,
+        background: `${color}0E`,
+        border: `2px solid ${color}30`,
         position: "relative", overflow: "hidden",
-        boxShadow: `0 4px 20px ${color}1A, inset 0 1px 0 rgba(255,255,255,0.6), inset 0 -1px 0 ${color}18`
+        boxShadow: `0 6px 28px ${color}22, inset 0 1px 0 rgba(255,255,255,0.7)`
       }}>
         {/* liquid fill */}
         <div style={{
           position: "absolute", bottom: 0, left: 0, right: 0,
           height: `${fill * 100}%`,
-          background: `linear-gradient(180deg, ${color}99 0%, ${color}EE 40%, ${color} 100%)`,
-          borderRadius: "0 0 16px 16px",
-          transition: "height 1.1s cubic-bezier(.34,1.08,.64,1)"
+          background: `linear-gradient(180deg, ${color}88 0%, ${color}CC 45%, ${color} 100%)`,
+          borderRadius: "0 0 17px 17px",
+          transition: "height 1.2s cubic-bezier(.34,1.1,.64,1)"
         }}>
-          {/* inner shine stripe */}
-          <div style={{ position: "absolute", top: 0, left: "14%", width: "10%", bottom: 0, borderRadius: 99, background: "rgba(255,255,255,0.25)", pointerEvents: "none" }} />
           {/* surface shimmer */}
-          <div style={{ position: "absolute", top: 0, left: 0, right: 0, height: 6, background: `rgba(255,255,255,0.28)`, borderRadius: "50% 50% 0 0 / 100% 100% 0 0" }} />
+          <div style={{ position: "absolute", top: 0, left: 0, right: 0, height: 8, background: "rgba(255,255,255,0.32)", borderRadius: "50% 50% 0 0 / 100% 100% 0 0", pointerEvents: "none" }} />
+          {/* inner shine stripe */}
+          <div style={{ position: "absolute", top: 4, left: "13%", width: "10%", bottom: 0, borderRadius: 99, background: "rgba(255,255,255,0.22)", pointerEvents: "none" }} />
         </div>
-        {/* glass highlight bar */}
-        <div style={{ position: "absolute", top: 10, left: 5, width: 3, bottom: 10, borderRadius: 99, background: "rgba(255,255,255,0.35)", pointerEvents: "none" }} />
-        {/* % inside when enough fill */}
-        {fill > 0.15 && (
-          <div style={{ position: "absolute", bottom: 9, left: 0, right: 0, textAlign: "center", fontSize: 11, fontWeight: 800, color: "rgba(255,255,255,0.95)", letterSpacing: ".01em", lineHeight: 1 }}>
+        {/* glass edge highlight */}
+        <div style={{ position: "absolute", top: 8, left: 6, width: 4, bottom: 8, borderRadius: 99, background: "rgba(255,255,255,0.4)", pointerEvents: "none" }} />
+        {/* % inside */}
+        {fill > 0.18 && (
+          <div style={{ position: "absolute", bottom: 10, left: 0, right: 0, textAlign: "center", fontSize: 13, fontWeight: 800, color: "rgba(255,255,255,0.96)", letterSpacing: ".01em", lineHeight: 1, textShadow: `0 1px 4px ${color}88` }}>
             {pctLabel}%
           </div>
         )}
-        {fill <= 0.15 && fill > 0 && (
-          <div style={{ position: "absolute", top: "50%", left: 0, right: 0, textAlign: "center", fontSize: 10, fontWeight: 700, color, letterSpacing: ".01em", transform: "translateY(-50%)" }}>
+        {fill <= 0.18 && fill > 0 && (
+          <div style={{ position: "absolute", top: "50%", left: 0, right: 0, textAlign: "center", fontSize: 11, fontWeight: 700, color, letterSpacing: ".01em", transform: "translateY(-50%)" }}>
             {pctLabel}%
           </div>
         )}
       </div>
-      <div style={{ fontSize: 8.5, color: "var(--mut)", textAlign: "center", maxWidth: glassW + 10, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", letterSpacing: ".03em" }}>{label}</div>
+      <div style={{ fontSize: 10, color: "var(--mut)", textAlign: "center", maxWidth: glassW + 12, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", letterSpacing: ".02em", fontWeight: 500 }}>{label}</div>
     </div>
   );
 }
 
 /* ─── LIQUID GLASS ROW — řada sklenic ─── */
-function LiquidGlassRow({ segments, totalOverride, glassH = 130, glassW = 52 }) {
+function LiquidGlassRow({ segments, totalOverride, glassH = 150, glassW = 64 }) {
   const total = totalOverride || segments.reduce((s, d) => s + (d.value || 0), 0);
   if (!total) return null;
   return (
-    <div style={{ display: "flex", gap: 9, justifyContent: "center", alignItems: "flex-end", flexWrap: "wrap", padding: "8px 0 4px" }}>
+    <div style={{ display: "flex", gap: 12, justifyContent: "center", alignItems: "flex-end", flexWrap: "wrap", padding: "10px 0 4px" }}>
       {segments.filter(s => s.value > 0).map((seg, i) => (
         <LiquidGlass key={i} label={seg.label} value={seg.value} color={seg.color} pct={seg.value / total} glassH={glassH} glassW={glassW} />
       ))}
@@ -4241,106 +4240,118 @@ function TriGrafyPanel({ financeItems, onSaveFinance, invoices, dpfoMonths, loan
     </button>
   );
 
-  // spořák segments for glass row (excluding Volné)
-  const sporGlassSegs = envSegs.map(e => ({ label: e.label, value: e.amount, color: e.color }));
-  // majetek segments
+  // ── SESTAVENÍ SEGMENTŮ ──
+  // Spořák: všechny obálky + firemní rezerva (= volné peníze na účtu)
+  const fullSporSegs = [
+    ...envSegs.map(e => ({ label: e.label, value: e.amount, color: e.color })),
+    ...(firmaRez > 0 ? [{ label: "Rezerva", value: firmaRez, color: "#047857" }] : []),
+  ];
   const majGlassSegs = allMajSegs.map(s => ({ label: s.label, value: s.value, color: s.color }));
-  // rezerva — one glass filling to % of goal
-  const rezPct = planKap > 0 ? firmaRez / planKap : 0;
+  const rezPct = planKap > 0 ? Math.min(firmaRez / planKap, 1) : 0;
   const rezGlassSegs = firmaRez >= 0
     ? [{ label: "Rezerva", value: firmaRez, color: "#047857" }, ...(firmaRez < planKap ? [{ label: "Do cíle", value: planKap - firmaRez, color: "rgba(4,120,87,0.12)" }] : [])]
     : [{ label: "Deficit", value: Math.abs(firmaRez), color: "#4F46E5" }, { label: "Do cíle", value: planKap, color: "rgba(79,70,229,0.12)" }];
 
-  return (
-    <div style={{ display: "flex", gap: 14 }}>
+  const secHdr = (col, text) => (
+    <div style={{ fontSize: 8, letterSpacing: ".18em", color: col, fontWeight: 800, textTransform: "uppercase", opacity: 0.65, marginBottom: 3 }}>{text}</div>
+  );
+  const secNum = (col, content) => (
+    <div style={{ fontFamily: "Fraunces,serif", fontSize: 28, fontWeight: 300, color: col, lineHeight: 1, marginBottom: 2 }}>{content}</div>
+  );
 
-      {/* ── SPOŘÁK ── */}
-      <div style={card(S_COL, "linear-gradient(150deg, #F5F3FF 0%, #EEF2FF 100%)")}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 2 }}>
-          <div style={lbl(S_COL)}>Spořící účet · obálky</div>
+  return (
+    <div style={{ borderRadius: 22, overflow: "hidden", border: "1px solid rgba(0,0,0,0.07)", boxShadow: "0 4px 32px rgba(0,0,0,0.07)" }}>
+
+      {/* ═══ SPOŘÁK — full-width strip ═══ */}
+      <div style={{ padding: "24px 32px 22px", background: "linear-gradient(150deg, #F0EDFF 0%, #EEF2FF 100%)" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 6 }}>
+          <div>
+            {secHdr(S_COL, "Spořící účet · celkové rozložení")}
+            {secNum(S_COL, fmtKc(actualBal))}
+            <div style={{ fontSize: 11, color: S_COL, opacity: 0.55, marginTop: 2 }}>
+              {fmtKc(totalEar)} v obálkách · {fmtKc(Math.max(firmaRez, 0))} volná rezerva
+            </div>
+          </div>
           {eBtn(() => { setBalInput(actualBal); setEditBal(e => !e); }, editBal, S_COL)}
         </div>
-        <div style={bigNum(S_COL)}>{fmtKc(actualBal)}</div>
         {editBal && (
-          <div style={{ display: "flex", gap: 5, marginBottom: 12, alignItems: "center" }}>
+          <div style={{ display: "flex", gap: 6, marginBottom: 14, alignItems: "center" }}>
             <input type="number" value={balInput} autoFocus onChange={e => setBalInput(Number(e.target.value))}
               onKeyDown={e => { if (e.key === "Enter") { onSaveFinance({ ...zItem, amount: balInput }); setEditBal(false); } if (e.key === "Escape") setEditBal(false); }}
-              style={{ flex: 1, fontSize: 15, padding: "5px 8px", border: `2px solid ${S_COL}`, borderRadius: 7, outline: "none", fontFamily: "inherit", background: "rgba(255,255,255,0.7)" }} />
-            <button onClick={() => { onSaveFinance({ ...zItem, amount: balInput }); setEditBal(false); }} style={{ background: S_COL, color: "#fff", border: "none", borderRadius: 7, padding: "5px 10px", cursor: "pointer", fontWeight: 700 }}>✓</button>
-            <button onClick={() => setEditBal(false)} style={{ background: "none", border: "1px solid var(--line)", borderRadius: 7, padding: "5px 8px", cursor: "pointer", color: "var(--mut)" }}>✕</button>
+              style={{ flex: 1, fontSize: 15, padding: "6px 10px", border: `2px solid ${S_COL}`, borderRadius: 8, outline: "none", fontFamily: "inherit", background: "rgba(255,255,255,0.75)" }} />
+            <button onClick={() => { onSaveFinance({ ...zItem, amount: balInput }); setEditBal(false); }} style={{ background: S_COL, color: "#fff", border: "none", borderRadius: 8, padding: "6px 12px", cursor: "pointer", fontWeight: 700 }}>✓</button>
+            <button onClick={() => setEditBal(false)} style={{ background: "none", border: "1px solid rgba(0,0,0,0.12)", borderRadius: 8, padding: "6px 10px", cursor: "pointer", color: "var(--mut)" }}>✕</button>
           </div>
         )}
-        <LiquidGlassRow segments={sporGlassSegs} glassH={110} glassW={44} />
-        <div style={{ fontSize: 8.5, color: S_COL, textAlign: "center", marginTop: 10, opacity: 0.6, letterSpacing: ".04em" }}>
-          {fmtKc(totalEar)} zaúčtováno z {fmtKc(actualBal)}
-        </div>
+        <LiquidGlassRow segments={fullSporSegs} glassH={150} glassW={62} />
       </div>
 
-      {/* ── MAJETEK ── */}
-      <div style={card(M_COL, "linear-gradient(150deg, #FFFBEB 0%, #FEF3C7 100%)")}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 2 }}>
-          <div style={lbl(M_COL)}>Osobní majetek</div>
-          {eBtn(() => setEditMaj(e => !e), editMaj, M_COL)}
-        </div>
-        <div style={bigNum(M_COL)}>{fmtKc(totalMaj)}</div>
-        {editMaj ? (
-          <div style={{ flex: 1 }}>
-            {allMajSegs.map((seg, i) => (
-              <div key={i} style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6 }}>
-                <span style={{ width: 7, height: 7, borderRadius: "50%", background: seg.color, flexShrink: 0, display: "block" }} />
-                <span style={{ flex: 1, fontSize: 11, color: "var(--ink)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{seg.label}</span>
-                {editId === seg.item?.id ? (
-                  <>
-                    <input type="number" value={editVal} autoFocus onChange={e => setEditVal(Number(e.target.value))}
-                      onKeyDown={e => { if (e.key === "Enter") saveEdit(seg.item); if (e.key === "Escape") setEditId(null); }}
-                      style={{ width: 88, fontSize: 12, padding: "3px 6px", border: `2px solid ${seg.color}`, borderRadius: 6, outline: "none", fontFamily: "inherit", background: "rgba(255,255,255,0.7)" }} />
-                    <button onClick={() => saveEdit(seg.item)} style={{ background: seg.color, color: "#fff", border: "none", borderRadius: 5, padding: "3px 7px", cursor: "pointer", fontWeight: 700, fontSize: 11 }}>✓</button>
-                    <button onClick={() => setEditId(null)} style={{ background: "none", border: "1px solid var(--line)", borderRadius: 5, padding: "3px 6px", cursor: "pointer", color: "var(--mut)", fontSize: 11 }}>✕</button>
-                  </>
-                ) : (
-                  <>
-                    <span style={{ fontSize: 12, fontWeight: 500, color: "var(--ink)", whiteSpace: "nowrap" }}>{fmtKc(seg.value)}</span>
-                    <button onClick={() => { setEditVal(seg.value); setEditId(seg.item?.id); }} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--mut)", fontSize: 11, padding: "0 2px" }}>✎</button>
-                  </>
-                )}
-              </div>
-            ))}
-            {!adding ? (
-              <button onClick={() => setAdding(true)} style={{ width: "100%", marginTop: 6, background: "none", border: `1px dashed ${M_COL}`, borderRadius: 7, padding: "5px", fontSize: 11, color: M_COL, cursor: "pointer" }}>+ Přidat položku</button>
-            ) : (
-              <div style={{ display: "flex", gap: 4, marginTop: 6, flexWrap: "wrap" }}>
-                <input placeholder="Název" value={newLabel} onChange={e => setNewLabel(e.target.value)}
-                  style={{ flex: 1, fontSize: 11, padding: "4px 7px", border: `2px solid ${M_COL}`, borderRadius: 6, outline: "none", minWidth: 80, fontFamily: "inherit", background: "rgba(255,255,255,0.7)" }} />
-                <input type="number" placeholder="Kč" value={newAmt||""} onChange={e => setNewAmt(Number(e.target.value))}
-                  onKeyDown={e => { if (e.key === "Enter") saveNew(); if (e.key === "Escape") setAdding(false); }}
-                  style={{ width: 80, fontSize: 11, padding: "4px 7px", border: `2px solid ${M_COL}`, borderRadius: 6, outline: "none", fontFamily: "inherit", background: "rgba(255,255,255,0.7)" }} />
-                <button onClick={saveNew} style={{ background: M_COL, color: "#fff", border: "none", borderRadius: 6, padding: "4px 8px", cursor: "pointer", fontWeight: 700, fontSize: 11 }}>✓</button>
-                <button onClick={() => setAdding(false)} style={{ background: "none", border: "1px solid var(--line)", borderRadius: 6, padding: "4px 7px", cursor: "pointer", color: "var(--mut)", fontSize: 11 }}>✕</button>
-              </div>
-            )}
+      {/* ═══ DOLNÍ PŮLKA: MAJETEK + REZERVA ═══ */}
+      <div style={{ display: "flex", borderTop: "1px solid rgba(0,0,0,0.06)" }}>
+
+        {/* ── MAJETEK ── */}
+        <div style={{ flex: 3, padding: "22px 28px 20px", background: "linear-gradient(150deg, #FFFBEB 0%, #FEF3C7 100%)", borderRight: "1px solid rgba(0,0,0,0.06)" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 6 }}>
+            <div>
+              {secHdr(M_COL, "Osobní majetek")}
+              {secNum(M_COL, fmtKc(totalMaj))}
+            </div>
+            {eBtn(() => setEditMaj(e => !e), editMaj, M_COL)}
           </div>
-        ) : (
-          <>
-            <LiquidGlassRow segments={majGlassSegs} glassH={110} glassW={60} />
-            <div style={{ fontSize: 8.5, color: M_COL, textAlign: "center", marginTop: 10, opacity: 0.6, letterSpacing: ".04em" }}>{allMajSegs.length} aktiva · hover → hodnota</div>
-          </>
-        )}
-      </div>
-
-      {/* ── REZERVA ── */}
-      <div style={card(R_COL, firmaRez >= 0 ? "linear-gradient(150deg, #ECFDF5 0%, #D1FAE5 100%)" : "linear-gradient(150deg, #EEF2FF 0%, #E0E7FF 100%)")}>
-        <div style={lbl(R_COL)}>Firemní rezerva</div>
-        <div style={bigNum(firmaRez < 0 ? "#DC2626" : R_COL)}>
-          {firmaRez >= 0 ? fmtKc(firmaRez) : `−${fmtKc(Math.abs(firmaRez))}`}
+          {editMaj ? (
+            <div>
+              {allMajSegs.map((seg, i) => (
+                <div key={i} style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 7 }}>
+                  <span style={{ width: 8, height: 8, borderRadius: "50%", background: seg.color, flexShrink: 0 }} />
+                  <span style={{ flex: 1, fontSize: 12, color: "var(--ink)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{seg.label}</span>
+                  {editId === seg.item?.id ? (
+                    <>
+                      <input type="number" value={editVal} autoFocus onChange={e => setEditVal(Number(e.target.value))}
+                        onKeyDown={e => { if (e.key === "Enter") saveEdit(seg.item); if (e.key === "Escape") setEditId(null); }}
+                        style={{ width: 90, fontSize: 12, padding: "4px 7px", border: `2px solid ${seg.color}`, borderRadius: 6, outline: "none", fontFamily: "inherit", background: "rgba(255,255,255,0.8)" }} />
+                      <button onClick={() => saveEdit(seg.item)} style={{ background: seg.color, color: "#fff", border: "none", borderRadius: 5, padding: "4px 8px", cursor: "pointer", fontWeight: 700, fontSize: 11 }}>✓</button>
+                      <button onClick={() => setEditId(null)} style={{ background: "none", border: "1px solid var(--line)", borderRadius: 5, padding: "4px 7px", cursor: "pointer", color: "var(--mut)", fontSize: 11 }}>✕</button>
+                    </>
+                  ) : (
+                    <>
+                      <span style={{ fontSize: 13, fontWeight: 500, color: "var(--ink)", whiteSpace: "nowrap" }}>{fmtKc(seg.value)}</span>
+                      <button onClick={() => { setEditVal(seg.value); setEditId(seg.item?.id); }} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--mut)", fontSize: 12, padding: "0 2px" }}>✎</button>
+                    </>
+                  )}
+                </div>
+              ))}
+              {!adding ? (
+                <button onClick={() => setAdding(true)} style={{ width: "100%", marginTop: 8, background: "none", border: `1px dashed ${M_COL}`, borderRadius: 8, padding: "6px", fontSize: 11, color: M_COL, cursor: "pointer" }}>+ Přidat aktivum</button>
+              ) : (
+                <div style={{ display: "flex", gap: 5, marginTop: 8, flexWrap: "wrap" }}>
+                  <input placeholder="Název" value={newLabel} onChange={e => setNewLabel(e.target.value)}
+                    style={{ flex: 1, fontSize: 12, padding: "5px 8px", border: `2px solid ${M_COL}`, borderRadius: 7, outline: "none", minWidth: 90, fontFamily: "inherit", background: "rgba(255,255,255,0.8)" }} />
+                  <input type="number" placeholder="Kč" value={newAmt||""} onChange={e => setNewAmt(Number(e.target.value))}
+                    onKeyDown={e => { if (e.key === "Enter") saveNew(); if (e.key === "Escape") setAdding(false); }}
+                    style={{ width: 90, fontSize: 12, padding: "5px 8px", border: `2px solid ${M_COL}`, borderRadius: 7, outline: "none", fontFamily: "inherit", background: "rgba(255,255,255,0.8)" }} />
+                  <button onClick={saveNew} style={{ background: M_COL, color: "#fff", border: "none", borderRadius: 7, padding: "5px 10px", cursor: "pointer", fontWeight: 700 }}>✓</button>
+                  <button onClick={() => setAdding(false)} style={{ background: "none", border: "1px solid var(--line)", borderRadius: 7, padding: "5px 9px", cursor: "pointer", color: "var(--mut)" }}>✕</button>
+                </div>
+              )}
+            </div>
+          ) : (
+            <LiquidGlassRow segments={majGlassSegs} glassH={130} glassW={70} />
+          )}
         </div>
-        <LiquidGlassRow segments={rezGlassSegs} glassH={110} glassW={72} />
-        <div style={{ fontSize: 8.5, color: R_COL, textAlign: "center", marginTop: 10, opacity: 0.6, letterSpacing: ".04em" }}>
-          {firmaRez >= 0
-            ? `${Math.round(Math.min(rezPct,1)*100)} % cíle · cíl ${fmtKc(planKap)}`
-            : `chybí ${fmtKc(planKap + Math.abs(firmaRez))} · cíl ${fmtKc(planKap)}`}
-        </div>
-      </div>
 
+        {/* ── REZERVA ── */}
+        <div style={{ flex: 2, padding: "22px 28px 20px", background: firmaRez >= 0 ? "linear-gradient(150deg, #ECFDF5 0%, #D1FAE5 100%)" : "linear-gradient(150deg, #EEF2FF 0%, #E0E7FF 100%)" }}>
+          {secHdr(R_COL, "Firemní rezerva")}
+          {secNum(firmaRez < 0 ? "#DC2626" : R_COL, firmaRez >= 0 ? fmtKc(firmaRez) : `−${fmtKc(Math.abs(firmaRez))}`)}
+          <div style={{ fontSize: 11, color: R_COL, opacity: 0.55, marginBottom: 4 }}>
+            {firmaRez >= 0
+              ? `${Math.round(rezPct * 100)} % z cíle ${fmtKc(planKap)}`
+              : `chybí ${fmtKc(planKap + Math.abs(firmaRez))} do cíle`}
+          </div>
+          <LiquidGlassRow segments={rezGlassSegs} glassH={130} glassW={90} />
+        </div>
+
+      </div>
     </div>
   );
 }
