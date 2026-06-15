@@ -6504,7 +6504,7 @@ function InvoiceList({ invoices, clients, workEntries, onOpen, onOpenClient, onT
           <div className="k">Po splatnosti — bez DPH</div>
           <div className="v" style={{ color: poSplatnosti > 0 ? "#DC2626" : "var(--txt)" }}>{fmtKc(poSplatnosti)}</div>
           <div className="s" style={{ color: poSplatnosti > 0 ? "#DC2626" : "var(--mut)" }}>
-            {poSplatnosti > 0 ? `${overdue.length} faktur — nutná akce` : "vše v pořádku"}
+            {poSplatnosti > 0 ? `${invoices.filter(i => invoiceStatus(i) === "po_splatnosti").length} faktur — nutná akce` : "vše v pořádku"}
           </div>
         </div>
       </div>
