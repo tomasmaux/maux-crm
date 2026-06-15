@@ -4049,34 +4049,60 @@ function _donutArcPath(cx, cy, ro, ri, a1, a2) {
   return `M${x1} ${y1} A${ro} ${ro} 0 ${lg} 1 ${x2} ${y2} L${x3} ${y3} A${ri} ${ri} 0 ${lg} 0 ${x4} ${y4}Z`;
 }
 
-/* ─── SQUARE GLASS — plnící sklenice, jeden segment ─── */
-function SquareGlass({ label, value, color, pct, glassH = 88, glassW = 50 }) {
+/* ─── LIQUID GLASS — plnící sklenice s gradientem, vlnou a leskem ─── */
+function LiquidGlass({ label, value, color, pct, glassH = 130, glassW = 52 }) {
   const fill = Math.min(Math.max(pct, 0), 1);
+  const pctLabel = Math.round(fill * 100);
+  // lighter tint for the glass container bg
   return (
-    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 5 }} title={`${label}: ${fmtKc(value)}`}>
-      <div style={{ width: glassW, height: glassH, borderRadius: 10, border: `1.5px solid ${color}35`, background: `${color}07`, position: "relative", overflow: "hidden" }}>
+    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 8 }} title={`${label}: ${fmtKc(value)}`}>
+      <div style={{
+        width: glassW, height: glassH, borderRadius: 18,
+        background: `${color}0C`,
+        border: `1.5px solid ${color}28`,
+        position: "relative", overflow: "hidden",
+        boxShadow: `0 4px 20px ${color}1A, inset 0 1px 0 rgba(255,255,255,0.6), inset 0 -1px 0 ${color}18`
+      }}>
         {/* liquid fill */}
-        <div style={{ position: "absolute", bottom: 0, left: 0, right: 0, height: `${fill * 100}%`, background: `linear-gradient(0deg, ${color} 0%, ${color}BB 100%)`, transition: "height .9s cubic-bezier(.34,1.05,.64,1)" }} />
-        {/* shine */}
-        <div style={{ position: "absolute", inset: 0, background: "linear-gradient(90deg, rgba(255,255,255,0.10) 0%, transparent 35%)", pointerEvents: "none" }} />
-        {/* % label inside */}
-        <div style={{ position: "absolute", bottom: 4, left: 0, right: 0, textAlign: "center", fontSize: 9, fontWeight: 700, color: fill > 0.25 ? "rgba(255,255,255,0.85)" : color, lineHeight: 1 }}>
-          {Math.round(fill * 100)}%
+        <div style={{
+          position: "absolute", bottom: 0, left: 0, right: 0,
+          height: `${fill * 100}%`,
+          background: `linear-gradient(180deg, ${color}99 0%, ${color}EE 40%, ${color} 100%)`,
+          borderRadius: "0 0 16px 16px",
+          transition: "height 1.1s cubic-bezier(.34,1.08,.64,1)"
+        }}>
+          {/* inner shine stripe */}
+          <div style={{ position: "absolute", top: 0, left: "14%", width: "10%", bottom: 0, borderRadius: 99, background: "rgba(255,255,255,0.25)", pointerEvents: "none" }} />
+          {/* surface shimmer */}
+          <div style={{ position: "absolute", top: 0, left: 0, right: 0, height: 6, background: `rgba(255,255,255,0.28)`, borderRadius: "50% 50% 0 0 / 100% 100% 0 0" }} />
         </div>
+        {/* glass highlight bar */}
+        <div style={{ position: "absolute", top: 10, left: 5, width: 3, bottom: 10, borderRadius: 99, background: "rgba(255,255,255,0.35)", pointerEvents: "none" }} />
+        {/* % inside when enough fill */}
+        {fill > 0.15 && (
+          <div style={{ position: "absolute", bottom: 9, left: 0, right: 0, textAlign: "center", fontSize: 11, fontWeight: 800, color: "rgba(255,255,255,0.95)", letterSpacing: ".01em", lineHeight: 1 }}>
+            {pctLabel}%
+          </div>
+        )}
+        {fill <= 0.15 && fill > 0 && (
+          <div style={{ position: "absolute", top: "50%", left: 0, right: 0, textAlign: "center", fontSize: 10, fontWeight: 700, color, letterSpacing: ".01em", transform: "translateY(-50%)" }}>
+            {pctLabel}%
+          </div>
+        )}
       </div>
-      <div style={{ fontSize: 8, color: "var(--mut)", textAlign: "center", maxWidth: glassW + 6, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", letterSpacing: ".02em" }}>{label}</div>
+      <div style={{ fontSize: 8.5, color: "var(--mut)", textAlign: "center", maxWidth: glassW + 10, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", letterSpacing: ".03em" }}>{label}</div>
     </div>
   );
 }
 
-/* ─── SQUARE GLASS ROW — řada plnících sklenic pro sadu segmentů ─── */
-function SquareGlassRow({ segments, totalOverride, glassH, glassW }) {
+/* ─── LIQUID GLASS ROW — řada sklenic ─── */
+function LiquidGlassRow({ segments, totalOverride, glassH = 130, glassW = 52 }) {
   const total = totalOverride || segments.reduce((s, d) => s + (d.value || 0), 0);
   if (!total) return null;
   return (
-    <div style={{ display: "flex", gap: 7, justifyContent: "center", alignItems: "flex-end", flexWrap: "wrap", padding: "6px 0 2px" }}>
+    <div style={{ display: "flex", gap: 9, justifyContent: "center", alignItems: "flex-end", flexWrap: "wrap", padding: "8px 0 4px" }}>
       {segments.filter(s => s.value > 0).map((seg, i) => (
-        <SquareGlass key={i} label={seg.label} value={seg.value} color={seg.color} pct={seg.value / total} glassH={glassH} glassW={glassW} />
+        <LiquidGlass key={i} label={seg.label} value={seg.value} color={seg.color} pct={seg.value / total} glassH={glassH} glassW={glassW} />
       ))}
     </div>
   );
@@ -4140,11 +4166,11 @@ function TriGrafyPanel({ financeItems, onSaveFinance, invoices, dpfoMonths, loan
     && !autoLbls.has((i.label||"").toLowerCase().trim())
   );
   const envSegs    = [
-    { label: "DPH",          amount: dphAuto,   color: "#5B4AD4" },
-    { label: "DPFO 2026",    amount: dpfoAcc,   color: "#7B6EE8" },
-    ...(bobBal > 0 ? [{ label: "Bobnice", amount: bobBal, color: "#9C94F0" }] : []),
-    { label: "Daň z úschov", amount: danUschov, color: "#BDB8F7" },
-    ...manObálky.map((o,idx) => ({ label: o.label, amount: o.amount||0, color: ["#4338CA","#6D64E8"][idx%2] })),
+    { label: "DPH",          amount: dphAuto,   color: "#4338CA" },
+    { label: "DPFO 2026",    amount: dpfoAcc,   color: "#6D28D9" },
+    ...(bobBal > 0 ? [{ label: "Bobnice", amount: bobBal, color: "#7C3AED" }] : []),
+    { label: "Daň z úschov", amount: danUschov, color: "#8B5CF6" },
+    ...manObálky.map((o,idx) => ({ label: o.label, amount: o.amount||0, color: ["#3730A3","#5B21B6"][idx%2] })),
   ].filter(e => e.amount > 0);
   const totalEar   = envSegs.reduce((s,e) => s+e.amount, 0);
   const volné      = actualBal - totalEar;
@@ -4157,7 +4183,7 @@ function TriGrafyPanel({ financeItems, onSaveFinance, invoices, dpfoMonths, loan
   const akcieItem  = (financeItems||[]).find(i => i.id === "fi_ma_01");
   const stavItem   = (financeItems||[]).find(i => i.id === "fi_ma_02");
   const extraMaj   = (financeItems||[]).filter(i => i.category === "majetek" && !["fi_ma_01","fi_ma_02","fi_ma_03"].includes(i.id));
-  const MAJ_C      = ["#D97706","#F59E0B","#B45309","#FBBF24","#92400E","#FDE68A"];
+  const MAJ_C      = ["#92400E","#B45309","#D97706","#F59E0B","#78350F","#FBBF24"];
   const allMajSegs = [
     akcieItem && { item: akcieItem, label: "Akcie / ETF",      value: akcieItem.amount||0, color: MAJ_C[0] },
     stavItem  && { item: stavItem,  label: "Stavební spoření", value: stavItem.amount||0,  color: MAJ_C[1] },
@@ -4195,16 +4221,20 @@ function TriGrafyPanel({ financeItems, onSaveFinance, invoices, dpfoMonths, loan
     setNewLabel(""); setNewAmt(0); setAdding(false);
   };
 
-  const S_COL = "#5B4AD4", M_COL = "#D97706";
+  const S_COL = "#4F46E5", M_COL = "#B45309";
   const R_COL = firmaRez >= 0 ? "#059669" : "#6B62D8";
 
-  const card = (accentColor, extraShadow) => ({
-    flex: 1, background: "var(--card)", border: "1px solid var(--line)", borderRadius: 16,
-    padding: "22px 24px 18px", display: "flex", flexDirection: "column",
-    boxShadow: extraShadow || `0 1px 3px rgba(0,0,0,0.04), 0 8px 32px ${accentColor}22`,
+  const card = (accentColor, bgGrad) => ({
+    flex: 1,
+    background: bgGrad || "var(--card)",
+    border: `1px solid ${accentColor}20`,
+    borderRadius: 20,
+    padding: "22px 22px 18px",
+    display: "flex", flexDirection: "column",
+    boxShadow: `0 2px 8px rgba(0,0,0,0.04), 0 12px 48px ${accentColor}18`,
   });
-  const lbl = (col) => ({ fontSize: 8.5, letterSpacing: ".13em", color: col, fontWeight: 700, textTransform: "uppercase", marginBottom: 3 });
-  const bigNum = (col) => ({ fontFamily: "Fraunces,serif", fontSize: 26, fontWeight: 300, color: col || "var(--ink)", lineHeight: 1, marginBottom: 14 });
+  const lbl = (col) => ({ fontSize: 8, letterSpacing: ".16em", color: col, fontWeight: 800, textTransform: "uppercase", marginBottom: 4, opacity: 0.75 });
+  const bigNum = (col) => ({ fontFamily: "Fraunces,serif", fontSize: 28, fontWeight: 300, color: col || "var(--ink)", lineHeight: 1, marginBottom: 14 });
   const eBtn = (onClick, active, col) => (
     <button onClick={onClick} style={{ width: 24, height: 24, borderRadius: 6, border: "1px solid var(--line)", background: active ? `${col}18` : "none", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", color: active ? col : "var(--mut)", fontSize: 11, flexShrink: 0 }}>
       {active ? "✕" : "✎"}
@@ -4218,41 +4248,41 @@ function TriGrafyPanel({ financeItems, onSaveFinance, invoices, dpfoMonths, loan
   // rezerva — one glass filling to % of goal
   const rezPct = planKap > 0 ? firmaRez / planKap : 0;
   const rezGlassSegs = firmaRez >= 0
-    ? [{ label: "Rezerva", value: firmaRez, color: "#059669" }, ...(firmaRez < planKap ? [{ label: "Do cíle", value: planKap - firmaRez, color: "#D1FAE5" }] : [])]
-    : [{ label: "Deficit", value: Math.abs(firmaRez), color: "#6B62D8" }, { label: "Do cíle", value: planKap, color: "#EDE9FE" }];
+    ? [{ label: "Rezerva", value: firmaRez, color: "#047857" }, ...(firmaRez < planKap ? [{ label: "Do cíle", value: planKap - firmaRez, color: "rgba(4,120,87,0.12)" }] : [])]
+    : [{ label: "Deficit", value: Math.abs(firmaRez), color: "#4F46E5" }, { label: "Do cíle", value: planKap, color: "rgba(79,70,229,0.12)" }];
 
   return (
-    <div style={{ display: "flex", gap: 12 }}>
+    <div style={{ display: "flex", gap: 14 }}>
 
       {/* ── SPOŘÁK ── */}
-      <div style={card(S_COL)}>
+      <div style={card(S_COL, "linear-gradient(150deg, #F5F3FF 0%, #EEF2FF 100%)")}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 2 }}>
           <div style={lbl(S_COL)}>Spořící účet · obálky</div>
           {eBtn(() => { setBalInput(actualBal); setEditBal(e => !e); }, editBal, S_COL)}
         </div>
-        <div style={bigNum()}>{fmtKc(actualBal)}</div>
+        <div style={bigNum(S_COL)}>{fmtKc(actualBal)}</div>
         {editBal && (
           <div style={{ display: "flex", gap: 5, marginBottom: 12, alignItems: "center" }}>
             <input type="number" value={balInput} autoFocus onChange={e => setBalInput(Number(e.target.value))}
               onKeyDown={e => { if (e.key === "Enter") { onSaveFinance({ ...zItem, amount: balInput }); setEditBal(false); } if (e.key === "Escape") setEditBal(false); }}
-              style={{ flex: 1, fontSize: 15, padding: "5px 8px", border: `2px solid ${S_COL}`, borderRadius: 7, outline: "none", fontFamily: "inherit" }} />
+              style={{ flex: 1, fontSize: 15, padding: "5px 8px", border: `2px solid ${S_COL}`, borderRadius: 7, outline: "none", fontFamily: "inherit", background: "rgba(255,255,255,0.7)" }} />
             <button onClick={() => { onSaveFinance({ ...zItem, amount: balInput }); setEditBal(false); }} style={{ background: S_COL, color: "#fff", border: "none", borderRadius: 7, padding: "5px 10px", cursor: "pointer", fontWeight: 700 }}>✓</button>
             <button onClick={() => setEditBal(false)} style={{ background: "none", border: "1px solid var(--line)", borderRadius: 7, padding: "5px 8px", cursor: "pointer", color: "var(--mut)" }}>✕</button>
           </div>
         )}
-        <SquareGlassRow segments={sporGlassSegs} glassH={90} glassW={48} />
-        <div style={{ fontSize: 8.5, color: "var(--mut)", textAlign: "center", marginTop: 8 }}>
-          Zaúčtováno {fmtKc(totalEar)} z {fmtKc(actualBal)}
+        <LiquidGlassRow segments={sporGlassSegs} glassH={110} glassW={44} />
+        <div style={{ fontSize: 8.5, color: S_COL, textAlign: "center", marginTop: 10, opacity: 0.6, letterSpacing: ".04em" }}>
+          {fmtKc(totalEar)} zaúčtováno z {fmtKc(actualBal)}
         </div>
       </div>
 
       {/* ── MAJETEK ── */}
-      <div style={card(M_COL, "0 1px 3px rgba(0,0,0,0.04), 0 8px 40px rgba(217,119,6,0.20)")}>
+      <div style={card(M_COL, "linear-gradient(150deg, #FFFBEB 0%, #FEF3C7 100%)")}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 2 }}>
           <div style={lbl(M_COL)}>Osobní majetek</div>
           {eBtn(() => setEditMaj(e => !e), editMaj, M_COL)}
         </div>
-        <div style={bigNum()}>{fmtKc(totalMaj)}</div>
+        <div style={bigNum(M_COL)}>{fmtKc(totalMaj)}</div>
         {editMaj ? (
           <div style={{ flex: 1 }}>
             {allMajSegs.map((seg, i) => (
@@ -4263,7 +4293,7 @@ function TriGrafyPanel({ financeItems, onSaveFinance, invoices, dpfoMonths, loan
                   <>
                     <input type="number" value={editVal} autoFocus onChange={e => setEditVal(Number(e.target.value))}
                       onKeyDown={e => { if (e.key === "Enter") saveEdit(seg.item); if (e.key === "Escape") setEditId(null); }}
-                      style={{ width: 88, fontSize: 12, padding: "3px 6px", border: `2px solid ${seg.color}`, borderRadius: 6, outline: "none", fontFamily: "inherit" }} />
+                      style={{ width: 88, fontSize: 12, padding: "3px 6px", border: `2px solid ${seg.color}`, borderRadius: 6, outline: "none", fontFamily: "inherit", background: "rgba(255,255,255,0.7)" }} />
                     <button onClick={() => saveEdit(seg.item)} style={{ background: seg.color, color: "#fff", border: "none", borderRadius: 5, padding: "3px 7px", cursor: "pointer", fontWeight: 700, fontSize: 11 }}>✓</button>
                     <button onClick={() => setEditId(null)} style={{ background: "none", border: "1px solid var(--line)", borderRadius: 5, padding: "3px 6px", cursor: "pointer", color: "var(--mut)", fontSize: 11 }}>✕</button>
                   </>
@@ -4280,10 +4310,10 @@ function TriGrafyPanel({ financeItems, onSaveFinance, invoices, dpfoMonths, loan
             ) : (
               <div style={{ display: "flex", gap: 4, marginTop: 6, flexWrap: "wrap" }}>
                 <input placeholder="Název" value={newLabel} onChange={e => setNewLabel(e.target.value)}
-                  style={{ flex: 1, fontSize: 11, padding: "4px 7px", border: `2px solid ${M_COL}`, borderRadius: 6, outline: "none", minWidth: 80, fontFamily: "inherit" }} />
+                  style={{ flex: 1, fontSize: 11, padding: "4px 7px", border: `2px solid ${M_COL}`, borderRadius: 6, outline: "none", minWidth: 80, fontFamily: "inherit", background: "rgba(255,255,255,0.7)" }} />
                 <input type="number" placeholder="Kč" value={newAmt||""} onChange={e => setNewAmt(Number(e.target.value))}
                   onKeyDown={e => { if (e.key === "Enter") saveNew(); if (e.key === "Escape") setAdding(false); }}
-                  style={{ width: 80, fontSize: 11, padding: "4px 7px", border: `2px solid ${M_COL}`, borderRadius: 6, outline: "none", fontFamily: "inherit" }} />
+                  style={{ width: 80, fontSize: 11, padding: "4px 7px", border: `2px solid ${M_COL}`, borderRadius: 6, outline: "none", fontFamily: "inherit", background: "rgba(255,255,255,0.7)" }} />
                 <button onClick={saveNew} style={{ background: M_COL, color: "#fff", border: "none", borderRadius: 6, padding: "4px 8px", cursor: "pointer", fontWeight: 700, fontSize: 11 }}>✓</button>
                 <button onClick={() => setAdding(false)} style={{ background: "none", border: "1px solid var(--line)", borderRadius: 6, padding: "4px 7px", cursor: "pointer", color: "var(--mut)", fontSize: 11 }}>✕</button>
               </div>
@@ -4291,23 +4321,23 @@ function TriGrafyPanel({ financeItems, onSaveFinance, invoices, dpfoMonths, loan
           </div>
         ) : (
           <>
-            <SquareGlassRow segments={majGlassSegs} glassH={90} glassW={48} />
-            <div style={{ fontSize: 8.5, color: "var(--mut)", textAlign: "center", marginTop: 8 }}>{allMajSegs.length} aktiva · hover → hodnota</div>
+            <LiquidGlassRow segments={majGlassSegs} glassH={110} glassW={60} />
+            <div style={{ fontSize: 8.5, color: M_COL, textAlign: "center", marginTop: 10, opacity: 0.6, letterSpacing: ".04em" }}>{allMajSegs.length} aktiva · hover → hodnota</div>
           </>
         )}
       </div>
 
       {/* ── REZERVA ── */}
-      <div style={card(R_COL)}>
+      <div style={card(R_COL, firmaRez >= 0 ? "linear-gradient(150deg, #ECFDF5 0%, #D1FAE5 100%)" : "linear-gradient(150deg, #EEF2FF 0%, #E0E7FF 100%)")}>
         <div style={lbl(R_COL)}>Firemní rezerva</div>
-        <div style={bigNum(firmaRez < 0 ? "#DC2626" : undefined)}>
+        <div style={bigNum(firmaRez < 0 ? "#DC2626" : R_COL)}>
           {firmaRez >= 0 ? fmtKc(firmaRez) : `−${fmtKc(Math.abs(firmaRez))}`}
         </div>
-        <SquareGlassRow segments={rezGlassSegs} glassH={90} glassW={80} />
-        <div style={{ fontSize: 8.5, color: "var(--mut)", textAlign: "center", marginTop: 8 }}>
+        <LiquidGlassRow segments={rezGlassSegs} glassH={110} glassW={72} />
+        <div style={{ fontSize: 8.5, color: R_COL, textAlign: "center", marginTop: 10, opacity: 0.6, letterSpacing: ".04em" }}>
           {firmaRez >= 0
-            ? `✓ ${Math.round(Math.min(rezPct,1)*100)} % cíle · cíl ${fmtKc(planKap)}`
-            : `↓ chybí ${fmtKc(planKap + Math.abs(firmaRez))} · cíl ${fmtKc(planKap)}`}
+            ? `${Math.round(Math.min(rezPct,1)*100)} % cíle · cíl ${fmtKc(planKap)}`
+            : `chybí ${fmtKc(planKap + Math.abs(firmaRez))} · cíl ${fmtKc(planKap)}`}
         </div>
       </div>
 
