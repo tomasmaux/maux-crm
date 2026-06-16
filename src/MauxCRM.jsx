@@ -5876,18 +5876,14 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
         const lastM = (now.getMonth() + 1) % 12;
         const nextYmStr = `${lastY}-${String(lastM+1).padStart(2,"0")}`;
         let cy = startY, cm = startM0 - 1; // 0-indexed
-        // Čistý (bez DPH, bez přefakturace notáře/správního/podpisů) ekvivalent nevyfakturované práce —
-        // stejná definice jako invoice.subtotal (= jen e.amount), aby sloupec "Fakturace" zůstal napříč
-        // celou tabulkou v čisté hodnotě a živý řádek nebyl nafouknutý o DPH a přefakturace navíc.
-        const unbilledNetAmt = (unbilled||[]).reduce((s,e)=>s+(e.amount||0),0);
         const rows = [];
         while (cy < lastY || (cy === lastY && cm <= lastM)) {
           const ym = `${cy}-${String(cm+1).padStart(2,"0")}`;
           const live = ym === nextYmStr; // jen tento jeden řádek je "průběžné" — aktuální měsíc se počítá normálně
-          // Živý řádek (příští měsíc): nevyfakturovaná práce v čisté hodnotě (bez DPH) + úrok z úschov
-          // splatný k 1. tohoto měsíce (escrowNetThisMonth = úrok narostlý TENTO měsíc) — ne čerstvý
-          // "od nuly" výpočet pro budoucí měsíc samotný a ne hrubá (s DPH) hodnota z karty "Příjmy".
-          const invAmt = live ? unbilledNetAmt : invoices.filter(i => (i.issue_date||"").startsWith(ym)).reduce((s,i)=>s+(i.subtotal||0),0);
+          // Živý řádek (příští měsíc): nevyfakturovaná práce bez DPH (unbilledAmt — stejné číslo jako karta
+          // "Příjmy na příští měsíc") + úrok z úschov splatný k 1. tohoto měsíce (escrowNetThisMonth = úrok
+          // narostlý TENTO měsíc) — ne čerstvý "od nuly" výpočet pro budoucí měsíc samotný.
+          const invAmt = live ? unbilledAmt : invoices.filter(i => (i.issue_date||"").startsWith(ym)).reduce((s,i)=>s+(i.subtotal||0),0);
           const escAmt = live ? Math.round(escrowNetThisMonth) : Math.round(escrowNetForMonth(escrows, cy, cm));
           const totalM = invAmt + escAmt;
           if (totalM > 0 || ym === thisMonth || live) rows.push({ ym, invAmt, escAmt, totalM, live, monIdx: cm });
@@ -5973,7 +5969,7 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
                 </table>
               </div>
               <div style={{fontSize:9.5,color:"var(--mut)",marginTop:6,maxWidth:600}}>
-                Řádek "průběžné" = nevyfakturovaná práce v čisté hodnotě bez DPH (jako u ostatních měsíců) + úrok z úschov splatný k 1. {nextMonthName.toLowerCase()} — ne hrubá hodnota s DPH z karty "Příjmy na příští měsíc" a ne úrok narostlý v {nextMonthName.toLowerCase()} samotném.
+                Řádek "průběžné" = stejná čísla jako karta "Příjmy na příští měsíc" výš — nevyfakturovaná práce bez DPH (nevyfakturováno) + úrok z úschov splatný k 1. {nextMonthName.toLowerCase()} — ne nová fakturace ani úrok narostlý v {nextMonthName.toLowerCase()} samotném.
               </div>
             </details>
           </>
