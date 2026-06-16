@@ -4049,52 +4049,75 @@ function _donutArcPath(cx, cy, ro, ri, a1, a2) {
   return `M${x1} ${y1} A${ro} ${ro} 0 ${lg} 1 ${x2} ${y2} L${x3} ${y3} A${ri} ${ri} 0 ${lg} 0 ${x4} ${y4}Z`;
 }
 
-/* ─── GLOW RING — zářící prstencový graf se středovou hodnotou ─── */
-function RingChart({ segments, size = 140, thickness = 16, glowColor, centerTop, centerMain, centerSub }) {
-  const total = segments.reduce((s, d) => s + (d.value || 0), 0) || 1;
+/* ─── INTERACTIVE RING — velký zářící prstenec s hoverem, propojený s legendou ─── */
+function InteractiveRing({ segments, size = 190, thickness = 20, glowColor, centerTop, centerMain, centerSub, legendOnly = false }) {
+  const [hover, setHover] = useState(null);
+  const visible = segments.filter(s => s.value > 0);
+  const total = visible.reduce((s, d) => s + (d.value || 0), 0) || 1;
   const r = (size - thickness) / 2;
   const circumference = 2 * Math.PI * r;
-  const gap = segments.filter(s => s.value > 0).length > 1 ? 5 : 0;
+  const gap = visible.length > 1 ? 7 : 0;
   let offsetAcc = 0;
-  return (
-    <div style={{ position: "relative", width: size, height: size, flexShrink: 0 }}>
-      <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} style={{ filter: `drop-shadow(0 8px 26px ${glowColor}4D)`, transform: "rotate(-90deg)" }}>
-        <circle cx={size/2} cy={size/2} r={r} fill="none" stroke={`${glowColor}16`} strokeWidth={thickness} />
-        {segments.filter(s => s.value > 0).map((s, i) => {
-          const frac = s.value / total;
-          const len = Math.max(frac * circumference - gap, 0);
-          const dashoffset = -offsetAcc;
-          offsetAcc += frac * circumference;
-          return (
-            <circle key={i} cx={size/2} cy={size/2} r={r} fill="none"
-              stroke={s.color} strokeWidth={thickness} strokeLinecap="round"
-              strokeDasharray={`${len} ${circumference}`} strokeDashoffset={dashoffset}
-              style={{ transition: "stroke-dasharray 1.1s cubic-bezier(.34,1.05,.64,1), stroke-dashoffset 1.1s cubic-bezier(.34,1.05,.64,1)" }} />
-          );
-        })}
-      </svg>
-      <div style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", textAlign: "center", padding: "0 8px" }}>
-        {centerTop && <div style={{ fontSize: 8.5, letterSpacing: ".13em", color: glowColor, fontWeight: 800, textTransform: "uppercase", opacity: 0.62, marginBottom: 4 }}>{centerTop}</div>}
-        <div style={{ fontFamily: "Fraunces,serif", fontSize: size > 110 ? 23 : 17, fontWeight: 300, color: glowColor, lineHeight: 1 }}>{centerMain}</div>
-        {centerSub && <div style={{ fontSize: 9.5, color: glowColor, opacity: 0.55, marginTop: 4 }}>{centerSub}</div>}
-      </div>
-    </div>
-  );
-}
+  const arcs = visible.map((s, i) => {
+    const frac = s.value / total;
+    const len = Math.max(frac * circumference - gap, 0);
+    const dashoffset = -offsetAcc;
+    offsetAcc += frac * circumference;
+    return { ...s, len, dashoffset, frac, idx: i };
+  });
+  const active = hover != null ? arcs[hover] : null;
 
-/* ─── RING LEGEND — čistý seznam hodnot vedle prstence ─── */
-function RingLegend({ segments, totalOverride }) {
-  const total = totalOverride || segments.reduce((s, d) => s + (d.value || 0), 0) || 1;
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 10, flex: 1, minWidth: 0, justifyContent: "center" }}>
-      {segments.filter(s => s.value > 0).map((s, i) => (
-        <div key={i} style={{ display: "flex", alignItems: "center", gap: 10 }} title={`${s.label}: ${fmtKc(s.value)}`}>
-          <span style={{ width: 10, height: 10, borderRadius: "50%", background: s.color, flexShrink: 0, boxShadow: `0 0 7px ${s.color}AA` }} />
-          <span style={{ flex: 1, fontSize: 13, color: "var(--ink)", fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.label}</span>
-          <span style={{ fontSize: 13, fontWeight: 700, color: "var(--ink)", whiteSpace: "nowrap" }}>{fmtKc(s.value)}</span>
-          <span style={{ fontSize: 11, color: "var(--mut)", width: 36, textAlign: "right", flexShrink: 0 }}>{Math.round(s.value / total * 100)}%</span>
+    <div style={{ display: "flex", alignItems: "center", gap: 32 }}>
+      <div style={{ position: "relative", width: size, height: size, flexShrink: 0 }}>
+        <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} style={{ filter: `drop-shadow(0 12px 36px ${glowColor}55)`, transform: "rotate(-90deg)", overflow: "visible" }}>
+          <circle cx={size/2} cy={size/2} r={r} fill="none" stroke={`${glowColor}14`} strokeWidth={thickness} />
+          {arcs.map((a, i) => (
+            <circle key={i} cx={size/2} cy={size/2} r={r} fill="none"
+              stroke={a.color} strokeWidth={hover === i ? thickness + 7 : thickness} strokeLinecap="round"
+              strokeDasharray={`${a.len} ${circumference}`} strokeDashoffset={a.dashoffset}
+              onMouseEnter={() => setHover(i)} onMouseLeave={() => setHover(null)}
+              style={{
+                cursor: "pointer",
+                opacity: hover == null || hover === i ? 1 : 0.32,
+                transition: "stroke-width .25s ease, opacity .25s ease, stroke-dasharray 1.1s cubic-bezier(.34,1.05,.64,1), stroke-dashoffset 1.1s cubic-bezier(.34,1.05,.64,1)",
+              }} />
+          ))}
+        </svg>
+        <div style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", textAlign: "center", padding: "0 16px", pointerEvents: "none" }}>
+          {active ? (
+            <>
+              <div style={{ fontSize: 10, letterSpacing: ".12em", color: active.color, fontWeight: 800, textTransform: "uppercase", opacity: 0.8, marginBottom: 6, maxWidth: size - 50, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{active.label}</div>
+              <div style={{ fontFamily: "Fraunces,serif", fontSize: size > 160 ? 28 : 21, fontWeight: 300, color: active.color, lineHeight: 1 }}>{fmtKc(active.value)}</div>
+              <div style={{ fontSize: 11.5, color: active.color, opacity: 0.65, marginTop: 6, fontWeight: 600 }}>{Math.round(active.frac * 100)} %</div>
+            </>
+          ) : (
+            <>
+              {centerTop && <div style={{ fontSize: 9.5, letterSpacing: ".14em", color: glowColor, fontWeight: 800, textTransform: "uppercase", opacity: 0.62, marginBottom: 6 }}>{centerTop}</div>}
+              <div style={{ fontFamily: "Fraunces,serif", fontSize: size > 160 ? 30 : 22, fontWeight: 300, color: glowColor, lineHeight: 1 }}>{centerMain}</div>
+              {centerSub && <div style={{ fontSize: 11, color: glowColor, opacity: 0.55, marginTop: 6 }}>{centerSub}</div>}
+            </>
+          )}
         </div>
-      ))}
+      </div>
+      {!legendOnly && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 6, flex: 1, minWidth: 0, justifyContent: "center" }}>
+          {arcs.map((s, i) => (
+            <div key={i} onMouseEnter={() => setHover(i)} onMouseLeave={() => setHover(null)}
+              style={{
+                display: "flex", alignItems: "center", gap: 12, padding: "8px 12px", borderRadius: 11, cursor: "pointer",
+                background: hover === i ? `${s.color}16` : "transparent",
+                transform: hover === i ? "translateX(4px)" : "none",
+                transition: "background .2s ease, transform .2s ease",
+              }}>
+              <span style={{ width: 12, height: 12, borderRadius: "50%", background: s.color, flexShrink: 0, boxShadow: hover === i ? `0 0 12px ${s.color}` : `0 0 6px ${s.color}99`, transition: "box-shadow .2s ease" }} />
+              <span style={{ flex: 1, fontSize: 14, color: "var(--ink)", fontWeight: hover === i ? 700 : 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.label}</span>
+              <span style={{ fontSize: 14, fontWeight: 700, color: "var(--ink)", whiteSpace: "nowrap" }}>{fmtKc(s.value)}</span>
+              <span style={{ fontSize: 12, color: "var(--mut)", width: 40, textAlign: "right", flexShrink: 0 }}>{Math.round(s.frac * 100)}%</span>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -4269,11 +4292,8 @@ function TriGrafyPanel({ financeItems, onSaveFinance, invoices, dpfoMonths, loan
             <button onClick={() => setEditBal(false)} style={{ background: "none", border: "1px solid rgba(0,0,0,0.12)", borderRadius: 8, padding: "6px 10px", cursor: "pointer", color: "var(--mut)" }}>✕</button>
           </div>
         )}
-        <div style={{ display: "flex", alignItems: "center", gap: 36 }}>
-          <RingChart segments={fullSporSegs} size={150} thickness={17} glowColor={S_COL}
-            centerTop="Celkem" centerMain={fmtKc(actualBal)} centerSub={`${fmtKc(totalEar)} v obálkách`} />
-          <RingLegend segments={fullSporSegs} />
-        </div>
+        <InteractiveRing segments={fullSporSegs} size={210} thickness={24} glowColor={S_COL}
+          centerTop="Celkem" centerMain={fmtKc(actualBal)} centerSub={`${fmtKc(totalEar)} v obálkách`} />
       </div>
 
       {/* ═══ DOLNÍ PŮLKA: MAJETEK + REZERVA ═══ */}
@@ -4322,11 +4342,8 @@ function TriGrafyPanel({ financeItems, onSaveFinance, invoices, dpfoMonths, loan
               )}
             </div>
           ) : (
-            <div style={{ display: "flex", alignItems: "center", gap: 30 }}>
-              <RingChart segments={majGlassSegs} size={130} thickness={15} glowColor={M_COL}
-                centerTop="Majetek" centerMain={fmtKc(totalMaj)} />
-              <RingLegend segments={majGlassSegs} />
-            </div>
+            <InteractiveRing segments={majGlassSegs} size={170} thickness={20} glowColor={M_COL}
+              centerTop="Majetek" centerMain={fmtKc(totalMaj)} />
           )}
         </div>
 
@@ -4334,7 +4351,7 @@ function TriGrafyPanel({ financeItems, onSaveFinance, invoices, dpfoMonths, loan
         <div style={{ flex: 2, padding: "24px 30px 26px", background: firmaRez >= 0 ? "linear-gradient(150deg, #ECFDF5 0%, #D1FAE5 100%)" : "linear-gradient(150deg, #EEF2FF 0%, #E0E7FF 100%)" }}>
           <div style={{ marginBottom: 16 }}>{secHdr(R_COL, "Firemní rezerva")}</div>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "center" }}>
-            <RingChart segments={rezGlassSegs} size={130} thickness={15} glowColor={firmaRez < 0 ? "#4F46E5" : R_COL}
+            <InteractiveRing segments={rezGlassSegs} size={170} thickness={20} glowColor={firmaRez < 0 ? "#4F46E5" : R_COL} legendOnly
               centerTop={firmaRez >= 0 ? "Naplněno" : "Schodek"}
               centerMain={firmaRez >= 0 ? fmtKc(firmaRez) : `−${fmtKc(Math.abs(firmaRez))}`}
               centerSub={firmaRez >= 0 ? `${Math.round(rezPct * 100)}% z cíle` : "pod cílem"} />
