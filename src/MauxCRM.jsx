@@ -4049,59 +4049,51 @@ function _donutArcPath(cx, cy, ro, ri, a1, a2) {
   return `M${x1} ${y1} A${ro} ${ro} 0 ${lg} 1 ${x2} ${y2} L${x3} ${y3} A${ri} ${ri} 0 ${lg} 0 ${x4} ${y4}Z`;
 }
 
-/* ─── LIQUID GLASS — plnící sklenice s gradientem a leskem ─── */
-function LiquidGlass({ label, value, color, pct, glassH = 150, glassW = 64 }) {
-  const fill = Math.min(Math.max(pct, 0), 1);
-  const pctLabel = Math.round(fill * 100);
+/* ─── GLOW RING — zářící prstencový graf se středovou hodnotou ─── */
+function RingChart({ segments, size = 140, thickness = 16, glowColor, centerTop, centerMain, centerSub }) {
+  const total = segments.reduce((s, d) => s + (d.value || 0), 0) || 1;
+  const r = (size - thickness) / 2;
+  const circumference = 2 * Math.PI * r;
+  const gap = segments.filter(s => s.value > 0).length > 1 ? 5 : 0;
+  let offsetAcc = 0;
   return (
-    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 9 }} title={`${label}: ${fmtKc(value)}`}>
-      <div style={{
-        width: glassW, height: glassH, borderRadius: 20,
-        background: `${color}0E`,
-        border: `2px solid ${color}30`,
-        position: "relative", overflow: "hidden",
-        boxShadow: `0 6px 28px ${color}22, inset 0 1px 0 rgba(255,255,255,0.7)`
-      }}>
-        {/* liquid fill */}
-        <div style={{
-          position: "absolute", bottom: 0, left: 0, right: 0,
-          height: `${fill * 100}%`,
-          background: `linear-gradient(180deg, ${color}88 0%, ${color}CC 45%, ${color} 100%)`,
-          borderRadius: "0 0 17px 17px",
-          transition: "height 1.2s cubic-bezier(.34,1.1,.64,1)"
-        }}>
-          {/* surface shimmer */}
-          <div style={{ position: "absolute", top: 0, left: 0, right: 0, height: 8, background: "rgba(255,255,255,0.32)", borderRadius: "50% 50% 0 0 / 100% 100% 0 0", pointerEvents: "none" }} />
-          {/* inner shine stripe */}
-          <div style={{ position: "absolute", top: 4, left: "13%", width: "10%", bottom: 0, borderRadius: 99, background: "rgba(255,255,255,0.22)", pointerEvents: "none" }} />
-        </div>
-        {/* glass edge highlight */}
-        <div style={{ position: "absolute", top: 8, left: 6, width: 4, bottom: 8, borderRadius: 99, background: "rgba(255,255,255,0.4)", pointerEvents: "none" }} />
-        {/* % inside */}
-        {fill > 0.18 && (
-          <div style={{ position: "absolute", bottom: 10, left: 0, right: 0, textAlign: "center", fontSize: 13, fontWeight: 800, color: "rgba(255,255,255,0.96)", letterSpacing: ".01em", lineHeight: 1, textShadow: `0 1px 4px ${color}88` }}>
-            {pctLabel}%
-          </div>
-        )}
-        {fill <= 0.18 && fill > 0 && (
-          <div style={{ position: "absolute", top: "50%", left: 0, right: 0, textAlign: "center", fontSize: 11, fontWeight: 700, color, letterSpacing: ".01em", transform: "translateY(-50%)" }}>
-            {pctLabel}%
-          </div>
-        )}
+    <div style={{ position: "relative", width: size, height: size, flexShrink: 0 }}>
+      <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} style={{ filter: `drop-shadow(0 8px 26px ${glowColor}4D)`, transform: "rotate(-90deg)" }}>
+        <circle cx={size/2} cy={size/2} r={r} fill="none" stroke={`${glowColor}16`} strokeWidth={thickness} />
+        {segments.filter(s => s.value > 0).map((s, i) => {
+          const frac = s.value / total;
+          const len = Math.max(frac * circumference - gap, 0);
+          const dashoffset = -offsetAcc;
+          offsetAcc += frac * circumference;
+          return (
+            <circle key={i} cx={size/2} cy={size/2} r={r} fill="none"
+              stroke={s.color} strokeWidth={thickness} strokeLinecap="round"
+              strokeDasharray={`${len} ${circumference}`} strokeDashoffset={dashoffset}
+              style={{ transition: "stroke-dasharray 1.1s cubic-bezier(.34,1.05,.64,1), stroke-dashoffset 1.1s cubic-bezier(.34,1.05,.64,1)" }} />
+          );
+        })}
+      </svg>
+      <div style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", textAlign: "center", padding: "0 8px" }}>
+        {centerTop && <div style={{ fontSize: 8.5, letterSpacing: ".13em", color: glowColor, fontWeight: 800, textTransform: "uppercase", opacity: 0.62, marginBottom: 4 }}>{centerTop}</div>}
+        <div style={{ fontFamily: "Fraunces,serif", fontSize: size > 110 ? 23 : 17, fontWeight: 300, color: glowColor, lineHeight: 1 }}>{centerMain}</div>
+        {centerSub && <div style={{ fontSize: 9.5, color: glowColor, opacity: 0.55, marginTop: 4 }}>{centerSub}</div>}
       </div>
-      <div style={{ fontSize: 10, color: "var(--mut)", textAlign: "center", maxWidth: glassW + 12, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", letterSpacing: ".02em", fontWeight: 500 }}>{label}</div>
     </div>
   );
 }
 
-/* ─── LIQUID GLASS ROW — řada sklenic ─── */
-function LiquidGlassRow({ segments, totalOverride, glassH = 150, glassW = 64 }) {
-  const total = totalOverride || segments.reduce((s, d) => s + (d.value || 0), 0);
-  if (!total) return null;
+/* ─── RING LEGEND — čistý seznam hodnot vedle prstence ─── */
+function RingLegend({ segments, totalOverride }) {
+  const total = totalOverride || segments.reduce((s, d) => s + (d.value || 0), 0) || 1;
   return (
-    <div style={{ display: "flex", gap: 12, justifyContent: "center", alignItems: "flex-end", flexWrap: "wrap", padding: "10px 0 4px" }}>
-      {segments.filter(s => s.value > 0).map((seg, i) => (
-        <LiquidGlass key={i} label={seg.label} value={seg.value} color={seg.color} pct={seg.value / total} glassH={glassH} glassW={glassW} />
+    <div style={{ display: "flex", flexDirection: "column", gap: 10, flex: 1, minWidth: 0, justifyContent: "center" }}>
+      {segments.filter(s => s.value > 0).map((s, i) => (
+        <div key={i} style={{ display: "flex", alignItems: "center", gap: 10 }} title={`${s.label}: ${fmtKc(s.value)}`}>
+          <span style={{ width: 10, height: 10, borderRadius: "50%", background: s.color, flexShrink: 0, boxShadow: `0 0 7px ${s.color}AA` }} />
+          <span style={{ flex: 1, fontSize: 13, color: "var(--ink)", fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.label}</span>
+          <span style={{ fontSize: 13, fontWeight: 700, color: "var(--ink)", whiteSpace: "nowrap" }}>{fmtKc(s.value)}</span>
+          <span style={{ fontSize: 11, color: "var(--mut)", width: 36, textAlign: "right", flexShrink: 0 }}>{Math.round(s.value / total * 100)}%</span>
+        </div>
       ))}
     </div>
   );
@@ -4263,19 +4255,13 @@ function TriGrafyPanel({ financeItems, onSaveFinance, invoices, dpfoMonths, loan
     <div style={{ borderRadius: 22, overflow: "hidden", border: "1px solid rgba(0,0,0,0.07)", boxShadow: "0 4px 32px rgba(0,0,0,0.07)" }}>
 
       {/* ═══ SPOŘÁK — full-width strip ═══ */}
-      <div style={{ padding: "24px 32px 22px", background: "linear-gradient(150deg, #F0EDFF 0%, #EEF2FF 100%)" }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 6 }}>
-          <div>
-            {secHdr(S_COL, "Spořící účet · celkové rozložení")}
-            {secNum(S_COL, fmtKc(actualBal))}
-            <div style={{ fontSize: 11, color: S_COL, opacity: 0.55, marginTop: 2 }}>
-              {fmtKc(totalEar)} v obálkách · {fmtKc(Math.max(firmaRez, 0))} volná rezerva
-            </div>
-          </div>
+      <div style={{ padding: "26px 34px 28px", background: "linear-gradient(150deg, #F0EDFF 0%, #EEF2FF 100%)" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 18 }}>
+          {secHdr(S_COL, "Spořící účet · celkové rozložení")}
           {eBtn(() => { setBalInput(actualBal); setEditBal(e => !e); }, editBal, S_COL)}
         </div>
         {editBal && (
-          <div style={{ display: "flex", gap: 6, marginBottom: 14, alignItems: "center" }}>
+          <div style={{ display: "flex", gap: 6, marginBottom: 16, alignItems: "center" }}>
             <input type="number" value={balInput} autoFocus onChange={e => setBalInput(Number(e.target.value))}
               onKeyDown={e => { if (e.key === "Enter") { onSaveFinance({ ...zItem, amount: balInput }); setEditBal(false); } if (e.key === "Escape") setEditBal(false); }}
               style={{ flex: 1, fontSize: 15, padding: "6px 10px", border: `2px solid ${S_COL}`, borderRadius: 8, outline: "none", fontFamily: "inherit", background: "rgba(255,255,255,0.75)" }} />
@@ -4283,19 +4269,20 @@ function TriGrafyPanel({ financeItems, onSaveFinance, invoices, dpfoMonths, loan
             <button onClick={() => setEditBal(false)} style={{ background: "none", border: "1px solid rgba(0,0,0,0.12)", borderRadius: 8, padding: "6px 10px", cursor: "pointer", color: "var(--mut)" }}>✕</button>
           </div>
         )}
-        <LiquidGlassRow segments={fullSporSegs} glassH={150} glassW={62} />
+        <div style={{ display: "flex", alignItems: "center", gap: 36 }}>
+          <RingChart segments={fullSporSegs} size={150} thickness={17} glowColor={S_COL}
+            centerTop="Celkem" centerMain={fmtKc(actualBal)} centerSub={`${fmtKc(totalEar)} v obálkách`} />
+          <RingLegend segments={fullSporSegs} />
+        </div>
       </div>
 
       {/* ═══ DOLNÍ PŮLKA: MAJETEK + REZERVA ═══ */}
       <div style={{ display: "flex", borderTop: "1px solid rgba(0,0,0,0.06)" }}>
 
         {/* ── MAJETEK ── */}
-        <div style={{ flex: 3, padding: "22px 28px 20px", background: "linear-gradient(150deg, #FFFBEB 0%, #FEF3C7 100%)", borderRight: "1px solid rgba(0,0,0,0.06)" }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 6 }}>
-            <div>
-              {secHdr(M_COL, "Osobní majetek")}
-              {secNum(M_COL, fmtKc(totalMaj))}
-            </div>
+        <div style={{ flex: 3, padding: "24px 30px 26px", background: "linear-gradient(150deg, #FFFBEB 0%, #FEF3C7 100%)", borderRight: "1px solid rgba(0,0,0,0.06)" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+            {secHdr(M_COL, "Osobní majetek")}
             {eBtn(() => setEditMaj(e => !e), editMaj, M_COL)}
           </div>
           {editMaj ? (
@@ -4335,20 +4322,28 @@ function TriGrafyPanel({ financeItems, onSaveFinance, invoices, dpfoMonths, loan
               )}
             </div>
           ) : (
-            <LiquidGlassRow segments={majGlassSegs} glassH={130} glassW={70} />
+            <div style={{ display: "flex", alignItems: "center", gap: 30 }}>
+              <RingChart segments={majGlassSegs} size={130} thickness={15} glowColor={M_COL}
+                centerTop="Majetek" centerMain={fmtKc(totalMaj)} />
+              <RingLegend segments={majGlassSegs} />
+            </div>
           )}
         </div>
 
         {/* ── REZERVA ── */}
-        <div style={{ flex: 2, padding: "22px 28px 20px", background: firmaRez >= 0 ? "linear-gradient(150deg, #ECFDF5 0%, #D1FAE5 100%)" : "linear-gradient(150deg, #EEF2FF 0%, #E0E7FF 100%)" }}>
-          {secHdr(R_COL, "Firemní rezerva")}
-          {secNum(firmaRez < 0 ? "#DC2626" : R_COL, firmaRez >= 0 ? fmtKc(firmaRez) : `−${fmtKc(Math.abs(firmaRez))}`)}
-          <div style={{ fontSize: 11, color: R_COL, opacity: 0.55, marginBottom: 4 }}>
-            {firmaRez >= 0
-              ? `${Math.round(rezPct * 100)} % z cíle ${fmtKc(planKap)}`
-              : `chybí ${fmtKc(planKap + Math.abs(firmaRez))} do cíle`}
+        <div style={{ flex: 2, padding: "24px 30px 26px", background: firmaRez >= 0 ? "linear-gradient(150deg, #ECFDF5 0%, #D1FAE5 100%)" : "linear-gradient(150deg, #EEF2FF 0%, #E0E7FF 100%)" }}>
+          <div style={{ marginBottom: 16 }}>{secHdr(R_COL, "Firemní rezerva")}</div>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "center" }}>
+            <RingChart segments={rezGlassSegs} size={130} thickness={15} glowColor={firmaRez < 0 ? "#4F46E5" : R_COL}
+              centerTop={firmaRez >= 0 ? "Naplněno" : "Schodek"}
+              centerMain={firmaRez >= 0 ? fmtKc(firmaRez) : `−${fmtKc(Math.abs(firmaRez))}`}
+              centerSub={firmaRez >= 0 ? `${Math.round(rezPct * 100)}% z cíle` : "pod cílem"} />
           </div>
-          <LiquidGlassRow segments={rezGlassSegs} glassH={130} glassW={90} />
+          <div style={{ fontSize: 11, color: R_COL, opacity: 0.6, textAlign: "center", marginTop: 12 }}>
+            {firmaRez >= 0
+              ? `cíl ${fmtKc(planKap)}`
+              : `chybí ${fmtKc(planKap + Math.abs(firmaRez))} · cíl ${fmtKc(planKap)}`}
+          </div>
         </div>
 
       </div>
