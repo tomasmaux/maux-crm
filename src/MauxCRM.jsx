@@ -2883,6 +2883,23 @@ function escrowNetForMonth(escrows, year, month) {
   }, 0);
 }
 
+// Hrubý úrok za měsíc (před -15% srážkovou daní) — pro srovnání s fakturací, která je
+// taky "před" odečtením daně z příjmu (jen bez DPH, což není daň z příjmu firmy).
+function escrowGrossForMonth(escrows, year, month) {
+  const mStart = new Date(year, month, 1);
+  const mEnd   = new Date(year, month + 1, 0);
+  const today  = new Date(); today.setHours(0,0,0,0);
+  const isCurrent = year === today.getFullYear() && month === today.getMonth();
+  const cap = isCurrent ? today : null;
+  return (escrows || []).reduce((sum, e) => {
+    if (!e.interest_rate) return sum;
+    const ivs = _buildBalanceIntervals(e);
+    const relevant = ivs.filter(iv => iv.from <= mEnd && iv.to >= mStart);
+    if (relevant.length === 0) return sum;
+    return sum + _grossForPeriod(relevant, e.interest_rate, mStart, mEnd, cap);
+  }, 0);
+}
+
 // Průběžný čistý úrok z dosud neukončených intervalů (accumulated do dnes)
 function escrowRunningNet(escrows) {
   const today = new Date(); today.setHours(0,0,0,0);
@@ -5619,6 +5636,7 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
   // Úschovy — výpočty pro dashboard
   const escrowNetThisMonth = escrowNetForMonth(escrows, now.getFullYear(), now.getMonth());
   const escrowNetNextMonth = escrowNetForMonth(escrows, now.getFullYear(), now.getMonth() + 1);
+  const escrowGrossThisMonth = escrowGrossForMonth(escrows, now.getFullYear(), now.getMonth());
   const escrowTaxTotal = escrowTotalTax(escrows);
 
   // Příjmy měsíční
@@ -5881,10 +5899,16 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
           const ym = `${cy}-${String(cm+1).padStart(2,"0")}`;
           const live = ym === nextYmStr; // jen tento jeden řádek je "průběžné" — aktuální měsíc se počítá normálně
           // Živý řádek (příští měsíc): nevyfakturovaná práce bez DPH (unbilledAmt — stejné číslo jako karta
-          // "Příjmy na příští měsíc") + úrok z úschov splatný k 1. tohoto měsíce (escrowNetThisMonth = úrok
-          // narostlý TENTO měsíc) — ne čerstvý "od nuly" výpočet pro budoucí měsíc samotný.
+          // "Příjmy na příští měsíc") + úrok z úschov splatný k 1. tohoto měsíce — ne čerstvý "od nuly"
+          // výpočet pro budoucí měsíc samotný.
+          // Úrok je zde HRUBÝ (před -15% srážkovou daní), ne čistý: sloupec "Fakturace" je taky "před
+          // daní z příjmu" (jen bez DPH, což je daň, kterou firma neplatí, ne její příjem) — pro
+          // konzistentní srovnání proti hranici 200 000 Kč musí být úrok na stejné bázi (hrubý výnos),
+          // jinak by se fakturace a úschovy měřily podle dvou různých definic "čistého". Proto se tento
+          // řádek může lišit od karty "Příjmy na příští měsíc" výš, která naopak ukazuje reálně přijatou
+          // (čistou, po srážkové dani) hotovost.
           const invAmt = live ? unbilledAmt : invoices.filter(i => (i.issue_date||"").startsWith(ym)).reduce((s,i)=>s+(i.subtotal||0),0);
-          const escAmt = live ? Math.round(escrowNetThisMonth) : Math.round(escrowNetForMonth(escrows, cy, cm));
+          const escAmt = live ? Math.round(escrowGrossThisMonth) : Math.round(escrowGrossForMonth(escrows, cy, cm));
           const totalM = invAmt + escAmt;
           if (totalM > 0 || ym === thisMonth || live) rows.push({ ym, invAmt, escAmt, totalM, live, monIdx: cm });
           cm++; if (cm > 11) { cm = 0; cy++; }
@@ -5943,7 +5967,7 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
                   <thead><tr style={{background:"#F3F0FF"}}>
                     <th style={{padding:"6px 12px",textAlign:"left",fontWeight:500,color:"var(--mut)",fontSize:9,letterSpacing:".06em",textTransform:"uppercase"}}>Měsíc</th>
                     <th style={{padding:"6px 12px",textAlign:"right",fontWeight:500,color:"var(--mut)",fontSize:9,letterSpacing:".06em",textTransform:"uppercase"}}>Fakturace</th>
-                    <th style={{padding:"6px 12px",textAlign:"right",fontWeight:500,color:"var(--mut)",fontSize:9,letterSpacing:".06em",textTransform:"uppercase"}}>Úschovy (čistý úrok)</th>
+                    <th style={{padding:"6px 12px",textAlign:"right",fontWeight:500,color:"var(--mut)",fontSize:9,letterSpacing:".06em",textTransform:"uppercase"}}>Úschovy (hrubý úrok)</th>
                     <th style={{padding:"6px 12px",textAlign:"right",fontWeight:500,color:"var(--mut)",fontSize:9,letterSpacing:".06em",textTransform:"uppercase"}}>Celkem</th>
                     <th style={{padding:"6px 12px",textAlign:"right",fontWeight:500,color:"var(--mut)",fontSize:9,letterSpacing:".06em",textTransform:"uppercase"}}>Meta</th>
                   </tr></thead>
@@ -5969,7 +5993,7 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
                 </table>
               </div>
               <div style={{fontSize:9.5,color:"var(--mut)",marginTop:6,maxWidth:600}}>
-                Řádek "průběžné" = stejná čísla jako karta "Příjmy na příští měsíc" výš — nevyfakturovaná práce bez DPH (nevyfakturováno) + úrok z úschov splatný k 1. {nextMonthName.toLowerCase()} — ne nová fakturace ani úrok narostlý v {nextMonthName.toLowerCase()} samotném.
+                Úrok z úschov je zde hrubý (před -15% srážkovou daní) — stejná báze jako fakturace, která je taky bez DPH, ale ne po dani z příjmu. Proto se sloupec "Úschovy" může lišit od karty "Příjmy na příští měsíc" výš, která ukazuje reálně přijatou čistou hotovost (po srážkové dani). Sloupec "Fakturace" u řádku "průběžné" = nevyfakturovaná práce bez DPH (stejné číslo jako "nevyfakturováno" v kartě výš).
               </div>
             </details>
           </>
