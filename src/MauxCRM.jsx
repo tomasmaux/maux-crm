@@ -5871,9 +5871,10 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
         ymSet.add(thisMonth);
         const sortedYm = [...ymSet].sort();
         const [startY, startM0] = sortedYm[0].split("-").map(Number);
-        // Vždy zobraz i příští měsíc jako živou projekci — tabulka se tak posouvá automaticky s časem.
+        // Vždy zobraz přesně JEDEN měsíc dopředu (příští, ne přespříští) jako živou projekci — posouvá se automaticky s časem.
         const lastY = now.getMonth() === 11 ? now.getFullYear() + 1 : now.getFullYear();
         const lastM = (now.getMonth() + 1) % 12;
+        const nextYmStr = `${lastY}-${String(lastM+1).padStart(2,"0")}`;
         let cy = startY, cm = startM0 - 1; // 0-indexed
         const rows = [];
         while (cy < lastY || (cy === lastY && cm <= lastM)) {
@@ -5881,8 +5882,8 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
           const invAmt = invoices.filter(i => (i.issue_date||"").startsWith(ym)).reduce((s,i)=>s+(i.subtotal||0),0);
           const escAmt = Math.round(escrowNetForMonth(escrows, cy, cm));
           const totalM = invAmt + escAmt;
-          const live = ym >= thisMonth;
-          if (totalM > 0 || live) rows.push({ ym, invAmt, escAmt, totalM, live, monIdx: cm });
+          const live = ym === nextYmStr; // jen tento jeden řádek je "průběžné" — aktuální měsíc se počítá normálně
+          if (totalM > 0 || ym === thisMonth || live) rows.push({ ym, invAmt, escAmt, totalM, live, monIdx: cm });
           cm++; if (cm > 11) { cm = 0; cy++; }
         }
         // Postupně se posunující meta: 200 000 → po prvním prolomení 250 000 → dál vždy +25 000.
