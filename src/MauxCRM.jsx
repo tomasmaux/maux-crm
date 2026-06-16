@@ -5879,10 +5879,13 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
         const rows = [];
         while (cy < lastY || (cy === lastY && cm <= lastM)) {
           const ym = `${cy}-${String(cm+1).padStart(2,"0")}`;
-          const invAmt = invoices.filter(i => (i.issue_date||"").startsWith(ym)).reduce((s,i)=>s+(i.subtotal||0),0);
-          const escAmt = Math.round(escrowNetForMonth(escrows, cy, cm));
-          const totalM = invAmt + escAmt;
           const live = ym === nextYmStr; // jen tento jeden řádek je "průběžné" — aktuální měsíc se počítá normálně
+          // Živý řádek (příští měsíc) musí ukazovat STEJNÁ čísla jako karta "Příjmy na příští měsíc" výš na
+          // Přehledu — tedy nevyfakturovanou práci (unbilledAmt) a úrok z úschov splatný k 1. tohoto měsíce
+          // (escrowNetThisMonth = úrok narostlý TENTO měsíc), ne čerstvý "od nuly" výpočet pro budoucí měsíc samotný.
+          const invAmt = live ? unbilledAmt : invoices.filter(i => (i.issue_date||"").startsWith(ym)).reduce((s,i)=>s+(i.subtotal||0),0);
+          const escAmt = live ? Math.round(escrowNetThisMonth) : Math.round(escrowNetForMonth(escrows, cy, cm));
+          const totalM = invAmt + escAmt;
           if (totalM > 0 || ym === thisMonth || live) rows.push({ ym, invAmt, escAmt, totalM, live, monIdx: cm });
           cm++; if (cm > 11) { cm = 0; cy++; }
         }
@@ -5964,6 +5967,9 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
                     ))}
                   </tbody>
                 </table>
+              </div>
+              <div style={{fontSize:9.5,color:"var(--mut)",marginTop:6,maxWidth:600}}>
+                Řádek "průběžné" = stejná čísla jako karta "Příjmy na příští měsíc" výš (nevyfakturovaná práce + úrok z úschov splatný k 1. {nextMonthName.toLowerCase()}) — ne nová fakturace ani úrok narostlý v {nextMonthName.toLowerCase()} samotném.
               </div>
             </details>
           </>
