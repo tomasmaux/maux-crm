@@ -4180,11 +4180,11 @@ function TriGrafyPanel({ financeItems, onSaveFinance, invoices, dpfoMonths, loan
     && !autoLbls.has((i.label||"").toLowerCase().trim())
   );
   const envSegs    = [
-    { label: "DPH",          amount: dphAuto,   color: "#4338CA" },
-    { label: "DPFO 2026",    amount: dpfoAcc,   color: "#6D28D9" },
-    ...(bobBal > 0 ? [{ label: "Bobnice", amount: bobBal, color: "#7C3AED" }] : []),
-    { label: "Daň z úschov", amount: danUschov, color: "#8B5CF6" },
-    ...manObálky.map((o,idx) => ({ label: o.label, amount: o.amount||0, color: ["#3730A3","#5B21B6"][idx%2] })),
+    { label: "DPH",          amount: dphAuto,   color: "#0D9488" },
+    { label: "DPFO 2026",    amount: dpfoAcc,   color: "#16A34A" },
+    ...(bobBal > 0 ? [{ label: "Bobnice", amount: bobBal, color: "#65A30D" }] : []),
+    { label: "Daň z úschov", amount: danUschov, color: "#0891B2" },
+    ...manObálky.map((o,idx) => ({ label: o.label, amount: o.amount||0, color: ["#059669","#84CC16"][idx%2] })),
   ].filter(e => e.amount > 0);
   const totalEar   = envSegs.reduce((s,e) => s+e.amount, 0);
   const volné      = actualBal - totalEar;
