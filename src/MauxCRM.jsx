@@ -4056,11 +4056,11 @@ function InteractiveRing({ segments, size = 190, thickness = 20, glowColor, cent
   const total = visible.reduce((s, d) => s + (d.value || 0), 0) || 1;
   const r = (size - thickness) / 2;
   const circumference = 2 * Math.PI * r;
-  const gap = visible.length > 1 ? 7 : 0;
+  const gap = visible.length > 1 ? Math.max(thickness * 0.16, 3) : 0;
   let offsetAcc = 0;
   const arcs = visible.map((s, i) => {
     const frac = s.value / total;
-    const len = Math.max(frac * circumference - gap, 0);
+    const len = Math.max(frac * circumference - gap, 0.0001);
     const dashoffset = -offsetAcc;
     offsetAcc += frac * circumference;
     return { ...s, len, dashoffset, frac, idx: i };
@@ -4070,16 +4070,16 @@ function InteractiveRing({ segments, size = 190, thickness = 20, glowColor, cent
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 32 }}>
       <div style={{ position: "relative", width: size, height: size, flexShrink: 0 }}>
-        <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} style={{ filter: `drop-shadow(0 12px 36px ${glowColor}55)`, transform: "rotate(-90deg)", overflow: "visible" }}>
-          <circle cx={size/2} cy={size/2} r={r} fill="none" stroke={`${glowColor}14`} strokeWidth={thickness} />
+        <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} style={{ filter: `drop-shadow(0 10px 28px ${glowColor}40)`, transform: "rotate(-90deg)", overflow: "visible" }}>
+          <circle cx={size/2} cy={size/2} r={r} fill="none" stroke="rgba(0,0,0,0.055)" strokeWidth={thickness} />
           {arcs.map((a, i) => (
             <circle key={i} cx={size/2} cy={size/2} r={r} fill="none"
-              stroke={a.color} strokeWidth={hover === i ? thickness + 7 : thickness} strokeLinecap="round"
+              stroke={a.color} strokeWidth={hover === i ? thickness + 6 : thickness} strokeLinecap="butt"
               strokeDasharray={`${a.len} ${circumference}`} strokeDashoffset={a.dashoffset}
               onMouseEnter={() => setHover(i)} onMouseLeave={() => setHover(null)}
               style={{
                 cursor: "pointer",
-                opacity: hover == null || hover === i ? 1 : 0.32,
+                opacity: hover == null || hover === i ? 1 : 0.28,
                 transition: "stroke-width .25s ease, opacity .25s ease, stroke-dasharray 1.1s cubic-bezier(.34,1.05,.64,1), stroke-dashoffset 1.1s cubic-bezier(.34,1.05,.64,1)",
               }} />
           ))}
@@ -4197,7 +4197,7 @@ function TriGrafyPanel({ financeItems, onSaveFinance, invoices, dpfoMonths, loan
   const akcieItem  = (financeItems||[]).find(i => i.id === "fi_ma_01");
   const stavItem   = (financeItems||[]).find(i => i.id === "fi_ma_02");
   const extraMaj   = (financeItems||[]).filter(i => i.category === "majetek" && !["fi_ma_01","fi_ma_02","fi_ma_03"].includes(i.id));
-  const MAJ_C      = ["#92400E","#B45309","#D97706","#F59E0B","#78350F","#FBBF24"];
+  const MAJ_C      = ["#8A6D1B","#B8860B","#D4AF37","#C9A227","#A6790A","#E2C275"];
   const allMajSegs = [
     akcieItem && { item: akcieItem, label: "Akcie / ETF",      value: akcieItem.amount||0, color: MAJ_C[0] },
     stavItem  && { item: stavItem,  label: "Stavební spoření", value: stavItem.amount||0,  color: MAJ_C[1] },
@@ -4235,8 +4235,9 @@ function TriGrafyPanel({ financeItems, onSaveFinance, invoices, dpfoMonths, loan
     setNewLabel(""); setNewAmt(0); setAdding(false);
   };
 
-  const S_COL = "#4F46E5", M_COL = "#B45309";
-  const R_COL = firmaRez >= 0 ? "#059669" : "#6B62D8";
+  const S_COL = "#059669", M_COL = "#B8860B";
+  const R_COL = "#4F46E5";
+  const R_WARN = "#DC2626";
 
   const card = (accentColor, bgGrad) => ({
     flex: 1,
@@ -4259,13 +4260,13 @@ function TriGrafyPanel({ financeItems, onSaveFinance, invoices, dpfoMonths, loan
   // Spořák: všechny obálky + firemní rezerva (= volné peníze na účtu)
   const fullSporSegs = [
     ...envSegs.map(e => ({ label: e.label, value: e.amount, color: e.color })),
-    ...(firmaRez > 0 ? [{ label: "Rezerva", value: firmaRez, color: "#047857" }] : []),
+    ...(firmaRez > 0 ? [{ label: "Rezerva", value: firmaRez, color: R_COL }] : []),
   ];
   const majGlassSegs = allMajSegs.map(s => ({ label: s.label, value: s.value, color: s.color }));
   const rezPct = planKap > 0 ? Math.min(firmaRez / planKap, 1) : 0;
   const rezGlassSegs = firmaRez >= 0
-    ? [{ label: "Rezerva", value: firmaRez, color: "#047857" }, ...(firmaRez < planKap ? [{ label: "Do cíle", value: planKap - firmaRez, color: "rgba(4,120,87,0.12)" }] : [])]
-    : [{ label: "Deficit", value: Math.abs(firmaRez), color: "#4F46E5" }, { label: "Do cíle", value: planKap, color: "rgba(79,70,229,0.12)" }];
+    ? [{ label: "Rezerva", value: firmaRez, color: R_COL }, ...(firmaRez < planKap ? [{ label: "Do cíle", value: planKap - firmaRez, color: "rgba(79,70,229,0.14)" }] : [])]
+    : [{ label: "Deficit", value: Math.abs(firmaRez), color: R_WARN }, { label: "Do cíle", value: planKap, color: "rgba(220,38,38,0.14)" }];
 
   const secHdr = (col, text) => (
     <div style={{ fontSize: 8, letterSpacing: ".18em", color: col, fontWeight: 800, textTransform: "uppercase", opacity: 0.65, marginBottom: 3 }}>{text}</div>
@@ -4278,7 +4279,7 @@ function TriGrafyPanel({ financeItems, onSaveFinance, invoices, dpfoMonths, loan
     <div style={{ borderRadius: 22, overflow: "hidden", border: "1px solid rgba(0,0,0,0.07)", boxShadow: "0 4px 32px rgba(0,0,0,0.07)" }}>
 
       {/* ═══ SPOŘÁK — full-width strip ═══ */}
-      <div style={{ padding: "26px 34px 28px", background: "linear-gradient(150deg, #F0EDFF 0%, #EEF2FF 100%)" }}>
+      <div style={{ padding: "26px 34px 28px", background: "linear-gradient(150deg, #ECFDF5 0%, #D1FAE5 100%)" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 18 }}>
           {secHdr(S_COL, "Spořící účet · celkové rozložení")}
           {eBtn(() => { setBalInput(actualBal); setEditBal(e => !e); }, editBal, S_COL)}
@@ -4300,7 +4301,7 @@ function TriGrafyPanel({ financeItems, onSaveFinance, invoices, dpfoMonths, loan
       <div style={{ display: "flex", borderTop: "1px solid rgba(0,0,0,0.06)" }}>
 
         {/* ── MAJETEK ── */}
-        <div style={{ flex: 3, padding: "24px 30px 26px", background: "linear-gradient(150deg, #FFFBEB 0%, #FEF3C7 100%)", borderRight: "1px solid rgba(0,0,0,0.06)" }}>
+        <div style={{ flex: 3, padding: "24px 30px 26px", background: "linear-gradient(150deg, #FFFCF0 0%, #F5E6B8 100%)", borderRight: "1px solid rgba(0,0,0,0.06)" }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
             {secHdr(M_COL, "Osobní majetek")}
             {eBtn(() => setEditMaj(e => !e), editMaj, M_COL)}
@@ -4348,10 +4349,10 @@ function TriGrafyPanel({ financeItems, onSaveFinance, invoices, dpfoMonths, loan
         </div>
 
         {/* ── REZERVA ── */}
-        <div style={{ flex: 2, padding: "24px 30px 26px", background: firmaRez >= 0 ? "linear-gradient(150deg, #ECFDF5 0%, #D1FAE5 100%)" : "linear-gradient(150deg, #EEF2FF 0%, #E0E7FF 100%)" }}>
+        <div style={{ flex: 2, padding: "24px 30px 26px", background: "linear-gradient(150deg, #EEF2FF 0%, #E0E7FF 100%)" }}>
           <div style={{ marginBottom: 16 }}>{secHdr(R_COL, "Firemní rezerva")}</div>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "center" }}>
-            <InteractiveRing segments={rezGlassSegs} size={170} thickness={20} glowColor={firmaRez < 0 ? "#4F46E5" : R_COL} legendOnly
+            <InteractiveRing segments={rezGlassSegs} size={170} thickness={20} glowColor={firmaRez < 0 ? R_WARN : R_COL} legendOnly
               centerTop={firmaRez >= 0 ? "Naplněno" : "Schodek"}
               centerMain={firmaRez >= 0 ? fmtKc(firmaRez) : `−${fmtKc(Math.abs(firmaRez))}`}
               centerSub={firmaRez >= 0 ? `${Math.round(rezPct * 100)}% z cíle` : "pod cílem"} />
