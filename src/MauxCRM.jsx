@@ -5855,6 +5855,61 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
           </button>
         </div>
       </div>
+
+      {/* Kontrola hranice 200 000 Kč/měs. (úschovy — čistý úrok + fakturace — vlastní odměna) */}
+      {(() => {
+        const ymSet = new Set();
+        invoices.forEach(i => { if (i.issue_date) ymSet.add(i.issue_date.slice(0,7)); });
+        (escrows||[]).forEach(e => {
+          if (e.date_received) ymSet.add(e.date_received.slice(0,7));
+          (e.escrow_tranches||[]).forEach(t => {
+            if (t.received_date) ymSet.add(t.received_date.slice(0,7));
+            if (t.paid_date) ymSet.add(t.paid_date.slice(0,7));
+          });
+        });
+        if (ymSet.size === 0) return null;
+        const sortedYm = [...ymSet].sort();
+        const [startY, startM0] = sortedYm[0].split("-").map(Number);
+        let cy = startY, cm = startM0 - 1; // 0-indexed
+        const rows = [];
+        while (cy < now.getFullYear() || (cy === now.getFullYear() && cm <= now.getMonth())) {
+          const ym = `${cy}-${String(cm+1).padStart(2,"0")}`;
+          const invAmt = invoices.filter(i => (i.issue_date||"").startsWith(ym)).reduce((s,i)=>s+(i.subtotal||0),0);
+          const escAmt = Math.round(escrowNetForMonth(escrows, cy, cm));
+          const totalM = invAmt + escAmt;
+          if (totalM > 0) rows.push({ ym, invAmt, escAmt, totalM, over: totalM > 200000 });
+          cm++; if (cm > 11) { cm = 0; cy++; }
+        }
+        const anyOver = rows.some(r => r.over);
+        return (
+          <details style={{marginTop:2}}>
+            <summary style={{cursor:"pointer",fontSize:10.5,color:anyOver?"#DC2626":"var(--mut)",fontWeight:anyOver?700:500,letterSpacing:".02em"}}>
+              {anyOver ? "⚠ Hranice 200 000 Kč/měs. (úschovy + fakturace) — v historii překročeno" : "Kontrola hranice 200 000 Kč/měs. (úschovy + fakturace) — nikdy překročeno"}
+            </summary>
+            <div style={{marginTop:8,border:"1px solid var(--line)",borderRadius:8,overflow:"hidden",maxWidth:560}}>
+              <table style={{width:"100%",borderCollapse:"collapse",fontSize:11.5}}>
+                <thead><tr style={{background:"#F3F0FF"}}>
+                  <th style={{padding:"6px 12px",textAlign:"left",fontWeight:500,color:"var(--mut)",fontSize:9,letterSpacing:".06em",textTransform:"uppercase"}}>Měsíc</th>
+                  <th style={{padding:"6px 12px",textAlign:"right",fontWeight:500,color:"var(--mut)",fontSize:9,letterSpacing:".06em",textTransform:"uppercase"}}>Fakturace</th>
+                  <th style={{padding:"6px 12px",textAlign:"right",fontWeight:500,color:"var(--mut)",fontSize:9,letterSpacing:".06em",textTransform:"uppercase"}}>Úschovy (čistý úrok)</th>
+                  <th style={{padding:"6px 12px",textAlign:"right",fontWeight:500,color:"var(--mut)",fontSize:9,letterSpacing:".06em",textTransform:"uppercase"}}>Celkem</th>
+                </tr></thead>
+                <tbody>
+                  {rows.map(r => (
+                    <tr key={r.ym} style={{borderTop:"1px solid var(--line)",background:r.over?"#FEF2F2":"#fff"}}>
+                      <td style={{padding:"6px 12px",color:"var(--txt)"}}>{r.ym}</td>
+                      <td style={{padding:"6px 12px",textAlign:"right",color:"var(--mut)"}}>{fmtKc(r.invAmt)}</td>
+                      <td style={{padding:"6px 12px",textAlign:"right",color:"var(--mut)"}}>{fmtKc(r.escAmt)}</td>
+                      <td style={{padding:"6px 12px",textAlign:"right",fontWeight:r.over?700:500,color:r.over?"#DC2626":"var(--txt)"}}>{fmtKc(r.totalM)}{r.over?" ⚠":""}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </details>
+        );
+      })()}
+
       {editLayout && (
         <div style={{background:"#EEF2FF",border:"1px dashed #3518A5",borderRadius:10,padding:"10px 16px",fontSize:12,color:"#3730A3"}}>
           🖱 Přetáhni karty pro změnu pořadí · ✕ skryje kartu · + ji znovu zobrazí · klikni <strong>Hotovo</strong> pro uložení
