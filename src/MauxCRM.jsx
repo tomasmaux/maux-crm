@@ -565,6 +565,11 @@ function InvoiceIssueModal({ clientId, entries, clients, invoices, onConfirm, on
   });
   const [showPreview, setShowPreview] = useState(false);
 
+  // ── sleva (discount) — o udělení rozhoduje Tom před vystavením faktury ──
+  const [discounts, setDiscounts] = useState([]);
+  const [newDiscountTarget, setNewDiscountTarget] = useState("");
+  const [newDiscountAmount, setNewDiscountAmount] = useState("");
+
   const dueDate = adjustDueDate(dueDateBase, dueDateOffset);
   const duzp    = lastDayPrevMonth(issueDate);
 
@@ -573,8 +578,17 @@ function InvoiceIssueModal({ clientId, entries, clients, invoices, onConfirm, on
   const notary = selEntries.reduce((s, e) => s + (e.notary_fee || 0), 0);
   const admin = selEntries.reduce((s, e) => s + (e.admin_fee || 0), 0);
   const sigFee = selEntries.reduce((s, e) => s + (Number(e.sig_count) || 0) * SIGNATURE_DECL_FEE, 0);
-  const vat = Math.round(workAmt * 0.21);
-  const total = workAmt + vat + notary + admin + sigFee;
+
+  const discountCandidates = selEntries.map(e => ({ key: e.id, label: e.description, amount: e.amount }));
+  const discountTotal = discounts.reduce((s, d) => s + (Number(d.amount) || 0), 0);
+  const workAmtBeforeDiscount = workAmt;
+  const workAmtAfterDiscount  = Math.max(workAmt - discountTotal, 0);
+  const vatBefore   = Math.round(workAmtBeforeDiscount * 0.21);
+  const vatAfter    = Math.round(workAmtAfterDiscount * 0.21);
+  const totalBefore = workAmtBeforeDiscount + vatBefore + notary + admin + sigFee;
+  const totalAfter  = workAmtAfterDiscount + vatAfter + notary + admin + sigFee;
+  const vat   = vatAfter;
+  const total = totalAfter;
 
   const toggle = (id) => setSelected(p => { const n = new Set(p); n.has(id) ? n.delete(id) : n.add(id); return n; });
 
@@ -596,7 +610,11 @@ function InvoiceIssueModal({ clientId, entries, clients, invoices, onConfirm, on
         statutory_note: SIGNATURE_DECL_NOTE,
       })),
     ],
-    subtotal: workAmt, vat_rate: 21, vat_amount: vat, total,
+    subtotal: workAmtAfterDiscount, vat_rate: 21, vat_amount: vatAfter, total: totalAfter,
+    discount: discountTotal > 0 ? { items: discounts, total: discountTotal } : null,
+    subtotal_before_discount: workAmtBeforeDiscount,
+    vat_amount_before_discount: vatBefore,
+    total_before_discount: totalBefore,
     status: "pripravena", notes: varSymbol,
     var_symbol: varSymbol,
   };
@@ -669,13 +687,54 @@ function InvoiceIssueModal({ clientId, entries, clients, invoices, onConfirm, on
           </div>
         </div>
 
+        {/* Sleva — o udělení rozhoduje Tom před vystavením faktury */}
+        <div style={{ marginBottom: 20 }}>
+          <div style={{ fontSize: 9.5, letterSpacing: ".12em", textTransform: "uppercase", color: "var(--mut)", fontWeight: 500, marginBottom: 10 }}>Sleva</div>
+          {discounts.length > 0 && (
+            <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 10 }}>
+              {discounts.map(d => (
+                <div key={d.id} style={{ display: "flex", alignItems: "center", gap: 10, background: "#FFF5FA", border: "1px solid #F3D9E8", borderRadius: 8, padding: "8px 12px" }}>
+                  <span style={{ flex: 1, fontSize: 12, color: "var(--txt)" }}>{d.label}</span>
+                  <span style={{ fontSize: 12.5, fontFamily: "Fraunces, serif", color: "#A8527A" }}>−{fmtKc(d.amount)}</span>
+                  <button onClick={() => setDiscounts(p => p.filter(x => x.id !== d.id))}
+                    style={{ background: "none", border: "none", cursor: "pointer", color: "#A8527A", fontSize: 14 }}>✕</button>
+                </div>
+              ))}
+            </div>
+          )}
+          <div style={{ display: "flex", gap: 8 }}>
+            <select value={newDiscountTarget} onChange={e => setNewDiscountTarget(e.target.value)}
+              style={{ flex: 2, font: "inherit", fontSize: 12.5, padding: "8px 10px", border: "1px solid var(--line)", borderRadius: 8, background: "#fff" }}>
+              <option value="">Vyber výkaz…</option>
+              {discountCandidates.map(c => <option key={c.key} value={c.key}>{c.label} ({fmtKc(c.amount)})</option>)}
+            </select>
+            <input type="number" placeholder="Kč" value={newDiscountAmount} onChange={e => setNewDiscountAmount(e.target.value)}
+              style={{ width: 90, font: "inherit", fontSize: 12.5, padding: "8px 10px", border: "1px solid var(--line)", borderRadius: 8 }} />
+            <button className="btn" style={{ fontSize: 12 }} disabled={!newDiscountTarget || !newDiscountAmount}
+              onClick={() => {
+                const cand = discountCandidates.find(c => c.key === newDiscountTarget);
+                if (!cand) return;
+                setDiscounts(p => [...p, { id: uid(), key: cand.key, label: cand.label, amount: Number(newDiscountAmount) }]);
+                setNewDiscountTarget(""); setNewDiscountAmount("");
+              }}>
+              + Přidat slevu
+            </button>
+          </div>
+        </div>
+
         {/* Summary */}
         <div style={{ background: "var(--bg)", borderRadius: 10, padding: "14px 16px", marginBottom: 20, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <div style={{ fontSize: 12, color: "var(--mut)" }}>
-            {selEntries.length} výkazů · základ {fmtKc(workAmt)}
+            {selEntries.length} výkazů · základ {fmtKc(workAmtAfterDiscount)}
             {(notary + admin) > 0 && <span> · přefakturace {fmtKc(notary + admin)}</span>}
+            {discountTotal > 0 && <span style={{ color: "#A8527A" }}> · sleva −{fmtKc(discountTotal)}</span>}
           </div>
-          <div style={{ fontFamily: "Fraunces, serif", fontSize: 20, fontWeight: 300, color: "var(--ink)" }}>{fmtKc(total)}</div>
+          <div style={{ textAlign: "right" }}>
+            {discountTotal > 0 && (
+              <div style={{ fontFamily: "Fraunces, serif", fontSize: 13, color: "var(--mut)", textDecoration: "line-through" }}>{fmtKc(totalBefore)}</div>
+            )}
+            <div style={{ fontFamily: "Fraunces, serif", fontSize: 20, fontWeight: 300, color: "var(--ink)" }}>{fmtKc(total)}</div>
+          </div>
         </div>
 
         <div style={{ display: "flex", gap: 10 }}>
