@@ -5856,8 +5856,9 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
         </div>
       </div>
 
-      {/* Kontrola hranice 200 000 Kč/měs. (úschovy — čistý úrok + fakturace — vlastní odměna) */}
+      {/* Kontrola hranice 200 000 Kč/měs. (úschovy — čistý úrok + fakturace — vlastní odměna), s automatickým posunem mety a živým řádkem na příští měsíc */}
       {(() => {
+        const MESICE_LOC = ["lednu","únoru","březnu","dubnu","květnu","červnu","červenci","srpnu","září","říjnu","listopadu","prosinci"];
         const ymSet = new Set();
         invoices.forEach(i => { if (i.issue_date) ymSet.add(i.issue_date.slice(0,7)); });
         (escrows||[]).forEach(e => {
@@ -5867,46 +5868,104 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
             if (t.paid_date) ymSet.add(t.paid_date.slice(0,7));
           });
         });
-        if (ymSet.size === 0) return null;
+        ymSet.add(thisMonth);
         const sortedYm = [...ymSet].sort();
         const [startY, startM0] = sortedYm[0].split("-").map(Number);
+        // Vždy zobraz i příští měsíc jako živou projekci — tabulka se tak posouvá automaticky s časem.
+        const lastY = now.getMonth() === 11 ? now.getFullYear() + 1 : now.getFullYear();
+        const lastM = (now.getMonth() + 1) % 12;
         let cy = startY, cm = startM0 - 1; // 0-indexed
         const rows = [];
-        while (cy < now.getFullYear() || (cy === now.getFullYear() && cm <= now.getMonth())) {
+        while (cy < lastY || (cy === lastY && cm <= lastM)) {
           const ym = `${cy}-${String(cm+1).padStart(2,"0")}`;
           const invAmt = invoices.filter(i => (i.issue_date||"").startsWith(ym)).reduce((s,i)=>s+(i.subtotal||0),0);
           const escAmt = Math.round(escrowNetForMonth(escrows, cy, cm));
           const totalM = invAmt + escAmt;
-          if (totalM > 0) rows.push({ ym, invAmt, escAmt, totalM, over: totalM > 200000 });
+          const live = ym >= thisMonth;
+          if (totalM > 0 || live) rows.push({ ym, invAmt, escAmt, totalM, live, monIdx: cm });
           cm++; if (cm > 11) { cm = 0; cy++; }
         }
-        const anyOver = rows.some(r => r.over);
+        // Postupně se posunující meta: 200 000 → po prvním prolomení 250 000 → dál vždy +25 000.
+        // Meta se posouvá jen podle UZAVŘENÝCH měsíců — živý/budoucí měsíc ji ještě nemůže posunout.
+        let goal = 200000;
+        let firstMilestone = null;
+        let milestoneCount = 0;
+        rows.forEach(r => {
+          r.goal = goal;
+          r.over = r.totalM > goal;
+          if (!r.live && r.over) {
+            milestoneCount++;
+            r.milestoneNum = milestoneCount;
+            if (!firstMilestone) firstMilestone = r;
+            goal = (goal === 200000) ? 250000 : goal + 25000;
+          }
+        });
+        const anyOver = milestoneCount > 0;
+        const activeGoal = goal;
         return (
-          <details style={{marginTop:2}}>
-            <summary style={{cursor:"pointer",fontSize:10.5,color:anyOver?"#DC2626":"var(--mut)",fontWeight:anyOver?700:500,letterSpacing:".02em"}}>
-              {anyOver ? "⚠ Hranice 200 000 Kč/měs. (úschovy + fakturace) — v historii překročeno" : "Kontrola hranice 200 000 Kč/měs. (úschovy + fakturace) — nikdy překročeno"}
-            </summary>
-            <div style={{marginTop:8,border:"1px solid var(--line)",borderRadius:8,overflow:"hidden",maxWidth:560}}>
-              <table style={{width:"100%",borderCollapse:"collapse",fontSize:11.5}}>
-                <thead><tr style={{background:"#F3F0FF"}}>
-                  <th style={{padding:"6px 12px",textAlign:"left",fontWeight:500,color:"var(--mut)",fontSize:9,letterSpacing:".06em",textTransform:"uppercase"}}>Měsíc</th>
-                  <th style={{padding:"6px 12px",textAlign:"right",fontWeight:500,color:"var(--mut)",fontSize:9,letterSpacing:".06em",textTransform:"uppercase"}}>Fakturace</th>
-                  <th style={{padding:"6px 12px",textAlign:"right",fontWeight:500,color:"var(--mut)",fontSize:9,letterSpacing:".06em",textTransform:"uppercase"}}>Úschovy (čistý úrok)</th>
-                  <th style={{padding:"6px 12px",textAlign:"right",fontWeight:500,color:"var(--mut)",fontSize:9,letterSpacing:".06em",textTransform:"uppercase"}}>Celkem</th>
-                </tr></thead>
-                <tbody>
-                  {rows.map(r => (
-                    <tr key={r.ym} style={{borderTop:"1px solid var(--line)",background:r.over?"#FEF2F2":"#fff"}}>
-                      <td style={{padding:"6px 12px",color:"var(--txt)"}}>{r.ym}</td>
-                      <td style={{padding:"6px 12px",textAlign:"right",color:"var(--mut)"}}>{fmtKc(r.invAmt)}</td>
-                      <td style={{padding:"6px 12px",textAlign:"right",color:"var(--mut)"}}>{fmtKc(r.escAmt)}</td>
-                      <td style={{padding:"6px 12px",textAlign:"right",fontWeight:r.over?700:500,color:r.over?"#DC2626":"var(--txt)"}}>{fmtKc(r.totalM)}{r.over?" ⚠":""}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </details>
+          <>
+            {firstMilestone && (
+              <div style={{
+                marginTop:2, position:"relative", overflow:"hidden",
+                background:"linear-gradient(135deg,#3518A5 0%,#7C3AED 45%,#A8527A 100%)",
+                borderRadius:14, padding:"16px 20px", color:"#fff",
+                boxShadow:"0 8px 28px -8px rgba(53,24,165,.45)",
+              }}>
+                <span style={{position:"absolute",top:8,left:18,fontSize:18,animation:"mauxSparkle 2.4s ease-in-out infinite"}}>✨</span>
+                <span style={{position:"absolute",top:14,right:34,fontSize:14,animation:"mauxSparkle 2.4s ease-in-out infinite .5s"}}>✨</span>
+                <span style={{position:"absolute",bottom:10,right:14,fontSize:20,animation:"mauxSparkle 2.4s ease-in-out infinite 1s"}}>🎉</span>
+                <div style={{display:"flex",alignItems:"center",gap:14}}>
+                  <div style={{fontSize:34,animation:"mauxTrophyPop .7s ease-out"}}>🏆</div>
+                  <div>
+                    <div style={{fontSize:9,letterSpacing:".22em",textTransform:"uppercase",opacity:.8,fontWeight:700,marginBottom:3}}>Nový milník</div>
+                    <div style={{fontFamily:"Fraunces,serif",fontSize:18,fontWeight:500,lineHeight:1.25}}>
+                      Poprvé jsi v {MESICE_LOC[firstMilestone.monIdx]} {firstMilestone.ym.slice(0,4)} prolomil hranici 200 000 Kč/měs. — {fmtKc(firstMilestone.totalM)}!
+                    </div>
+                    <div style={{fontSize:11,opacity:.85,marginTop:4}}>Meta se posouvá výš — další cíl je {fmtKc(250000)}, pak vždy o dalších 25 000 Kč.</div>
+                  </div>
+                </div>
+              </div>
+            )}
+            <style>{`
+              @keyframes mauxSparkle { 0%,100% { opacity:.25; transform:scale(.85) rotate(0deg); } 50% { opacity:1; transform:scale(1.15) rotate(12deg); } }
+              @keyframes mauxTrophyPop { 0% { transform:scale(.4) rotate(-15deg); opacity:0; } 60% { transform:scale(1.15) rotate(6deg); opacity:1; } 100% { transform:scale(1) rotate(0deg); opacity:1; } }
+            `}</style>
+            <details style={{marginTop:2}}>
+              <summary style={{cursor:"pointer",fontSize:10.5,color:anyOver?"#DC2626":"var(--mut)",fontWeight:anyOver?700:500,letterSpacing:".02em"}}>
+                {anyOver ? `⚠ Meta ${fmtKc(activeGoal)}/měs. (úschovy + fakturace) — v historii překročeno ${milestoneCount}×` : "Kontrola hranice 200 000 Kč/měs. (úschovy + fakturace) — nikdy překročeno"}
+              </summary>
+              <div style={{marginTop:8,border:"1px solid var(--line)",borderRadius:8,overflow:"hidden",maxWidth:600}}>
+                <table style={{width:"100%",borderCollapse:"collapse",fontSize:11.5}}>
+                  <thead><tr style={{background:"#F3F0FF"}}>
+                    <th style={{padding:"6px 12px",textAlign:"left",fontWeight:500,color:"var(--mut)",fontSize:9,letterSpacing:".06em",textTransform:"uppercase"}}>Měsíc</th>
+                    <th style={{padding:"6px 12px",textAlign:"right",fontWeight:500,color:"var(--mut)",fontSize:9,letterSpacing:".06em",textTransform:"uppercase"}}>Fakturace</th>
+                    <th style={{padding:"6px 12px",textAlign:"right",fontWeight:500,color:"var(--mut)",fontSize:9,letterSpacing:".06em",textTransform:"uppercase"}}>Úschovy (čistý úrok)</th>
+                    <th style={{padding:"6px 12px",textAlign:"right",fontWeight:500,color:"var(--mut)",fontSize:9,letterSpacing:".06em",textTransform:"uppercase"}}>Celkem</th>
+                    <th style={{padding:"6px 12px",textAlign:"right",fontWeight:500,color:"var(--mut)",fontSize:9,letterSpacing:".06em",textTransform:"uppercase"}}>Meta</th>
+                  </tr></thead>
+                  <tbody>
+                    {rows.map(r => (
+                      <tr key={r.ym} style={{
+                        borderTop:"1px solid var(--line)",
+                        background: r.live ? "#F5F3FF" : (r.over ? "#FEF2F2" : "#fff"),
+                        borderLeft: r.live ? "3px dashed #9C96B5" : "3px solid transparent",
+                      }}>
+                        <td style={{padding:"6px 12px",color:"var(--txt)"}}>
+                          {r.ym}
+                          {r.live ? <span style={{marginLeft:6,fontSize:9,color:"#7C3AED",fontWeight:600}}>průběžné</span> : null}
+                          {r.milestoneNum ? <span style={{marginLeft:6,fontSize:9,color:"#A8527A",fontWeight:600}}>{r.milestoneNum===1?"🏆":"🎉"} milník {r.milestoneNum}</span> : null}
+                        </td>
+                        <td style={{padding:"6px 12px",textAlign:"right",color:"var(--mut)"}}>{fmtKc(r.invAmt)}</td>
+                        <td style={{padding:"6px 12px",textAlign:"right",color:"var(--mut)"}}>{fmtKc(r.escAmt)}</td>
+                        <td style={{padding:"6px 12px",textAlign:"right",fontWeight:r.over?700:500,color:r.over?"#DC2626":"var(--txt)"}}>{fmtKc(r.totalM)}{r.over?" ⚠":""}</td>
+                        <td style={{padding:"6px 12px",textAlign:"right",color:"var(--mut)",fontSize:10.5}}>{fmtKc(r.goal)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </details>
+          </>
         );
       })()}
 
