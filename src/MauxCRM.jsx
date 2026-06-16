@@ -6109,12 +6109,12 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
 
             {/* PŘÍJMY */}
             <div style={{padding:"20px 26px 18px"}}>
-              <div style={{fontSize:7,letterSpacing:".30em",textTransform:"uppercase",color:"var(--mut)",fontWeight:700,marginBottom:9}}>PŘÍJMY MĚSÍČNÍ</div>
+              <div style={{fontSize:7,letterSpacing:".30em",textTransform:"uppercase",color:"var(--mut)",fontWeight:700,marginBottom:9}}>PŘÍJMY NA PŘÍŠTÍ MĚSÍC</div>
               <div style={{display:"flex",alignItems:"baseline",gap:7}}>
                 <span style={{fontFamily:"Fraunces,serif",fontSize:30,fontWeight:300,color:"#059669",lineHeight:1,letterSpacing:"-.01em"}}>{fmtKc(totalPrijmy)}</span>
-                <span style={{fontSize:9.5,color:"#059669",opacity:.55,fontWeight:400}}>/ měsíc</span>
+                <span style={{fontSize:9.5,color:"#059669",opacity:.55,fontWeight:400}}>odhad</span>
               </div>
-              <div style={{fontSize:8.5,color:"var(--mut)",marginTop:6,letterSpacing:".03em"}}>{mName[now.getMonth()]} {now.getFullYear()}</div>
+              <div style={{fontSize:8.5,color:"var(--mut)",marginTop:6,letterSpacing:".03em"}}>do 1. {nextMonthName.toLowerCase()} — nevyfakturováno, úschovy, DPH, manuální</div>
             </div>
 
             {/* BILANCE — dominantní číslo */}
