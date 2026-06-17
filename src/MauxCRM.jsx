@@ -566,7 +566,12 @@ function InvoiceIssueModal({ clientId, entries, clients, invoices, onConfirm, on
   const [showPreview, setShowPreview] = useState(false);
 
   // ── sleva (discount) — o udělení rozhoduje Tom před vystavením faktury ──
-  const [discounts, setDiscounts] = useState([]);
+  // Seed z discount_amount uloženého na výkazu přes krok "Změny" (DraftDiscountModal) —
+  // pokud tam Tom slevu potvrdil, tady se objeví už předvyplněná, ale dál editovatelná.
+  const [discounts, setDiscounts] = useState(() =>
+    entries.filter(e => Number(e.discount_amount) > 0)
+      .map(e => ({ id: uid(), key: e.id, label: e.description, amount: Number(e.discount_amount) }))
+  );
   const [newDiscountTarget, setNewDiscountTarget] = useState("");
   const [newDiscountAmount, setNewDiscountAmount] = useState("");
 
@@ -743,6 +748,101 @@ function InvoiceIssueModal({ clientId, entries, clients, invoices, onConfirm, on
             Náhled faktury →
           </button>
         </div>
+      </div>
+    </div>
+  );
+}
+
+/* ─── ZMĚNY — sleva na jednotlivé výkazy v draftu, krok PŘED vystavením faktury ───
+   Záměrně oddělené od "Vystavit fakturu" (nevratná akce) — tady se jen ukládá koncept
+   slevy na samotné výkazy (work_entries.discount_amount), nic se nefakturuje.
+   POTVRDIT = uloží. ZPĚT bez rozepsaných změn = zavře beze zbytku. ZPĚT s rozepsanými
+   změnami = vyzve uložit nebo zahodit koncept. */
+function DraftDiscountModal({ clientId, entries, clients, onConfirm, onCancel, saving }) {
+  const client = clients.find(c => c.id === clientId);
+  const sorted = [...entries].sort((a,b) => (a.entry_date||"").localeCompare(b.entry_date||""));
+
+  const [vals, setVals] = useState(() => {
+    const m = {};
+    entries.forEach(e => { m[e.id] = e.discount_amount ? String(e.discount_amount) : ""; });
+    return m;
+  });
+  const [confirmDiscard, setConfirmDiscard] = useState(false);
+
+  const isDirty = entries.some(e => (Number(vals[e.id]) || 0) !== (Number(e.discount_amount) || 0));
+  const totalDiscount = entries.reduce((s, e) => s + Math.min(Number(vals[e.id]) || 0, e.amount || 0), 0);
+
+  const handleBack = () => {
+    if (isDirty) { setConfirmDiscard(true); return; }
+    onCancel();
+  };
+
+  const handleConfirm = () => {
+    const updated = entries.map(e => ({
+      ...e,
+      discount_amount: Math.max(0, Math.min(Number(vals[e.id]) || 0, e.amount || 0)),
+    }));
+    onConfirm(updated);
+  };
+
+  return (
+    <div className="ov" onClick={handleBack}>
+      <div style={{ background: "#fff", borderRadius: 16, padding: 28, maxWidth: 580, width: "100%", maxHeight: "90vh", overflowY: "auto", boxShadow: "0 24px 64px rgba(0,0,0,.18)" }}
+        onClick={e => e.stopPropagation()}>
+        <div style={{ fontFamily: "Fraunces, serif", fontSize: 20, fontWeight: 300, color: "var(--txt)", marginBottom: 4 }}>Změny — sleva na výkazech</div>
+        <div style={{ fontSize: 12.5, color: "var(--mut)", marginBottom: 20 }}>
+          {client?.name} · sleva se na faktuře uvede samostatně a decentně u příslušné položky
+        </div>
+
+        <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 20 }}>
+          {sorted.map(e => {
+            const v = vals[e.id] || "";
+            const base = e.amount || 0;
+            const disc = Math.min(Number(v) || 0, base);
+            const final = base - disc;
+            return (
+              <div key={e.id} style={{ border: "1px solid var(--line)", borderRadius: 10, padding: "10px 14px", background: disc > 0 ? "#FFF5FA" : "#fff" }}>
+                <div style={{ fontSize: 12.5, color: "var(--txt)", fontWeight: 500, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                  {e.description}
+                </div>
+                <div style={{ fontSize: 10.5, color: "var(--mut)", marginBottom: 8 }}>{fmtDate(e.entry_date)} · základ {fmtKc(base)}</div>
+                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                  <span style={{ fontSize: 11, color: "var(--mut)" }}>Sleva (Kč)</span>
+                  <input type="number" min="0" max={base} value={v} placeholder="0"
+                    onChange={ev => setVals(p => ({ ...p, [e.id]: ev.target.value }))}
+                    style={{ width: 90, font: "inherit", fontSize: 12.5, padding: "6px 9px", border: "1px solid var(--line2)", borderRadius: 7 }} />
+                  {disc > 0 && (
+                    <span style={{ fontSize: 11.5, color: "#A8527A", marginLeft: "auto" }}>
+                      → {fmtKc(final)} <span style={{ textDecoration: "line-through", color: "var(--mut)" }}>{fmtKc(base)}</span>
+                    </span>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        <div style={{ background: "var(--bg)", borderRadius: 10, padding: "12px 16px", marginBottom: 20, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <span style={{ fontSize: 12, color: "var(--mut)" }}>{entries.length} výkazů · sleva celkem</span>
+          <span style={{ fontFamily: "Fraunces, serif", fontSize: 16, color: totalDiscount > 0 ? "#A8527A" : "var(--mut)" }}>
+            {totalDiscount > 0 ? `−${fmtKc(totalDiscount)}` : "—"}
+          </span>
+        </div>
+
+        {confirmDiscard ? (
+          <div style={{ background: "#FEF2F2", border: "1px solid #FECACA", borderRadius: 10, padding: "14px 16px" }}>
+            <div style={{ fontSize: 13, color: "#991B1B", marginBottom: 12 }}>Máš neuložené změny slevy — uložit, nebo koncept zahodit?</div>
+            <div style={{ display: "flex", gap: 10 }}>
+              <button className="btn" style={{ flex: 1 }} onClick={() => { setConfirmDiscard(false); onCancel(); }}>Zahodit koncept</button>
+              <button className="btn pri" style={{ flex: 1 }} onClick={handleConfirm} disabled={saving}>{saving ? "Ukládám…" : "Uložit"}</button>
+            </div>
+          </div>
+        ) : (
+          <div style={{ display: "flex", gap: 10 }}>
+            <button className="btn" style={{ flex: 1 }} onClick={handleBack}>Zpět</button>
+            <button className="btn pri" style={{ flex: 2 }} onClick={handleConfirm} disabled={saving}>{saving ? "Ukládám…" : "Potvrdit"}</button>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -7049,7 +7149,7 @@ function WorkEntryList({ entries, clients, invoices, onNew, onEdit, onDelete, on
 }
 
 /* ─── FAKTURACE ─── */
-function InvoiceList({ invoices, clients, workEntries, onOpen, onOpenClient, onToggleStatus, onGenerateInvoice, onPreviewInvoice, onEditInvoice, loading }) {
+function InvoiceList({ invoices, clients, workEntries, onOpen, onOpenClient, onToggleStatus, onGenerateInvoice, onPreviewInvoice, onEditInvoice, onOpenDiscountModal, loading }) {
   const [search, setSearch] = useState("");
   const [filterStatus, setFilterStatus] = useState("vse");
   const [filterClient, setFilterClient] = useState("");
@@ -7173,6 +7273,10 @@ function InvoiceList({ invoices, clients, workEntries, onOpen, onOpenClient, onT
                     <div style={{ fontFamily: "Fraunces, serif", fontSize: 18, fontWeight: 300, color: "var(--gold)" }}>{fmtKc(d.total)}</div>
                     <div style={{ fontSize: 11, color: "var(--mut)" }}>základ {fmtKc(d.workAmt)} + DPH {fmtKc(d.vat)}{(d.notary+d.admin+d.sig)>0 ? ` + přef. ${fmtKc(d.notary+d.admin+d.sig)}` : ""}</div>
                   </div>
+                  <button className="btn" style={{ fontSize: 12, flexShrink: 0 }}
+                    onClick={e => { e.stopPropagation(); onOpenDiscountModal && onOpenDiscountModal(d.clientId, d.entries); }}>
+                    Změny{d.entries.some(e => Number(e.discount_amount) > 0) ? " •" : ""}
+                  </button>
                   <button className="btn" style={{ fontSize: 12, flexShrink: 0 }}
                     onClick={e => { e.stopPropagation(); onPreviewInvoice && onPreviewInvoice(d.clientId, d.entries); }}>
                     Náhled
@@ -9764,6 +9868,7 @@ export default function MauxCRM() {
   const [assistantAttendance, setAssistantAttendance] = useState([]);
   const [previewModal, setPreviewModal] = useState(null); // { invoice, client, workEntries }
   const [editInvModal, setEditInvModal] = useState(null); // { inv } — edit existing invoice
+  const [discountModal, setDiscountModal] = useState(null); // { clientId, entries } — "Změny" krok před vystavením faktury
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => setSession(session));
@@ -9878,13 +9983,37 @@ export default function MauxCRM() {
     setIssueModal({ clientId, entries });
   };
 
+  // "Změny" — samostatný krok PŘED vystavením faktury, kde se na jednotlivé výkazy
+  // navěšují slevy. Odděleně od "Vystavit fakturu", aby to nebylo svázáno s nevratnou akcí.
+  // POTVRDIT = uloží discount_amount na výkazy (běžným upsertem přes existující handler).
+  // ZPĚT bez rozepsaných změn = jen zavře. ZPĚT s neuloženými změnami = vyzve uložit/zahodit.
+  const openDiscountModal = (clientId, entries) => {
+    setDiscountModal({ clientId, entries });
+  };
+
+  const confirmDraftDiscounts = async (updatedEntries) => {
+    setSaving(true);
+    try {
+      await Promise.all(updatedEntries.map(e => upsertWorkEntry(e)));
+      const updated = await fetchWorkEntries();
+      setWorkEntries(updated);
+      setDiscountModal(null);
+    } catch (err) { alert("Chyba: " + err.message); } finally { setSaving(false); }
+  };
+
   const openPreviewModal = (clientId, entries) => {
     const client = clients.find(c => c.id === clientId);
-    const workAmt = entries.reduce((s,e) => s+(e.amount||0), 0);
+    // Slevy potvrzené přes "Změny" (discount_amount na výkazu) se promítnou i do tohoto rychlého náhledu.
+    const discItems = entries.filter(e => Number(e.discount_amount) > 0)
+      .map(e => ({ id: uid(), key: e.id, label: e.description, amount: Number(e.discount_amount) }));
+    const discountTotal = discItems.reduce((s,d) => s+d.amount, 0);
+    const workAmtBefore = entries.reduce((s,e) => s+(e.amount||0), 0);
+    const workAmt = Math.max(workAmtBefore - discountTotal, 0);
     const notary = entries.reduce((s,e) => s+(e.notary_fee||0), 0);
     const admin = entries.reduce((s,e) => s+(e.admin_fee||0), 0);
     const sig = entries.reduce((s,e) => s+(Number(e.sig_count)||0)*SIGNATURE_DECL_FEE, 0);
     const vat = Math.round(workAmt * 0.21);
+    const vatBefore = Math.round(workAmtBefore * 0.21);
     const inv = {
       id: uid(), invoice_number: nextInvoiceNumber(invoices),
       client_id: clientId, issue_date: today(), due_date: nextDueDate(),
@@ -9895,6 +10024,10 @@ export default function MauxCRM() {
         ...(sig>0 ? [{ id: uid(), description: "Prohlášení o pravosti podpisu", hours:0, rate:0, amount:sig, no_vat:true, statutory_note: SIGNATURE_DECL_NOTE }] : []),
       ],
       subtotal: workAmt, vat_rate: 21, vat_amount: vat, total: workAmt+vat+notary+admin+sig,
+      discount: discountTotal > 0 ? { items: discItems, total: discountTotal } : null,
+      subtotal_before_discount: workAmtBefore,
+      vat_amount_before_discount: vatBefore,
+      total_before_discount: workAmtBefore+vatBefore+notary+admin+sig,
       status: "pripravena", notes: "", var_symbol: nextInvoiceNumber(invoices).replace(/\D/g,"").slice(-6),
     };
     setPreviewModal({ invoice: inv, client, workEntries: entries });
@@ -10227,6 +10360,7 @@ export default function MauxCRM() {
               onGenerateInvoice={openIssueModal}
               onPreviewInvoice={openPreviewModal}
               onEditInvoice={openEditInvModal}
+              onOpenDiscountModal={openDiscountModal}
               loading={dataLoading}
             />
           )}
@@ -10337,6 +10471,17 @@ export default function MauxCRM() {
           invoices={invoices}
           onConfirm={confirmIssueInvoice}
           onCancel={() => setIssueModal(null)}
+          saving={saving}
+        />
+      )}
+
+      {discountModal && (
+        <DraftDiscountModal
+          clientId={discountModal.clientId}
+          entries={discountModal.entries}
+          clients={clients}
+          onConfirm={confirmDraftDiscounts}
+          onCancel={() => setDiscountModal(null)}
           saving={saving}
         />
       )}
