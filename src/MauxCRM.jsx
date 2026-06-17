@@ -503,12 +503,22 @@ function computeInvoiceTotals(items) {
   return { subtotal, vat_amount: vatAmount, total };
 }
 function nextInvoiceNumber(invoices) {
+  // Pořadové číslo se počítá jen z faktur VLASTNÍHO formátu "FA {rok}/{NNN}" pro AKTUÁLNÍ rok.
+  // Díky tomu se nepletou starší/cizí formáty čísel (např. "14/2026" = pořadové/rok) za pořadové
+  // číslo — to byla příčina chyby, kdy se vygenerovalo např. "FA 2026/2027" (rok omylem braný
+  // jako pořadové číslo). Číslování je tak reálně chronologické a každý rok začíná znovu od 001.
   const year = new Date().getFullYear();
+  const prefix = `FA ${year}/`;
   const nums = invoices
-    .map(i => { const m = (i.invoice_number || "").match(/(\d+)$/); return m ? parseInt(m[1]) : 0; })
+    .map(i => {
+      const num = i.invoice_number || "";
+      if (!num.startsWith(prefix)) return 0;
+      const m = num.slice(prefix.length).match(/^(\d+)/);
+      return m ? parseInt(m[1], 10) : 0;
+    })
     .filter(n => n > 0);
   const next = (nums.length > 0 ? Math.max(...nums) : 0) + 1;
-  return `FA ${year}/${String(next).padStart(3, "0")}`;
+  return `${prefix}${String(next).padStart(3, "0")}`;
 }
 function invoiceStatus(inv) {
   if (inv.status === "dph_odvedeno") return "dph_odvedeno";
@@ -1456,7 +1466,7 @@ function InvoiceEditModal({ inv, clients, workEntries, onPreview, onCancel, onSa
 
 function InvoicePrintPreview({ invoice, client, workEntries, onBack, onIssue, saving, previewOnly = false, isEditMode = false, onConfirmEdit = null }) {
   const [qrUrl, setQrUrl] = useState("");
-  const [sentDialog, setSentDialog] = useState(false);
+  const [issueConfirmDialog, setIssueConfirmDialog] = useState(false);
   const [editConfirmDialog, setEditConfirmDialog] = useState(false);
 
   const ibanRaw = FIRMA.iban.replace(/\s/g, "");
@@ -1469,9 +1479,12 @@ function InvoicePrintPreview({ invoice, client, workEntries, onBack, onIssue, sa
       .then(setQrUrl).catch(console.error);
   }, [qrData]);
 
-  const handlePrintAndAsk = () => {
+  // Potvrzení JE PŘED vystavením (ne až po vytisknutí) — jednoduché "opravdu? ano / ještě ne".
+  // Po potvrzení: vytiskne se PDF a faktura se uloží jako Vystavena. Bez potvrzení se nic neuloží ani nevytiskne.
+  const handleConfirmIssue = () => {
+    setIssueConfirmDialog(false);
     window.print();
-    setTimeout(() => setSentDialog(true), 800);
+    onIssue(true);
   };
 
   // Last day of prev month description for items
@@ -1518,7 +1531,7 @@ function InvoicePrintPreview({ invoice, client, workEntries, onBack, onIssue, sa
             Potvrdit →
           </button>
         ) : (
-          <button className="btn pri" style={{ fontSize: 13 }} onClick={handlePrintAndAsk} disabled={saving}>
+          <button className="btn pri" style={{ fontSize: 13 }} onClick={() => setIssueConfirmDialog(true)} disabled={saving}>
             Stáhnout PDF a vystavit →
           </button>
         )}
@@ -1662,8 +1675,10 @@ function InvoicePrintPreview({ invoice, client, workEntries, onBack, onIssue, sa
                 )}
                 {invoice.discount?.total > 0 && (
                   <div style={{ display: "flex", justifyContent: "space-between", gap: 20 }}>
+                    {/* Bez popisu úkonu — detail slevy je vázán na advokátní tajemství,
+                        rozpis viz příloha č. 1 (výkaz práce) */}
                     <span style={{ fontSize: 9.5, color: "#A8527A", fontFamily: "'Inter', sans-serif", fontWeight: 300, fontStyle: "italic" }}>
-                      Sleva{invoice.discount.items?.length === 1 ? ` — ${invoice.discount.items[0].label}` : ` (${invoice.discount.items?.length || 0}×)`}
+                      Sleva <span style={{ color: "#C9A0B8" }}>(dle přílohy)</span>
                     </span>
                     <span style={{ fontSize: 11, color: "#A8527A", fontFamily: "'Inter', sans-serif", fontWeight: 300 }}>−{fmtKc(invoice.discount.total)}</span>
                   </div>
@@ -1747,10 +1762,9 @@ function InvoicePrintPreview({ invoice, client, workEntries, onBack, onIssue, sa
                     </div>
                   </div>
                 )}
-                <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end" }}>
-                  <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 12, color: "#5B3FC8", letterSpacing: "0.22em", textAlign: "right", marginBottom: 8 }}>MAUX LEGAL</div>
-                  <div style={{ width: 88, height: .5, background: "rgba(53,24,165,.22)", marginBottom: 4 }} />
-                  <div style={{ fontSize: 6.5, letterSpacing: "0.22em", color: "#D4CEEA", textTransform: "uppercase", fontFamily: "'Inter', sans-serif" }}>podpis & razítko</div>
+                <div style={{ display: "flex", flexDirection: "column", alignItems: "center", width: 200 }}>
+                  <div style={{ width: 200, height: .5, background: "rgba(53,24,165,.22)", marginBottom: 9 }} />
+                  <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 19, fontWeight: 400, color: "#5B3FC8", letterSpacing: "0.34em", textAlign: "center" }}>MAUX LEGAL</div>
                 </div>
               </div>
             </div>
@@ -1793,7 +1807,6 @@ function InvoicePrintPreview({ invoice, client, workEntries, onBack, onIssue, sa
                       ["Období", prevMonthLabel()],
                       ["Vystaveno", fmtDate(invoice.issue_date)],
                       ["Faktura č.", invoice.invoice_number],
-                      ["Celkem hodin", totalHours > 0 ? `${totalHours} h` : "paušál"],
                     ].map(([lbl, val], i) => (
                       <div key={i}>
                         <div style={{ fontSize: 6, letterSpacing: "0.4em", color: "rgba(255,255,255,.3)", textTransform: "uppercase", marginBottom: 3 }}>{lbl}</div>
@@ -1823,7 +1836,11 @@ function InvoicePrintPreview({ invoice, client, workEntries, onBack, onIssue, sa
                     </tr>
                   </thead>
                   <tbody>
-                    {sorted.map((e, i) => (
+                    {sorted.map((e, i) => {
+                      const discAmt = Math.min(Number(e.discount_amount) || 0, e.amount || 0);
+                      const lineTotal = (e.amount||0) + (Number(e.sig_count)||0) * SIGNATURE_DECL_FEE;
+                      const lineFinal = lineTotal - discAmt;
+                      return (
                       <tr key={i} style={{ background: i % 2 === 0 ? "transparent" : "rgba(53,24,165,.012)" }}>
                         <td style={{ padding: "12px 4mm 12px 0", borderBottom: ".5px solid rgba(53,24,165,.045)", fontSize: 10.5, color: "#9C96B5", fontWeight: 300, whiteSpace: "nowrap", verticalAlign: "top" }}>{fmtDate(e.entry_date)}</td>
                         <td style={{ padding: "12px 4mm 12px 0", borderBottom: ".5px solid rgba(53,24,165,.045)", fontSize: 11.5, color: "#2d2840", fontWeight: 300, lineHeight: 1.55, verticalAlign: "top" }}>
@@ -1833,12 +1850,25 @@ function InvoicePrintPreview({ invoice, client, workEntries, onBack, onIssue, sa
                               + prohlášení o pravosti podpisu ({e.sig_count}× {fmtKc(SIGNATURE_DECL_FEE)}) — {SIGNATURE_DECL_NOTE}
                             </div>
                           )}
+                          {discAmt > 0 && (
+                            <div style={{ fontSize: 9.5, color: "#A8527A", marginTop: 4, fontFamily: "'Inter', sans-serif", fontStyle: "italic", maxWidth: 340, lineHeight: 1.5 }}>
+                              Na tomto úkonu uplatněna sleva {fmtKc(discAmt)} oproti standardní sazbě.
+                            </div>
+                          )}
                         </td>
                         <td style={{ padding: "12px 4mm 12px 0", borderBottom: ".5px solid rgba(53,24,165,.045)", textAlign: "right", fontSize: 11, color: "#B0ABCA", fontWeight: 300, verticalAlign: "top", whiteSpace: "nowrap" }}>{e.hours > 0 ? `${e.hours} h` : "—"}</td>
                         <td style={{ padding: "12px 4mm 12px 0", borderBottom: ".5px solid rgba(53,24,165,.045)", textAlign: "right", fontSize: 11, color: "#B0ABCA", fontWeight: 300, verticalAlign: "top", whiteSpace: "nowrap" }}>{e.rate > 0 ? fmtKc(e.rate) : <span style={{ color: "#D4CEEA" }}>paušál</span>}</td>
-                        <td style={{ padding: "12px 0 12px 0", borderBottom: ".5px solid rgba(53,24,165,.045)", textAlign: "right", fontSize: 12, color: "#1a1530", fontWeight: 400, verticalAlign: "top", whiteSpace: "nowrap" }}>{fmtKc((e.amount||0) + (Number(e.sig_count)||0) * SIGNATURE_DECL_FEE)}</td>
+                        <td style={{ padding: "12px 0 12px 0", borderBottom: ".5px solid rgba(53,24,165,.045)", textAlign: "right", fontSize: 12, color: "#1a1530", fontWeight: 400, verticalAlign: "top", whiteSpace: "nowrap" }}>
+                          {discAmt > 0 ? (
+                            <>
+                              <div style={{ textDecoration: "line-through", color: "#B0ABCA", fontSize: 10, fontWeight: 300 }}>{fmtKc(lineTotal)}</div>
+                              <div style={{ color: "#A8527A" }}>{fmtKc(lineFinal)}</div>
+                            </>
+                          ) : fmtKc(lineTotal)}
+                        </td>
                       </tr>
-                    ))}
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
@@ -1846,12 +1876,6 @@ function InvoicePrintPreview({ invoice, client, workEntries, onBack, onIssue, sa
               {/* ── TOTAL BLOCK ── */}
               <div style={{ padding: "6mm 18mm 8mm", display: "flex", justifyContent: "flex-end" }}>
                 <div style={{ minWidth: 220, borderTop: ".5px solid rgba(53,24,165,.15)", paddingTop: "5mm" }}>
-                  {totalHours > 0 && (
-                    <div style={{ display: "flex", justifyContent: "space-between", gap: 24, marginBottom: 8, alignItems: "baseline" }}>
-                      <span style={{ fontSize: 9, color: "#D4CEEA", letterSpacing: "0.3em", textTransform: "uppercase", fontWeight: 300 }}>Celkem hodin</span>
-                      <span style={{ fontSize: 11, color: "#9C96B5", fontWeight: 300 }}>{totalHours} h</span>
-                    </div>
-                  )}
                   <div style={{ display: "flex", justifyContent: "space-between", gap: 32, alignItems: "baseline" }}>
                     <span style={{ fontSize: 7, color: "#C4BDDC", letterSpacing: "0.42em", textTransform: "uppercase", fontFamily: "'Inter', sans-serif" }}>Základ bez DPH</span>
                     <span style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 28, fontWeight: 500, color: "#3518A5", letterSpacing: "0.02em", lineHeight: 1, whiteSpace: "nowrap" }}>{fmtKc(invoice.subtotal)}</span>
@@ -1890,17 +1914,17 @@ function InvoicePrintPreview({ invoice, client, workEntries, onBack, onIssue, sa
           </div>
         </div>
       )}
-      {sentDialog && !previewOnly && (
+      {issueConfirmDialog && !previewOnly && (
         <div className="ov no-print">
           <div style={{ background: "#fff", borderRadius: 16, padding: 28, maxWidth: 400, width: "100%", boxShadow: "0 24px 64px rgba(0,0,0,.18)" }}>
-            <div style={{ fontFamily: "Fraunces, serif", fontSize: 22, fontWeight: 300, color: "var(--txt)", marginBottom: 10 }}>Odeslal jsi fakturu klientovi?</div>
+            <div style={{ fontFamily: "Fraunces, serif", fontSize: 22, fontWeight: 300, color: "var(--txt)", marginBottom: 10 }}>Opravdu vystavit fakturu?</div>
             <div style={{ fontSize: 13, color: "var(--mut)", marginBottom: 24 }}>
-              Pokud ano, faktura se označí jako <strong>Vystavena</strong>.<br />
-              Jinak zůstane jako Připravená.
+              {invoice.invoice_number} · {client?.name}<br />
+              Po potvrzení se stáhne PDF a faktura se uloží jako <strong>Vystavena</strong>.
             </div>
             <div style={{ display: "flex", gap: 10 }}>
-              <button className="btn" onClick={() => { onIssue(false); setSentDialog(false); }}>Neodesláno — Připravená</button>
-              <button className="btn pri" onClick={() => { onIssue(true); setSentDialog(false); }}>Ano, označit Vystavena</button>
+              <button className="btn" style={{ flex: 1 }} onClick={() => setIssueConfirmDialog(false)}>Ještě ne</button>
+              <button className="btn pri" style={{ flex: 1 }} onClick={handleConfirmIssue} disabled={saving}>{saving ? "Ukládám…" : "Ano, vystavit →"}</button>
             </div>
           </div>
         </div>
@@ -7168,14 +7192,18 @@ function InvoiceList({ invoices, clients, workEntries, onOpen, onOpenClient, onT
     });
     return Object.entries(byClient).map(([clientId, entries]) => {
       const client = clients.find(c => c.id === clientId);
-      const workAmt = entries.reduce((s,e) => s + (e.amount||0), 0);
+      // Sleva potvrzená přes "Změny" (discount_amount na výkazu) se musí propsat i sem —
+      // ať draft "K vystavení" ukazuje stejnou nižší částku jako Náhled a budoucí faktura.
+      const discount = entries.reduce((s,e) => s + Math.min(Number(e.discount_amount)||0, e.amount||0), 0);
+      const workAmtBefore = entries.reduce((s,e) => s + (e.amount||0), 0);
+      const workAmt = Math.max(workAmtBefore - discount, 0);
       const notary = entries.reduce((s,e) => s + (e.notary_fee||0), 0);
       const admin = entries.reduce((s,e) => s + (e.admin_fee||0), 0);
       const sig = entries.reduce((s,e) => s + (Number(e.sig_count)||0)*SIGNATURE_DECL_FEE, 0);
       const vat = Math.round(workAmt * 0.21);
       const total = workAmt + vat + notary + admin + sig;
       const hours = entries.reduce((s,e) => s + (e.hours||0), 0);
-      return { clientId, client, entries, workAmt, notary, admin, sig, vat, total, hours };
+      return { clientId, client, entries, workAmt, notary, admin, sig, vat, total, hours, discount };
     }).sort((a,b) => b.total - a.total);
   }, [workEntries, clients]);
 
@@ -7272,6 +7300,9 @@ function InvoiceList({ invoices, clients, workEntries, onOpen, onOpenClient, onT
                   <div style={{ textAlign: "right", marginRight: 16 }}>
                     <div style={{ fontFamily: "Fraunces, serif", fontSize: 18, fontWeight: 300, color: "var(--gold)" }}>{fmtKc(d.total)}</div>
                     <div style={{ fontSize: 11, color: "var(--mut)" }}>základ {fmtKc(d.workAmt)} + DPH {fmtKc(d.vat)}{(d.notary+d.admin+d.sig)>0 ? ` + přef. ${fmtKc(d.notary+d.admin+d.sig)}` : ""}</div>
+                    {d.discount > 0 && (
+                      <div style={{ fontSize: 10.5, color: "#A8527A", marginTop: 1 }}>sleva uplatněna −{fmtKc(d.discount)}</div>
+                    )}
                   </div>
                   <button className="btn" style={{ fontSize: 12, flexShrink: 0 }}
                     onClick={e => { e.stopPropagation(); onOpenDiscountModal && onOpenDiscountModal(d.clientId, d.entries); }}>
