@@ -590,6 +590,9 @@ function InvoiceIssueModal({ clientId, entries, clients, invoices, onConfirm, on
 
   const selEntries = entries.filter(e => selected.has(e.id));
   const workAmt = selEntries.reduce((s, e) => s + (e.amount || 0), 0);
+  // notary = Tomova vlastní nákladová položka (notář mu fakturuje na jeho jméno, on ho platí).
+  // JE UŽ skrytě obsažená v e.amount (paušál/sazba, kterou Tom klientovi naceňuje) — proto se
+  // NIKDY nepřičítá k workAmt/total. Slouží jen pro interní dopočet zisku (workAmt − notary).
   const notary = selEntries.reduce((s, e) => s + (e.notary_fee || 0), 0);
   const admin = selEntries.reduce((s, e) => s + (e.admin_fee || 0), 0);
   const sigFee = selEntries.reduce((s, e) => s + (Number(e.sig_count) || 0) * SIGNATURE_DECL_FEE, 0);
@@ -600,8 +603,8 @@ function InvoiceIssueModal({ clientId, entries, clients, invoices, onConfirm, on
   const workAmtAfterDiscount  = Math.max(workAmt - discountTotal, 0);
   const vatBefore   = Math.round(workAmtBeforeDiscount * 0.21);
   const vatAfter    = Math.round(workAmtAfterDiscount * 0.21);
-  const totalBefore = workAmtBeforeDiscount + vatBefore + notary + admin + sigFee;
-  const totalAfter  = workAmtAfterDiscount + vatAfter + notary + admin + sigFee;
+  const totalBefore = workAmtBeforeDiscount + vatBefore + admin + sigFee;
+  const totalAfter  = workAmtAfterDiscount + vatAfter + admin + sigFee;
   const vat   = vatAfter;
   const total = totalAfter;
 
@@ -614,7 +617,7 @@ function InvoiceIssueModal({ clientId, entries, clients, invoices, onConfirm, on
     client_id: clientId, issue_date: issueDate, due_date: dueDate, duzp,
     items: [
       ...selEntries.filter(e => e.hours > 0 || e.billing_type === "flat_rate").map(e => ({ id: uid(), description: e.description, hours: e.hours, rate: e.rate, amount: e.amount, no_vat: false, flat_rate: e.billing_type === "flat_rate" })),
-      ...(notary > 0 ? [{ id: uid(), description: "Přefakturace — notář", hours: 0, rate: 0, amount: notary, no_vat: true }] : []),
+      // Notář se NIKDY nepřidává jako vlastní položka — je už neviditelně součástí amount výše.
       ...(admin > 0 ? [{ id: uid(), description: "Správní poplatek — přefakturace", hours: 0, rate: 0, amount: admin, no_vat: true }] : []),
       ...sigEntries.map(e => ({
         id: uid(),
@@ -741,7 +744,7 @@ function InvoiceIssueModal({ clientId, entries, clients, invoices, onConfirm, on
         <div style={{ background: "var(--bg)", borderRadius: 10, padding: "14px 16px", marginBottom: 20, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <div style={{ fontSize: 12, color: "var(--mut)" }}>
             {selEntries.length} výkazů · základ {fmtKc(workAmtAfterDiscount)}
-            {(notary + admin) > 0 && <span> · přefakturace {fmtKc(notary + admin)}</span>}
+            {admin > 0 && <span> · přefakturace {fmtKc(admin)}</span>}
             {discountTotal > 0 && <span style={{ color: "#A8527A" }}> · sleva −{fmtKc(discountTotal)}</span>}
           </div>
           <div style={{ textAlign: "right" }}>
@@ -1499,9 +1502,15 @@ function InvoicePrintPreview({ invoice, client, workEntries, onBack, onIssue, sa
 
   const duzpDisplay = invoice.duzp ? fmtDate(invoice.duzp) : fmtDate(lastDayPrevMonth(invoice.issue_date));
 
-  // noVatItems
+  // noVatItems — notář je Tomova vlastní nákladová položka (on ho platí, klient ji nikdy
+  // nevidí jmenovitě) — splyne neviditelně do hlavního řádku výkazu. Sp. poplatek (admin_fee)
+  // a zákonné poplatky (statutory_note, prohlášení o pravosti podpisu) se naopak ZOBRAZUJÍ
+  // jako vlastní řádek jako dosud — to jsou jiné kategorie, beze změny.
   const noVatItems = (invoice.items || []).filter(it => it.no_vat && it.amount > 0);
-  const noVatTotal = noVatItems.reduce((s, it) => s + (it.amount || 0), 0);
+  const hiddenPassthroughItems = noVatItems.filter(it => it.notary_passthrough);
+  const visibleNoVatItems = noVatItems.filter(it => !it.notary_passthrough);
+  const hiddenPassthroughTotal = hiddenPassthroughItems.reduce((s, it) => s + (it.amount || 0), 0);
+  const noVatTotal = visibleNoVatItems.reduce((s, it) => s + (it.amount || 0), 0);
 
   const printStyles = `
     @media print {
@@ -1631,11 +1640,12 @@ function InvoicePrintPreview({ invoice, client, workEntries, onBack, onIssue, sa
                       <td style={{ padding: "11px 0 11px 8px", borderBottom: ".5px solid rgba(53,24,165,.05)", textAlign: "right", fontSize: 11, color: "#B0ABCA", fontFamily: "'Inter', sans-serif", fontWeight: 300, whiteSpace: "nowrap" }}>
                         {(workEntries || []).length > 0 ? fmtKc((workEntries || [])[0]?.rate || 0) : "—"}
                       </td>
-                      <td style={{ padding: "11px 0 11px 8px", borderBottom: ".5px solid rgba(53,24,165,.05)", textAlign: "right", fontSize: 11.5, color: "#2d2840", fontFamily: "'Inter', sans-serif", fontWeight: 400, whiteSpace: "nowrap" }}>{fmtKc(invoice.subtotal)}</td>
+                      <td style={{ padding: "11px 0 11px 8px", borderBottom: ".5px solid rgba(53,24,165,.05)", textAlign: "right", fontSize: 11.5, color: "#2d2840", fontFamily: "'Inter', sans-serif", fontWeight: 400, whiteSpace: "nowrap" }}>{fmtKc(invoice.subtotal + hiddenPassthroughTotal)}</td>
                     </tr>
                   )}
-                  {/* No-VAT items */}
-                  {noVatItems.map((it, i) => (
+                  {/* No-VAT items — sp. poplatek a zákonné poplatky (statutory_note) se zobrazují
+                      jako dosud. Jen notář je skrytá nákladová položka a splyne do hlavního řádku výše. */}
+                  {visibleNoVatItems.map((it, i) => (
                     <tr key={i}>
                       <td style={{ padding: "11px 0", borderBottom: ".5px solid rgba(53,24,165,.05)", fontSize: 11.5, color: "#3a3355", fontFamily: "'Inter', sans-serif", fontWeight: 300 }}>
                         {it.description}
@@ -1667,6 +1677,8 @@ function InvoicePrintPreview({ invoice, client, workEntries, onBack, onIssue, sa
                     <span style={{ fontSize: 11, color: "#9C96B5", fontFamily: "'Inter', sans-serif", fontWeight: 300 }}>{fmtKc(invoice.vat_amount)}</span>
                   </div>
                 )}
+                {/* Pozn.: notář se zde NEZOBRAZUJE — je neviditelně součástí hlavního řádku výše.
+                    Sp. poplatek a zákonné poplatky (statutory_note) se naopak v souhrnu uvádí beze změny. */}
                 {noVatTotal > 0 && (
                   <div style={{ display: "flex", justifyContent: "space-between", gap: 20 }}>
                     <span style={{ fontSize: 9.5, color: "#C4BDDC", fontFamily: "'Inter', sans-serif", fontWeight: 300 }}>Přefakturace (bez DPH)</span>
@@ -1688,7 +1700,7 @@ function InvoicePrintPreview({ invoice, client, workEntries, onBack, onIssue, sa
               <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 10, paddingLeft: "8mm" }}>
                 <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 3 }}>
                   <div style={{ fontSize: 6.5, letterSpacing: "0.35em", color: "#D4CEEA", textTransform: "uppercase", fontFamily: "'Inter', sans-serif" }}>Celkem bez DPH</div>
-                  <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 20, fontWeight: 300, color: "#9C96B5", letterSpacing: "0.03em", lineHeight: 1 }}>{fmtKc(invoice.subtotal + noVatTotal)}</div>
+                  <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 20, fontWeight: 300, color: "#9C96B5", letterSpacing: "0.03em", lineHeight: 1 }}>{fmtKc(invoice.subtotal + noVatTotal + hiddenPassthroughTotal)}</div>
                 </div>
                 <div style={{ width: 200, height: .5, background: "rgba(53,24,165,.18)" }} />
                 <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 3 }}>
@@ -5768,7 +5780,7 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
   // On the way = nevyfakturovaná práce TENTO MĚSÍC (work entries bez invoice_id)
   const onTheWay = (workEntries||[])
     .filter(e => !e.invoice_id && (e.entry_date||"").startsWith(thisMonth))
-    .reduce((s,e) => s + Math.round((e.amount||0)*1.21) + (e.notary_fee||0) + (e.admin_fee||0) + (Number(e.sig_count)||0)*SIGNATURE_DECL_FEE, 0);
+    .reduce((s,e) => s + Math.round((e.amount||0)*1.21) + (e.admin_fee||0) + (Number(e.sig_count)||0)*SIGNATURE_DECL_FEE, 0);
   // Zdraví skóre = YTD avg monthly / abs(monthly expenses)
   const monthsElapsed = Math.max(now.getMonth()+1, 1);
 
@@ -5789,7 +5801,7 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
 
   // Unbilled
   const unbilled = workEntries.filter(e => !e.invoice_id);
-  const unbilledAmt = unbilled.reduce((s,e) => s+Math.round((e.amount||0)*1.21)+(e.notary_fee||0)+(e.admin_fee||0)+(Number(e.sig_count)||0)*SIGNATURE_DECL_FEE, 0);
+  const unbilledAmt = unbilled.reduce((s,e) => s+Math.round((e.amount||0)*1.21)+(e.admin_fee||0)+(Number(e.sig_count)||0)*SIGNATURE_DECL_FEE, 0);
   const unbilledByClient = unbilled.reduce((acc,e) => { if(e.client_id) acc[e.client_id]=(acc[e.client_id]||[]).concat(e); return acc; }, {});
 
   // Overdue
@@ -6371,7 +6383,7 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
                         </div>
                         {Object.entries(unbilledByClient).map(([cid, entries])=>{
                           const cl = clients.find(c=>c.id===cid);
-                          const amt = entries.reduce((s,e)=>s+Math.round((e.amount||0)*1.21)+(e.notary_fee||0)+(e.admin_fee||0)+(Number(e.sig_count)||0)*SIGNATURE_DECL_FEE,0);
+                          const amt = entries.reduce((s,e)=>s+Math.round((e.amount||0)*1.21)+(e.admin_fee||0)+(Number(e.sig_count)||0)*SIGNATURE_DECL_FEE,0);
                           return (
                             <div key={cid} style={{display:"flex",justifyContent:"space-between",fontSize:10,paddingLeft:12,color:"var(--mut)"}}>
                               <span>{cl?.name||"Neznámý klient"} ({entries.length}×)</span>
@@ -6391,7 +6403,7 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
                       <div style={{padding:"4px 0 10px 4px",display:"flex",flexDirection:"column",gap:6,maxHeight:220,overflowY:"auto"}}>
                         {Object.entries(unbilledByClient).map(([cid, entries])=>{
                           const cl = clients.find(c=>c.id===cid);
-                          const amt = entries.reduce((s,e)=>s+Math.round((e.amount||0)*1.21)+(e.notary_fee||0)+(e.admin_fee||0)+(Number(e.sig_count)||0)*SIGNATURE_DECL_FEE,0);
+                          const amt = entries.reduce((s,e)=>s+Math.round((e.amount||0)*1.21)+(e.admin_fee||0)+(Number(e.sig_count)||0)*SIGNATURE_DECL_FEE,0);
                           return (
                             <div key={cid} style={{borderBottom:"1px solid var(--line)",paddingBottom:5}}>
                               <div style={{display:"flex",justifyContent:"space-between",fontSize:10.5,fontWeight:600,color:"var(--ink)"}}>
@@ -7021,7 +7033,12 @@ function WorkEntryList({ entries, clients, invoices, onNew, onEdit, onDelete, on
   }, [unbilled]);
 
   const totalHours = unbilled.reduce((s, e) => s + (e.hours || 0), 0);
-  const totalAmount = unbilled.reduce((s, e) => s + (e.amount || 0) + (e.notary_fee || 0) + (e.admin_fee || 0) + (Number(e.sig_count) || 0) * SIGNATURE_DECL_FEE, 0);
+  // notář se NEpřičítá — je to Tomova nákladová položka, vždy už skrytě obsažená v e.amount
+  // (paušál/sazba, kterou Tom klientovi naceňuje). Sp. poplatek + prohlášení o podpisu jsou
+  // naopak skutečně navíc (bez DPH), proto se přičítají bez vatování.
+  const totalWorkAmt = unbilled.reduce((s, e) => s + (e.amount || 0), 0);
+  const totalAdminSig = unbilled.reduce((s, e) => s + (e.admin_fee || 0) + (Number(e.sig_count) || 0) * SIGNATURE_DECL_FEE, 0);
+  const totalAmount = Math.round(totalWorkAmt * 1.21) + totalAdminSig;
 
   const clientName = (e) => e.clients?.name || clients.find(c => c.id === e.client_id)?.name || "—";
 
@@ -7030,7 +7047,7 @@ function WorkEntryList({ entries, clients, invoices, onNew, onEdit, onDelete, on
       <div className="kpi-row">
         <div className="kpi hi">
           <div className="k">Nevyfakturováno</div>
-          <div className="v">{maskNum(new Intl.NumberFormat("cs-CZ").format(Math.round(totalAmount * 1.21)))} Kč</div>
+          <div className="v">{maskNum(new Intl.NumberFormat("cs-CZ").format(totalAmount))} Kč</div>
           <div className="s">{unbilled.length} záznamů · {totalHours.toFixed(1)} h</div>
         </div>
         <div className="kpi">
@@ -7071,7 +7088,7 @@ function WorkEntryList({ entries, clients, invoices, onNew, onEdit, onDelete, on
         const mNotary = monthEntries.reduce((s,e) => s + (e.notary_fee||0), 0);
         const mAdmin = monthEntries.reduce((s,e) => s + (e.admin_fee||0), 0);
         const mSig = monthEntries.reduce((s,e) => s + (Number(e.sig_count)||0) * SIGNATURE_DECL_FEE, 0);
-        const mTotal = Math.round(mWork * 1.21) + mNotary + mAdmin + mSig;
+        const mTotal = Math.round(mWork * 1.21) + mAdmin + mSig;
         const clients_in_month = [...new Set(monthEntries.map(e => e.client_id))];
 
         return (
@@ -7126,7 +7143,7 @@ function WorkEntryList({ entries, clients, invoices, onNew, onEdit, onDelete, on
                       {e.admin_fee > 0 && <div>Sp.pop.: {maskNum(new Intl.NumberFormat("cs-CZ").format(e.admin_fee))} Kč</div>}
                       {Number(e.sig_count) > 0 && <div>Prohlášení: {maskNum(new Intl.NumberFormat("cs-CZ").format(Number(e.sig_count)*SIGNATURE_DECL_FEE))} Kč</div>}
                     </td>
-                    <td className="t-amt">{maskNum(new Intl.NumberFormat("cs-CZ").format((e.amount||0) + (e.notary_fee||0) + (e.admin_fee||0) + (Number(e.sig_count)||0)*SIGNATURE_DECL_FEE))} Kč</td>
+                    <td className="t-amt">{maskNum(new Intl.NumberFormat("cs-CZ").format((e.amount||0) + (e.admin_fee||0) + (Number(e.sig_count)||0)*SIGNATURE_DECL_FEE))} Kč</td>
                     <td style={{ textAlign: "right" }} onClick={ev => ev.stopPropagation()}>
                       <button className="btn gho" style={{ fontSize: 11, padding: "4px 8px", color: "#DC2626" }}
                         onClick={() => onDelete(e.id)}>✕</button>
@@ -7160,7 +7177,7 @@ function WorkEntryList({ entries, clients, invoices, onNew, onEdit, onDelete, on
                       {disc && <span style={{ marginLeft: 6, fontSize: 10.5, color: "#A8527A" }}>(sleva −{fmtKc(disc.amount)} na faktuře {inv.invoice_number})</span>}
                     </td>
                     <td className="t-date">{e.hours > 0 ? `${e.hours} h` : "—"}</td>
-                    <td className="t-amt">{maskNum(new Intl.NumberFormat("cs-CZ").format((e.amount||0) + (e.notary_fee||0) + (e.admin_fee||0) + (Number(e.sig_count)||0)*SIGNATURE_DECL_FEE))} Kč</td>
+                    <td className="t-amt">{maskNum(new Intl.NumberFormat("cs-CZ").format((e.amount||0) + (e.admin_fee||0) + (Number(e.sig_count)||0)*SIGNATURE_DECL_FEE))} Kč</td>
                   </tr>
                   );
                 })}
@@ -7197,11 +7214,13 @@ function InvoiceList({ invoices, clients, workEntries, onOpen, onOpenClient, onT
       const discount = entries.reduce((s,e) => s + Math.min(Number(e.discount_amount)||0, e.amount||0), 0);
       const workAmtBefore = entries.reduce((s,e) => s + (e.amount||0), 0);
       const workAmt = Math.max(workAmtBefore - discount, 0);
+      // notář je Tomova vlastní nákladová položka, už skrytě obsažená v e.amount — nikdy se
+      // nepřičítá k total. Ponecháno jen pro interní zobrazení (informativní, viz níže).
       const notary = entries.reduce((s,e) => s + (e.notary_fee||0), 0);
       const admin = entries.reduce((s,e) => s + (e.admin_fee||0), 0);
       const sig = entries.reduce((s,e) => s + (Number(e.sig_count)||0)*SIGNATURE_DECL_FEE, 0);
       const vat = Math.round(workAmt * 0.21);
-      const total = workAmt + vat + notary + admin + sig;
+      const total = workAmt + vat + admin + sig;
       const hours = entries.reduce((s,e) => s + (e.hours||0), 0);
       return { clientId, client, entries, workAmt, notary, admin, sig, vat, total, hours, discount };
     }).sort((a,b) => b.total - a.total);
@@ -7299,7 +7318,7 @@ function InvoiceList({ invoices, clients, workEntries, onOpen, onOpenClient, onT
                   </div>
                   <div style={{ textAlign: "right", marginRight: 16 }}>
                     <div style={{ fontFamily: "Fraunces, serif", fontSize: 18, fontWeight: 300, color: "var(--gold)" }}>{fmtKc(d.total)}</div>
-                    <div style={{ fontSize: 11, color: "var(--mut)" }}>základ {fmtKc(d.workAmt)} + DPH {fmtKc(d.vat)}{(d.notary+d.admin+d.sig)>0 ? ` + přef. ${fmtKc(d.notary+d.admin+d.sig)}` : ""}</div>
+                    <div style={{ fontSize: 11, color: "var(--mut)" }}>základ {fmtKc(d.workAmt)} + DPH {fmtKc(d.vat)}{(d.admin+d.sig)>0 ? ` + přef. ${fmtKc(d.admin+d.sig)}` : ""}</div>
                     {d.discount > 0 && (
                       <div style={{ fontSize: 10.5, color: "#A8527A", marginTop: 1 }}>sleva uplatněna −{fmtKc(d.discount)}</div>
                     )}
@@ -7343,7 +7362,7 @@ function InvoiceList({ invoices, clients, workEntries, onOpen, onOpenClient, onT
                             </td>
                             <td style={{ padding: "10px 18px", textAlign: "right", color: "var(--mut)" }}>{e.hours > 0 ? `${e.hours} h` : "—"}</td>
                             <td style={{ padding: "10px 18px", textAlign: "right", fontFamily: "Fraunces, serif", fontWeight: 300 }}>
-                              {fmtKc((e.amount||0)+(e.notary_fee||0)+(e.admin_fee||0)+(Number(e.sig_count)||0)*SIGNATURE_DECL_FEE)}
+                              {fmtKc((e.amount||0)+(e.admin_fee||0)+(Number(e.sig_count)||0)*SIGNATURE_DECL_FEE)}
                             </td>
                           </tr>
                         ))}
@@ -7378,7 +7397,7 @@ function InvoiceList({ invoices, clients, workEntries, onOpen, onOpenClient, onT
         </div>
         <div className="kpi" style={{background:"#F0FDF4",border:"1px solid #BBF7D0"}}>
           <div className="k" style={{color:"#065F46"}}>Bude fakturováno — tento měsíc</div>
-          <div className="v" style={{color:"#059669"}}>{fmtKc((workEntries||[]).filter(e=>!e.invoice_id).reduce((s,e)=>s+Math.round((e.amount||0)*1.21)+(e.notary_fee||0)+(e.admin_fee||0)+(Number(e.sig_count)||0)*SIGNATURE_DECL_FEE,0))}</div>
+          <div className="v" style={{color:"#059669"}}>{fmtKc((workEntries||[]).filter(e=>!e.invoice_id).reduce((s,e)=>s+Math.round((e.amount||0)*1.21)+(e.admin_fee||0)+(Number(e.sig_count)||0)*SIGNATURE_DECL_FEE,0))}</div>
           <div className="s" style={{color:"#065F46"}}>nevyfakturované výkazy · s DPH</div>
         </div>
         <div className="kpi">
@@ -10040,6 +10059,7 @@ export default function MauxCRM() {
     const discountTotal = discItems.reduce((s,d) => s+d.amount, 0);
     const workAmtBefore = entries.reduce((s,e) => s+(e.amount||0), 0);
     const workAmt = Math.max(workAmtBefore - discountTotal, 0);
+    // notary = Tomova nákladová položka, UŽ skrytě obsažená v e.amount — nikdy se nepřičítá.
     const notary = entries.reduce((s,e) => s+(e.notary_fee||0), 0);
     const admin = entries.reduce((s,e) => s+(e.admin_fee||0), 0);
     const sig = entries.reduce((s,e) => s+(Number(e.sig_count)||0)*SIGNATURE_DECL_FEE, 0);
@@ -10050,15 +10070,14 @@ export default function MauxCRM() {
       client_id: clientId, issue_date: today(), due_date: nextDueDate(),
       items: [
         ...entries.filter(e=>e.hours>0 || e.billing_type === "flat_rate").map(e=>({ id: uid(), description: e.description, hours: e.hours, rate: e.rate, amount: e.amount, no_vat: false, flat_rate: e.billing_type === "flat_rate" })),
-        ...(notary>0 ? [{ id: uid(), description: "Přefakturace — notář", hours:0, rate:0, amount:notary, no_vat:true }] : []),
         ...(admin>0 ? [{ id: uid(), description: "Správní poplatek — přefakturace", hours:0, rate:0, amount:admin, no_vat:true }] : []),
         ...(sig>0 ? [{ id: uid(), description: "Prohlášení o pravosti podpisu", hours:0, rate:0, amount:sig, no_vat:true, statutory_note: SIGNATURE_DECL_NOTE }] : []),
       ],
-      subtotal: workAmt, vat_rate: 21, vat_amount: vat, total: workAmt+vat+notary+admin+sig,
+      subtotal: workAmt, vat_rate: 21, vat_amount: vat, total: workAmt+vat+admin+sig,
       discount: discountTotal > 0 ? { items: discItems, total: discountTotal } : null,
       subtotal_before_discount: workAmtBefore,
       vat_amount_before_discount: vatBefore,
-      total_before_discount: workAmtBefore+vatBefore+notary+admin+sig,
+      total_before_discount: workAmtBefore+vatBefore+admin+sig,
       status: "pripravena", notes: "", var_symbol: nextInvoiceNumber(invoices).replace(/\D/g,"").slice(-6),
     };
     setPreviewModal({ invoice: inv, client, workEntries: entries });
