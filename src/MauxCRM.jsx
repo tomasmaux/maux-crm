@@ -5001,13 +5001,16 @@ function ZiskovostPanel({ workEntries, clients }) {
 
   // Efektivní hodinovka — počítá se ze VŠECH záznamů s reálnými hodinami (vč. paušálů): co skutečně vydělávám na hodinu práce.
   const totalReal   = withReal.reduce((s, e) => s + (e.real_hours || 0), 0);
-  const totalAmount = withReal.reduce((s, e) => s + (e.amount || (e.hours || 0) * (e.rate || 0)), 0);
+  // sleva (discount_amount) se musí odečíst — jinak "efektivní hodinovka" ukazuje výdělek
+  // i za úkony, kde klient díky slevě fakticky zaplatil méně (nebo nic).
+  const netAmt = e => Math.max((e.amount || (e.hours || 0) * (e.rate || 0)) - (Number(e.discount_amount) || 0), 0);
+  const totalAmount = withReal.reduce((s, e) => s + netAmt(e), 0);
   const effRate  = totalReal > 0 ? totalAmount / totalReal : 0;
 
   // Nominální sazba a Ziskovost — jen z hodinových záznamů (paušál nemá "fakturované hodiny", takže by zkresloval poměr).
   const totalBilled     = hourlyEntries.reduce((s, e) => s + (e.hours || 0), 0);
   const totalRealHourly = hourlyEntries.reduce((s, e) => s + (e.real_hours || 0), 0);
-  const hourlyAmount    = hourlyEntries.reduce((s, e) => s + (e.amount || (e.hours || 0) * (e.rate || 0)), 0);
+  const hourlyAmount    = hourlyEntries.reduce((s, e) => s + netAmt(e), 0);
   const nomRate  = totalBilled     > 0 ? hourlyAmount / totalBilled     : 0;
   const ratioAll = totalRealHourly > 0 ? totalBilled / totalRealHourly : 0;
 
@@ -5780,7 +5783,9 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
   // On the way = nevyfakturovaná práce TENTO MĚSÍC (work entries bez invoice_id)
   const onTheWay = (workEntries||[])
     .filter(e => !e.invoice_id && (e.entry_date||"").startsWith(thisMonth))
-    .reduce((s,e) => s + Math.round((e.amount||0)*1.21) + (e.admin_fee||0) + (Number(e.sig_count)||0)*SIGNATURE_DECL_FEE, 0);
+    // sleva (discount_amount, potvrzená přes "Změny") se musí odečíst — jinak se promítá
+    // do projekce příjmů plná částka, i když klient za výkon fakticky zaplatí méně/nic.
+    .reduce((s,e) => s + Math.round(Math.max((e.amount||0)-(Number(e.discount_amount)||0),0)*1.21) + (e.admin_fee||0) + (Number(e.sig_count)||0)*SIGNATURE_DECL_FEE, 0);
   // Zdraví skóre = YTD avg monthly / abs(monthly expenses)
   const monthsElapsed = Math.max(now.getMonth()+1, 1);
 
@@ -5801,7 +5806,7 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
 
   // Unbilled
   const unbilled = workEntries.filter(e => !e.invoice_id);
-  const unbilledAmt = unbilled.reduce((s,e) => s+Math.round((e.amount||0)*1.21)+(e.admin_fee||0)+(Number(e.sig_count)||0)*SIGNATURE_DECL_FEE, 0);
+  const unbilledAmt = unbilled.reduce((s,e) => s+Math.round(Math.max((e.amount||0)-(Number(e.discount_amount)||0),0)*1.21)+(e.admin_fee||0)+(Number(e.sig_count)||0)*SIGNATURE_DECL_FEE, 0);
   const unbilledByClient = unbilled.reduce((acc,e) => { if(e.client_id) acc[e.client_id]=(acc[e.client_id]||[]).concat(e); return acc; }, {});
 
   // Overdue
@@ -6383,7 +6388,7 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
                         </div>
                         {Object.entries(unbilledByClient).map(([cid, entries])=>{
                           const cl = clients.find(c=>c.id===cid);
-                          const amt = entries.reduce((s,e)=>s+Math.round((e.amount||0)*1.21)+(e.admin_fee||0)+(Number(e.sig_count)||0)*SIGNATURE_DECL_FEE,0);
+                          const amt = entries.reduce((s,e)=>s+Math.round(Math.max((e.amount||0)-(Number(e.discount_amount)||0),0)*1.21)+(e.admin_fee||0)+(Number(e.sig_count)||0)*SIGNATURE_DECL_FEE,0);
                           return (
                             <div key={cid} style={{display:"flex",justifyContent:"space-between",fontSize:10,paddingLeft:12,color:"var(--mut)"}}>
                               <span>{cl?.name||"Neznámý klient"} ({entries.length}×)</span>
@@ -6403,7 +6408,7 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
                       <div style={{padding:"4px 0 10px 4px",display:"flex",flexDirection:"column",gap:6,maxHeight:220,overflowY:"auto"}}>
                         {Object.entries(unbilledByClient).map(([cid, entries])=>{
                           const cl = clients.find(c=>c.id===cid);
-                          const amt = entries.reduce((s,e)=>s+Math.round((e.amount||0)*1.21)+(e.admin_fee||0)+(Number(e.sig_count)||0)*SIGNATURE_DECL_FEE,0);
+                          const amt = entries.reduce((s,e)=>s+Math.round(Math.max((e.amount||0)-(Number(e.discount_amount)||0),0)*1.21)+(e.admin_fee||0)+(Number(e.sig_count)||0)*SIGNATURE_DECL_FEE,0);
                           return (
                             <div key={cid} style={{borderBottom:"1px solid var(--line)",paddingBottom:5}}>
                               <div style={{display:"flex",justifyContent:"space-between",fontSize:10.5,fontWeight:600,color:"var(--ink)"}}>
@@ -7036,7 +7041,9 @@ function WorkEntryList({ entries, clients, invoices, onNew, onEdit, onDelete, on
   // notář se NEpřičítá — je to Tomova nákladová položka, vždy už skrytě obsažená v e.amount
   // (paušál/sazba, kterou Tom klientovi naceňuje). Sp. poplatek + prohlášení o podpisu jsou
   // naopak skutečně navíc (bez DPH), proto se přičítají bez vatování.
-  const totalWorkAmt = unbilled.reduce((s, e) => s + (e.amount || 0), 0);
+  // sleva (discount_amount, potvrzená přes "Změny") se musí odečíst — jinak metrika ukazuje
+  // víc, než klient fakticky zaplatí (i u výkonu se slevou na 0 Kč).
+  const totalWorkAmt = unbilled.reduce((s, e) => s + Math.max((e.amount || 0) - (Number(e.discount_amount) || 0), 0), 0);
   const totalAdminSig = unbilled.reduce((s, e) => s + (e.admin_fee || 0) + (Number(e.sig_count) || 0) * SIGNATURE_DECL_FEE, 0);
   const totalAmount = Math.round(totalWorkAmt * 1.21) + totalAdminSig;
 
@@ -7084,7 +7091,7 @@ function WorkEntryList({ entries, clients, invoices, onNew, onEdit, onDelete, on
 
       {!loading && unbilledByMonth.map(([month, monthEntries]) => {
         const mHours = monthEntries.reduce((s,e) => s + (e.hours||0), 0);
-        const mWork = monthEntries.reduce((s,e) => s + (e.amount||0), 0);
+        const mWork = monthEntries.reduce((s,e) => s + Math.max((e.amount||0)-(Number(e.discount_amount)||0),0), 0);
         const mNotary = monthEntries.reduce((s,e) => s + (e.notary_fee||0), 0);
         const mAdmin = monthEntries.reduce((s,e) => s + (e.admin_fee||0), 0);
         const mSig = monthEntries.reduce((s,e) => s + (Number(e.sig_count)||0) * SIGNATURE_DECL_FEE, 0);
@@ -7143,7 +7150,7 @@ function WorkEntryList({ entries, clients, invoices, onNew, onEdit, onDelete, on
                       {e.admin_fee > 0 && <div>Sp.pop.: {maskNum(new Intl.NumberFormat("cs-CZ").format(e.admin_fee))} Kč</div>}
                       {Number(e.sig_count) > 0 && <div>Prohlášení: {maskNum(new Intl.NumberFormat("cs-CZ").format(Number(e.sig_count)*SIGNATURE_DECL_FEE))} Kč</div>}
                     </td>
-                    <td className="t-amt">{maskNum(new Intl.NumberFormat("cs-CZ").format((e.amount||0) + (e.admin_fee||0) + (Number(e.sig_count)||0)*SIGNATURE_DECL_FEE))} Kč</td>
+                    <td className="t-amt">{maskNum(new Intl.NumberFormat("cs-CZ").format(Math.max((e.amount||0)-(Number(e.discount_amount)||0),0) + (e.admin_fee||0) + (Number(e.sig_count)||0)*SIGNATURE_DECL_FEE))} Kč</td>
                     <td style={{ textAlign: "right" }} onClick={ev => ev.stopPropagation()}>
                       <button className="btn gho" style={{ fontSize: 11, padding: "4px 8px", color: "#DC2626" }}
                         onClick={() => onDelete(e.id)}>✕</button>
@@ -7177,7 +7184,7 @@ function WorkEntryList({ entries, clients, invoices, onNew, onEdit, onDelete, on
                       {disc && <span style={{ marginLeft: 6, fontSize: 10.5, color: "#A8527A" }}>(sleva −{fmtKc(disc.amount)} na faktuře {inv.invoice_number})</span>}
                     </td>
                     <td className="t-date">{e.hours > 0 ? `${e.hours} h` : "—"}</td>
-                    <td className="t-amt">{maskNum(new Intl.NumberFormat("cs-CZ").format((e.amount||0) + (e.admin_fee||0) + (Number(e.sig_count)||0)*SIGNATURE_DECL_FEE))} Kč</td>
+                    <td className="t-amt">{maskNum(new Intl.NumberFormat("cs-CZ").format(Math.max((e.amount||0)-(Number(disc?.amount)||0),0) + (e.admin_fee||0) + (Number(e.sig_count)||0)*SIGNATURE_DECL_FEE))} Kč</td>
                   </tr>
                   );
                 })}
@@ -7362,7 +7369,7 @@ function InvoiceList({ invoices, clients, workEntries, onOpen, onOpenClient, onT
                             </td>
                             <td style={{ padding: "10px 18px", textAlign: "right", color: "var(--mut)" }}>{e.hours > 0 ? `${e.hours} h` : "—"}</td>
                             <td style={{ padding: "10px 18px", textAlign: "right", fontFamily: "Fraunces, serif", fontWeight: 300 }}>
-                              {fmtKc((e.amount||0)+(e.admin_fee||0)+(Number(e.sig_count)||0)*SIGNATURE_DECL_FEE)}
+                              {fmtKc(Math.max((e.amount||0)-(Number(e.discount_amount)||0),0)+(e.admin_fee||0)+(Number(e.sig_count)||0)*SIGNATURE_DECL_FEE)}
                             </td>
                           </tr>
                         ))}
@@ -7397,7 +7404,7 @@ function InvoiceList({ invoices, clients, workEntries, onOpen, onOpenClient, onT
         </div>
         <div className="kpi" style={{background:"#F0FDF4",border:"1px solid #BBF7D0"}}>
           <div className="k" style={{color:"#065F46"}}>Bude fakturováno — tento měsíc</div>
-          <div className="v" style={{color:"#059669"}}>{fmtKc((workEntries||[]).filter(e=>!e.invoice_id).reduce((s,e)=>s+Math.round((e.amount||0)*1.21)+(e.admin_fee||0)+(Number(e.sig_count)||0)*SIGNATURE_DECL_FEE,0))}</div>
+          <div className="v" style={{color:"#059669"}}>{fmtKc((workEntries||[]).filter(e=>!e.invoice_id).reduce((s,e)=>s+Math.round(Math.max((e.amount||0)-(Number(e.discount_amount)||0),0)*1.21)+(e.admin_fee||0)+(Number(e.sig_count)||0)*SIGNATURE_DECL_FEE,0))}</div>
           <div className="s" style={{color:"#065F46"}}>nevyfakturované výkazy · s DPH</div>
         </div>
         <div className="kpi">
