@@ -53,6 +53,10 @@ const MODULES = [
 // žádná čísla ani fakturace. Tomas vidí Josefův přehled v listu "Josef · Asistent".
 const ASSISTANT_EMAILS = ["asistent@maux.cz"];
 const ASSISTANT_HOURLY_RATE = 170; // Kč/h — Josef Řehák
+// Josef začal zapisovat docházku v appce až od 6/2026 — za měsíce předtím (kde tedy
+// auto-výpočet z docházky vrátí 0) doplňujeme reálnou částku ručně z příkazu od účetní.
+// Od 6/2026 dál se vše počítá automaticky z docházky — tahle mapa se dál nerozšiřuje.
+const JOSEF_WAGE_MANUAL_OVERRIDES = { "2026-05": 10399 };
 
 // ── Privacy mode: čistě zobrazovací maska částek, NIKDY nepřepisuje reálná data ──
 let PRIVACY_MODE = false;
@@ -5823,11 +5827,13 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
   const _josefPrevDate = new Date(_josefNow.getFullYear(), _josefNow.getMonth() - 1, 1);
   const _josefYm = `${_josefPrevDate.getFullYear()}-${String(_josefPrevDate.getMonth()+1).padStart(2,"0")}`;
   const _josefAtt = (assistantAttendance||[]).filter(a=>(a.date||"").startsWith(_josefYm));
-  const josefWage = Math.round(_josefAtt.reduce((s,a)=>{
+  const _josefWageAuto = Math.round(_josefAtt.reduce((s,a)=>{
     if(!a.check_in||!a.check_out) return s;
     const h = netAttHours(a.check_in, a.check_out);
     return s + (isFinite(h)&&h>0?h:0);
   },0) * ASSISTANT_HOURLY_RATE);
+  // pro měsíce před zavedením docházky v appce (viz JOSEF_WAGE_MANUAL_OVERRIDES) použij ruční částku
+  const josefWage = JOSEF_WAGE_MANUAL_OVERRIDES[_josefYm] ?? _josefWageAuto;
   const totalVydaje = totalNutne + totalLuxus + josefWage;
   const cashflow = mRev + totalVydaje;
   // DPH — nadměrný odpočet (na žádost): kolik mi reálně ZŮSTANE díky účtenkám, které posílám Čechmanové
@@ -6472,7 +6478,7 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
                       {josefPaid?"✓":""}
                     </span>
                     <span>Josef Řehák</span>
-                    <span style={{fontSize:8.5,background:"rgba(53,24,165,.08)",color:"var(--ink)",borderRadius:4,padding:"1px 5px",fontWeight:600,letterSpacing:".04em"}}>auto · {_josefYm}</span>
+                    <span style={{fontSize:8.5,background:"rgba(53,24,165,.08)",color:"var(--ink)",borderRadius:4,padding:"1px 5px",fontWeight:600,letterSpacing:".04em"}}>{JOSEF_WAGE_MANUAL_OVERRIDES[_josefYm] != null ? "ručně" : "auto"} · {_josefYm}</span>
                   </span>
                   <span style={{color:josefPaid?"var(--mut)":"#DC2626",fontVariantNumeric:"tabular-nums",fontFamily:"var(--mono)",fontSize:11}}>
                     {josefWage > 0 ? josefWage.toLocaleString("cs-CZ") + " Kč" : "— Kč"}
