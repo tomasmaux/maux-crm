@@ -6602,6 +6602,8 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
         const [heroKpiOpen, setHeroKpiOpen] = useState(null);
         const toggleHeroKpi = (k) => setHeroKpiOpen(v => v===k?null:k);
         const [showFinDetail, setShowFinDetail] = useState(false);
+        const [prijmyOpen, setPrijmyOpen] = useState(false);
+        const [nakladyOpen, setNakladyOpen] = useState(false);
         const isPaid = (id) => !!(expenseChecks||[]).find(c => c.item_id === id && c.paid);
         const all = [...nutne.map(i=>({...i,_c:"#DC2626"})), ...luxus.map(i=>({...i,_c:"#9333EA"}))];
         const paidItems = all.filter(i => isPaid(i.id));
@@ -6651,13 +6653,86 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
               </div>
 
               <div style={{flex:1,display:"flex",flexDirection:"column",justifyContent:"center",gap:13,padding:"14px 24px"}}>
-                <div style={{borderTop:"1px solid rgba(53,24,165,.14)",paddingTop:12,display:"flex",justifyContent:"space-between",alignItems:"baseline"}}>
-                  <span style={{fontSize:12,letterSpacing:".1em",textTransform:"uppercase",color:"var(--ink)",fontWeight:700}}>Příjmy</span>
-                  <span style={{fontFamily:"var(--mono)",fontSize:21,fontWeight:500,color:"#059669"}}>{fmtKc(totalPrijmy)}</span>
+                <div style={{borderTop:"1px solid rgba(53,24,165,.14)",paddingTop:12}}>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",cursor:"pointer"}} onClick={()=>setPrijmyOpen(v=>!v)}>
+                    <span style={{fontSize:12,letterSpacing:".1em",textTransform:"uppercase",color:"var(--ink)",fontWeight:700}}>Příjmy {prijmyOpen?"▲":"▾"}</span>
+                    <span style={{fontFamily:"var(--mono)",fontSize:21,fontWeight:500,color:"#059669"}}>{fmtKc(totalPrijmy)}</span>
+                  </div>
+                  {prijmyOpen && (
+                    <div style={{marginTop:8,display:"flex",flexDirection:"column",gap:2}}>
+                      {[
+                        {key:"vystaveni", label:"K vystavení", val: unbilledAmt, color:"var(--ink)"},
+                        {key:"posplat", label:"Po splatnosti", val: overdueAmt, color: overdueAmt>0?"#DC2626":"#059669"},
+                      ].map(k => (
+                        <div key={k.key}>
+                          <div onClick={(e)=>{e.stopPropagation();toggleHeroKpi(k.key);}} style={{display:"flex",justifyContent:"space-between",alignItems:"center",cursor:"pointer",padding:"4px 0"}}>
+                            <span style={{fontSize:10,color:"var(--mut)",letterSpacing:".02em"}}>{k.label} {heroKpiOpen===k.key?"▲":"▼"}</span>
+                            <span style={{fontFamily:"var(--mono)",fontSize:11.5,fontWeight:500,color:k.color,letterSpacing:"-.01em"}}>{fmtKc(k.val)}</span>
+                          </div>
+                          {heroKpiOpen==="vystaveni" && k.key==="vystaveni" && (
+                            <div style={{padding:"4px 0 8px 4px",display:"flex",flexDirection:"column",gap:6,maxHeight:180,overflowY:"auto"}}>
+                              {Object.entries(unbilledByClient).map(([cid, entries])=>{
+                                const cl = clients.find(c=>c.id===cid);
+                                const amt = entries.reduce((s,e)=>s+Math.round(Math.max((e.amount||0)-(Number(e.discount_amount)||0),0)*1.21)+(e.admin_fee||0)+(Number(e.sig_count)||0)*SIGNATURE_DECL_FEE,0);
+                                return (
+                                  <div key={cid} style={{borderBottom:"1px solid var(--line)",paddingBottom:5}}>
+                                    <div style={{display:"flex",justifyContent:"space-between",fontSize:10,fontWeight:600,color:"var(--ink)"}}>
+                                      <span>{cl?.name||"Neznámý klient"}</span><span style={{fontFamily:"var(--mono)"}}>{fmtKc(amt)}</span>
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                              {Object.keys(unbilledByClient).length===0 && <div style={{color:"var(--mut)",fontSize:10,padding:"6px 0"}}>Žádné nevyfakturované výkazy</div>}
+                              <div style={{textAlign:"right"}}>
+                                <button className="btn" style={{fontSize:9.5}} onClick={(e)=>{e.stopPropagation();onNav("fakturace");}}>Přejít na fakturaci →</button>
+                              </div>
+                            </div>
+                          )}
+                          {heroKpiOpen==="posplat" && k.key==="posplat" && (
+                            <div style={{padding:"4px 0 8px 4px",display:"flex",flexDirection:"column",gap:5,maxHeight:180,overflowY:"auto"}}>
+                              {overdue.length===0 ? (
+                                <div style={{color:"#059669",fontSize:10,padding:"4px 0"}}>✓ Žádné faktury po splatnosti</div>
+                              ) : overdue.map(inv=>{
+                                const cl = clients.find(c=>c.id===inv.client_id);
+                                const daysLate = inv.due_date ? Math.floor((new Date()-new Date(inv.due_date))/(1000*60*60*24)) : "?";
+                                return (
+                                  <div key={inv.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"5px 6px",background:"#FEF2F2",borderRadius:6}}>
+                                    <div>
+                                      <div style={{fontWeight:600,color:"#991B1B",fontSize:10}}>{cl?.name||"Neznámý klient"}</div>
+                                      <div style={{fontSize:9,color:"#DC2626"}}>{daysLate} dní po splatnosti</div>
+                                    </div>
+                                    <span style={{fontFamily:"var(--mono)",fontWeight:700,color:"#DC2626",fontSize:10.5}}>{fmtKc(inv.subtotal)}</span>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
-                <div style={{borderTop:"1px solid rgba(53,24,165,.14)",paddingTop:12,display:"flex",justifyContent:"space-between",alignItems:"baseline"}}>
-                  <span style={{fontSize:12,letterSpacing:".1em",textTransform:"uppercase",color:"var(--ink)",fontWeight:700}}>Výdaje měsíčně</span>
-                  <span style={{fontFamily:"var(--mono)",fontSize:21,fontWeight:500,color:"#DC2626"}}>{fmtKc(Math.abs(totalNutne)+josefWage+Math.abs(totalLuxus))}</span>
+                <div style={{borderTop:"1px solid rgba(53,24,165,.14)",paddingTop:12}}>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",cursor:"pointer"}} onClick={()=>setNakladyOpen(v=>!v)}>
+                    <span style={{fontSize:12,letterSpacing:".1em",textTransform:"uppercase",color:"var(--ink)",fontWeight:700}}>Výdaje měsíčně {nakladyOpen?"▲":"▾"}</span>
+                    <span style={{fontFamily:"var(--mono)",fontSize:21,fontWeight:500,color:"#DC2626"}}>{fmtKc(Math.abs(totalNutne)+josefWage+Math.abs(totalLuxus))}</span>
+                  </div>
+                  {nakladyOpen && (
+                    <div style={{marginTop:8,display:"flex",flexDirection:"column",gap:4}}>
+                      <div style={{display:"flex",justifyContent:"space-between",padding:"3px 0"}}>
+                        <span style={{fontSize:10,color:"var(--mut)",letterSpacing:".02em"}}>Nutné</span>
+                        <span style={{fontFamily:"var(--mono)",fontSize:11.5,fontWeight:500,color:"#DC2626"}}>{fmtKc(Math.abs(totalNutne))}</span>
+                      </div>
+                      <div style={{display:"flex",justifyContent:"space-between",padding:"3px 0"}}>
+                        <span style={{fontSize:10,color:"var(--mut)",letterSpacing:".02em",display:"flex",alignItems:"center",gap:5}}>Josef Řehák <span style={{fontSize:7.5,background:"rgba(53,24,165,.08)",color:"var(--ink)",padding:"1px 5px",borderRadius:3,fontWeight:700,letterSpacing:".05em"}}>{JOSEF_WAGE_MANUAL_OVERRIDES[_josefYm] != null ? "ručně" : "auto"}</span></span>
+                        <span style={{fontFamily:"var(--mono)",fontSize:11.5,fontWeight:500,color:"#DC2626"}}>{fmtKc(josefWage)}</span>
+                      </div>
+                      <div style={{display:"flex",justifyContent:"space-between",padding:"3px 0"}}>
+                        <span style={{fontSize:10,color:"var(--mut)",letterSpacing:".02em"}}>Luxus</span>
+                        <span style={{fontFamily:"var(--mono)",fontSize:11.5,fontWeight:500,color:"#DC2626"}}>{fmtKc(Math.abs(totalLuxus))}</span>
+                      </div>
+                    </div>
+                  )}
                 </div>
                 <div style={{height:5,borderRadius:3,background:"rgba(53,24,165,.1)",overflow:"hidden",marginTop:3}}>
                   <div style={{height:"100%",width:`${pct}%`,borderRadius:3,background:pct===100?"#10B981":"#3518A5",transition:"width .7s ease"}} />
@@ -6726,59 +6801,6 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
               <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",paddingTop:10,marginTop:8,borderTop:"1px solid rgba(0,0,0,.05)"}}>
                 <span style={{fontSize:10.5,color:"var(--mut)",letterSpacing:".02em"}}>Celkové náklady</span>
                 <span style={{fontSize:13,fontFamily:"var(--mono)",fontWeight:500,color:"#DC2626",letterSpacing:"-.01em"}}>−{fmtKc(Math.abs(totalVydaje))}</span>
-              </div>
-
-              {/* K vystavení / Po splatnosti — kompaktní rozklikávací řádky, vyplňují volné místo */}
-              <div style={{marginTop:14,paddingTop:12,borderTop:"1px dashed rgba(0,0,0,.1)",display:"flex",flexDirection:"column",gap:2}}>
-                {[
-                  {key:"vystaveni", label:"K vystavení", val: unbilledAmt, color:"var(--ink)", sign:"", emoji:""},
-                  {key:"posplat", label:"Po splatnosti", val: overdueAmt, color: overdueAmt>0?"#DC2626":"#059669", sign:"", emoji:""},
-                ].map(k => (
-                  <div key={k.key}>
-                    <div onClick={()=>toggleHeroKpi(k.key)} style={{display:"flex",justifyContent:"space-between",alignItems:"center",cursor:"pointer",padding:"5px 0"}}>
-                      <span style={{fontSize:10.5,color:"var(--mut)",letterSpacing:".02em"}}>{k.emoji}{k.label} {heroKpiOpen===k.key?"▲":"▼"}</span>
-                      <span style={{fontFamily:"var(--mono)",fontSize:13,fontWeight:500,color:k.color,letterSpacing:"-.01em"}}>{k.sign}{fmtKc(k.val)}</span>
-                    </div>
-                    {heroKpiOpen==="vystaveni" && k.key==="vystaveni" && (
-                      <div style={{padding:"4px 0 10px 4px",display:"flex",flexDirection:"column",gap:6,maxHeight:220,overflowY:"auto"}}>
-                        {Object.entries(unbilledByClient).map(([cid, entries])=>{
-                          const cl = clients.find(c=>c.id===cid);
-                          const amt = entries.reduce((s,e)=>s+Math.round(Math.max((e.amount||0)-(Number(e.discount_amount)||0),0)*1.21)+(e.admin_fee||0)+(Number(e.sig_count)||0)*SIGNATURE_DECL_FEE,0);
-                          return (
-                            <div key={cid} style={{borderBottom:"1px solid var(--line)",paddingBottom:5}}>
-                              <div style={{display:"flex",justifyContent:"space-between",fontSize:10.5,fontWeight:600,color:"var(--ink)"}}>
-                                <span>{cl?.name||"Neznámý klient"}</span><span style={{fontFamily:"var(--mono)"}}>{fmtKc(amt)}</span>
-                              </div>
-                            </div>
-                          );
-                        })}
-                        {Object.keys(unbilledByClient).length===0 && <div style={{color:"var(--mut)",fontSize:10.5,padding:"6px 0"}}>Žádné nevyfakturované výkazy</div>}
-                        <div style={{textAlign:"right"}}>
-                          <button className="btn" style={{fontSize:10}} onClick={()=>onNav("fakturace")}>Přejít na fakturaci →</button>
-                        </div>
-                      </div>
-                    )}
-                    {heroKpiOpen==="posplat" && k.key==="posplat" && (
-                      <div style={{padding:"4px 0 10px 4px",display:"flex",flexDirection:"column",gap:5,maxHeight:220,overflowY:"auto"}}>
-                        {overdue.length===0 ? (
-                          <div style={{color:"#059669",fontSize:10.5,padding:"4px 0"}}>✓ Žádné faktury po splatnosti</div>
-                        ) : overdue.map(inv=>{
-                          const cl = clients.find(c=>c.id===inv.client_id);
-                          const daysLate = inv.due_date ? Math.floor((new Date()-new Date(inv.due_date))/(1000*60*60*24)) : "?";
-                          return (
-                            <div key={inv.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"5px 6px",background:"#FEF2F2",borderRadius:6}}>
-                              <div>
-                                <div style={{fontWeight:600,color:"#991B1B",fontSize:10.5}}>{cl?.name||"Neznámý klient"}</div>
-                                <div style={{fontSize:9.5,color:"#DC2626"}}>{daysLate} dní po splatnosti</div>
-                              </div>
-                              <span style={{fontFamily:"var(--mono)",fontWeight:700,color:"#DC2626",fontSize:11}}>{fmtKc(inv.subtotal)}</span>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    )}
-                  </div>
-                ))}
               </div>
             </div>
 
