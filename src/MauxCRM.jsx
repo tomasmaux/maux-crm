@@ -5779,27 +5779,74 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
     const ns = { order: DEFAULT_PANELS, hidden: [] };
     setPanelState(ns); savePanelState(ns);
   }
+  // Barevné odlišení panelů Přehledu podle kategorie (převzato z brandové palety webu) —
+  // každý panel má svůj akcent, který se projeví jako tenký okraj a při najetí myší jako
+  // jemný spotlight + 3D náklon karty (stejný efekt jako na maux.cz, jen zeslabený, ať to
+  // nerozhodí grafy/tabulky uvnitř).
+  const PANEL_ACCENTS = {
+    finance: "#3518A5", trigrafy: "#2563EB", firma: "#0D9488", josef: "#7C3AED",
+    pulz: "#DB2777", chart: "#B8923D", klienti: "#DC2626", ziskovost: "#059669", claude: "#4F46E5",
+  };
   function Panel({ id, children }) {
     const hidden = panelState.hidden.includes(id);
     const isOver = dragOver === id;
     const cssOrder = panelState.order.indexOf(id);
+    const accent = PANEL_ACCENTS[id] || "#3518A5";
+    const wrapRef = useRef(null);
+    const spotRef = useRef(null);
+    const innerRef = useRef(null);
+
+    const handleMove = (e) => {
+      if (editLayout) return;
+      if (typeof window !== "undefined" && window.matchMedia) {
+        if (window.matchMedia("(hover: none)").matches) return;
+        if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+      }
+      const el = wrapRef.current;
+      if (!el) return;
+      const r = el.getBoundingClientRect();
+      const x = e.clientX - r.left, y = e.clientY - r.top;
+      const px = x / r.width, py = y / r.height;
+      if (spotRef.current) {
+        spotRef.current.style.opacity = "1";
+        spotRef.current.style.background = `radial-gradient(circle at ${x}px ${y}px, ${accent}14, transparent 62%)`;
+      }
+      if (innerRef.current) {
+        const rx = (py - 0.5) * -1.1, ry = (px - 0.5) * 1.1;
+        innerRef.current.style.transform = `perspective(1600px) rotateX(${rx}deg) rotateY(${ry}deg)`;
+      }
+      el.style.boxShadow = `0 14px 30px ${accent}1f`;
+      el.style.borderColor = `${accent}55`;
+    };
+    const handleLeave = () => {
+      if (spotRef.current) spotRef.current.style.opacity = "0";
+      if (innerRef.current) innerRef.current.style.transform = "perspective(1600px) rotateX(0) rotateY(0)";
+      const el = wrapRef.current;
+      if (el) { el.style.boxShadow = "none"; el.style.borderColor = `${accent}22`; }
+    };
+
     if (hidden && !editLayout) return null;
     return (
       <div
+        ref={wrapRef}
         draggable={editLayout}
         onDragStart={() => handleDragStart(id)}
         onDragOver={e => handleDragOver(e, id)}
         onDrop={e => handleDrop(e, id)}
         onDragLeave={() => setDragOver(null)}
+        onMouseMove={handleMove}
+        onMouseLeave={handleLeave}
         style={{
           order: cssOrder >= 0 ? cssOrder : 99,
           outline: isOver ? "2px dashed #3518A5" : editLayout ? "2px dashed rgba(209,213,219,.7)" : "none",
           outlineOffset: 4,
           borderRadius: 16,
+          border: `1px solid ${accent}22`,
           opacity: hidden ? 0.4 : 1,
           position: "relative",
           cursor: editLayout ? "grab" : "default",
-          transition: "outline .15s",
+          transition: "outline .15s, box-shadow .35s, border-color .35s",
+          boxShadow: "none",
         }}
       >
         {editLayout && (
@@ -5809,7 +5856,10 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
             title={hidden ? "Zobrazit" : "Skrýt"}
           >{hidden ? "+" : "×"}</button>
         )}
-        {children}
+        <div ref={spotRef} style={{ position:"absolute", inset:0, borderRadius:16, opacity:0, pointerEvents:"none", transition:"opacity .25s", zIndex:1 }} />
+        <div ref={innerRef} style={{ position:"relative", transformStyle:"preserve-3d", transition:"transform .25s ease-out", willChange:"transform" }}>
+          {children}
+        </div>
       </div>
     );
   }
