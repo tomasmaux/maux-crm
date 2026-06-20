@@ -97,7 +97,7 @@ const CSS = `
 *{box-sizing:border-box;margin:0;padding:0}
 html,body,#root{height:100%;background:#FAFAFA}
 .mx{--ink:#3518A5;--ink2:#2810a0;--ink3:#4a2bc4;--gold:#B8923D;--gold2:#CF9B3E;--green:#059669;--red:#DC2626;
-    --bg:#F3F2F9;--surface:#FFFFFF;--line:#ECEAF5;--line2:#D5D2EA;--mut:#9896B0;--txt:#16142A;
+    --bg:#F4F4F5;--surface:#FFFFFF;--line:#E4E4E7;--line2:#D4D4D8;--mut:#8A8A93;--txt:#16142A;
     --mono:'JetBrains Mono','SF Mono',Menlo,monospace;
   font-family:'Inter',system-ui,sans-serif;color:var(--txt);background:var(--bg);min-height:100vh;display:flex;font-size:14px;line-height:1.5}
 .serif{font-family:'Fraunces',Georgia,serif}
@@ -4396,7 +4396,7 @@ function EscrowLiveTile({ escrows }) {
   return (
     <div style={{display:"flex",flexDirection:"column",justifyContent:"center",minWidth:190}}>
       <div style={{fontSize:11,letterSpacing:".15em",textTransform:"uppercase",color:"var(--mut)",fontWeight:600,marginBottom:8}}>VYDĚLÁVÁŠ Z ÚSCHOV</div>
-      <div style={{fontFamily:"Fraunces,serif",fontSize:27,fontWeight:300,color:"#7C3AED",lineHeight:1,marginBottom:4,fontVariantNumeric:"tabular-nums"}}>{Kd(sinceMidnight)}</div>
+      <div style={{fontFamily:"var(--mono)",fontSize:24,fontWeight:600,color:"#7C3AED",lineHeight:1,marginBottom:4,fontVariantNumeric:"tabular-nums"}}>{Kd(sinceMidnight)}</div>
       <div style={{fontSize:11,color:"var(--mut)",marginBottom:11}}>dnes · roste o {Kd(perSec)} každou sekundu</div>
       <div style={{display:"flex",gap:18,marginBottom:11}}>
         <div>
@@ -4467,13 +4467,13 @@ function InteractiveRing({ segments, size = 190, thickness = 20, glowColor, cent
           {active ? (
             <>
               <div style={{ fontSize: 10, letterSpacing: ".12em", color: active.color, fontWeight: 800, textTransform: "uppercase", opacity: 0.8, marginBottom: 6, maxWidth: size - 50, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{active.label}</div>
-              <div style={{ fontFamily: "Fraunces,serif", fontSize: size > 160 ? 28 : 21, fontWeight: 300, color: active.color, lineHeight: 1 }}>{fmtKc(active.value)}</div>
+              <div style={{ fontFamily: "var(--mono)", fontSize: size > 160 ? 26 : 19, fontWeight: 600, color: active.color, lineHeight: 1 }}>{fmtKc(active.value)}</div>
               <div style={{ fontSize: 11.5, color: active.color, opacity: 0.65, marginTop: 6, fontWeight: 600 }}>{Math.round(active.frac * 100)} %</div>
             </>
           ) : (
             <>
               {centerTop && <div style={{ fontSize: 9.5, letterSpacing: ".14em", color: glowColor, fontWeight: 800, textTransform: "uppercase", opacity: 0.62, marginBottom: 6 }}>{centerTop}</div>}
-              <div style={{ fontFamily: "Fraunces,serif", fontSize: size > 160 ? 30 : 22, fontWeight: 300, color: glowColor, lineHeight: 1 }}>{centerMain}</div>
+              <div style={{ fontFamily: "var(--mono)", fontSize: size > 160 ? 28 : 20, fontWeight: 600, color: glowColor, lineHeight: 1 }}>{centerMain}</div>
               {centerSub && <div style={{ fontSize: 11, color: glowColor, opacity: 0.55, marginTop: 6 }}>{centerSub}</div>}
             </>
           )}
@@ -4587,9 +4587,9 @@ function SporakRingTile({ financeItems, onSaveFinance, invoices, dpfoMonths, loa
 
   return (
     <div style={{
-      height: "100%", borderRadius: 18, overflow: "hidden",
-      background: "linear-gradient(150deg, #ECFDF5 0%, #D1FAE5 100%)",
-      border: "1px solid rgba(0,0,0,0.07)", boxShadow: "0 4px 32px rgba(0,0,0,0.07)",
+      height: "100%", borderRadius: 3, overflow: "hidden",
+      background: "#fff", borderTop: `4px solid ${S_COL}`,
+      boxShadow: "0 0 0 1px rgba(0,0,0,.08)",
       display: "flex", flexDirection: "column", alignItems: "center",
       padding: square ? "20px 18px 14px" : "26px 34px 28px",
       boxSizing: "border-box",
@@ -4729,14 +4729,14 @@ function TriGrafyPanel({ financeItems, onSaveFinance, invoices, dpfoMonths, loan
   );
 
   return (
-    <div style={{ borderRadius: 22, overflow: "hidden", border: "1px solid rgba(0,0,0,0.07)", boxShadow: "0 4px 32px rgba(0,0,0,0.07)" }}>
+    <div style={{ borderRadius: 3, overflow: "hidden", border: "1px solid rgba(0,0,0,0.08)" }}>
       {/* Spořák (celkové rozložení) byl přesunut na Přehled — viz <SporakRingTile> vedle karty Příjmy/Výdaje */}
 
       {/* ═══ DOLNÍ PŮLKA: MAJETEK + REZERVA ═══ */}
       <div style={{ display: "flex" }}>
 
         {/* ── MAJETEK ── */}
-        <div style={{ flex: 3, padding: "24px 30px 26px", background: "linear-gradient(150deg, #FFFCF0 0%, #F5E6B8 100%)", borderRight: "1px solid rgba(0,0,0,0.06)" }}>
+        <div style={{ flex: 3, padding: "24px 30px 26px", background: "#fff", borderTop: `3px solid ${M_COL}`, borderRight: "1px solid rgba(0,0,0,0.06)" }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
             {secHdr(M_COL, "Osobní majetek")}
             {eBtn(() => setEditMaj(e => !e), editMaj, M_COL)}
@@ -4784,7 +4784,7 @@ function TriGrafyPanel({ financeItems, onSaveFinance, invoices, dpfoMonths, loan
         </div>
 
         {/* ── REZERVA ── */}
-        <div style={{ flex: 2, padding: "24px 30px 26px", background: "linear-gradient(150deg, #EEF2FF 0%, #E0E7FF 100%)" }}>
+        <div style={{ flex: 2, padding: "24px 30px 26px", background: "#fff", borderTop: `3px solid ${R_COL}` }}>
           <div style={{ marginBottom: 16 }}>{secHdr(R_COL, "Firemní rezerva")}</div>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "center" }}>
             <InteractiveRing segments={rezGlassSegs} size={170} thickness={20} glowColor={firmaRez < 0 ? R_WARN : R_COL} legendOnly
@@ -4839,7 +4839,7 @@ function FirmaBar({ financeItems, invoices, dpfoMonths, loanTransactions, escrow
   const [editVal, setEditVal] = useState(0);
 
   return (
-    <div style={{background:"var(--card)",border:"1px solid var(--line)",borderRadius:14,padding:"20px 28px",display:"flex",alignItems:"stretch",gap:24,flexWrap:"wrap"}}>
+    <div style={{background:"var(--card)",border:"1px solid var(--line)",borderRadius:3,padding:"20px 28px",display:"flex",alignItems:"stretch",gap:24,flexWrap:"wrap"}}>
       {/* === ŽIVÝ VÝDĚLEK Z ÚSCHOV === */}
       <EscrowLiveTile escrows={escrows} />
 
@@ -4849,17 +4849,17 @@ function FirmaBar({ financeItems, invoices, dpfoMonths, loanTransactions, escrow
       <div style={{display:"flex",gap:28,alignItems:"center",flexWrap:"wrap"}}>
         <div>
           <div style={{fontSize:11,color:"var(--mut)",marginBottom:4}}>💳 Na cestě (faktury)</div>
-          <div style={{fontFamily:"Fraunces,serif",fontSize:22,fontWeight:300,color:overdueF>0?"#DC2626":"#D97706"}}>{fmtKc(onTheWayF)}</div>
+          <div style={{fontFamily:"var(--mono)",fontSize:20,fontWeight:600,color:overdueF>0?"#DC2626":"#D97706"}}>{fmtKc(onTheWayF)}</div>
           <div style={{fontSize:10,color:"var(--mut)"}}>{overdueF>0?<span style={{color:"#DC2626",fontWeight:600}}>⚠ {fmtKc(overdueF)} po splatnosti</span>:"vystaveno, čeká na úhradu"}</div>
         </div>
         <div>
           <div style={{fontSize:11,color:"var(--mut)",marginBottom:4}}>📈 Zdraví skóre</div>
-          <div style={{fontFamily:"Fraunces,serif",fontSize:22,fontWeight:300,color:Number(zdravi)>=2?"#059669":Number(zdravi)>=1?"#D97706":"#DC2626"}}>{zdravi}×</div>
+          <div style={{fontFamily:"var(--mono)",fontSize:20,fontWeight:600,color:Number(zdravi)>=2?"#059669":Number(zdravi)>=1?"#D97706":"#DC2626"}}>{zdravi}×</div>
           <div style={{fontSize:10,color:"var(--mut)"}}>příjem / výdaje tento měsíc</div>
         </div>
         <div>
           <div style={{fontSize:11,color:"var(--mut)",marginBottom:4}}>💸 Měsíční výdaje</div>
-          <div style={{fontFamily:"Fraunces,serif",fontSize:22,fontWeight:300,color:"var(--ink)"}}>{fmtKc(totalVyd)}</div>
+          <div style={{fontFamily:"var(--mono)",fontSize:20,fontWeight:600,color:"var(--ink)"}}>{fmtKc(totalVyd)}</div>
           <div style={{fontSize:10,color:"var(--mut)"}}>nutné + lusus</div>
         </div>
       </div>
@@ -5358,14 +5358,14 @@ function WebsiteTrafficPanel() {
 
   if (loading) {
     return (
-      <div style={{ background: "#fff", borderRadius: 18, padding: "26px 30px", boxShadow: "0 0 0 1px rgba(0,0,0,.065)", color: "var(--mut)", fontSize: 12 }}>
+      <div style={{ background: "#fff", borderRadius: 3, padding: "26px 30px", boxShadow: "0 0 0 1px rgba(0,0,0,.08)", color: "var(--mut)", fontSize: 12 }}>
         Načítám návštěvnost webu…
       </div>
     );
   }
   if (err) {
     return (
-      <div style={{ background: "#fff", borderRadius: 18, padding: "22px 28px", boxShadow: "0 0 0 1px rgba(0,0,0,.065)" }}>
+      <div style={{ background: "#fff", borderRadius: 3, padding: "22px 28px", boxShadow: "0 0 0 1px rgba(0,0,0,.08)" }}>
         <div style={{ ...label, marginBottom: 8 }}>Návštěvnost webu — maux.cz</div>
         <div style={{ fontSize: 12.5, color: "#DC2626", lineHeight: 1.5 }}>{err}</div>
       </div>
@@ -5389,7 +5389,7 @@ function WebsiteTrafficPanel() {
   }).join(" ");
 
   return (
-    <div style={{ background: "#fff", borderRadius: 18, overflow: "hidden", boxShadow: "0 0 0 1px rgba(0,0,0,.065), 0 8px 40px rgba(53,24,165,.07)" }}>
+    <div style={{ background: "#fff", borderRadius: 3, overflow: "hidden", boxShadow: "0 0 0 1px rgba(0,0,0,.08)" }}>
       <div style={{ padding: "18px 26px 14px", display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
         <div style={{ ...label }}>Návštěvnost webu — maux.cz</div>
         <div style={{ fontSize: 8, color: "var(--mut)", opacity: .6 }}>Google Analytics 4</div>
@@ -5403,7 +5403,7 @@ function WebsiteTrafficPanel() {
         ].map(([title, v], i) => (
           <div key={title} style={{ padding: "16px 20px", borderRight: i < 2 ? "1px solid rgba(0,0,0,.06)" : "none" }}>
             <div style={{ fontSize: 8, letterSpacing: ".12em", textTransform: "uppercase", color: "var(--mut)", fontWeight: 700, marginBottom: 8 }}>{title}</div>
-            <div style={{ fontFamily: "Fraunces,serif", fontSize: 24, fontWeight: 300, color: "var(--ink)", lineHeight: 1 }}>{fmtN(v.activeUsers)}</div>
+            <div style={{ fontFamily: "var(--mono)", fontSize: 22, fontWeight: 600, color: "var(--ink)", lineHeight: 1 }}>{fmtN(v.activeUsers)}</div>
             <div style={{ fontSize: 8.5, color: "var(--mut)", marginTop: 3 }}>aktivních uživatelů</div>
             <div style={{ fontSize: 9, color: "var(--mut)", marginTop: 8, opacity: .75 }}>{fmtN(v.sessions)} relací · {fmtN(v.pageViews)} zobrazení</div>
           </div>
@@ -5464,14 +5464,14 @@ function XtbPanel() {
 
   if (loading) {
     return (
-      <div style={{ background: "#fff", borderRadius: 18, padding: "26px 30px", boxShadow: "0 0 0 1px rgba(0,0,0,.065)", color: "var(--mut)", fontSize: 12 }}>
+      <div style={{ background: "#fff", borderRadius: 3, padding: "26px 30px", boxShadow: "0 0 0 1px rgba(0,0,0,.08)", color: "var(--mut)", fontSize: 12 }}>
         Načítám portfolio XTB…
       </div>
     );
   }
   if (err) {
     return (
-      <div style={{ background: "#fff", borderRadius: 18, padding: "22px 28px", boxShadow: "0 0 0 1px rgba(0,0,0,.065)" }}>
+      <div style={{ background: "#fff", borderRadius: 3, padding: "22px 28px", boxShadow: "0 0 0 1px rgba(0,0,0,.08)" }}>
         <div style={{ ...label, marginBottom: 8 }}>Investice — XTB</div>
         <div style={{ fontSize: 12.5, color: "#DC2626", lineHeight: 1.5 }}>{err}</div>
       </div>
@@ -5483,7 +5483,7 @@ function XtbPanel() {
   const profitColor = (acc.equity - acc.balance) >= 0 ? "#059669" : "#DC2626";
 
   return (
-    <div style={{ background: "#fff", borderRadius: 18, overflow: "hidden", boxShadow: "0 0 0 1px rgba(0,0,0,.065), 0 8px 40px rgba(53,24,165,.07)" }}>
+    <div style={{ background: "#fff", borderRadius: 3, overflow: "hidden", boxShadow: "0 0 0 1px rgba(0,0,0,.08)" }}>
       <div style={{ padding: "18px 26px 14px", display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
         <div style={{ ...label }}>Investice — XTB</div>
         <div style={{ fontSize: 8, color: "var(--mut)", opacity: .6 }}>{data?.env === "demo" ? "DEMO účet" : "živý účet"}</div>
@@ -5492,15 +5492,15 @@ function XtbPanel() {
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", borderTop: "1px solid rgba(0,0,0,.06)", borderBottom: "1px solid rgba(0,0,0,.06)" }}>
         <div style={{ padding: "16px 20px", borderRight: "1px solid rgba(0,0,0,.06)" }}>
           <div style={{ fontSize: 8, letterSpacing: ".12em", textTransform: "uppercase", color: "var(--mut)", fontWeight: 700, marginBottom: 8 }}>Zůstatek</div>
-          <div style={{ fontFamily: "Fraunces,serif", fontSize: 22, fontWeight: 300, color: "var(--ink)", lineHeight: 1 }}>{fmtMoney(acc.balance, acc.currency)}</div>
+          <div style={{ fontFamily: "var(--mono)", fontSize: 20, fontWeight: 600, color: "var(--ink)", lineHeight: 1 }}>{fmtMoney(acc.balance, acc.currency)}</div>
         </div>
         <div style={{ padding: "16px 20px", borderRight: "1px solid rgba(0,0,0,.06)" }}>
           <div style={{ fontSize: 8, letterSpacing: ".12em", textTransform: "uppercase", color: "var(--mut)", fontWeight: 700, marginBottom: 8 }}>Equity</div>
-          <div style={{ fontFamily: "Fraunces,serif", fontSize: 22, fontWeight: 300, color: profitColor, lineHeight: 1 }}>{fmtMoney(acc.equity, acc.currency)}</div>
+          <div style={{ fontFamily: "var(--mono)", fontSize: 20, fontWeight: 600, color: profitColor, lineHeight: 1 }}>{fmtMoney(acc.equity, acc.currency)}</div>
         </div>
         <div style={{ padding: "16px 20px" }}>
           <div style={{ fontSize: 8, letterSpacing: ".12em", textTransform: "uppercase", color: "var(--mut)", fontWeight: 700, marginBottom: 8 }}>Volná marže</div>
-          <div style={{ fontFamily: "Fraunces,serif", fontSize: 22, fontWeight: 300, color: "var(--ink)", lineHeight: 1 }}>{fmtMoney(acc.marginFree, acc.currency)}</div>
+          <div style={{ fontFamily: "var(--mono)", fontSize: 20, fontWeight: 600, color: "var(--ink)", lineHeight: 1 }}>{fmtMoney(acc.marginFree, acc.currency)}</div>
         </div>
       </div>
 
@@ -6085,7 +6085,7 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
           order: cssOrder >= 0 ? cssOrder : 99,
           outline: isOver ? "2px dashed #3518A5" : editLayout ? "2px dashed rgba(209,213,219,.7)" : "none",
           outlineOffset: 4,
-          borderRadius: 16,
+          borderRadius: 3,
           border: `1px solid ${accent}22`,
           opacity: hidden ? 0.4 : 1,
           position: "relative",
@@ -6101,7 +6101,7 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
             title={hidden ? "Zobrazit" : "Skrýt"}
           >{hidden ? "+" : "×"}</button>
         )}
-        <div ref={spotRef} style={{ position:"absolute", inset:0, borderRadius:16, opacity:0, pointerEvents:"none", transition:"opacity .25s", zIndex:1 }} />
+        <div ref={spotRef} style={{ position:"absolute", inset:0, borderRadius:3, opacity:0, pointerEvents:"none", transition:"opacity .25s", zIndex:1 }} />
         <div ref={innerRef} style={{ position:"relative", transformStyle:"preserve-3d", transition:"transform .25s ease-out", willChange:"transform" }}>
           {children}
         </div>
@@ -6291,7 +6291,7 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
     <div style={{fontFamily:"Fraunces,Georgia,serif",fontSize:size||26,fontWeight:300,lineHeight:1,color:color||"var(--txt)"}}>{children}</div>
   );
   const Card = ({children, style}) => (
-    <div style={{background:"#fff",border:"1px solid var(--line)",borderRadius:14,padding:"18px 20px",...style}}>{children}</div>
+    <div style={{background:"#fff",border:"1px solid var(--line)",borderRadius:3,padding:"18px 20px",...style}}>{children}</div>
   );
 
   return (
@@ -6339,12 +6339,12 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
           <div style={{marginTop:9,display:"flex",alignItems:"baseline",gap:14,flexWrap:"wrap"}}>
             <span style={{fontSize:9,letterSpacing:".14em",textTransform:"uppercase",color:"var(--mut)",fontWeight:700}}>Fakturováno {thisMonthName.toLowerCase()}</span>
             <span style={{display:"flex",alignItems:"baseline",gap:5}}>
-              <span style={{fontFamily:"Fraunces,serif",fontSize:17,fontWeight:500,color:"var(--ink)"}}>{fmtKc(mRev)}</span>
+              <span style={{fontFamily:"var(--mono)",fontSize:16,fontWeight:600,color:"var(--ink)"}}>{fmtKc(mRev)}</span>
               <span style={{fontSize:9.5,color:"var(--mut)"}}>bez DPH</span>
             </span>
             <span style={{fontSize:12,color:"var(--mut)",opacity:.4}}>/</span>
             <span style={{display:"flex",alignItems:"baseline",gap:5}}>
-              <span style={{fontFamily:"Fraunces,serif",fontSize:17,fontWeight:500,color:"var(--ink)"}}>{fmtKc(mRevWithVat)}</span>
+              <span style={{fontFamily:"var(--mono)",fontSize:16,fontWeight:600,color:"var(--ink)"}}>{fmtKc(mRevWithVat)}</span>
               <span style={{fontSize:9.5,color:"var(--mut)"}}>s DPH</span>
             </span>
             <span style={{fontSize:9,color:"var(--mut)",opacity:.6}}>(jen vlastní fakturace — bez úschov, bez přefakturací notáře/popl./prohlášení)</span>
@@ -6552,7 +6552,7 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
                       strokeDasharray={`${(score/100)*169.6} 169.6`} transform="rotate(-90 32 32)" style={{transition:"stroke-dasharray 1s cubic-bezier(.4,0,.2,1)"}} />
                   </svg>
                   <div style={{position:"absolute",inset:0,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center"}}>
-                    <span style={{fontFamily:"Fraunces,serif",fontSize:18,fontWeight:300,color:verdict.c,lineHeight:1}}>{score}</span>
+                    <span style={{fontFamily:"var(--mono)",fontSize:18,fontWeight:600,color:verdict.c,lineHeight:1}}>{score}</span>
                     <span style={{fontSize:7,color:"var(--mut)",letterSpacing:".1em"}}>PULZ</span>
                   </div>
                 </div>
@@ -6618,17 +6618,17 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
             {/* TILE A — hlavička Příjmy/Bilance/Výdaje (čtverec), brand indigo, bez levandulové záře */}
             <div style={{
               flex:1, aspectRatio:"1", minWidth:0,
-              background:"#fff", borderRadius:18, overflow:"hidden",
+              background:"#fff", borderRadius:3, overflow:"hidden",
               borderTop: "4px solid #3518A5",
-              boxShadow:"0 0 0 1px rgba(0,0,0,.08), 0 8px 28px rgba(0,0,0,.06)",
+              boxShadow:"0 0 0 1px rgba(0,0,0,.08)",
               display:"flex", flexDirection:"column",
             }}>
               <div style={{padding:"22px 24px 0",textAlign:"center"}}>
                 <div style={{fontSize:10,letterSpacing:".22em",textTransform:"uppercase",color:"#3518A5",fontWeight:800,marginBottom:10}}>Bilance příštího měsíce</div>
                 <div style={{
-                  fontFamily:"Fraunces,serif", fontSize:56, fontWeight:300,
+                  fontFamily:"var(--mono)", fontSize:52, fontWeight:500,
                   color: positiveBalance ? "#059669" : "#DC2626",
-                  lineHeight:1, letterSpacing:"-.02em",
+                  lineHeight:1, letterSpacing:"-.01em",
                 }}>
                   {positiveBalance?"+":"−"}{fmtKc(Math.abs(nextMonthBalance))}
                 </div>
@@ -6637,11 +6637,11 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
               <div style={{flex:1,display:"flex",flexDirection:"column",justifyContent:"center",gap:13,padding:"14px 24px"}}>
                 <div style={{borderTop:"1px solid rgba(53,24,165,.14)",paddingTop:12,display:"flex",justifyContent:"space-between",alignItems:"baseline"}}>
                   <span style={{fontSize:12,letterSpacing:".1em",textTransform:"uppercase",color:"var(--ink)",fontWeight:700}}>Příjmy</span>
-                  <span style={{fontFamily:"Fraunces,serif",fontSize:23,fontWeight:400,color:"#059669"}}>{fmtKc(totalPrijmy)}</span>
+                  <span style={{fontFamily:"var(--mono)",fontSize:21,fontWeight:500,color:"#059669"}}>{fmtKc(totalPrijmy)}</span>
                 </div>
                 <div style={{borderTop:"1px solid rgba(53,24,165,.14)",paddingTop:12,display:"flex",justifyContent:"space-between",alignItems:"baseline"}}>
                   <span style={{fontSize:12,letterSpacing:".1em",textTransform:"uppercase",color:"var(--ink)",fontWeight:700}}>Výdaje měsíčně</span>
-                  <span style={{fontFamily:"Fraunces,serif",fontSize:23,fontWeight:400,color:"#DC2626"}}>{fmtKc(Math.abs(totalNutne)+josefWage+Math.abs(totalLuxus))}</span>
+                  <span style={{fontFamily:"var(--mono)",fontSize:21,fontWeight:500,color:"#DC2626"}}>{fmtKc(Math.abs(totalNutne)+josefWage+Math.abs(totalLuxus))}</span>
                 </div>
                 <div style={{height:5,borderRadius:3,background:"rgba(53,24,165,.1)",overflow:"hidden",marginTop:3}}>
                   <div style={{height:"100%",width:`${pct}%`,borderRadius:3,background:pct===100?"#10B981":"#3518A5",transition:"width .7s ease"}} />
@@ -6666,8 +6666,8 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
 
           {!showFinDetail ? null : (
           <div style={{
-            background:"#fff", borderRadius:18, overflow:"hidden",
-            boxShadow:"0 0 0 1px rgba(0,0,0,.065), 0 8px 40px rgba(53,24,165,.07)",
+            background:"#fff", borderRadius:3, overflow:"hidden",
+            boxShadow:"0 0 0 1px rgba(0,0,0,.07)",
           }}>
           {/* ── DETAIL ── */}
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr"}}>
@@ -6709,7 +6709,7 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
               ))}
               <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",paddingTop:10,marginTop:8,borderTop:"1px solid rgba(0,0,0,.05)"}}>
                 <span style={{fontSize:10.5,color:"var(--mut)",letterSpacing:".02em"}}>Celkové náklady</span>
-                <span style={{fontSize:13,fontFamily:"Fraunces,serif",fontWeight:300,color:"#DC2626",letterSpacing:"-.01em"}}>−{fmtKc(Math.abs(totalVydaje))}</span>
+                <span style={{fontSize:13,fontFamily:"var(--mono)",fontWeight:500,color:"#DC2626",letterSpacing:"-.01em"}}>−{fmtKc(Math.abs(totalVydaje))}</span>
               </div>
 
               {/* Přijde / K vystavení / Po splatnosti — kompaktní rozklikávací řádky, vyplňují volné místo */}
@@ -6722,7 +6722,7 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
                   <div key={k.key}>
                     <div onClick={()=>toggleHeroKpi(k.key)} style={{display:"flex",justifyContent:"space-between",alignItems:"center",cursor:"pointer",padding:"5px 0"}}>
                       <span style={{fontSize:10.5,color:"var(--mut)",letterSpacing:".02em"}}>{k.emoji}{k.label} {heroKpiOpen===k.key?"▲":"▼"}</span>
-                      <span style={{fontFamily:"Fraunces,serif",fontSize:13,fontWeight:300,color:k.color,letterSpacing:"-.01em"}}>{k.sign}{fmtKc(k.val)}</span>
+                      <span style={{fontFamily:"var(--mono)",fontSize:13,fontWeight:500,color:k.color,letterSpacing:"-.01em"}}>{k.sign}{fmtKc(k.val)}</span>
                     </div>
                     {heroKpiOpen==="prijde" && k.key==="prijde" && (
                       <div style={{padding:"4px 0 10px 4px",display:"flex",flexDirection:"column",gap:5}}>
@@ -6838,7 +6838,7 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
               <AddExpenseRow category="luxus" color="#7C3AED" onSaveFinance={onSaveFinance} />
               <div style={{marginTop:10,borderTop:"1px solid rgba(0,0,0,.05)",paddingTop:8,display:"flex",justifyContent:"space-between",alignItems:"baseline"}}>
                 <span style={{fontSize:9.5,color:"var(--mut)",letterSpacing:".06em",textTransform:"uppercase"}}>Celkem výdaje</span>
-                <span style={{fontFamily:"Fraunces,serif",fontSize:14,fontWeight:300,color:"var(--ink)",letterSpacing:"-.01em"}}>{fmtKc(Math.abs(totalVydaje))}</span>
+                <span style={{fontFamily:"var(--mono)",fontSize:14,fontWeight:500,color:"var(--ink)",letterSpacing:"-.01em"}}>{fmtKc(Math.abs(totalVydaje))}</span>
               </div>
               <button className="btn gho" style={{fontSize:10.5,marginTop:9,width:"100%",opacity:.65}} onClick={()=>onNav("vykaz")}>+ Nový výkaz práce</button>
             </div>
@@ -6898,7 +6898,7 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
                 </div>
                 <div style={{textAlign:"right"}}>
                   <div style={{fontSize:9,color:"var(--mut)"}}>Celkem YTD</div>
-                  <div style={{fontSize:17,fontFamily:"Fraunces,serif",fontWeight:300,color:"var(--gold)"}}>{fmtKc(ytdInv + ytdEsc)}</div>
+                  <div style={{fontSize:16,fontFamily:"var(--mono)",fontWeight:600,color:"var(--gold)"}}>{fmtKc(ytdInv + ytdEsc)}</div>
                 </div>
               </div>
 
@@ -7041,8 +7041,8 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
                           x={x + barW/2} y={baseY - totalH - 16}
                           textAnchor="middle"
                           fontSize={isNow ? 12 : 10}
-                          fontFamily="Fraunces,serif"
-                          fontWeight={isNow ? "600" : "400"}
+                          fontFamily="'JetBrains Mono','SF Mono',Menlo,monospace"
+                          fontWeight={isNow ? "700" : "500"}
                           fill={isNow ? "var(--ink)" : "var(--txt)"}
                         >
                           {Math.round(d.total/1000)}k
@@ -7111,7 +7111,7 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
                       {lines.map((ln, li) => (
                         <text key={li} x={tx} y={ty - boxH + 16 + li*13}
                           textAnchor="middle" fontSize={li===0?9:8.5}
-                          fontFamily={li===0?"Fraunces,serif":"Inter"}
+                          fontFamily={li===0?"'JetBrains Mono','SF Mono',Menlo,monospace":"Inter"}
                           fontWeight={li===0?"600":(li===highlightIdx ? "700":"400")}
                           fill={li===0 ? "#fff" : (li===highlightIdx ? (highlightGood?"#6EE7B7":"#FCA5A5") : "rgba(255,255,255,.78)")}>
                           {ln}
@@ -7136,10 +7136,10 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
         <div style={{fontSize:9,letterSpacing:".2em",textTransform:"uppercase",color:"var(--mut)",fontWeight:600,marginBottom:10}}>Top klienti</div>
         <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
           {topC.slice(0,8).map(({c,rev},i)=>(
-            <div key={i} style={{display:"flex",alignItems:"center",gap:7,padding:"6px 12px",borderRadius:20,background:i===0?"var(--ink)":"var(--bg2)",border:`1px solid ${i===0?"var(--ink)":"var(--line)"}`,flexShrink:0}}>
+            <div key={i} style={{display:"flex",alignItems:"center",gap:7,padding:"6px 12px",borderRadius:3,background:i===0?"var(--ink)":"var(--bg2)",border:`1px solid ${i===0?"var(--ink)":"var(--line)"}`,flexShrink:0}}>
               <span style={{fontSize:9,color:i===0?"rgba(255,255,255,.5)":"var(--mut)",fontWeight:600}}>{i+1}</span>
               <span style={{fontSize:11,fontWeight:500,color:i===0?"#fff":"var(--txt)",maxWidth:130,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{c.name}</span>
-              <span style={{fontSize:11,fontFamily:"Fraunces,serif",fontWeight:300,color:i===0?"rgba(255,255,255,.8)":"var(--gold)"}}>{fmtKc(rev)}</span>
+              <span style={{fontSize:11,fontFamily:"var(--mono)",fontWeight:600,color:i===0?"rgba(255,255,255,.8)":"var(--gold)"}}>{fmtKc(rev)}</span>
             </div>
           ))}
         </div>
@@ -7178,7 +7178,7 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
               <div style={{fontSize:9,letterSpacing:".2em",textTransform:"uppercase",color:"var(--mut)",fontWeight:600,marginBottom:10}}>Claude AI</div>
               {curEntry ? (
                 <>
-                  <div style={{fontFamily:"Fraunces,serif",fontSize:28,fontWeight:300,color:"var(--ink)",lineHeight:1,marginBottom:4,fontVariantNumeric:"tabular-nums"}}>
+                  <div style={{fontFamily:"var(--mono)",fontSize:26,fontWeight:600,color:"var(--ink)",lineHeight:1,marginBottom:4,fontVariantNumeric:"tabular-nums"}}>
                     {Math.round(totalCzk).toLocaleString("cs-CZ")} Kč
                   </div>
                   <div style={{fontSize:11,color:"var(--mut)",fontFamily:"monospace"}}>{monthLabel(curEntry.month)} · ${totalUsd.toFixed(2)}</div>
