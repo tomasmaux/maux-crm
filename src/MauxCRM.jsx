@@ -5989,7 +5989,7 @@ function JosefPanel({ logs, attendance: attendanceProp }) {
 }
 
 
-function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, loanTrackers, loanTransactions, escrows, expenseChecks, onToggleExpenseCheck, onNav, onSaveFinance, onDeleteFinance, onDpfoToggle, onLoanTxAdd, onLoanTxToggle, onLoanTxDelete, onLoanUpdate, assistantLogs=[], assistantAttendance=[] }) {
+function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, loanTrackers, loanTransactions, escrows, expenseChecks, onToggleExpenseCheck, onNav, onSaveFinance, onDeleteFinance, onDpfoToggle, onLoanTxAdd, onLoanTxToggle, onLoanTxDelete, onLoanUpdate, assistantLogs=[], assistantAttendance=[], assistantAvailability=null }) {
   const [escrowAlertDismissed, setEscrowAlertDismissed] = useState(false);
   const [editLayout, setEditLayout] = useState(false);
   const [panelState, setPanelState] = useState(loadPanelState);
@@ -6167,16 +6167,32 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
   const luxus = (financeItems||[]).filter(i => i.category === "luxus");
   const totalNutne = nutne.reduce((s,i) => s+(i.amount||0), 0);
   const totalLuxus = luxus.reduce((s,i) => s+(i.amount||0), 0);
-  // Josef Řehák — automatický náklad z docházky za PŘEDCHOZÍ (uzavřený) měsíc
+  // Josef Řehák — živý automatický náklad za AKTUÁLNÍ (běžící) měsíc.
+  // Mzda se vyplácí zpětně až po uzavření měsíce, takže částka tady je to, co se
+  // promítne jako náklad do projekce PŘÍŠTÍHO měsíce. Dny, co už proběhly, počítáme
+  // z reálné docházky; dny, co ještě nenastaly ale Josef si je naplánoval (assistant_availability),
+  // presumujeme na 8 h/den — jak den proběhne a docházka se zapíše, presumpce se nahradí reálným číslem.
   const _josefNow = new Date();
-  const _josefPrevDate = new Date(_josefNow.getFullYear(), _josefNow.getMonth() - 1, 1);
-  const _josefYm = `${_josefPrevDate.getFullYear()}-${String(_josefPrevDate.getMonth()+1).padStart(2,"0")}`;
-  const _josefAtt = (assistantAttendance||[]).filter(a=>(a.date||"").startsWith(_josefYm));
-  const _josefWageAuto = Math.round(_josefAtt.reduce((s,a)=>{
-    if(!a.check_in||!a.check_out) return s;
-    const h = netAttHours(a.check_in, a.check_out);
-    return s + (isFinite(h)&&h>0?h:0);
-  },0) * ASSISTANT_HOURLY_RATE);
+  const _josefYm = `${_josefNow.getFullYear()}-${String(_josefNow.getMonth()+1).padStart(2,"0")}`;
+  const _josefTodayStr = _josefNow.toISOString().slice(0,10);
+  const _josefAttByDate = {};
+  (assistantAttendance||[]).forEach(a => { if ((a.date||"").startsWith(_josefYm)) _josefAttByDate[a.date] = a; });
+  const _josefPlannedSet = new Set((assistantAvailability && assistantAvailability.year_month === _josefYm ? assistantAvailability.planned_dates : null) || []);
+  const _josefDaysInMonth = new Date(_josefNow.getFullYear(), _josefNow.getMonth()+1, 0).getDate();
+  let _josefHoursSum = 0;
+  for (let d=1; d<=_josefDaysInMonth; d++) {
+    const dateStr = `${_josefYm}-${String(d).padStart(2,"0")}`;
+    if (dateStr <= _josefTodayStr) {
+      const a = _josefAttByDate[dateStr];
+      if (a && a.check_in && a.check_out) {
+        const h = netAttHours(a.check_in, a.check_out);
+        if (isFinite(h) && h>0) _josefHoursSum += h;
+      }
+    } else if (_josefPlannedSet.has(dateStr)) {
+      _josefHoursSum += 8; // presumpce — den ještě nenastal
+    }
+  }
+  const _josefWageAuto = Math.round(_josefHoursSum * ASSISTANT_HOURLY_RATE);
   // pro měsíce před zavedením docházky v appce (viz JOSEF_WAGE_MANUAL_OVERRIDES) použij ruční částku
   const josefWage = JOSEF_WAGE_MANUAL_OVERRIDES[_josefYm] ?? _josefWageAuto;
   const totalVydaje = totalNutne + totalLuxus - josefWage;
@@ -6784,9 +6800,15 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
               {/* Josef Řehák — automatický náklad */}
               {(() => {
                 const josefPaid = isPaid("josef_wage");
+                const handleJosefToggle = () => {
+                  if (!josefPaid) {
+                    if (!window.confirm(`Odeslal jsi mzdu asistentovi? (${josefWage.toLocaleString("cs-CZ")} Kč)`)) return;
+                  }
+                  onToggleExpenseCheck("josef_wage", !josefPaid);
+                };
                 return (
                 <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",fontSize:11.5,padding:"3px 0",gap:6,opacity:josefPaid?.65:.85,color:josefPaid?"var(--mut)":"var(--txt)",textDecoration:josefPaid?"line-through":"none"}}>
-                  <span style={{display:"flex",alignItems:"center",gap:5,cursor:"pointer"}} onClick={()=>onToggleExpenseCheck("josef_wage")}>
+                  <span style={{display:"flex",alignItems:"center",gap:5,cursor:"pointer"}} onClick={handleJosefToggle}>
                     <span style={{display:"inline-flex",alignItems:"center",justifyContent:"center",width:13,height:13,borderRadius:3,border:`1.5px solid ${josefPaid?"#16a34a":"#DC2626"}`,background:josefPaid?"#16a34a":"transparent",flexShrink:0,color:"#fff",fontSize:9}}>
                       {josefPaid?"✓":""}
                     </span>
@@ -10258,6 +10280,7 @@ export default function MauxCRM() {
   const [asistentPreview, setAsistentPreview] = useState(false); // Tom náhlíží pohled Josefa
   const [assistantLogs, setAssistantLogs] = useState([]);
   const [assistantAttendance, setAssistantAttendance] = useState([]);
+  const [assistantAvailability, setAssistantAvailability] = useState(null);
   const [previewModal, setPreviewModal] = useState(null); // { invoice, client, workEntries }
   const [editInvModal, setEditInvModal] = useState(null); // { inv } — edit existing invoice
   const [discountModal, setDiscountModal] = useState(null); // { clientId, entries } — "Změny" krok před vystavením faktury
@@ -10286,8 +10309,9 @@ export default function MauxCRM() {
       fetchEscrows().catch(e => { console.error("escrows load:", e); return []; }),
       fetchAssistantWorkLogs("asistent@maux.cz").catch(() => []),
       fetchAssistantAttendance("asistent@maux.cz").catch(() => []),
+      fetchAssistantAvailability("asistent@maux.cz", `${new Date().getFullYear()}-${String(new Date().getMonth()+1).padStart(2,"0")}`).catch(() => null),
     ])
-      .then(async ([c, i, w, f, dpfo, tax, checks, loans, esc, aLogs, aAtt]) => {
+      .then(async ([c, i, w, f, dpfo, tax, checks, loans, esc, aLogs, aAtt, aAvail]) => {
         setClients(c); setInvoices(i); setWorkEntries(w); setFinanceItems(f);
         setDpfoMonths(dpfo);
         setTaxRecords(tax);
@@ -10296,6 +10320,7 @@ export default function MauxCRM() {
         setEscrows(esc || []);
         setAssistantLogs(aLogs || []);
         setAssistantAttendance(aAtt || []);
+        setAssistantAvailability(aAvail || null);
         const txMap = {};
         await Promise.all(loans.map(async l => {
           txMap[l.id] = await fetchLoanTransactions(l.id).catch(() => []);
@@ -10717,7 +10742,8 @@ export default function MauxCRM() {
               onToggleExpenseCheck={toggleExpenseCheck}
               onNav={k => navTo(k)}
               assistantLogs={assistantLogs}
-              assistantAttendance={assistantAttendance} />
+              assistantAttendance={assistantAttendance}
+              assistantAvailability={assistantAvailability} />
           )}
 
           {/* VÝKAZ PRÁCE */}
