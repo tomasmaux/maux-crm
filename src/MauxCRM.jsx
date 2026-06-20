@@ -7971,6 +7971,8 @@ const MAY_2026_RECEIPTS = [
   { id: "imp_maj26_09", date: "2026-05-30", label: "PODA a.s. – internet (vyúčtování za květen)", gross: 499, rate: 21, vat: 87 },
   // — doplněno z dávky naskenované asistentkou 21.5. (složka 001_Účetní podklady) —
   { id: "imp_maj26_10", date: "2026-05-16", label: "Woolworth Home Discount – drobnosti do domácnosti", gross: 340, rate: 21, vat: 59 },
+  // — faktura č. 1260040147 (PODA a.s.), DUZP 31.5., vystavena 4.6. —
+  { id: "imp_maj26_11", date: "2026-05-31", label: "PODA a.s. – telefon 775938765 (vyúčtování za květen)", gross: 399, rate: 21, vat: 69 },
 ];
 
 // Účtenky a faktury za červen 2026 — průběžně doplňováno ze složky 001_Účetní podklady,
@@ -7979,6 +7981,8 @@ const JUNE_2026_RECEIPTS = [
   { id: "imp_cer26_01", date: "2026-06-01", label: "Blažek Praha – kožená taška", gross: 12089, rate: 21, vat: 2098 },
   { id: "imp_cer26_02", date: "2026-06-07", label: "IKEA – vybavení (úschovné schránky, ručníky, doplňky)", gross: 9463, rate: 21, vat: 1642 },
   { id: "imp_cer26_03", date: "2026-06-05", label: "JUDr. Svobodová – notářka (NZ 134+135/2026, Freedom stav realizační s.r.o.)", gross: 5639, rate: 21, vat: 979 },
+  // — faktura č. 9260944518 (PODA a.s.), DUZP i vystavení 2.6. —
+  { id: "imp_cer26_04", date: "2026-06-02", label: "PODA a.s. – internet a WiFi (vyúčtování za červen)", gross: 499, rate: 21, vat: 87 },
 ];
 
 function DphKalkulacka({ odpItem, onSaveFinance }) {
