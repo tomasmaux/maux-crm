@@ -6615,18 +6615,18 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
           {/* ── DVĚ ČTVERCOVÉ DLAŽDICE 1:1, VEDLE SEBE: Příjmy/Bilance/Výdaje + Spořicí účet ── */}
           <div style={{display:"flex",gap:16,alignItems:"stretch"}}>
 
-            {/* TILE A — hlavička Příjmy/Bilance/Výdaje (čtverec) */}
+            {/* TILE A — hlavička Příjmy/Bilance/Výdaje (čtverec), brand indigo, bez levandulové záře */}
             <div style={{
               flex:1, aspectRatio:"1", minWidth:0,
               background:"#fff", borderRadius:18, overflow:"hidden",
-              borderTop: positiveBalance ? "2.5px solid #10B981" : "2.5px solid #F43F5E",
-              boxShadow:"0 0 0 1px rgba(0,0,0,.065), 0 8px 40px rgba(53,24,165,.07)",
+              borderTop: "4px solid #3518A5",
+              boxShadow:"0 0 0 1px rgba(0,0,0,.08), 0 8px 28px rgba(0,0,0,.06)",
               display:"flex", flexDirection:"column",
             }}>
-              <div style={{padding:"18px 22px 0",textAlign:"center"}}>
-                <div style={{fontSize:7,letterSpacing:".28em",textTransform:"uppercase",color:"var(--mut)",fontWeight:700,marginBottom:7}}>BILANCE PŘÍŠTÍHO MĚSÍCE</div>
+              <div style={{padding:"22px 24px 0",textAlign:"center"}}>
+                <div style={{fontSize:10,letterSpacing:".22em",textTransform:"uppercase",color:"#3518A5",fontWeight:800,marginBottom:10}}>Bilance příštího měsíce</div>
                 <div style={{
-                  fontFamily:"Fraunces,serif", fontSize:36, fontWeight:300,
+                  fontFamily:"Fraunces,serif", fontSize:56, fontWeight:300,
                   color: positiveBalance ? "#059669" : "#DC2626",
                   lineHeight:1, letterSpacing:"-.02em",
                 }}>
@@ -6634,24 +6634,24 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
                 </div>
               </div>
 
-              <div style={{flex:1,display:"flex",flexDirection:"column",justifyContent:"center",gap:9,padding:"12px 22px"}}>
-                <div style={{borderTop:SEP,paddingTop:9,display:"flex",justifyContent:"space-between",alignItems:"baseline"}}>
-                  <span style={{fontSize:8,letterSpacing:".18em",textTransform:"uppercase",color:"var(--mut)",fontWeight:700}}>Příjmy</span>
-                  <span style={{fontFamily:"Fraunces,serif",fontSize:17,fontWeight:300,color:"#059669"}}>{fmtKc(totalPrijmy)}</span>
+              <div style={{flex:1,display:"flex",flexDirection:"column",justifyContent:"center",gap:13,padding:"14px 24px"}}>
+                <div style={{borderTop:"1px solid rgba(53,24,165,.14)",paddingTop:12,display:"flex",justifyContent:"space-between",alignItems:"baseline"}}>
+                  <span style={{fontSize:12,letterSpacing:".1em",textTransform:"uppercase",color:"var(--ink)",fontWeight:700}}>Příjmy</span>
+                  <span style={{fontFamily:"Fraunces,serif",fontSize:23,fontWeight:400,color:"#059669"}}>{fmtKc(totalPrijmy)}</span>
                 </div>
-                <div style={{borderTop:SEP,paddingTop:9,display:"flex",justifyContent:"space-between",alignItems:"baseline"}}>
-                  <span style={{fontSize:8,letterSpacing:".18em",textTransform:"uppercase",color:"var(--mut)",fontWeight:700}}>Výdaje měsíčně</span>
-                  <span style={{fontFamily:"Fraunces,serif",fontSize:17,fontWeight:300,color:"#DC2626"}}>{fmtKc(Math.abs(totalNutne)+josefWage+Math.abs(totalLuxus))}</span>
+                <div style={{borderTop:"1px solid rgba(53,24,165,.14)",paddingTop:12,display:"flex",justifyContent:"space-between",alignItems:"baseline"}}>
+                  <span style={{fontSize:12,letterSpacing:".1em",textTransform:"uppercase",color:"var(--ink)",fontWeight:700}}>Výdaje měsíčně</span>
+                  <span style={{fontFamily:"Fraunces,serif",fontSize:23,fontWeight:400,color:"#DC2626"}}>{fmtKc(Math.abs(totalNutne)+josefWage+Math.abs(totalLuxus))}</span>
                 </div>
-                <div style={{height:2,borderRadius:2,background:"rgba(0,0,0,.08)",overflow:"hidden",marginTop:2}}>
-                  <div style={{height:"100%",width:`${pct}%`,borderRadius:2,background:pct===100?"#10B981":"#0EA5E9",transition:"width .7s ease"}} />
+                <div style={{height:5,borderRadius:3,background:"rgba(53,24,165,.1)",overflow:"hidden",marginTop:3}}>
+                  <div style={{height:"100%",width:`${pct}%`,borderRadius:3,background:pct===100?"#10B981":"#3518A5",transition:"width .7s ease"}} />
                 </div>
-                <div style={{fontSize:7.5,color:"var(--mut)",letterSpacing:".01em",textAlign:"center"}}>
+                <div style={{fontSize:11,color:"var(--mut)",letterSpacing:".01em",textAlign:"center",fontWeight:600}}>
                   {pct===100?"✓ vše zaplaceno":`zaplaceno ${paidCount}/${all.length}`}
                 </div>
               </div>
 
-              <button onClick={()=>setShowFinDetail(s=>!s)} style={{border:"none",borderTop:SEP,background:"none",cursor:"pointer",fontSize:9.5,color:"var(--mut)",padding:"9px 0",letterSpacing:".05em",fontWeight:600}}>
+              <button onClick={()=>setShowFinDetail(s=>!s)} style={{border:"none",borderTop:"1px solid rgba(53,24,165,.14)",background:"none",cursor:"pointer",fontSize:12,color:"#3518A5",padding:"12px 0",letterSpacing:".03em",fontWeight:700}}>
                 {showFinDetail ? "Skrýt detail ▴" : "Zobrazit detail ▾"}
               </button>
             </div>
