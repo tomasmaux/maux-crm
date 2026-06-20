@@ -6201,19 +6201,20 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
   // jako odpočet proti DPH z vystavených faktur. Nemění se tím "to číslo shrnující daň" v modulu Daně —
   // je to čistě nová položka v příjmech, doplňující obrázek o tom, kolik fakticky zaplatím / kolik mi zbude.
   //
-  // DŮLEŽITÉ — DPH se platí ZPĚTNĚ: vyúčtování za PŘEDCHOZÍ měsíc je splatné Čechmanové až 25. dne
-  // měsíce aktuálního (přesně jak vysvětluje dlaždice Odpočet DPH — "DPH za května... počítá se do
-  // příjmů června"). Proto v červnových Příjmech NEPOČÍTÁME červnové doklady (ty se teprve tvoří
-  // a zúčtují se až v červenci), ale květnové — to je ta částka, co se v červnu reálně řeší a "usadí".
-  // dphFaktury (za předchozí měsíc) − odpočet z účtenek (za předchozí měsíc) = reálně uhrazeno
-  // Čechmanové; co je z odpočtu "navíc", to mi zůstává jako příjem tohoto měsíce.
-  const dphFakturyMesic = invoices.filter(i => (i.issue_date||"").startsWith(prevMonth)).reduce((s,i)=>s+(i.vat_amount||0),0);
+  // DŮLEŽITÉ — DPH se platí ZPĚTNĚ: vyúčtování za měsíc X je splatné Čechmanové až 25. dne měsíce X+1
+  // (přesně jak vysvětluje dlaždice Odpočet DPH — "DPH za května... počítá se do příjmů června").
+  // Tato sekce ("Bilance příštího měsíce") je projekce na měsíc PO aktuálním (X+1 = příští měsíc),
+  // takže do ní patří vyúčtování za měsíc AKTUÁLNÍ (X = tento měsíc) — to je to, co se zúčtuje a
+  // vyplatí až v příštím měsíci. Použít minulý měsíc by bylo už "usazené" v aktuálním měsíci, ne v projekci.
+  // dphFaktury (za tento měsíc) − odpočet z účtenek (za tento měsíc) = reálně uhrazeno Čechmanové;
+  // co je z odpočtu "navíc", to zůstává jako příjem příštího měsíce.
+  const dphFakturyMesic = invoices.filter(i => (i.issue_date||"").startsWith(thisMonth)).reduce((s,i)=>s+(i.vat_amount||0),0);
   const dphOdpItem = (financeItems||[]).find(i => i.id === "fi_dph_odpocet");
   const dphOdpocetLogVse = (() => {
     try { const p = JSON.parse(dphOdpItem?.notes || "{}"); return Array.isArray(p.log) ? p.log : []; }
     catch { return []; }
   })();
-  const dphOdpocet = dphOdpocetLogVse.filter(e => (e.date||"").startsWith(prevMonth)).reduce((s,e)=>s+(e.vat||0),0);
+  const dphOdpocet = dphOdpocetLogVse.filter(e => (e.date||"").startsWith(thisMonth)).reduce((s,e)=>s+(e.vat||0),0);
   const nadmernyOdpocet = Math.min(dphOdpocet, dphFakturyMesic);
   // "Finance v následujícím měsíci" — SOUČET položek skutečně zobrazených v "Příjmy měsíční"
   // (manuální příjmy + nevyfakturováno + čistý úrok z úschov + nadměrný odpočet DPH) MÍNUS výdaje zobrazené v Cash flow.
@@ -6695,13 +6696,13 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
                       ))}
                       {nadmernyOdpocet>0 && (
                         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"4px 0"}}>
-                          <span style={{fontSize:10,color:"var(--mut)",letterSpacing:".02em"}}>Odpočet DPH za {prevMonthName.toLowerCase()}</span>
+                          <span style={{fontSize:10,color:"var(--mut)",letterSpacing:".02em"}}>Odpočet DPH za {thisMonthName.toLowerCase()}</span>
                           <span style={{fontFamily:"var(--mono)",fontSize:11.5,fontWeight:500,color:"var(--ink)",letterSpacing:"-.01em"}}>{fmtKc(nadmernyOdpocet)}</span>
                         </div>
                       )}
                       {escrowNetThisMonth>0 && (
                         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"4px 0"}}>
-                          <span style={{fontSize:10,color:"var(--mut)",letterSpacing:".02em"}}>Úschovy — čistý úrok</span>
+                          <span style={{fontSize:10,color:"var(--mut)",letterSpacing:".02em"}}>Úschovy — čistý úrok za {thisMonthName.toLowerCase()}</span>
                           <span style={{fontFamily:"var(--mono)",fontSize:11.5,fontWeight:500,color:"var(--ink)",letterSpacing:"-.01em"}}>{fmtKc(Math.round(escrowNetThisMonth))}</span>
                         </div>
                       )}
@@ -6765,7 +6766,7 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
                 <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"3.5px 0",gap:8}}>
                   <span style={{display:"flex",alignItems:"center",gap:6,minWidth:0,overflow:"hidden"}}>
                     <span style={{fontSize:7.5,background:"rgba(5,150,105,.1)",color:"#065F46",padding:"1px 5px",borderRadius:3,fontWeight:700,letterSpacing:".05em",flexShrink:0}}>auto</span>
-                    <span style={{fontSize:11.5,color:"var(--txt)",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>Nadměrný odpočet DPH za {prevMonthName.toLowerCase()}</span>
+                    <span style={{fontSize:11.5,color:"var(--txt)",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>Nadměrný odpočet DPH za {thisMonthName.toLowerCase()}</span>
                   </span>
                   <span style={{fontFamily:"JetBrains Mono,monospace",color:"#059669",fontSize:11,flexShrink:0,letterSpacing:"-.01em"}}>+{fmtKc(nadmernyOdpocet)}</span>
                 </div>
