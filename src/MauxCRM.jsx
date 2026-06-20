@@ -122,7 +122,7 @@ html,body,#root{height:100%;background:#FAFAFA}
 .top-l h1{font-family:'Fraunces',serif;font-size:32px;font-weight:300;color:var(--txt);line-height:1.1;letter-spacing:-.01em}
 .top-r{display:flex;gap:8px;align-items:center;padding-bottom:2px}
 .hr{height:1px;background:var(--line);margin:24px 40px 0}
-.body{flex:1;padding:28px 40px 48px}
+.body{flex:1;padding:28px 40px 48px;width:100%;max-width:1180px;margin:0 auto}
 /* tooltip */
 .tt-wrap{position:relative;display:inline-block;max-width:100%}
 .tt-wrap .tt{display:none;position:absolute;left:0;top:calc(100% + 6px);z-index:50;background:#1A0E5C;color:#fff;font-size:12px;line-height:1.6;padding:10px 14px;border-radius:8px;min-width:280px;max-width:420px;box-shadow:0 8px 24px rgba(0,0,0,.18);white-space:pre-wrap;word-break:break-word}
@@ -4541,7 +4541,81 @@ function FinDonutChart({ segments, centerDefault, centerColor, size = 170 }) {
   );
 }
 
-/* ─── TRI GRAFY PANEL — Spořák + Majetek + Rezerva jako interaktivní donut grafy ─── */
+/* ─── SPOŘICÍ ÚČET — samostatná čtvercová dlaždice (vedle Příjmy/Výdaje na Přehledu) ─── */
+function SporakRingTile({ financeItems, onSaveFinance, invoices, dpfoMonths, loanTransactions, escrows, square }) {
+  const sporaci    = (financeItems||[]).filter(i => i.category === "sporaci" && i.notes !== "SKIP_DISPLAY");
+  const zItem      = sporaci.find(i => i.id === "fi_sp_99");
+  const actualBal  = zItem?.amount || 0;
+  const dphAuto    = (invoices||[]).filter(i => i.status === "uhrazena").reduce((s,i) => s+(i.vat_amount||0), 0);
+  const dpfoAcc    = (dpfoMonths||[]).filter(m => m.is_paid).reduce((s,m) => s+(m.amount||8050), 0);
+  const bobloanBal = (loanTransactions?.loan_bobnice||[]).reduce((s,t) => s+t.amount, 0);
+  const bobFb      = (financeItems||[]).find(i => i.id === "fi_sp_02")?.amount || 0;
+  const bobBal     = Math.max(bobloanBal > 0 ? bobloanBal : bobFb, 0);
+  const danUschov  = Math.round(escrowTotalTax(escrows||[]));
+  const autoLbls   = new Set(["dph","dpfo 2026","bobnice","daň z úschov"]);
+  const manObálky  = sporaci.filter(i =>
+    i.id !== "fi_sp_99" && i.id !== "fi_sp_01" && i.id !== "fi_sp_02"
+    && !autoLbls.has((i.label||"").toLowerCase().trim())
+  );
+  const envSegs    = [
+    { label: "DPH",          amount: dphAuto,   color: "#0D9488" },
+    { label: "DPFO 2026",    amount: dpfoAcc,   color: "#16A34A" },
+    ...(bobBal > 0 ? [{ label: "Bobnice", amount: bobBal, color: "#65A30D" }] : []),
+    { label: "Daň z úschov", amount: danUschov, color: "#0891B2" },
+    ...manObálky.map((o,idx) => ({ label: o.label, amount: o.amount||0, color: ["#059669","#84CC16"][idx%2] })),
+  ].filter(e => e.amount > 0);
+  const totalEar   = envSegs.reduce((s,e) => s+e.amount, 0);
+  const firmaRez   = actualBal - totalEar;
+  const R_COL = "#4F46E5";
+  const fullSporSegs = [
+    ...envSegs.map(e => ({ label: e.label, value: e.amount, color: e.color })),
+    ...(firmaRez > 0 ? [{ label: "Rezerva", value: firmaRez, color: R_COL }] : []),
+  ];
+
+  const [editBal, setEditBal] = useState(false);
+  const [balInput, setBalInput] = useState(actualBal);
+  const S_COL = "#059669";
+
+  const secHdr = (col, text) => (
+    <div style={{ fontSize: 8, letterSpacing: ".18em", color: col, fontWeight: 800, textTransform: "uppercase", opacity: 0.65, marginBottom: 3 }}>{text}</div>
+  );
+  const eBtn = (onClick, active, col) => (
+    <button onClick={onClick} style={{ width: 22, height: 22, borderRadius: 6, border: "1px solid var(--line)", background: active ? `${col}18` : "none", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", color: active ? col : "var(--mut)", fontSize: 10, flexShrink: 0 }}>
+      {active ? "✕" : "✎"}
+    </button>
+  );
+
+  return (
+    <div style={{
+      height: "100%", borderRadius: 18, overflow: "hidden",
+      background: "linear-gradient(150deg, #ECFDF5 0%, #D1FAE5 100%)",
+      border: "1px solid rgba(0,0,0,0.07)", boxShadow: "0 4px 32px rgba(0,0,0,0.07)",
+      display: "flex", flexDirection: "column", alignItems: "center",
+      padding: square ? "20px 18px 14px" : "26px 34px 28px",
+      boxSizing: "border-box",
+    }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12, width: "100%" }}>
+        {secHdr(S_COL, "Spořicí účet")}
+        {eBtn(() => { setBalInput(actualBal); setEditBal(e => !e); }, editBal, S_COL)}
+      </div>
+      {editBal && (
+        <div style={{ display: "flex", gap: 6, marginBottom: 12, alignItems: "center", width: "100%" }}>
+          <input type="number" value={balInput} autoFocus onChange={e => setBalInput(Number(e.target.value))}
+            onKeyDown={e => { if (e.key === "Enter") { onSaveFinance({ ...zItem, amount: balInput }); setEditBal(false); } if (e.key === "Escape") setEditBal(false); }}
+            style={{ flex: 1, fontSize: 14, padding: "5px 9px", border: `2px solid ${S_COL}`, borderRadius: 8, outline: "none", fontFamily: "inherit", background: "rgba(255,255,255,0.75)" }} />
+          <button onClick={() => { onSaveFinance({ ...zItem, amount: balInput }); setEditBal(false); }} style={{ background: S_COL, color: "#fff", border: "none", borderRadius: 8, padding: "5px 11px", cursor: "pointer", fontWeight: 700 }}>✓</button>
+          <button onClick={() => setEditBal(false)} style={{ background: "none", border: "1px solid rgba(0,0,0,0.12)", borderRadius: 8, padding: "5px 9px", cursor: "pointer", color: "var(--mut)" }}>✕</button>
+        </div>
+      )}
+      <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", minHeight: 0 }}>
+        <InteractiveRing segments={fullSporSegs} size={square ? 168 : 210} thickness={square ? 19 : 24} glowColor={S_COL}
+          centerTop="Celkem" centerMain={fmtKc(actualBal)} centerSub={`${fmtKc(totalEar)} v obálkách`} />
+      </div>
+    </div>
+  );
+}
+
+/* ─── TRI GRAFY PANEL — Majetek + Rezerva jako interaktivní donut grafy (Spořák je teď samostatná dlaždice na Přehledu) ─── */
 function TriGrafyPanel({ financeItems, onSaveFinance, invoices, dpfoMonths, loanTransactions, escrows }) {
   // ── SPOŘÁK ──
   const sporaci    = (financeItems||[]).filter(i => i.category === "sporaci" && i.notes !== "SKIP_DISPLAY");
@@ -4656,28 +4730,10 @@ function TriGrafyPanel({ financeItems, onSaveFinance, invoices, dpfoMonths, loan
 
   return (
     <div style={{ borderRadius: 22, overflow: "hidden", border: "1px solid rgba(0,0,0,0.07)", boxShadow: "0 4px 32px rgba(0,0,0,0.07)" }}>
-
-      {/* ═══ SPOŘÁK — full-width strip ═══ */}
-      <div style={{ padding: "26px 34px 28px", background: "linear-gradient(150deg, #ECFDF5 0%, #D1FAE5 100%)" }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 18 }}>
-          {secHdr(S_COL, "Spořící účet · celkové rozložení")}
-          {eBtn(() => { setBalInput(actualBal); setEditBal(e => !e); }, editBal, S_COL)}
-        </div>
-        {editBal && (
-          <div style={{ display: "flex", gap: 6, marginBottom: 16, alignItems: "center" }}>
-            <input type="number" value={balInput} autoFocus onChange={e => setBalInput(Number(e.target.value))}
-              onKeyDown={e => { if (e.key === "Enter") { onSaveFinance({ ...zItem, amount: balInput }); setEditBal(false); } if (e.key === "Escape") setEditBal(false); }}
-              style={{ flex: 1, fontSize: 15, padding: "6px 10px", border: `2px solid ${S_COL}`, borderRadius: 8, outline: "none", fontFamily: "inherit", background: "rgba(255,255,255,0.75)" }} />
-            <button onClick={() => { onSaveFinance({ ...zItem, amount: balInput }); setEditBal(false); }} style={{ background: S_COL, color: "#fff", border: "none", borderRadius: 8, padding: "6px 12px", cursor: "pointer", fontWeight: 700 }}>✓</button>
-            <button onClick={() => setEditBal(false)} style={{ background: "none", border: "1px solid rgba(0,0,0,0.12)", borderRadius: 8, padding: "6px 10px", cursor: "pointer", color: "var(--mut)" }}>✕</button>
-          </div>
-        )}
-        <InteractiveRing segments={fullSporSegs} size={210} thickness={24} glowColor={S_COL}
-          centerTop="Celkem" centerMain={fmtKc(actualBal)} centerSub={`${fmtKc(totalEar)} v obálkách`} />
-      </div>
+      {/* Spořák (celkové rozložení) byl přesunut na Přehled — viz <SporakRingTile> vedle karty Příjmy/Výdaje */}
 
       {/* ═══ DOLNÍ PŮLKA: MAJETEK + REZERVA ═══ */}
-      <div style={{ display: "flex", borderTop: "1px solid rgba(0,0,0,0.06)" }}>
+      <div style={{ display: "flex" }}>
 
         {/* ── MAJETEK ── */}
         <div style={{ flex: 3, padding: "24px 30px 26px", background: "linear-gradient(150deg, #FFFCF0 0%, #F5E6B8 100%)", borderRight: "1px solid rgba(0,0,0,0.06)" }}>
@@ -4919,10 +4975,10 @@ function BackupReminderBanner({ onDone }) {
 /* ─── DASHBOARD ─── */
 // Drag-and-drop panel IDs — pořadí a viditelnost karet na dashboardu
 // Verze: zvýšit pokud chceme vynutit reset uloženého pořadí u všech uživatelů
-const PANEL_LAYOUT_VERSION = 5;
+const PANEL_LAYOUT_VERSION = 7;
 const DEFAULT_PANELS = [
   "finance","c35","trigrafy","firma","josef",
-  "chart","klienti","uschovy","fakturace","happylife","claude"
+  "chart","klienti","uschovy","fakturace","navstevnost","xtb","happylife","claude"
 ];
 function loadPanelState() {
   try {
@@ -5273,6 +5329,194 @@ function claudeLoadSettings() {
 }
 function claudeSaveSettings(s) {
   try { localStorage.setItem("claude_settings", JSON.stringify(s)); } catch {}
+}
+
+// Návštěvnost webu maux.cz — živé GA4 (Google Analytics Data API) přes serverless
+// proxy /api/ga4 (service account, klíče jen na Vercelu — viz api/ga4.js).
+function WebsiteTrafficPanel() {
+  const [data, setData] = useState(null);
+  const [err, setErr] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let alive = true;
+    setLoading(true);
+    fetch("/api/ga4")
+      .then(r => r.json().then(j => ({ ok: r.ok, j })))
+      .then(({ ok, j }) => {
+        if (!alive) return;
+        if (!ok || j.error) { setErr(j.error || "Neznámá chyba"); setData(null); }
+        else { setData(j); setErr(null); }
+      })
+      .catch(e => { if (alive) setErr(e.message); })
+      .finally(() => { if (alive) setLoading(false); });
+    return () => { alive = false; };
+  }, []);
+
+  const fmtN = (n) => Math.round(n || 0).toLocaleString("cs-CZ");
+  const label = { fontSize: 7, letterSpacing: ".28em", textTransform: "uppercase", color: "var(--mut)", fontWeight: 700 };
+
+  if (loading) {
+    return (
+      <div style={{ background: "#fff", borderRadius: 18, padding: "26px 30px", boxShadow: "0 0 0 1px rgba(0,0,0,.065)", color: "var(--mut)", fontSize: 12 }}>
+        Načítám návštěvnost webu…
+      </div>
+    );
+  }
+  if (err) {
+    return (
+      <div style={{ background: "#fff", borderRadius: 18, padding: "22px 28px", boxShadow: "0 0 0 1px rgba(0,0,0,.065)" }}>
+        <div style={{ ...label, marginBottom: 8 }}>Návštěvnost webu — maux.cz</div>
+        <div style={{ fontSize: 12.5, color: "#DC2626", lineHeight: 1.5 }}>{err}</div>
+      </div>
+    );
+  }
+
+  const s = data?.summary || {};
+  const today = s.today || { activeUsers: 0, sessions: 0, pageViews: 0 };
+  const last7 = s.last7 || { activeUsers: 0, sessions: 0, pageViews: 0 };
+  const last30 = s.last30 || { activeUsers: 0, sessions: 0, pageViews: 0 };
+  const trend = data?.trend || [];
+  const topPages = data?.topPages || [];
+
+  // jednoduchá sparkline (bez externí knihovny — inline SVG, stejný princip jako jiné grafy v appce)
+  const W = 100, H = 34;
+  const maxPv = Math.max(1, ...trend.map(t => t.pageViews));
+  const pts = trend.map((t, i) => {
+    const x = trend.length > 1 ? (i / (trend.length - 1)) * W : 0;
+    const y = H - (t.pageViews / maxPv) * H;
+    return `${x.toFixed(1)},${y.toFixed(1)}`;
+  }).join(" ");
+
+  return (
+    <div style={{ background: "#fff", borderRadius: 18, overflow: "hidden", boxShadow: "0 0 0 1px rgba(0,0,0,.065), 0 8px 40px rgba(53,24,165,.07)" }}>
+      <div style={{ padding: "18px 26px 14px", display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+        <div style={{ ...label }}>Návštěvnost webu — maux.cz</div>
+        <div style={{ fontSize: 8, color: "var(--mut)", opacity: .6 }}>Google Analytics 4</div>
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", borderTop: "1px solid rgba(0,0,0,.06)", borderBottom: "1px solid rgba(0,0,0,.06)" }}>
+        {[
+          ["Dnes", today],
+          ["Posledních 7 dní", last7],
+          ["Posledních 30 dní", last30],
+        ].map(([title, v], i) => (
+          <div key={title} style={{ padding: "16px 20px", borderRight: i < 2 ? "1px solid rgba(0,0,0,.06)" : "none" }}>
+            <div style={{ fontSize: 8, letterSpacing: ".12em", textTransform: "uppercase", color: "var(--mut)", fontWeight: 700, marginBottom: 8 }}>{title}</div>
+            <div style={{ fontFamily: "Fraunces,serif", fontSize: 24, fontWeight: 300, color: "var(--ink)", lineHeight: 1 }}>{fmtN(v.activeUsers)}</div>
+            <div style={{ fontSize: 8.5, color: "var(--mut)", marginTop: 3 }}>aktivních uživatelů</div>
+            <div style={{ fontSize: 9, color: "var(--mut)", marginTop: 8, opacity: .75 }}>{fmtN(v.sessions)} relací · {fmtN(v.pageViews)} zobrazení</div>
+          </div>
+        ))}
+      </div>
+
+      <div style={{ display: "flex", gap: 0 }}>
+        <div style={{ flex: 1, padding: "16px 26px 18px", borderRight: "1px solid rgba(0,0,0,.06)" }}>
+          <div style={{ fontSize: 8, letterSpacing: ".12em", textTransform: "uppercase", color: "var(--mut)", fontWeight: 700, marginBottom: 10 }}>Trend zobrazení stránek — 30 dní</div>
+          {trend.length > 1 ? (
+            <svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", height: 60, display: "block" }} preserveAspectRatio="none">
+              <polyline points={pts} fill="none" stroke="#0EA5E9" strokeWidth="1.6" vectorEffect="non-scaling-stroke" />
+            </svg>
+          ) : (
+            <div style={{ fontSize: 11, color: "var(--mut)" }}>Nedostatek dat pro graf.</div>
+          )}
+        </div>
+        <div style={{ flex: 1, padding: "16px 26px 18px" }}>
+          <div style={{ fontSize: 8, letterSpacing: ".12em", textTransform: "uppercase", color: "var(--mut)", fontWeight: 700, marginBottom: 10 }}>Nejnavštěvovanější stránky</div>
+          {topPages.length === 0 ? (
+            <div style={{ fontSize: 11, color: "var(--mut)" }}>Žádná data.</div>
+          ) : topPages.slice(0, 5).map(p => (
+            <div key={p.path} style={{ display: "flex", justifyContent: "space-between", gap: 10, fontSize: 11, padding: "4px 0", borderTop: "1px solid rgba(0,0,0,.04)" }}>
+              <span style={{ color: "var(--ink)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.path}</span>
+              <span style={{ color: "var(--mut)", flexShrink: 0 }}>{fmtN(p.pageViews)}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Investiční portfolio XTB — živá čísla přes serverless proxy /api/xtb (WebSocket xAPI,
+// přihlašovací heslo jen na Vercelu — viz api/xtb.js). Nikdy nežádej/nezadávej heslo v appce.
+function XtbPanel() {
+  const [data, setData] = useState(null);
+  const [err, setErr] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let alive = true;
+    setLoading(true);
+    fetch("/api/xtb")
+      .then(r => r.json().then(j => ({ ok: r.ok, j })))
+      .then(({ ok, j }) => {
+        if (!alive) return;
+        if (!ok || j.error) { setErr(j.error || "Neznámá chyba"); setData(null); }
+        else { setData(j); setErr(null); }
+      })
+      .catch(e => { if (alive) setErr(e.message); })
+      .finally(() => { if (alive) setLoading(false); });
+    return () => { alive = false; };
+  }, []);
+
+  const label = { fontSize: 7, letterSpacing: ".28em", textTransform: "uppercase", color: "var(--mut)", fontWeight: 700 };
+  const fmtMoney = (v, cur) => v == null ? "—" : `${Number(v).toLocaleString("cs-CZ", { maximumFractionDigits: 2 })} ${cur || ""}`.trim();
+
+  if (loading) {
+    return (
+      <div style={{ background: "#fff", borderRadius: 18, padding: "26px 30px", boxShadow: "0 0 0 1px rgba(0,0,0,.065)", color: "var(--mut)", fontSize: 12 }}>
+        Načítám portfolio XTB…
+      </div>
+    );
+  }
+  if (err) {
+    return (
+      <div style={{ background: "#fff", borderRadius: 18, padding: "22px 28px", boxShadow: "0 0 0 1px rgba(0,0,0,.065)" }}>
+        <div style={{ ...label, marginBottom: 8 }}>Investice — XTB</div>
+        <div style={{ fontSize: 12.5, color: "#DC2626", lineHeight: 1.5 }}>{err}</div>
+      </div>
+    );
+  }
+
+  const acc = data?.account || {};
+  const trades = data?.openTrades || [];
+  const profitColor = (acc.equity - acc.balance) >= 0 ? "#059669" : "#DC2626";
+
+  return (
+    <div style={{ background: "#fff", borderRadius: 18, overflow: "hidden", boxShadow: "0 0 0 1px rgba(0,0,0,.065), 0 8px 40px rgba(53,24,165,.07)" }}>
+      <div style={{ padding: "18px 26px 14px", display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+        <div style={{ ...label }}>Investice — XTB</div>
+        <div style={{ fontSize: 8, color: "var(--mut)", opacity: .6 }}>{data?.env === "demo" ? "DEMO účet" : "živý účet"}</div>
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", borderTop: "1px solid rgba(0,0,0,.06)", borderBottom: "1px solid rgba(0,0,0,.06)" }}>
+        <div style={{ padding: "16px 20px", borderRight: "1px solid rgba(0,0,0,.06)" }}>
+          <div style={{ fontSize: 8, letterSpacing: ".12em", textTransform: "uppercase", color: "var(--mut)", fontWeight: 700, marginBottom: 8 }}>Zůstatek</div>
+          <div style={{ fontFamily: "Fraunces,serif", fontSize: 22, fontWeight: 300, color: "var(--ink)", lineHeight: 1 }}>{fmtMoney(acc.balance, acc.currency)}</div>
+        </div>
+        <div style={{ padding: "16px 20px", borderRight: "1px solid rgba(0,0,0,.06)" }}>
+          <div style={{ fontSize: 8, letterSpacing: ".12em", textTransform: "uppercase", color: "var(--mut)", fontWeight: 700, marginBottom: 8 }}>Equity</div>
+          <div style={{ fontFamily: "Fraunces,serif", fontSize: 22, fontWeight: 300, color: profitColor, lineHeight: 1 }}>{fmtMoney(acc.equity, acc.currency)}</div>
+        </div>
+        <div style={{ padding: "16px 20px" }}>
+          <div style={{ fontSize: 8, letterSpacing: ".12em", textTransform: "uppercase", color: "var(--mut)", fontWeight: 700, marginBottom: 8 }}>Volná marže</div>
+          <div style={{ fontFamily: "Fraunces,serif", fontSize: 22, fontWeight: 300, color: "var(--ink)", lineHeight: 1 }}>{fmtMoney(acc.marginFree, acc.currency)}</div>
+        </div>
+      </div>
+
+      <div style={{ padding: "14px 26px 18px" }}>
+        <div style={{ fontSize: 8, letterSpacing: ".12em", textTransform: "uppercase", color: "var(--mut)", fontWeight: 700, marginBottom: 10 }}>Otevřené pozice ({trades.length})</div>
+        {trades.length === 0 ? (
+          <div style={{ fontSize: 11, color: "var(--mut)" }}>Žádné otevřené pozice.</div>
+        ) : trades.map((t, i) => (
+          <div key={i} style={{ display: "flex", justifyContent: "space-between", gap: 10, fontSize: 11, padding: "5px 0", borderTop: "1px solid rgba(0,0,0,.04)" }}>
+            <span style={{ color: "var(--ink)" }}>{t.symbol} <span style={{ color: "var(--mut)", fontSize: 9.5 }}>{t.cmd === 0 ? "BUY" : "SELL"} · {t.volume}</span></span>
+            <span style={{ color: t.profit >= 0 ? "#059669" : "#DC2626", fontWeight: 600 }}>{fmtMoney(t.profit, acc.currency)}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
 }
 
 function ClaudeTracker() {
@@ -5786,6 +6030,7 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
   const PANEL_ACCENTS = {
     finance: "#3518A5", trigrafy: "#2563EB", firma: "#0D9488", josef: "#7C3AED",
     pulz: "#DB2777", chart: "#B8923D", klienti: "#DC2626", ziskovost: "#059669", claude: "#4F46E5",
+    navstevnost: "#0EA5E9", xtb: "#16A34A",
   };
   function Panel({ id, children }) {
     const hidden = panelState.hidden.includes(id);
@@ -6340,6 +6585,7 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
         // je vždy kratší než pravý (Výdaje checklist) a zbytečně tu zůstávalo prázdno.
         const [heroKpiOpen, setHeroKpiOpen] = useState(null);
         const toggleHeroKpi = (k) => setHeroKpiOpen(v => v===k?null:k);
+        const [showFinDetail, setShowFinDetail] = useState(false);
         const isPaid = (id) => !!(expenseChecks||[]).find(c => c.item_id === id && c.paid);
         const all = [...nutne.map(i=>({...i,_c:"#DC2626"})), ...luxus.map(i=>({...i,_c:"#9333EA"}))];
         const paidItems = all.filter(i => isPaid(i.id));
@@ -6364,74 +6610,65 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
         const SEP = "1px solid rgba(0,0,0,.055)";
         const positiveBalance = nextMonthBalance >= 0;
         return (
-        <div style={{
-          background:"#fff",
-          borderRadius:18,
-          overflow:"hidden",
-          borderTop: positiveBalance ? "2.5px solid #10B981" : "2.5px solid #F43F5E",
-          boxShadow:"0 0 0 1px rgba(0,0,0,.065), 0 8px 40px rgba(53,24,165,.07)",
-        }}>
+        <div style={{display:"flex",flexDirection:"column",gap:16}}>
 
-          {/* ── HERO STRIP ── */}
-          <div style={{display:"grid",gridTemplateColumns:"1fr auto 1fr",borderBottom:SEP}}>
+          {/* ── DVĚ ČTVERCOVÉ DLAŽDICE 1:1, VEDLE SEBE: Příjmy/Bilance/Výdaje + Spořicí účet ── */}
+          <div style={{display:"flex",gap:16,alignItems:"stretch"}}>
 
-            {/* PŘÍJMY */}
-            <div style={{padding:"20px 26px 18px"}}>
-              <div style={{fontSize:7,letterSpacing:".30em",textTransform:"uppercase",color:"var(--mut)",fontWeight:700,marginBottom:9}}>PŘÍJMY NA PŘÍŠTÍ MĚSÍC</div>
-              <div style={{display:"flex",alignItems:"baseline",gap:7}}>
-                <span style={{fontFamily:"Fraunces,serif",fontSize:30,fontWeight:300,color:"#059669",lineHeight:1,letterSpacing:"-.01em"}}>{fmtKc(totalPrijmy)}</span>
-                <span style={{fontSize:9.5,color:"#059669",opacity:.55,fontWeight:400}}>odhad</span>
-              </div>
-              <div style={{fontSize:8.5,color:"var(--mut)",marginTop:6,letterSpacing:".03em"}}>do 1. {nextMonthName.toLowerCase()} — nevyfakturováno, úschovy, DPH, manuální</div>
-            </div>
-
-            {/* BILANCE — dominantní číslo */}
+            {/* TILE A — hlavička Příjmy/Bilance/Výdaje (čtverec) */}
             <div style={{
-              padding:"18px 40px 16px",
-              borderLeft:SEP, borderRight:SEP,
-              textAlign:"center",
-              background: positiveBalance ? "rgba(5,150,105,.035)" : "rgba(220,38,38,.035)",
-              minWidth:248
+              flex:1, aspectRatio:"1", minWidth:0,
+              background:"#fff", borderRadius:18, overflow:"hidden",
+              borderTop: positiveBalance ? "2.5px solid #10B981" : "2.5px solid #F43F5E",
+              boxShadow:"0 0 0 1px rgba(0,0,0,.065), 0 8px 40px rgba(53,24,165,.07)",
+              display:"flex", flexDirection:"column",
             }}>
-              <div style={{fontSize:7,letterSpacing:".30em",textTransform:"uppercase",color:"var(--mut)",fontWeight:700,marginBottom:9}}>BILANCE PŘÍŠTÍHO MĚSÍCE</div>
-              <div style={{
-                fontFamily:"Fraunces,serif",
-                fontSize:54,
-                fontWeight:300,
-                color: positiveBalance ? "#059669" : "#DC2626",
-                lineHeight:1,
-                letterSpacing:"-.025em"
-              }}>
-                {positiveBalance?"+":"−"}{fmtKc(Math.abs(nextMonthBalance))}
-              </div>
-              <div style={{fontSize:8,color:"var(--mut)",marginTop:7,letterSpacing:".015em",opacity:.8}}>příjmy − výdaje příštího měsíce</div>
-            </div>
-
-            {/* VÝDAJE */}
-            <div style={{padding:"20px 26px 18px"}}>
-              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:9}}>
-                <div style={{fontSize:7,letterSpacing:".30em",textTransform:"uppercase",color:"var(--mut)",fontWeight:700}}>VÝDAJE MĚSÍČNĚ</div>
-                <div style={{fontSize:8.5,color:pct===100?"#059669":"var(--mut)",fontWeight:600,letterSpacing:".02em"}}>
-                  {pct===100?"✓ vše zaplaceno":`${paidCount}/${all.length}`}
+              <div style={{padding:"18px 22px 0",textAlign:"center"}}>
+                <div style={{fontSize:7,letterSpacing:".28em",textTransform:"uppercase",color:"var(--mut)",fontWeight:700,marginBottom:7}}>BILANCE PŘÍŠTÍHO MĚSÍCE</div>
+                <div style={{
+                  fontFamily:"Fraunces,serif", fontSize:36, fontWeight:300,
+                  color: positiveBalance ? "#059669" : "#DC2626",
+                  lineHeight:1, letterSpacing:"-.02em",
+                }}>
+                  {positiveBalance?"+":"−"}{fmtKc(Math.abs(nextMonthBalance))}
                 </div>
               </div>
-              <div style={{display:"flex",gap:8,alignItems:"baseline",flexWrap:"wrap"}}>
-                <span style={{fontFamily:"Fraunces,serif",fontSize:22,fontWeight:300,color:"#DC2626",lineHeight:1}}>{fmtKc(Math.abs(totalNutne)+josefWage)}</span>
-                <span style={{fontSize:9,color:"var(--mut)"}}>nutné</span>
-                <span style={{fontSize:11,color:"var(--mut)",opacity:.35,fontWeight:300}}>+</span>
-                <span style={{fontFamily:"Fraunces,serif",fontSize:22,fontWeight:300,color:"#7C3AED",lineHeight:1}}>{fmtKc(Math.abs(totalLuxus))}</span>
-                <span style={{fontSize:9,color:"var(--mut)"}}>lusus</span>
+
+              <div style={{flex:1,display:"flex",flexDirection:"column",justifyContent:"center",gap:9,padding:"12px 22px"}}>
+                <div style={{borderTop:SEP,paddingTop:9,display:"flex",justifyContent:"space-between",alignItems:"baseline"}}>
+                  <span style={{fontSize:8,letterSpacing:".18em",textTransform:"uppercase",color:"var(--mut)",fontWeight:700}}>Příjmy</span>
+                  <span style={{fontFamily:"Fraunces,serif",fontSize:17,fontWeight:300,color:"#059669"}}>{fmtKc(totalPrijmy)}</span>
+                </div>
+                <div style={{borderTop:SEP,paddingTop:9,display:"flex",justifyContent:"space-between",alignItems:"baseline"}}>
+                  <span style={{fontSize:8,letterSpacing:".18em",textTransform:"uppercase",color:"var(--mut)",fontWeight:700}}>Výdaje měsíčně</span>
+                  <span style={{fontFamily:"Fraunces,serif",fontSize:17,fontWeight:300,color:"#DC2626"}}>{fmtKc(Math.abs(totalNutne)+josefWage+Math.abs(totalLuxus))}</span>
+                </div>
+                <div style={{height:2,borderRadius:2,background:"rgba(0,0,0,.08)",overflow:"hidden",marginTop:2}}>
+                  <div style={{height:"100%",width:`${pct}%`,borderRadius:2,background:pct===100?"#10B981":"#0EA5E9",transition:"width .7s ease"}} />
+                </div>
+                <div style={{fontSize:7.5,color:"var(--mut)",letterSpacing:".01em",textAlign:"center"}}>
+                  {pct===100?"✓ vše zaplaceno":`zaplaceno ${paidCount}/${all.length}`}
+                </div>
               </div>
-              {/* progress */}
-              <div style={{height:2,borderRadius:2,background:"rgba(0,0,0,.08)",overflow:"hidden",marginTop:11}}>
-                <div style={{height:"100%",width:`${pct}%`,borderRadius:2,background:pct===100?"#10B981":"#0EA5E9",transition:"width .7s ease"}} />
-              </div>
-              <div style={{fontSize:8,color:"var(--mut)",marginTop:5,letterSpacing:".01em"}}>
-                zaplaceno {fmtKc(paidSum)}{paidSum < Math.abs(totalVydaje) ? ` · zbývá ${fmtKc(Math.max(Math.abs(totalVydaje)-paidSum,0))}` : ""}
-              </div>
+
+              <button onClick={()=>setShowFinDetail(s=>!s)} style={{border:"none",borderTop:SEP,background:"none",cursor:"pointer",fontSize:9.5,color:"var(--mut)",padding:"9px 0",letterSpacing:".05em",fontWeight:600}}>
+                {showFinDetail ? "Skrýt detail ▴" : "Zobrazit detail ▾"}
+              </button>
+            </div>
+
+            {/* TILE B — Spořicí účet (čtverec, přesunuto z grafů níže) */}
+            <div style={{flex:1, aspectRatio:"1", minWidth:0}}>
+              <SporakRingTile financeItems={financeItems} onSaveFinance={onSaveFinance}
+                invoices={invoices} dpfoMonths={dpfoMonths}
+                loanTransactions={loanTransactions} escrows={escrows} square />
             </div>
           </div>
 
+          {!showFinDetail ? null : (
+          <div style={{
+            background:"#fff", borderRadius:18, overflow:"hidden",
+            boxShadow:"0 0 0 1px rgba(0,0,0,.065), 0 8px 40px rgba(53,24,165,.07)",
+          }}>
           {/* ── DETAIL ── */}
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr"}}>
 
@@ -6606,6 +6843,8 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
               <button className="btn gho" style={{fontSize:10.5,marginTop:9,width:"100%",opacity:.65}} onClick={()=>onNav("vykaz")}>+ Nový výkaz práce</button>
             </div>
           </div>
+          </div>
+          )}
         </div>
         );
       })()}
@@ -6905,6 +7144,16 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
           ))}
         </div>
       </Card>
+      </Panel>
+
+      {/* ── NÁVŠTĚVNOST WEBU (GA4, živě) ── */}
+      <Panel id="navstevnost">
+        <WebsiteTrafficPanel />
+      </Panel>
+
+      {/* ── INVESTICE (XTB, živě) ── */}
+      <Panel id="xtb">
+        <XtbPanel />
       </Panel>
 
       {/* ── ZISKOVOST ZAKÁZEK (nahradilo DPFO/úvěry — ty jsou teď v sekci Ostatní) ── */}
