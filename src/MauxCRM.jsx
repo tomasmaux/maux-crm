@@ -2209,50 +2209,51 @@ function LoanDashTile({ tracker, transactions, onAddTransaction, onToggleTransac
   const monthsLeft = monthly>0&&remaining>0 ? Math.ceil(remaining/monthly) : 0;
   const finalDate = monthsLeft>0 ? new Date(Date.now()+monthsLeft*30*24*3600*1000).toLocaleDateString("cs-CZ",{month:"long",year:"numeric"}) : "splaceno";
 
-  const bg = isInv ? "#0F3D2E" : "#1A0E2E";
-  const accent = isInv ? "#10B981" : "#F472B6";
-  const accentLight = isInv ? "#D1FAE5" : "#FCE7F3";
+  const accent = isInv ? "#059669" : "#DC2626";
+  const accentTint = isInv ? "rgba(5,150,105,.045)" : "rgba(220,38,38,.045)";
+  const SEP = "1px solid rgba(0,0,0,.055)";
 
   return (
-    <div style={{ borderRadius: 16, overflow: "hidden", border: `1px solid ${isInv?"#064E3B":"#4C1D95"}` }}>
+    <div style={{ background: "#fff", borderRadius: 18, overflow: "hidden",
+      boxShadow: "0 0 0 1px rgba(0,0,0,.065), 0 8px 40px rgba(53,24,165,.07)",
+      borderTop: `2.5px solid ${accent}` }}>
       {/* Header */}
-      <div style={{ background: bg, padding: "18px 20px 16px", position: "relative", overflow: "hidden" }}>
-        <div style={{ position: "absolute", right: -20, top: -20, width: 100, height: 100, borderRadius: "50%", background: "rgba(255,255,255,.03)" }} />
-        <div style={{ fontSize: 8, letterSpacing: ".35em", textTransform: "uppercase", color: accent, fontWeight: 700, marginBottom: 6, opacity: .9 }}>
+      <div style={{ padding: "16px 20px 14px", background: accentTint }}>
+        <div style={{ fontSize: 7, letterSpacing: ".30em", textTransform: "uppercase", color: accent, fontWeight: 700, marginBottom: 7 }}>
           {isInv ? "Investiční úvěr" : "Osobní dluh"}
         </div>
-        <div style={{ fontSize: 12, color: "rgba(255,255,255,.6)", marginBottom: 8 }}>{tracker?.name}</div>
-        <div style={{ fontFamily: "Fraunces,serif", fontSize: 28, fontWeight: 300, color: "#fff", lineHeight: 1 }}>
+        <div style={{ fontSize: 12, color: "var(--mut)", marginBottom: 7 }}>{tracker?.name}</div>
+        <div style={{ fontFamily: "Fraunces,serif", fontSize: 30, fontWeight: 300, color: "var(--txt)", lineHeight: 1 }}>
           {fmtKc(remaining)}
         </div>
-        <div style={{ fontSize: 11, color: "rgba(255,255,255,.45)", marginTop: 4 }}>
+        <div style={{ fontSize: 10.5, color: "var(--mut)", marginTop: 5 }}>
           {isInv ? (totalDrawnInv>0 ? `zůstatek dluhu · čerpáno ${fmtKc(totalDrawnInv)}` : "zůstatek dluhu") : original>0 ? `zbývá · původně ${fmtKc(original)}` : "nastav původní částku →"}
         </div>
       </div>
       {/* Stats row */}
-      <div style={{ background: isInv?"#064E3B":"#2D1B6E", display: "flex", gap: 0 }}>
+      <div style={{ display: "flex", gap: 0, borderTop: SEP, borderBottom: SEP }}>
         {[
           { label: isInv?"Načerpáno":"Splaceno", value: isInv?fmtKc(totalDrawnInv):fmtKc(totalPaid) },
           { label: "Splátka/měsíc", value: fmtKc(monthly) },
           { label: isInv?"Splaceno":"Zbývá", value: isInv?fmtKc(totalRepaidInv):monthsLeft>0?`${monthsLeft}×`:finalDate },
         ].map((s,i) => (
-          <div key={i} style={{ flex:1, padding:"10px 12px", borderLeft: i>0?`1px solid ${isInv?"#065F46":"#3730A3"}`:undefined }}>
-            <div style={{ fontSize: 8, color: "rgba(255,255,255,.4)", letterSpacing: ".1em", textTransform: "uppercase", marginBottom: 3 }}>{s.label}</div>
-            <div style={{ fontSize: 13, fontFamily: "Fraunces,serif", fontWeight: 300, color: "#fff" }}>{s.value}</div>
+          <div key={i} style={{ flex:1, padding:"9px 12px", borderLeft: i>0?SEP:undefined }}>
+            <div style={{ fontSize: 7, color: "var(--mut)", letterSpacing: ".18em", textTransform: "uppercase", marginBottom: 4, fontWeight: 700 }}>{s.label}</div>
+            <div style={{ fontSize: 13, fontFamily: "Fraunces,serif", fontWeight: 300, color: "var(--txt)" }}>{s.value}</div>
           </div>
         ))}
       </div>
       {/* Progress bar (debt only) */}
       {!isInv && original > 0 && (
-        <div style={{ background: "#1A0E2E", padding: "8px 16px 12px" }}>
-          <div style={{ height: 4, background: "rgba(255,255,255,.08)", borderRadius: 2 }}>
+        <div style={{ padding: "10px 20px" }}>
+          <div style={{ height: 4, background: "var(--line)", borderRadius: 2 }}>
             <div style={{ height: "100%", width: `${Math.min((totalPaid/original)*100,100)}%`, background: accent, borderRadius: 2, transition: ".5s" }} />
           </div>
-          <div style={{ fontSize: 10, color: "rgba(255,255,255,.35)", marginTop: 5 }}>{Math.round((totalPaid/original)*100)}% splaceno · {finalDate}</div>
+          <div style={{ fontSize: 9.5, color: "var(--mut)", marginTop: 5 }}>{Math.round((totalPaid/original)*100)}% splaceno · {finalDate}</div>
         </div>
       )}
       {/* Actions */}
-      <div style={{ background: "#fff", padding: "10px 14px", display: "flex", gap: 7, borderTop: "1px solid var(--line)" }}>
+      <div style={{ padding: "10px 14px", display: "flex", gap: 7, borderTop: SEP }}>
         <button className="btn" style={{ fontSize: 11, flex: 1 }}
           onClick={() => { setNewTx({ date: today(), amount: -monthly, description: "Splátka", is_done: false }); setAddForm(!addForm); }}>
           + Pohyb
@@ -2266,7 +2267,7 @@ function LoanDashTile({ tracker, transactions, onAddTransaction, onToggleTransac
       </div>
       {/* Edit original */}
       {editOriginal && (
-        <div style={{ background: "#fff", padding: "8px 14px", display: "flex", gap: 7, alignItems: "center", borderTop: "1px solid var(--line)" }}>
+        <div style={{ padding: "8px 14px", display: "flex", gap: 7, alignItems: "center", borderTop: SEP }}>
           <span style={{ fontSize: 12, color: "var(--mut)" }}>Původní dluh:</span>
           <input type="number" value={origInput} onChange={e => setOrigInput(Number(e.target.value))} autoFocus
             style={{ flex:1, font:"inherit", fontSize:13, padding:"5px 8px", border:"1px solid var(--ink)", borderRadius:7, outline:"none" }}
@@ -2277,7 +2278,7 @@ function LoanDashTile({ tracker, transactions, onAddTransaction, onToggleTransac
       )}
       {/* Add transaction form */}
       {addForm && (
-        <div style={{ background: "#F7F5FF", padding: "10px 14px", display: "flex", gap: 7, flexWrap: "wrap", alignItems: "center", borderTop: "1px solid var(--line)" }}>
+        <div style={{ background: "var(--bg)", padding: "10px 14px", display: "flex", gap: 7, flexWrap: "wrap", alignItems: "center", borderTop: SEP }}>
           <input type="date" value={newTx.date} onChange={e => setNewTx(p=>({...p,date:e.target.value}))}
             style={{ font:"inherit", fontSize:12, padding:"5px 8px", border:"1px solid var(--line2)", borderRadius:7, outline:"none" }} />
           <input type="number" value={newTx.amount} onChange={e => setNewTx(p=>({...p,amount:Number(e.target.value)}))}
@@ -2294,9 +2295,9 @@ function LoanDashTile({ tracker, transactions, onAddTransaction, onToggleTransac
       )}
       {/* Log */}
       {showLog && (
-        <div style={{ maxHeight:250, overflowY:"auto", borderTop:"1px solid var(--line)" }}>
+        <div style={{ maxHeight:250, overflowY:"auto", borderTop:SEP }}>
           <table style={{ width:"100%", borderCollapse:"collapse", fontSize:11.5 }}>
-            <thead><tr style={{ background:"#F5F3FF" }}>
+            <thead><tr style={{ background:"var(--bg)" }}>
               {["Datum","Popis","Částka","Zůstatek","✓",""].map((h,i)=>(
                 <th key={i} style={{ padding:"7px 10px", textAlign:i>=2?"right":"left", fontSize:9, letterSpacing:".1em", textTransform:"uppercase", color:"var(--mut)", fontWeight:500 }}>{h}</th>
               ))}
