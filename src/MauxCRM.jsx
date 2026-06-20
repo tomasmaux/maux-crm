@@ -2187,11 +2187,38 @@ function SpořákTile({ financeItems, invoices, dpfoMonths, loanTransactions, on
 }
 
 /* ─── PREMIUM LOAN TILES ─── */
+// Jednorázový import historie splátek auto-půjčky (úkol #33) — z Tomovy excel evidence
+// (jen reálně proběhlé/odklikané pohyby do 15.05.2026; budoucí naplánované splátky se
+// zadávají dál postupně přes "+ Pohyb"). Import je idempotentní — přeskočí už existující
+// pohyby (shoda datum+částka), takže tlačítko lze klidně omylem zmáčknout 2×.
+const AUTO_LOAN_IMPORT = [
+  { date: "2024-12-11", amount:  285000, description: "Čerpání půjčky",      is_done: true },
+  { date: "2024-12-12", amount:   -5000, description: "Splátka",            is_done: true },
+  { date: "2025-01-10", amount:   -5000, description: "Splátka",            is_done: true },
+  { date: "2025-02-07", amount:   -5000, description: "Splátka",            is_done: true },
+  { date: "2025-03-09", amount:   -5000, description: "Splátka",            is_done: true },
+  { date: "2025-04-09", amount:   -5000, description: "Splátka",            is_done: true },
+  { date: "2025-05-06", amount:   -5000, description: "Splátka",            is_done: true },
+  { date: "2025-06-06", amount:   -5000, description: "Splátka",            is_done: true },
+  { date: "2025-07-07", amount:   -5000, description: "Splátka",            is_done: true },
+  { date: "2025-08-07", amount:   -5000, description: "Splátka",            is_done: true },
+  { date: "2025-09-15", amount:   -5000, description: "Splátka",            is_done: true },
+  { date: "2025-10-12", amount:   -5000, description: "Splátka",            is_done: true },
+  { date: "2025-10-14", amount:   -5000, description: "Splátka",            is_done: true },
+  { date: "2025-12-04", amount:   -5000, description: "Splátka",            is_done: true },
+  { date: "2026-01-15", amount:   -5000, description: "Splátka",            is_done: true },
+  { date: "2026-02-15", amount:   -5000, description: "Splátka",            is_done: true },
+  { date: "2026-03-05", amount:   -5000, description: "Splátka",            is_done: true },
+  { date: "2026-04-09", amount:   -5000, description: "Splátka",            is_done: true },
+  { date: "2026-05-15", amount:  -20000, description: "Mimořádná splátka",  is_done: true },
+];
+
 function LoanDashTile({ tracker, transactions, onAddTransaction, onToggleTransaction, onDeleteTransaction, onUpdateTracker }) {
   const isInv = tracker?.type === "investment";
   const [showLog, setShowLog] = useState(false);
   const [addForm, setAddForm] = useState(false);
   const [newTx, setNewTx] = useState({ date: today(), amount: -(tracker?.monthly_payment||0), description: "Splátka", is_done: false });
+  const [importing, setImporting] = useState(false);
   const [editOriginal, setEditOriginal] = useState(false);
   const [origInput, setOrigInput] = useState(tracker?.original_amount || 0);
 
@@ -2212,6 +2239,20 @@ function LoanDashTile({ tracker, transactions, onAddTransaction, onToggleTransac
   const accent = isInv ? "#059669" : "#DC2626";
   const accentTint = isInv ? "rgba(5,150,105,.045)" : "rgba(220,38,38,.045)";
   const SEP = "1px solid rgba(0,0,0,.055)";
+
+  // Auto-půjčka: jednorázový import historie ze excelu (úkol #33)
+  const isAutoLoan = !isInv && /auto/i.test(tracker?.name || "");
+  const missingAutoImport = isAutoLoan
+    ? AUTO_LOAN_IMPORT.filter(imp => !transactions.some(t => t.transaction_date === imp.date && Number(t.amount) === imp.amount))
+    : [];
+  const runAutoImport = async () => {
+    setImporting(true);
+    try {
+      for (const imp of missingAutoImport) {
+        await onAddTransaction({ id: uid(), loan_id: tracker.id, transaction_date: imp.date, amount: imp.amount, description: imp.description, is_done: imp.is_done });
+      }
+    } finally { setImporting(false); }
+  };
 
   return (
     <div style={{ background: "#fff", borderRadius: 18, overflow: "hidden",
@@ -2260,6 +2301,11 @@ function LoanDashTile({ tracker, transactions, onAddTransaction, onToggleTransac
         </button>
         {!isInv && original === 0 && (
           <button className="btn" style={{ fontSize: 11 }} onClick={() => setEditOriginal(true)}>Nastav dluh</button>
+        )}
+        {isAutoLoan && missingAutoImport.length > 0 && (
+          <button className="btn pri" style={{ fontSize: 11 }} disabled={importing} onClick={runAutoImport}>
+            {importing ? "Importuju…" : `Import logu (${missingAutoImport.length})`}
+          </button>
         )}
         <button className="btn gho" style={{ fontSize: 11 }} onClick={() => setShowLog(!showLog)}>
           {showLog ? "Skrýt" : `Log (${transactions.length})`}
