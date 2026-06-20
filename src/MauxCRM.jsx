@@ -2198,10 +2198,13 @@ function LoanDashTile({ tracker, transactions, onAddTransaction, onToggleTransac
   const sorted = [...transactions].sort((a,b) => a.transaction_date.localeCompare(b.transaction_date));
   let bal = 0;
   const withBal = sorted.map(tx => { bal += tx.amount; return { ...tx, balance: bal }; });
-  const currentBal = withBal[withBal.length-1]?.balance || 0;
+  // Zůstatek (ať dluhu, ať úvěru) počítáme jen z POTVRZENÝCH (✓ is_done) pohybů — nově přidaný,
+  // ještě neodškrtnutý pohyb se do čísla nepromítne, dokud ho fakticky neprovedeš a neodklikneš.
   const totalPaid = transactions.filter(t=>t.amount<0&&t.is_done).reduce((s,t)=>s+Math.abs(t.amount),0);
+  const totalDrawnInv = transactions.filter(t=>t.amount>0&&t.is_done).reduce((s,t)=>s+t.amount,0);
+  const totalRepaidInv = transactions.filter(t=>t.amount<0&&t.is_done).reduce((s,t)=>s+Math.abs(t.amount),0);
   const original = tracker?.original_amount || 0;
-  const remaining = isInv ? Math.max(currentBal,0) : Math.max(original-totalPaid,0);
+  const remaining = isInv ? Math.max(totalDrawnInv-totalRepaidInv,0) : Math.max(original-totalPaid,0);
   const monthly = tracker?.monthly_payment || 0;
   const monthsLeft = monthly>0&&remaining>0 ? Math.ceil(remaining/monthly) : 0;
   const finalDate = monthsLeft>0 ? new Date(Date.now()+monthsLeft*30*24*3600*1000).toLocaleDateString("cs-CZ",{month:"long",year:"numeric"}) : "splaceno";
@@ -2223,15 +2226,15 @@ function LoanDashTile({ tracker, transactions, onAddTransaction, onToggleTransac
           {fmtKc(remaining)}
         </div>
         <div style={{ fontSize: 11, color: "rgba(255,255,255,.45)", marginTop: 4 }}>
-          {isInv ? "zbývá v kase z úvěru" : original>0 ? `zbývá · původně ${fmtKc(original)}` : "nastav původní částku →"}
+          {isInv ? (totalDrawnInv>0 ? `zůstatek dluhu · čerpáno ${fmtKc(totalDrawnInv)}` : "zůstatek dluhu") : original>0 ? `zbývá · původně ${fmtKc(original)}` : "nastav původní částku →"}
         </div>
       </div>
       {/* Stats row */}
       <div style={{ background: isInv?"#064E3B":"#2D1B6E", display: "flex", gap: 0 }}>
         {[
-          { label: isInv?"Načerpáno":"Splaceno", value: isInv?fmtKc(transactions.filter(t=>t.amount>0).reduce((s,t)=>s+t.amount,0)):fmtKc(totalPaid) },
+          { label: isInv?"Načerpáno":"Splaceno", value: isInv?fmtKc(totalDrawnInv):fmtKc(totalPaid) },
           { label: "Splátka/měsíc", value: fmtKc(monthly) },
-          { label: isInv?"Pohybů":"Zbývá", value: isInv?transactions.length:monthsLeft>0?`${monthsLeft}×`:finalDate },
+          { label: isInv?"Splaceno":"Zbývá", value: isInv?fmtKc(totalRepaidInv):monthsLeft>0?`${monthsLeft}×`:finalDate },
         ].map((s,i) => (
           <div key={i} style={{ flex:1, padding:"10px 12px", borderLeft: i>0?`1px solid ${isInv?"#065F46":"#3730A3"}`:undefined }}>
             <div style={{ fontSize: 8, color: "rgba(255,255,255,.4)", letterSpacing: ".1em", textTransform: "uppercase", marginBottom: 3 }}>{s.label}</div>
