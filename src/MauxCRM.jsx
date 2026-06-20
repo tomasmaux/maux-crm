@@ -6660,16 +6660,13 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
                   </div>
                   {prijmyOpen && (
                     <div style={{marginTop:8,display:"flex",flexDirection:"column",gap:2}}>
-                      {[
-                        {key:"vystaveni", label:"K vystavení", val: unbilledAmt, color:"var(--ink)"},
-                        {key:"posplat", label:"Po splatnosti", val: overdueAmt, color: overdueAmt>0?"#DC2626":"#059669"},
-                      ].map(k => (
-                        <div key={k.key}>
-                          <div onClick={(e)=>{e.stopPropagation();toggleHeroKpi(k.key);}} style={{display:"flex",justifyContent:"space-between",alignItems:"center",cursor:"pointer",padding:"4px 0"}}>
-                            <span style={{fontSize:10,color:"var(--mut)",letterSpacing:".02em"}}>{k.label} {heroKpiOpen===k.key?"▲":"▼"}</span>
-                            <span style={{fontFamily:"var(--mono)",fontSize:11.5,fontWeight:500,color:k.color,letterSpacing:"-.01em"}}>{fmtKc(k.val)}</span>
+                      {unbilledAmt>0 && (
+                        <div>
+                          <div onClick={(e)=>{e.stopPropagation();toggleHeroKpi("vystaveni");}} style={{display:"flex",justifyContent:"space-between",alignItems:"center",cursor:"pointer",padding:"4px 0"}}>
+                            <span style={{fontSize:10,color:"var(--mut)",letterSpacing:".02em"}}>Výkazy k vystavení 1. {mName[(now.getMonth()+1)%12]} {heroKpiOpen==="vystaveni"?"▲":"▼"}</span>
+                            <span style={{fontFamily:"var(--mono)",fontSize:11.5,fontWeight:500,color:"var(--ink)",letterSpacing:"-.01em"}}>{fmtKc(unbilledAmt)}</span>
                           </div>
-                          {heroKpiOpen==="vystaveni" && k.key==="vystaveni" && (
+                          {heroKpiOpen==="vystaveni" && (
                             <div style={{padding:"4px 0 8px 4px",display:"flex",flexDirection:"column",gap:6,maxHeight:180,overflowY:"auto"}}>
                               {Object.entries(unbilledByClient).map(([cid, entries])=>{
                                 const cl = clients.find(c=>c.id===cid);
@@ -6688,27 +6685,26 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
                               </div>
                             </div>
                           )}
-                          {heroKpiOpen==="posplat" && k.key==="posplat" && (
-                            <div style={{padding:"4px 0 8px 4px",display:"flex",flexDirection:"column",gap:5,maxHeight:180,overflowY:"auto"}}>
-                              {overdue.length===0 ? (
-                                <div style={{color:"#059669",fontSize:10,padding:"4px 0"}}>✓ Žádné faktury po splatnosti</div>
-                              ) : overdue.map(inv=>{
-                                const cl = clients.find(c=>c.id===inv.client_id);
-                                const daysLate = inv.due_date ? Math.floor((new Date()-new Date(inv.due_date))/(1000*60*60*24)) : "?";
-                                return (
-                                  <div key={inv.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"5px 6px",background:"#FEF2F2",borderRadius:6}}>
-                                    <div>
-                                      <div style={{fontWeight:600,color:"#991B1B",fontSize:10}}>{cl?.name||"Neznámý klient"}</div>
-                                      <div style={{fontSize:9,color:"#DC2626"}}>{daysLate} dní po splatnosti</div>
-                                    </div>
-                                    <span style={{fontFamily:"var(--mono)",fontWeight:700,color:"#DC2626",fontSize:10.5}}>{fmtKc(inv.subtotal)}</span>
-                                  </div>
-                                );
-                              })}
-                            </div>
-                          )}
+                        </div>
+                      )}
+                      {(financeItems||[]).filter(i=>i.category==="prijem"&&i.notes!=="TBD").map((item,idx)=>(
+                        <div key={idx} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"4px 0"}}>
+                          <span style={{fontSize:10,color:"var(--mut)",letterSpacing:".02em"}}>{item.label}</span>
+                          <span style={{fontFamily:"var(--mono)",fontSize:11.5,fontWeight:500,color:"var(--ink)",letterSpacing:"-.01em"}}>{fmtKc(item.amount||0)}</span>
                         </div>
                       ))}
+                      {nadmernyOdpocet>0 && (
+                        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"4px 0"}}>
+                          <span style={{fontSize:10,color:"var(--mut)",letterSpacing:".02em"}}>Odpočet DPH za {prevMonthName.toLowerCase()}</span>
+                          <span style={{fontFamily:"var(--mono)",fontSize:11.5,fontWeight:500,color:"var(--ink)",letterSpacing:"-.01em"}}>{fmtKc(nadmernyOdpocet)}</span>
+                        </div>
+                      )}
+                      {escrowNetThisMonth>0 && (
+                        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"4px 0"}}>
+                          <span style={{fontSize:10,color:"var(--mut)",letterSpacing:".02em"}}>Úschovy — čistý úrok</span>
+                          <span style={{fontFamily:"var(--mono)",fontSize:11.5,fontWeight:500,color:"var(--ink)",letterSpacing:"-.01em"}}>{fmtKc(Math.round(escrowNetThisMonth))}</span>
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>
