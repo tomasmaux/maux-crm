@@ -6179,7 +6179,7 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
   },0) * ASSISTANT_HOURLY_RATE);
   // pro měsíce před zavedením docházky v appce (viz JOSEF_WAGE_MANUAL_OVERRIDES) použij ruční částku
   const josefWage = JOSEF_WAGE_MANUAL_OVERRIDES[_josefYm] ?? _josefWageAuto;
-  const totalVydaje = totalNutne + totalLuxus + josefWage;
+  const totalVydaje = totalNutne + totalLuxus - josefWage;
   const cashflow = mRev + totalVydaje;
   // DPH — nadměrný odpočet (na žádost): kolik mi reálně ZŮSTANE díky účtenkám, které posílám Čechmanové
   // jako odpočet proti DPH z vystavených faktur. Nemění se tím "to číslo shrnující daň" v modulu Daně —
