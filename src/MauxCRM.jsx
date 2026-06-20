@@ -2239,6 +2239,7 @@ function LoanDashTile({ tracker, transactions, onAddTransaction, onToggleTransac
   const [importing, setImporting] = useState(false);
   const [showCheck, setShowCheck] = useState(false);
   const [importingBob, setImportingBob] = useState(false);
+  const [fixingDraw, setFixingDraw] = useState(false);
   const [editOriginal, setEditOriginal] = useState(false);
   const [origInput, setOrigInput] = useState(tracker?.original_amount || 0);
 
@@ -2285,6 +2286,10 @@ function LoanDashTile({ tracker, transactions, onAddTransaction, onToggleTransac
     ? transactions.filter(t => t.amount < 0 && !BOBNICE_REFERENCE_LOG.some(ref => ref.date === t.transaction_date && Math.abs(Number(t.amount) - ref.amount) < 0.01))
     : [];
   const bobniceDrawnOk = !isBobnice || Math.abs(totalDrawnInv - BOBNICE_DRAWN_TOTAL) < 0.01;
+  // Pohyb čerpání (kladný, potvrzený) — pokud existuje, ale jeho částka nesedí na 590 000 Kč
+  // (typicky stará/chybná hodnota v DB), oprav ho na místě přes onToggleTransaction (= upsert
+  // se zachovaným id), místo abychom vytvářeli druhý kladný pohyb navíc.
+  const bobniceDrawTx = isBobnice ? (transactions.find(t => t.amount > 0 && t.is_done) || null) : null;
   const runBobniceImport = async () => {
     setImportingBob(true);
     try {
@@ -2292,6 +2297,12 @@ function LoanDashTile({ tracker, transactions, onAddTransaction, onToggleTransac
         await onAddTransaction({ id: uid(), loan_id: tracker.id, transaction_date: ref.date, amount: ref.amount, description: ref.description, is_done: ref.is_done });
       }
     } finally { setImportingBob(false); }
+  };
+  const fixBobniceDraw = async () => {
+    if (!bobniceDrawTx) return;
+    setFixingDraw(true);
+    try { await onToggleTransaction({ ...bobniceDrawTx, amount: BOBNICE_DRAWN_TOTAL }); }
+    finally { setFixingDraw(false); }
   };
 
   return (
@@ -2359,9 +2370,17 @@ function LoanDashTile({ tracker, transactions, onAddTransaction, onToggleTransac
       {/* Bobnice: kontrola excel-referenčního logu vs. databáze (úkol #32) */}
       {isBobnice && showCheck && (
         <div style={{ padding: "10px 14px 14px", borderTop: SEP, fontSize: 11.5 }}>
-          <div style={{ marginBottom: 8, color: bobniceDrawnOk ? "#059669" : "#DC2626", fontWeight: 600 }}>
-            Čerpáno v appce: {fmtKc(totalDrawnInv)} {bobniceDrawnOk ? "— odpovídá excelu (590 000 Kč) ✓" : `— excel má 590 000 Kč, rozdíl ${fmtKc(BOBNICE_DRAWN_TOTAL - totalDrawnInv)}. Chybí/je špatně datovaný kladný pohyb čerpání — dopiš ho přes "+ Pohyb".`}
+          <div style={{ marginBottom: bobniceDrawnOk ? 8 : 4, color: bobniceDrawnOk ? "#059669" : "#DC2626", fontWeight: 600 }}>
+            Čerpáno v appce: {fmtKc(totalDrawnInv)} {bobniceDrawnOk ? "— odpovídá excelu (590 000 Kč) ✓" : `— excel má 590 000 Kč, rozdíl ${fmtKc(BOBNICE_DRAWN_TOTAL - totalDrawnInv)}.`}
           </div>
+          {!bobniceDrawnOk && bobniceDrawTx && (
+            <button className="btn pri" style={{ fontSize: 11, marginBottom: 10 }} disabled={fixingDraw} onClick={fixBobniceDraw}>
+              {fixingDraw ? "Opravuju…" : `Oprav čerpání: ${fmtKc(bobniceDrawTx.amount)} → 590 000 Kč`}
+            </button>
+          )}
+          {!bobniceDrawnOk && !bobniceDrawTx && (
+            <div style={{ color: "#DC2626", marginBottom: 10 }}>Žádný kladný (čerpání) pohyb v appce vůbec nenajdu — dopiš ho ručně přes "+ Pohyb" (+590000, datum čerpání).</div>
+          )}
           <table style={{ width: "100%", borderCollapse: "collapse" }}>
             <thead><tr style={{ background: "var(--bg)" }}>
               {["Datum","Popis (excel)","Částka","V appce?"].map((h,i)=>(
