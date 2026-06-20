@@ -2213,12 +2213,32 @@ const AUTO_LOAN_IMPORT = [
   { date: "2026-05-15", amount:  -20000, description: "Mimořádná splátka",  is_done: true },
 ];
 
+// Bobnice (investiční úvěr) — referenční log ze excelu (úkol #32). "Načerpáno" v excelu =
+// 590 000 Kč jako jeden kladný pohyb (datum čerpání tahle tabulka nezachycuje — pokud v appce
+// chybí/neodpovídá, dopiš ho ručně přes "+ Pohyb" s + 590000 a správným datem). Tohle je jen
+// referenční seznam pro kontrolu vs. databáze + idempotentní doplnění chybějících záporných řádků.
+const BOBNICE_DRAWN_TOTAL = 590000;
+const BOBNICE_REFERENCE_LOG = [
+  { date: "2025-11-20", amount:   -2000.00, description: "Vklad zástavního práva — poplatek",            is_done: true },
+  { date: "2025-11-20", amount:  -95000.00, description: "Doposlání do advokátní úschovy (dle instrukce)", is_done: true },
+  { date: "2025-11-30", amount:   -4011.61, description: "Splátka",                                       is_done: true },
+  { date: "2025-12-22", amount:  -13365.90, description: "Splátka",                                       is_done: true },
+  { date: "2026-01-22", amount:  -13365.90, description: "Splátka",                                       is_done: true },
+  { date: "2026-02-20", amount:  -13365.90, description: "Splátka",                                       is_done: true },
+  { date: "2026-03-20", amount:  -13365.90, description: "Splátka",                                       is_done: true },
+  { date: "2026-04-20", amount:  -13365.90, description: "Splátka",                                       is_done: true },
+  { date: "2026-05-20", amount:  -13365.90, description: "Splátka",                                       is_done: true },
+  { date: "2026-05-28", amount: -245908.00, description: "Faktura 2026-0007",                              is_done: true },
+];
+
 function LoanDashTile({ tracker, transactions, onAddTransaction, onToggleTransaction, onDeleteTransaction, onUpdateTracker }) {
   const isInv = tracker?.type === "investment";
   const [showLog, setShowLog] = useState(false);
   const [addForm, setAddForm] = useState(false);
   const [newTx, setNewTx] = useState({ date: today(), amount: -(tracker?.monthly_payment||0), description: "Splátka", is_done: false });
   const [importing, setImporting] = useState(false);
+  const [showCheck, setShowCheck] = useState(false);
+  const [importingBob, setImportingBob] = useState(false);
   const [editOriginal, setEditOriginal] = useState(false);
   const [origInput, setOrigInput] = useState(tracker?.original_amount || 0);
 
@@ -2252,6 +2272,26 @@ function LoanDashTile({ tracker, transactions, onAddTransaction, onToggleTransac
         await onAddTransaction({ id: uid(), loan_id: tracker.id, transaction_date: imp.date, amount: imp.amount, description: imp.description, is_done: imp.is_done });
       }
     } finally { setImporting(false); }
+  };
+
+  // Bobnice: živá kontrola excel-referenčního logu vs. to, co appka skutečně načetla
+  // z databáze (transactions prop) — nemůžu se dívat do DB přímo, takhle to vidí přímo Tom.
+  const isBobnice = isInv && /bobnic/i.test(tracker?.name || "");
+  const bobniceMatches = isBobnice
+    ? BOBNICE_REFERENCE_LOG.map(ref => ({ ...ref, inDb: transactions.some(t => t.transaction_date === ref.date && Math.abs(Number(t.amount) - ref.amount) < 0.01) }))
+    : [];
+  const bobniceMissing = bobniceMatches.filter(r => !r.inDb);
+  const bobniceExtras = isBobnice
+    ? transactions.filter(t => t.amount < 0 && !BOBNICE_REFERENCE_LOG.some(ref => ref.date === t.transaction_date && Math.abs(Number(t.amount) - ref.amount) < 0.01))
+    : [];
+  const bobniceDrawnOk = !isBobnice || Math.abs(totalDrawnInv - BOBNICE_DRAWN_TOTAL) < 0.01;
+  const runBobniceImport = async () => {
+    setImportingBob(true);
+    try {
+      for (const ref of bobniceMissing) {
+        await onAddTransaction({ id: uid(), loan_id: tracker.id, transaction_date: ref.date, amount: ref.amount, description: ref.description, is_done: ref.is_done });
+      }
+    } finally { setImportingBob(false); }
   };
 
   return (
@@ -2307,10 +2347,50 @@ function LoanDashTile({ tracker, transactions, onAddTransaction, onToggleTransac
             {importing ? "Importuju…" : `Import logu (${missingAutoImport.length})`}
           </button>
         )}
+        {isBobnice && (
+          <button className="btn gho" style={{ fontSize: 11 }} onClick={() => setShowCheck(!showCheck)}>
+            {showCheck ? "Skrýt kontrolu" : "Zkontrolovat vs. excel"}
+          </button>
+        )}
         <button className="btn gho" style={{ fontSize: 11 }} onClick={() => setShowLog(!showLog)}>
           {showLog ? "Skrýt" : `Log (${transactions.length})`}
         </button>
       </div>
+      {/* Bobnice: kontrola excel-referenčního logu vs. databáze (úkol #32) */}
+      {isBobnice && showCheck && (
+        <div style={{ padding: "10px 14px 14px", borderTop: SEP, fontSize: 11.5 }}>
+          <div style={{ marginBottom: 8, color: bobniceDrawnOk ? "#059669" : "#DC2626", fontWeight: 600 }}>
+            Čerpáno v appce: {fmtKc(totalDrawnInv)} {bobniceDrawnOk ? "— odpovídá excelu (590 000 Kč) ✓" : `— excel má 590 000 Kč, rozdíl ${fmtKc(BOBNICE_DRAWN_TOTAL - totalDrawnInv)}. Chybí/je špatně datovaný kladný pohyb čerpání — dopiš ho přes "+ Pohyb".`}
+          </div>
+          <table style={{ width: "100%", borderCollapse: "collapse" }}>
+            <thead><tr style={{ background: "var(--bg)" }}>
+              {["Datum","Popis (excel)","Částka","V appce?"].map((h,i)=>(
+                <th key={i} style={{ padding:"6px 8px", textAlign:i===2?"right":i===3?"center":"left", fontSize:9, letterSpacing:".08em", textTransform:"uppercase", color:"var(--mut)", fontWeight:600 }}>{h}</th>
+              ))}
+            </tr></thead>
+            <tbody>
+              {bobniceMatches.map((r,i) => (
+                <tr key={i} style={{ borderBottom: "1px solid var(--line)" }}>
+                  <td style={{ padding:"6px 8px", color:"var(--mut)", whiteSpace:"nowrap" }}>{fmtDate(r.date)}</td>
+                  <td style={{ padding:"6px 8px", color:"var(--txt)" }}>{r.description}</td>
+                  <td style={{ padding:"6px 8px", textAlign:"right", fontFamily:"Fraunces,serif", fontWeight:300 }}>{fmtKc(r.amount)}</td>
+                  <td style={{ padding:"6px 8px", textAlign:"center" }}>{r.inDb ? "✅" : "❌ chybí"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {bobniceExtras.length > 0 && (
+            <div style={{ marginTop: 10, color: "#DC2626" }}>
+              ⚠ V appce je navíc {bobniceExtras.length} záporných pohybů, které v excelu nejsou — zkontroluj je v logu (níže), jestli nejde o duplicitu nebo starou chybnou hodnotu.
+            </div>
+          )}
+          {bobniceMissing.length > 0 && (
+            <button className="btn pri" style={{ fontSize: 11, marginTop: 10 }} disabled={importingBob} onClick={runBobniceImport}>
+              {importingBob ? "Importuju…" : `Doplnit chybějících (${bobniceMissing.length})`}
+            </button>
+          )}
+        </div>
+      )}
       {/* Edit original */}
       {editOriginal && (
         <div style={{ padding: "8px 14px", display: "flex", gap: 7, alignItems: "center", borderTop: SEP }}>
