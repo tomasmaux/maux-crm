@@ -5092,7 +5092,7 @@ function BackupReminderBanner({ onDone }) {
 // Verze: zvýšit pokud chceme vynutit reset uloženého pořadí u všech uživatelů
 const PANEL_LAYOUT_VERSION = 9;
 const DEFAULT_PANELS = [
-  "finance","kalendar","uschovy","trigrafy","firma","josef","pulz",
+  "finance","uschovy","trigrafy","firma","josef","pulz",
   "chart","klienti","navstevnost","xtb","ziskovost","claude"
 ];
 function loadPanelState() {
@@ -6604,7 +6604,7 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
   // (indigo / violet / modrá), jen v různých odstínech, ať to působí jako jeden
   // souvislý command-center systém, ne duha.
   const PANEL_ACCENTS = {
-    finance: "#3518A5", kalendar: "#16A34A", uschovy: "#7C3AED", trigrafy: "#4338CA", firma: "#4F46E5",
+    finance: "#3518A5", uschovy: "#7C3AED", trigrafy: "#4338CA", firma: "#4F46E5",
     josef: "#6D28D9", pulz: "#4C1D95", chart: "#2563EB", klienti: "#5B21B6",
     navstevnost: "#4338CA", xtb: "#4F46E5", ziskovost: "#6D28D9", claude: "#3518A5",
   };
@@ -6613,50 +6613,15 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
     const isOver = dragOver === id;
     const cssOrder = panelState.order.indexOf(id);
     const accent = PANEL_ACCENTS[id] || "#3518A5";
-    const wrapRef = useRef(null);
-    const spotRef = useRef(null);
-    const innerRef = useRef(null);
-
-    const handleMove = (e) => {
-      if (editLayout) return;
-      if (typeof window !== "undefined" && window.matchMedia) {
-        if (window.matchMedia("(hover: none)").matches) return;
-        if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
-      }
-      const el = wrapRef.current;
-      if (!el) return;
-      const r = el.getBoundingClientRect();
-      const x = e.clientX - r.left, y = e.clientY - r.top;
-      const px = x / r.width, py = y / r.height;
-      if (spotRef.current) {
-        spotRef.current.style.opacity = "1";
-        spotRef.current.style.background = `radial-gradient(circle at ${x}px ${y}px, ${accent}22, transparent 62%)`;
-      }
-      if (innerRef.current) {
-        const rx = (py - 0.5) * -1.1, ry = (px - 0.5) * 1.1;
-        innerRef.current.style.transform = `perspective(1600px) rotateX(${rx}deg) rotateY(${ry}deg)`;
-      }
-      el.style.boxShadow = `0 0 0 1px ${accent}45, 0 16px 34px ${accent}30`;
-      el.style.borderColor = `${accent}66`;
-    };
-    const handleLeave = () => {
-      if (spotRef.current) spotRef.current.style.opacity = "0";
-      if (innerRef.current) innerRef.current.style.transform = "perspective(1600px) rotateX(0) rotateY(0)";
-      const el = wrapRef.current;
-      if (el) { el.style.boxShadow = `0 0 0 1px ${accent}14, 0 1px 10px ${accent}0d`; el.style.borderColor = `${accent}22`; }
-    };
 
     if (hidden && !editLayout) return null;
     return (
       <div
-        ref={wrapRef}
         draggable={editLayout}
         onDragStart={() => handleDragStart(id)}
         onDragOver={e => handleDragOver(e, id)}
         onDrop={e => handleDrop(e, id)}
         onDragLeave={() => setDragOver(null)}
-        onMouseMove={handleMove}
-        onMouseLeave={handleLeave}
         style={{
           order: cssOrder >= 0 ? cssOrder : 99,
           outline: isOver ? "2px dashed #3518A5" : editLayout ? "2px dashed rgba(209,213,219,.7)" : "none",
@@ -6666,7 +6631,6 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
           opacity: hidden ? 0.4 : 1,
           position: "relative",
           cursor: editLayout ? "grab" : "default",
-          transition: "outline .15s, box-shadow .35s, border-color .35s",
           boxShadow: `0 0 0 1px ${accent}14, 0 1px 10px ${accent}0d`,
         }}
       >
@@ -6677,10 +6641,7 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
             title={hidden ? "Zobrazit" : "Skrýt"}
           >{hidden ? "+" : "×"}</button>
         )}
-        <div ref={spotRef} style={{ position:"absolute", inset:0, borderRadius:3, opacity:0, pointerEvents:"none", transition:"opacity .25s", zIndex:1 }} />
-        <div ref={innerRef} style={{ position:"relative", transformStyle:"preserve-3d", transition:"transform .25s ease-out", willChange:"transform" }}>
-          {children}
-        </div>
+        {children}
       </div>
     );
   }
@@ -7224,12 +7185,111 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
         return (
         <div style={{display:"flex",flexDirection:"column",gap:16}}>
 
-          {/* ── DVĚ ČTVERCOVÉ DLAŽDICE 1:1, VEDLE SEBE: Příjmy/Bilance/Výdaje + Spořicí účet ── */}
+          {/* ── LEVÝ SLOUPEC (kalendář výkazů + Výdaje/Spořák) VEDLE Bilance, roztaženo na stejnou výšku ── */}
           <div style={{display:"flex",gap:16,alignItems:"stretch"}}>
 
-            {/* TILE A — hlavička Příjmy/Bilance/Výdaje (čtverec), brand indigo, bez levandulové záře */}
+          {/* LEVÝ SLOUPEC — kalendář výkazů nahoře (velký čtverec), pod ním Výdaje + Spořicí účet */}
+          <div style={{flex:1, minWidth:0, display:"flex", flexDirection:"column", gap:16}}>
+
+            {/* KALENDÁŘ VÝKAZŮ — náhled, kolik práce (Kč) bylo který den zapsáno */}
+            <div style={{aspectRatio:"1", minWidth:0}}>
+              <VykazyCalendar workEntries={workEntries} dense onOpenFull={() => onNav("vykaz")} />
+            </div>
+
+            <div style={{display:"flex",gap:16}}>
+
+            {/* TILE C — Výdaje měsíčně (čtverec) */}
             <div style={{
               flex:1, aspectRatio:"1", minWidth:0,
+              background:"#fff", borderRadius:3, overflow:"hidden",
+              borderTop: "4px solid #5B4FCF",
+              boxShadow:"0 0 0 1px rgba(0,0,0,.08)",
+              display:"flex", flexDirection:"column",
+            }}>
+              <div style={{padding:"22px 24px 0",textAlign:"center"}}>
+                <div style={{display:"flex",alignItems:"center",justifyContent:"center",gap:6,marginBottom:10}}>
+                  <span className="maux-dot" style={{width:6,height:6,background:"#5B4FCF",boxShadow:"0 0 4px rgba(91,79,207,.4)"}} />
+                  <div style={{fontSize:10,letterSpacing:".22em",textTransform:"uppercase",color:"#5B4FCF",fontWeight:800}}>Výdaje měsíčně</div>
+                </div>
+                <div className="maux-num" style={{fontSize:36, fontWeight:600, color:"#3518A5", lineHeight:1}}>
+                  {fmtKc(Math.abs(totalNutne)+josefWage+Math.abs(totalLuxus))}
+                </div>
+                <div style={{height:5,borderRadius:3,background:"rgba(53,24,165,.08)",overflow:"hidden",marginTop:12}}>
+                  <div style={{height:"100%",width:`${pct}%`,borderRadius:3,background:pct===100?"#16A34A":"#3518A5",transition:"width .7s ease"}} />
+                </div>
+                <div style={{fontSize:11,color:"var(--mut)",letterSpacing:".01em",marginTop:6,fontWeight:600}}>
+                  {pct===100?"✓ vše zaplaceno":`zaplaceno ${paidCount}/${all.length}`}
+                </div>
+              </div>
+
+              <div style={{flex:1,overflowY:"auto",padding:"10px 24px 6px",marginTop:4}}>
+                <div style={{fontSize:7,letterSpacing:".28em",textTransform:"uppercase",color:"#3518A5",fontWeight:700,marginBottom:6,opacity:.8}}>Nutné</div>
+                {nutne.map((i,idx) => (
+                  <div key={idx} style={{display:"flex",justifyContent:"space-between",alignItems:"center",fontSize:11.5,color:isPaid(i.id)?"var(--mut)":"var(--txt)",padding:"3px 0",gap:6}}>
+                    <span style={{display:"flex",alignItems:"center",textDecoration:isPaid(i.id)?"line-through":"none",minWidth:0,overflow:"hidden"}}>
+                      <Check item={i} color="#3518A5" /><EditableLabel item={i} onSave={onSaveFinance} />
+                    </span>
+                    <span style={{display:"flex",alignItems:"center",gap:4,flexShrink:0}}>
+                      <span style={{opacity:isPaid(i.id)?.4:1}}><EditableMoney item={i} onSave={onSaveFinance} color="#3518A5" abs /></span>
+                      <button onClick={()=>onDeleteFinance(i.id)} title="Smazat" style={{background:"none",border:"none",color:"var(--mut)",cursor:"pointer",fontSize:10,padding:"0 2px",opacity:.35,lineHeight:1}}>✕</button>
+                    </span>
+                  </div>
+                ))}
+                <AddExpenseRow category="nutne" color="#3518A5" onSaveFinance={onSaveFinance} />
+                {/* Josef Řehák — automatický náklad */}
+                {(() => {
+                  const josefPaid = isPaid("josef_wage");
+                  const handleJosefToggle = () => {
+                    if (!josefPaid) {
+                      if (!window.confirm(`Odeslal jsi mzdu asistentovi? (${josefWage.toLocaleString("cs-CZ")} Kč)`)) return;
+                    }
+                    onToggleExpenseCheck("josef_wage", !josefPaid);
+                  };
+                  return (
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",fontSize:11.5,padding:"3px 0",gap:6,opacity:josefPaid?.65:.85,color:josefPaid?"var(--mut)":"var(--txt)",textDecoration:josefPaid?"line-through":"none"}}>
+                    <span style={{display:"flex",alignItems:"center",gap:5,cursor:"pointer"}} onClick={handleJosefToggle}>
+                      <span style={{display:"inline-flex",alignItems:"center",justifyContent:"center",width:13,height:13,borderRadius:3,border:`1.5px solid ${josefPaid?"#16a34a":"#3518A5"}`,background:josefPaid?"#16a34a":"transparent",flexShrink:0,color:"#fff",fontSize:9}}>
+                        {josefPaid?"✓":""}
+                      </span>
+                      <span>Josef Řehák</span>
+                      <span style={{fontSize:8.5,background:"rgba(53,24,165,.08)",color:"var(--ink)",borderRadius:4,padding:"1px 5px",fontWeight:600,letterSpacing:".04em"}}>{JOSEF_WAGE_MANUAL_OVERRIDES[_josefYm] != null ? "ručně" : "auto"} · {_josefYm}</span>
+                    </span>
+                    <span className="maux-num" style={{color:josefPaid?"var(--mut)":"#3518A5",fontSize:11}}>
+                      {josefWage > 0 ? josefWage.toLocaleString("cs-CZ") + " Kč" : "— Kč"}
+                    </span>
+                  </div>
+                  );
+                })()}
+                <div style={{fontSize:7,letterSpacing:".28em",textTransform:"uppercase",color:"#8A7FE0",fontWeight:700,marginTop:10,marginBottom:6,opacity:.8}}>Lusus</div>
+                {luxus.map((i,idx) => (
+                  <div key={idx} style={{display:"flex",justifyContent:"space-between",alignItems:"center",fontSize:11.5,color:isPaid(i.id)?"var(--mut)":"var(--txt)",padding:"3px 0",gap:6}}>
+                    <span style={{display:"flex",alignItems:"center",textDecoration:isPaid(i.id)?"line-through":"none",minWidth:0}}>
+                      <Check item={i} color="#8A7FE0" /><EditableLabel item={i} onSave={onSaveFinance} />
+                    </span>
+                    <span style={{display:"flex",alignItems:"center",gap:4,flexShrink:0}}>
+                      <span style={{opacity:isPaid(i.id)?.4:1}}><EditableMoney item={i} onSave={onSaveFinance} color="#8A7FE0" abs /></span>
+                      <button onClick={()=>onDeleteFinance(i.id)} title="Smazat" style={{background:"none",border:"none",color:"var(--mut)",cursor:"pointer",fontSize:10,padding:"0 2px",opacity:.35,lineHeight:1}}>✕</button>
+                    </span>
+                  </div>
+                ))}
+                <AddExpenseRow category="luxus" color="#8A7FE0" onSaveFinance={onSaveFinance} />
+              </div>
+              <button className="btn gho" style={{fontSize:10.5,margin:"0 24px 14px",opacity:.65,border:"none",borderTop:"1px solid rgba(0,0,0,.06)",borderRadius:0,paddingTop:10}} onClick={()=>onNav("vykaz")}>+ Nový výkaz práce</button>
+            </div>
+
+            {/* TILE B — Spořicí účet (čtverec) */}
+            <div style={{flex:1, aspectRatio:"1", minWidth:0}}>
+              <SporakRingTile financeItems={financeItems} onSaveFinance={onSaveFinance}
+                invoices={invoices} dpfoMonths={dpfoMonths}
+                loanTransactions={loanTransactions} escrows={escrows} square />
+            </div>
+
+            </div>
+          </div>
+
+            {/* TILE A — hlavička Příjmy/Bilance/Výdaje, brand indigo, bez levandulové záře — roztaženo na výšku levého sloupce */}
+            <div style={{
+              flex:1, minWidth:0,
               background:"#fff", borderRadius:3, overflow:"hidden",
               borderTop: "4px solid #3518A5",
               boxShadow:"0 0 0 1px rgba(0,0,0,.08)",
@@ -7397,11 +7457,6 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
         </div>
         );
       })()}
-      </Panel>
-
-      {/* KALENDÁŘ FAKTUROVÁNÍ — náhled, kolik bylo který den vyfakturováno */}
-      <Panel id="kalendar">
-        <InvoiceCalendar invoices={invoices} compact onOpenFull={() => onNav("fakturace")} />
       </Panel>
 
       {/* STACKED BAR CHART — PŘÍJEM MAUX LEGAL: zelená faktury + oranžová úschovy */}
@@ -8207,7 +8262,7 @@ function WorkEntryList({ entries, clients, invoices, onNew, onEdit, onDelete, on
 }
 
 /* ─── KALENDÁŘ FAKTUROVÁNÍ — měsíční náhled, kolik bylo který den vyfakturováno (zeleně "svítí"), s historií ─── */
-function InvoiceCalendar({ invoices, compact = false, onOpenFull }) {
+function VykazyCalendar({ workEntries, dense = false, onOpenFull }) {
   const [monthOffset, setMonthOffset] = useState(0);
   const [selectedDay, setSelectedDay] = useState(null);
 
@@ -8218,17 +8273,18 @@ function InvoiceCalendar({ invoices, compact = false, onOpenFull }) {
   const todayStr = localDs(new Date());
   const monthNamesFull = ["leden","únor","březen","duben","květen","červen","červenec","srpen","září","říjen","listopad","prosinec"];
 
-  // Denní součty vyfakturováno (bez DPH, podle issue_date) za zobrazený měsíc
+  const entryAmt = (e) => Math.max((e.amount || 0) - (Number(e.discount_amount) || 0), 0);
+
+  // Denní součty zapsané práce (bez DPH, podle entry_date — datum vytvoření výkazu) za zobrazený měsíc
   const dayTotals = useMemo(() => {
     const map = {};
-    (invoices || []).forEach(i => {
-      if ((i.issue_date || "").startsWith(ym)) map[i.issue_date] = (map[i.issue_date] || 0) + (i.subtotal || 0);
+    (workEntries || []).forEach(e => {
+      if ((e.entry_date || "").startsWith(ym)) map[e.entry_date] = (map[e.entry_date] || 0) + entryAmt(e);
     });
     return map;
-  }, [invoices, ym]);
+  }, [workEntries, ym]);
 
   const monthTotal = useMemo(() => Object.values(dayTotals).reduce((s, v) => s + v, 0), [dayTotals]);
-  const maxDay = useMemo(() => Math.max(1, ...Object.values(dayTotals)), [dayTotals]);
 
   // Mřížka Po–Ne
   const firstOfMonth = new Date(y, m, 1);
@@ -8241,27 +8297,23 @@ function InvoiceCalendar({ invoices, compact = false, onOpenFull }) {
   const rows = [];
   for (let i = 0; i < cells.length; i += 7) rows.push(cells.slice(i, i + 7));
 
-  const cellSize = compact ? 24 : 44;
-  const gap = compact ? 3 : 6;
-
   const dayInfo = (d) => {
     const ds = `${ym}-${String(d).padStart(2, "0")}`;
     const amt = dayTotals[ds] || 0;
-    const intensity = amt > 0 ? Math.min(1, 0.18 + (amt / maxDay) * 0.82) : 0;
-    return { ds, amt, intensity, isToday: ds === todayStr };
+    return { ds, amt, isToday: ds === todayStr };
   };
 
-  const selInvoices = selectedDay ? (invoices || []).filter(i => i.issue_date === selectedDay) : [];
+  const selEntries = selectedDay ? (workEntries || []).filter(e => e.entry_date === selectedDay) : [];
 
   return (
-    <div style={{ background: "#fff", borderRadius: 18, overflow: "hidden", boxShadow: "0 0 0 1px rgba(0,0,0,.06), 0 4px 16px rgba(0,0,0,.04)" }}>
+    <div style={{ background: "#fff", borderRadius: dense ? 3 : 18, overflow: "hidden", height: "100%", display: "flex", flexDirection: "column", boxShadow: "0 0 0 1px rgba(0,0,0,.08)" }}>
       {/* Header */}
-      <div style={{ padding: compact ? "14px 16px 10px" : "20px 22px 14px", borderBottom: "1px solid rgba(0,0,0,.05)" }}>
+      <div style={{ padding: dense ? "14px 16px 8px" : "20px 22px 14px", borderBottom: "1px solid rgba(0,0,0,.05)", flexShrink: 0 }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
           <div>
-            {!compact && <div style={{fontSize:8,letterSpacing:".28em",textTransform:"uppercase",fontWeight:700,color:"var(--mut)",marginBottom:4}}>VYFAKTUROVÁNO — DEN PO DNI</div>}
+            {!dense && <div style={{fontSize:8,letterSpacing:".28em",textTransform:"uppercase",fontWeight:700,color:"var(--mut)",marginBottom:4}}>ZAPSANÁ PRÁCE — DEN PO DNI</div>}
             <div style={{display:"flex",alignItems:"baseline",gap:7}}>
-              <span style={{fontFamily:"Fraunces,serif",fontWeight:300,fontSize:compact?15:22,color:"var(--ink)",lineHeight:1}}>{monthNamesFull[m]} {y}</span>
+              <span style={{fontFamily:"Fraunces,serif",fontWeight:300,fontSize:dense?15:22,color:"var(--ink)",lineHeight:1}}>{monthNamesFull[m]} {y}</span>
               {monthOffset > 0 && (
                 <span style={{fontSize:9.5,color:"#3518A5",cursor:"pointer",textDecoration:"underline"}} onClick={() => { setMonthOffset(0); setSelectedDay(null); }}>zpět na dnešek</span>
               )}
@@ -8269,87 +8321,80 @@ function InvoiceCalendar({ invoices, compact = false, onOpenFull }) {
           </div>
           <div style={{display:"flex",alignItems:"center",gap:2}}>
             <button onClick={() => { setMonthOffset(o => o + 1); setSelectedDay(null); }}
-              style={{background:"none",border:"none",cursor:"pointer",color:"var(--mut)",fontSize:compact?13:16,padding:"2px 7px",lineHeight:1}}
+              style={{background:"none",border:"none",cursor:"pointer",color:"var(--mut)",fontSize:dense?13:16,padding:"2px 7px",lineHeight:1}}
               title="Předchozí měsíc">‹</button>
             <button onClick={() => { setMonthOffset(o => Math.max(0, o - 1)); setSelectedDay(null); }}
               disabled={monthOffset === 0}
-              style={{background:"none",border:"none",cursor:monthOffset===0?"default":"pointer",color:"var(--mut)",fontSize:compact?13:16,padding:"2px 7px",lineHeight:1,opacity:monthOffset===0?.25:1}}
+              style={{background:"none",border:"none",cursor:monthOffset===0?"default":"pointer",color:"var(--mut)",fontSize:dense?13:16,padding:"2px 7px",lineHeight:1,opacity:monthOffset===0?.25:1}}
               title="Následující měsíc">›</button>
           </div>
         </div>
-        <div style={{marginTop:compact?6:10,display:"flex",alignItems:"baseline",gap:6}}>
-          <span style={{fontFamily:"Fraunces,serif",fontWeight:300,fontSize:compact?19:30,color:monthTotal>0?"#16a34a":"var(--mut)",lineHeight:1}}>{fmtKc(monthTotal)}</span>
-          <span style={{fontSize:compact?9.5:11,color:"var(--mut)"}}>za měsíc, bez DPH</span>
+        <div style={{marginTop:dense?6:10,display:"flex",alignItems:"baseline",gap:6}}>
+          <span style={{fontFamily:"Fraunces,serif",fontWeight:300,fontSize:dense?19:30,color:monthTotal>0?"#16a34a":"var(--mut)",lineHeight:1}}>{monthTotal>0?"+":""}{fmtKc(monthTotal)}</span>
+          {!dense && <span style={{fontSize:11,color:"var(--mut)"}}>za měsíc, bez DPH</span>}
         </div>
       </div>
 
       {/* Grid */}
-      <div style={{padding: compact ? "10px 12px 12px" : "14px 18px 18px"}}>
-        <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap,marginBottom:gap+2}}>
+      <div style={{padding: dense ? "8px 10px 10px" : "14px 18px 18px", flex: 1, display: "flex", flexDirection: "column", minHeight: 0}}>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:dense?2:6,marginBottom:dense?3:8}}>
           {["Po","Út","St","Čt","Pá","So","Ne"].map(n => (
-            <div key={n} style={{textAlign:"center",fontSize:compact?7:8.5,color:"var(--mut)",fontWeight:700}}>{n}</div>
+            <div key={n} style={{textAlign:"center",fontSize:dense?6.5:8.5,color:"var(--mut)",fontWeight:700}}>{n}</div>
           ))}
         </div>
-        {rows.map((row, ri) => (
-          <div key={ri} style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap,marginBottom:gap}}>
-            {row.map((d, ci) => {
-              if (!d) return <div key={ci} style={{height:cellSize}}/>;
-              const { ds, amt, intensity, isToday } = dayInfo(d);
-              const isSel = selectedDay === ds;
-              return (
-                <button key={ds}
-                  onClick={() => !compact && amt > 0 && setSelectedDay(isSel ? null : ds)}
-                  title={amt > 0 ? `${fmtDate(ds)} — ${fmtKc(amt)}` : fmtDate(ds)}
-                  style={{
-                    height: cellSize, borderRadius: compact ? 6 : 9, border: "none", position:"relative",
-                    display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center",
-                    cursor: (!compact && amt > 0) ? "pointer" : "default",
-                    background: amt > 0
-                      ? `radial-gradient(circle at 50% 28%, rgba(34,197,94,${0.10 + intensity*0.30}) 0%, rgba(34,197,94,${0.03 + intensity*0.08}) 65%, transparent 100%)`
-                      : isToday ? "rgba(53,24,165,.07)" : "#FAFAFA",
-                    boxShadow: amt > 0
-                      ? `0 0 ${4 + intensity*14}px rgba(34,197,94,${0.18*intensity}), inset 0 0 0 1px rgba(34,197,94,${0.12+intensity*0.25})`
-                      : isSel ? "inset 0 0 0 1.5px #3518A5" : "none",
-                    outline: isToday ? "1.5px solid #9D93DD" : "none",
-                    outlineOffset: -1,
-                    transition: "all .15s",
-                  }}>
-                  <span style={{fontSize:compact?9:12,fontWeight:isToday?700:amt>0?600:400,color:amt>0?"#15803d":isToday?"#3518A5":"var(--mut)",lineHeight:1}}>{d}</span>
-                  {amt > 0 && !compact && (
-                    <span style={{fontSize:8.5,fontWeight:600,color:"#16a34a",lineHeight:1,marginTop:2}}>
-                      {amt >= 1000 ? `${(amt/1000).toLocaleString("cs-CZ",{maximumFractionDigits:1})}k` : Math.round(amt)}
-                    </span>
-                  )}
-                  {amt > 0 && compact && (
-                    <span style={{position:"absolute",bottom:2,width:3,height:3,borderRadius:"50%",background:"#16a34a"}}/>
-                  )}
-                </button>
-              );
-            })}
-          </div>
-        ))}
+        <div style={{flex:1, display:"flex", flexDirection:"column", gap:dense?2:6, minHeight:0}}>
+          {rows.map((row, ri) => (
+            <div key={ri} style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:dense?2:6,flex:1}}>
+              {row.map((d, ci) => {
+                if (!d) return <div key={ci}/>;
+                const { ds, amt, isToday } = dayInfo(d);
+                const isSel = selectedDay === ds;
+                return (
+                  <button key={ds}
+                    onClick={() => !dense && amt > 0 && setSelectedDay(isSel ? null : ds)}
+                    title={amt > 0 ? `${fmtDate(ds)} — +${fmtKc(amt)}` : fmtDate(ds)}
+                    style={{
+                      borderRadius: dense ? 4 : 8, border: "none", position:"relative",
+                      display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:1,
+                      cursor: (!dense && amt > 0) ? "pointer" : "default",
+                      background: amt > 0 ? "rgba(34,197,94,.10)" : isToday ? "rgba(53,24,165,.06)" : "#FAFAFA",
+                      boxShadow: isSel ? "inset 0 0 0 1.5px #3518A5" : isToday ? "inset 0 0 0 1.5px #9D93DD" : "none",
+                      padding: dense ? "2px 0" : "4px 0",
+                    }}>
+                    {amt > 0 && (
+                      <span style={{fontSize:dense?6.5:10,fontWeight:700,color:"#16a34a",lineHeight:1,whiteSpace:"nowrap"}}>
+                        +{fmtKc(amt)}
+                      </span>
+                    )}
+                    <span style={{fontSize:dense?8.5:12,fontWeight:isToday?700:400,color:isToday?"#3518A5":"var(--mut)",lineHeight:1}}>{d}</span>
+                  </button>
+                );
+              })}
+            </div>
+          ))}
+        </div>
       </div>
 
       {/* Detail vybraného dne — jen plná verze */}
-      {!compact && selectedDay && selInvoices.length > 0 && (
-        <div style={{borderTop:"1px solid rgba(0,0,0,.05)",padding:"12px 18px 16px",background:"#F9FFFB"}}>
+      {!dense && selectedDay && selEntries.length > 0 && (
+        <div style={{borderTop:"1px solid rgba(0,0,0,.05)",padding:"12px 18px 16px",background:"#F9FFFB",flexShrink:0,maxHeight:160,overflowY:"auto"}}>
           <div style={{fontSize:10,letterSpacing:".08em",color:"#16a34a",fontWeight:700,marginBottom:8,textTransform:"uppercase"}}>
-            {fmtDate(selectedDay)} · {selInvoices.length}× faktura
+            {fmtDate(selectedDay)} · {selEntries.length}× výkaz
           </div>
           <div style={{display:"flex",flexDirection:"column",gap:5}}>
-            {selInvoices.map(inv => (
-              <div key={inv.id} style={{display:"flex",justifyContent:"space-between",fontSize:12,color:"var(--txt)"}}>
-                <span>{inv.invoice_number || "—"} · {inv.clients?.name || inv.notes?.split(" - ")[0] || "—"}</span>
-                <span style={{fontWeight:600,color:"#16a34a"}}>{fmtKc(inv.subtotal || 0)}</span>
+            {selEntries.map(e => (
+              <div key={e.id} style={{display:"flex",justifyContent:"space-between",fontSize:12,color:"var(--txt)",gap:8}}>
+                <span style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{e.clients?.name || (e.description || "—").slice(0,40)}</span>
+                <span style={{fontWeight:600,color:"#16a34a",flexShrink:0}}>+{fmtKc(entryAmt(e))}</span>
               </div>
             ))}
           </div>
         </div>
       )}
 
-      {compact && onOpenFull && (
-        <div style={{padding:"0 16px 12px",textAlign:"right"}}>
-          <span style={{fontSize:10,color:"#16a34a",fontWeight:600,cursor:"pointer"}} onClick={onOpenFull}>Detail v kalendáři →</span>
+      {dense && onOpenFull && (
+        <div style={{padding:"0 10px 8px",textAlign:"right",flexShrink:0}}>
+          <span style={{fontSize:9,color:"#16a34a",fontWeight:600,cursor:"pointer"}} onClick={onOpenFull}>Detail →</span>
         </div>
       )}
     </div>
@@ -8576,9 +8621,9 @@ function InvoiceList({ invoices, clients, workEntries, onOpen, onOpenClient, onT
         </div>
       </div>
 
-      {/* ── KALENDÁŘ FAKTUROVÁNÍ ── */}
+      {/* ── KALENDÁŘ VÝKAZŮ ── */}
       <div style={{ marginBottom: 36 }}>
-        <InvoiceCalendar invoices={invoices} />
+        <VykazyCalendar workEntries={workEntries} />
       </div>
 
       {/* ── FILTRY A HISTORIE ── */}
