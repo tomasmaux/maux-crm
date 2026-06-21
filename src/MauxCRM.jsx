@@ -413,6 +413,20 @@ async function fetchXtbSnapshots() {
   if (error) throw error;
   return data || [];
 }
+// Historie titulů — ruční poznámkový seznam akcií, co Tom má/měl (živé API to už neumí zjistit).
+async function fetchXtbTitles() {
+  const { data, error } = await supabase.from("xtb_titles").select("*").order("created_at");
+  if (error) throw error;
+  return data || [];
+}
+async function upsertXtbTitle(t) {
+  const { error } = await supabase.from("xtb_titles").upsert(t);
+  if (error) throw error;
+}
+async function deleteXtbTitle(id) {
+  const { error } = await supabase.from("xtb_titles").delete().eq("id", id);
+  if (error) throw error;
+}
 // Zapíše dnešní equity, jen pokud za dnešek ještě žádný snapshot neexistuje —
 // volá se z AkcieModule při každém otevření, tak roste historie pro graf v čase.
 async function ensureTodaySnapshot(equity, balance, currency) {
@@ -5477,54 +5491,17 @@ function WebsiteTrafficPanel() {
   );
 }
 
-// Investiční portfolio XTB — živá čísla přes serverless proxy /api/xtb (WebSocket xAPI,
-// přihlašovací heslo jen na Vercelu — viz api/xtb.js). Nikdy nežádej/nezadávej heslo v appce.
+// Investiční evidence (Akcie) — ruční ledger vkladů/výběrů hotovosti do/z XTB.
+// Pozn.: živé napojení na XTB xAPI bylo odstraněno — XTB v roce 2025 zrušilo retailový
+// přístup k API (ws.xtb.com vyřazeno 14.3.2025, náhradní ws.xapi.pro slouží jen klientům
+// X Open Hub, ne běžným XTB účtům). Modul proto vede jen ruční evidenci tranší.
 function XtbPanel({ xtbTranches = [], onNav }) {
-  const [data, setData] = useState(null);
-  const [err, setErr] = useState(null);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    let alive = true;
-    setLoading(true);
-    fetch("/api/xtb")
-      .then(r => r.json().then(j => ({ ok: r.ok, j })))
-      .then(({ ok, j }) => {
-        if (!alive) return;
-        if (!ok || j.error) { setErr(j.error || "Neznámá chyba"); setData(null); }
-        else { setData(j); setErr(null); }
-      })
-      .catch(e => { if (alive) setErr(e.message); })
-      .finally(() => { if (alive) setLoading(false); });
-    return () => { alive = false; };
-  }, []);
-
   const label = { fontSize: 8, letterSpacing: ".22em", textTransform: "uppercase", color: "var(--mut)", fontWeight: 700 };
   const fmtMoney = (v, cur) => v == null ? "—" : maskNum(`${Number(v).toLocaleString("cs-CZ", { maximumFractionDigits: 2 })} ${cur || ""}`.trim());
 
-  if (loading) {
-    return (
-      <div style={{ background: "#fff", borderRadius: 3, padding: "26px 30px", boxShadow: "0 0 0 1px rgba(0,0,0,.08)", color: "var(--mut)", fontSize: 12 }}>
-        Načítám portfolio XTB…
-      </div>
-    );
-  }
-  if (err) {
-    return (
-      <div style={{ background: "#fff", borderRadius: 3, padding: "22px 28px", boxShadow: "0 0 0 1px rgba(0,0,0,.08)" }}>
-        <div style={{ ...label, marginBottom: 8 }}>Investice — Akcie</div>
-        <div style={{ fontSize: 12.5, color: "#DC2626", lineHeight: 1.5 }}>{err}</div>
-      </div>
-    );
-  }
-
-  const acc = data?.account || {};
-  const trades = data?.openTrades || [];
-  const equity = acc.equity || 0;
   const hasTranches = xtbTranches.length > 0;
   const netDeposited = xtbTranches.reduce((s, t) => s + (t.type === "výběr" ? -(t.amount || 0) : (t.amount || 0)), 0);
-  const profit = equity - netDeposited;
-  const profitColor = profit >= 0 ? "#059669" : "#DC2626";
+  const currency = xtbTranches[0]?.currency || "CZK";
 
   return (
     <div style={{ background: "#fff", borderRadius: 3, overflow: "hidden", boxShadow: "0 0 0 1px rgba(0,0,0,.08)" }}>
@@ -5538,69 +5515,37 @@ function XtbPanel({ xtbTranches = [], onNav }) {
         )}
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: hasTranches ? "1fr 1fr" : "1fr 1fr", borderTop: "1px solid rgba(0,0,0,.06)" }}>
-        <div style={{ padding: "16px 20px", borderRight: "1px solid rgba(0,0,0,.06)" }}>
-          <div style={{ fontSize: 8, letterSpacing: ".12em", textTransform: "uppercase", color: "var(--mut)", fontWeight: 700, marginBottom: 8 }}>Aktuální hodnota</div>
-          <div className="maux-num maux-glow" style={{ fontSize: 22, fontWeight: 600, color: "#4F46E5", lineHeight: 1 }}>{fmtMoney(equity, acc.currency)}</div>
-        </div>
-        <div style={{ padding: "16px 20px" }}>
-          <div style={{ fontSize: 8, letterSpacing: ".12em", textTransform: "uppercase", color: "var(--mut)", fontWeight: 700, marginBottom: 8 }}>{hasTranches ? "Čistý zisk" : "Otevřené pozice"}</div>
-          {hasTranches ? (
-            <div className="maux-num" style={{ fontSize: 22, fontWeight: 600, color: profitColor, lineHeight: 1 }}>{profit >= 0 ? "+" : ""}{fmtMoney(profit, acc.currency)}</div>
-          ) : (
-            <div className="maux-num" style={{ fontSize: 22, fontWeight: 600, color: "var(--ink)", lineHeight: 1 }}>{trades.length}</div>
-          )}
-        </div>
+      <div style={{ padding: "16px 20px", borderTop: "1px solid rgba(0,0,0,.06)" }}>
+        <div style={{ fontSize: 8, letterSpacing: ".12em", textTransform: "uppercase", color: "var(--mut)", fontWeight: 700, marginBottom: 8 }}>Čistě vloženo</div>
+        <div className="maux-num maux-glow" style={{ fontSize: 22, fontWeight: 600, color: "#4F46E5", lineHeight: 1 }}>{hasTranches ? fmtMoney(netDeposited, currency) : "—"}</div>
       </div>
 
       {!hasTranches && (
-        <div style={{ padding: "10px 26px 14px", fontSize: 10, color: "var(--mut)" }}>
-          Doplň historii vkladů na stránce Akcie, ať se spočítá čistý zisk vs. principál.
+        <div style={{ padding: "0 26px 16px", fontSize: 10, color: "var(--mut)" }}>
+          Doplň tranše na stránce Akcie — XTB live napojení bylo zrušeno (zdroj), eviduje se ručně.
         </div>
       )}
     </div>
   );
 }
 
-/* ─── AKCIE (XTB portfolio) — souhrn, otevřené pozice, nákupky, tranše vkladů/výběrů ─── */
-function AkcieModule({ xtbTranches = [], xtbSnapshots = [], onTrancheSave, onTrancheDelete, onSnapshotWritten }) {
-  const [data, setData] = useState(null);
-  const [err, setErr] = useState(null);
-  const [loading, setLoading] = useState(true);
+/* ─── AKCIE — ruční evidence tranší vkladů/výběrů do/z XTB ───
+   Pozn.: živé napojení na XTB xAPI bylo odstraněno — XTB v roce 2025 zrušilo retailový
+   přístup k API (ws.xtb.com vyřazeno 14.3.2025, náhradní ws.xapi.pro slouží jen klientům
+   X Open Hub, ne běžným XTB účtům, viz chyba "account from a different platform").
+   Nezbylo nic, co by šlo automaticky stahovat — modul vede jen ruční ledger tranší. */
+function AkcieModule({ xtbTranches = [], onTrancheSave, onTrancheDelete, xtbTitles = [], onTitleSave, onTitleDelete }) {
   const [addForm, setAddForm] = useState(false);
   const [newTranche, setNewTranche] = useState({ date: today(), type: "vklad", amount: "", symbol: "", note: "" });
   const [savingTranche, setSavingTranche] = useState(false);
-  const [showAllHistory, setShowAllHistory] = useState(false);
 
-  useEffect(() => {
-    let alive = true;
-    setLoading(true);
-    fetch("/api/xtb")
-      .then(r => r.json().then(j => ({ ok: r.ok, j })))
-      .then(async ({ ok, j }) => {
-        if (!alive) return;
-        if (!ok || j.error) { setErr(j.error || "Neznámá chyba"); setData(null); }
-        else {
-          setData(j); setErr(null);
-          try {
-            await ensureTodaySnapshot(j.account?.equity, j.account?.balance, j.account?.currency);
-            onSnapshotWritten && onSnapshotWritten();
-          } catch (e) { console.error("xtb snapshot:", e); }
-        }
-      })
-      .catch(e => { if (alive) setErr(e.message); })
-      .finally(() => { if (alive) setLoading(false); });
-    return () => { alive = false; };
-  }, []);
+  const [addTitleForm, setAddTitleForm] = useState(false);
+  const [newTitle, setNewTitle] = useState({ symbol: "", status: "drzim", note: "" });
+  const [savingTitle, setSavingTitle] = useState(false);
 
   const fmtMoney = (v, cur) => v == null ? "—" : maskNum(`${Number(v).toLocaleString("cs-CZ", { maximumFractionDigits: 2 })}${cur ? " " + cur : ""}`);
-  const fmtDT = (ms) => ms ? new Date(ms).toLocaleDateString("cs-CZ", { day: "numeric", month: "numeric", year: "numeric" }) : "—";
 
-  const acc = data?.account || {};
-  const openTrades = data?.openTrades || [];
-  const closedTrades = data?.closedTrades || [];
-  const currency = acc.currency || "CZK";
-  const equity = acc.equity || 0;
+  const currency = xtbTranches[0]?.currency || "CZK";
 
   const sortedTranches = useMemo(
     () => [...xtbTranches].sort((a, b) => (a.tranche_date || "").localeCompare(b.tranche_date || "")),
@@ -5608,34 +5553,6 @@ function AkcieModule({ xtbTranches = [], xtbSnapshots = [], onTrancheSave, onTra
   );
   const hasTranches = sortedTranches.length > 0;
   const netDeposited = sortedTranches.reduce((s, t) => s + (t.type === "výběr" ? -(t.amount || 0) : (t.amount || 0)), 0);
-  const profit = equity - netDeposited;
-  const profitPct = netDeposited > 0 ? (profit / netDeposited) * 100 : null;
-  const profitColor = profit >= 0 ? "#059669" : "#DC2626";
-
-  // Tranše tagované konkrétní akcií (volitelné) — pro zobrazení vlastního vkladu u pozice
-  const tranchesBySymbol = useMemo(() => {
-    const m = {};
-    for (const t of sortedTranches) {
-      if (!t.symbol) continue;
-      m[t.symbol] = (m[t.symbol] || 0) + (t.type === "výběr" ? -(t.amount || 0) : (t.amount || 0));
-    }
-    return m;
-  }, [sortedTranches]);
-
-  // Graf vývoje hodnoty portfolia — denní equity snapshoty (sbírá se od prvního otevření appky po nasazení)
-  const snaps = xtbSnapshots || [];
-  const W = 600, H = 90;
-  let chartPts = "";
-  if (snaps.length > 1) {
-    const vals = snaps.map(s => Number(s.equity) || 0);
-    const minV = Math.min(...vals), maxV = Math.max(...vals);
-    const span = (maxV - minV) || 1;
-    chartPts = snaps.map((s, i) => {
-      const x = (i / (snaps.length - 1)) * W;
-      const y = H - ((Number(s.equity) || 0) - minV) / span * H;
-      return `${x.toFixed(1)},${y.toFixed(1)}`;
-    }).join(" ");
-  }
 
   const saveTranche = async () => {
     const amt = Number(String(newTranche.amount).replace(/\s/g, "").replace(",", "."));
@@ -5652,137 +5569,42 @@ function AkcieModule({ xtbTranches = [], xtbSnapshots = [], onTrancheSave, onTra
     setSavingTranche(false);
   };
 
+  const sortedTitles = useMemo(
+    () => [...xtbTitles].sort((a, b) => (a.created_at || "").localeCompare(b.created_at || "")),
+    [xtbTitles]
+  );
+
+  const saveTitle = async () => {
+    const symbol = newTitle.symbol.trim().toUpperCase();
+    if (!symbol) { alert("Zadej ticker."); return; }
+    setSavingTitle(true);
+    try {
+      await onTitleSave({ id: uid(), symbol, status: newTitle.status, note: newTitle.note || "" });
+      setNewTitle({ symbol: "", status: "drzim", note: "" });
+      setAddTitleForm(false);
+    } catch (e) { alert("Chyba: " + e.message); }
+    setSavingTitle(false);
+  };
+
   const label = { fontSize: 9, letterSpacing: ".14em", textTransform: "uppercase", color: "var(--mut)", fontWeight: 700 };
   const inputStyle = { font: "inherit", fontSize: 12.5, padding: "6px 9px", border: "1px solid var(--line2)", borderRadius: 7, outline: "none" };
 
-  if (loading) {
-    return <div style={{ padding: 40, textAlign: "center", color: "var(--mut)", fontSize: 13 }}>Načítám portfolio XTB…</div>;
-  }
-
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-      {err && (
-        <div style={{ background: "#fff", border: "1px solid var(--line)", borderRadius: 14, padding: "18px 24px" }}>
-          <div style={{ fontSize: 12.5, color: "#DC2626", lineHeight: 1.5 }}>{err}</div>
-        </div>
-      )}
-
       {/* SOUHRN */}
       <div style={{ background: "#fff", border: "1px solid var(--line)", borderRadius: 14, overflow: "hidden" }}>
         <div style={{ padding: "18px 24px 12px", display: "flex", alignItems: "center", gap: 6 }}>
           <span className="maux-dot" style={{ width: 6, height: 6, background: "#4F46E5", boxShadow: "0 0 4px rgba(79,70,229,.55)" }} />
           <div style={{ ...label }}>Portfolio — souhrn</div>
-          <div style={{ fontSize: 9, color: "var(--mut)", opacity: .6, marginLeft: "auto" }}>
-            {data?.env === "demo" ? "DEMO účet" : "živý účet"} · aktualizováno {data?.fetchedAt ? new Date(data.fetchedAt).toLocaleTimeString("cs-CZ") : "—"}
+        </div>
+        <div style={{ padding: "16px 24px", borderTop: "1px solid var(--line)" }}>
+          <div style={{ ...label, marginBottom: 8 }}>Čistě vloženo</div>
+          <div className="maux-num" style={{ fontSize: 22, fontWeight: 600, color: "var(--ink)", lineHeight: 1 }}>{hasTranches ? fmtMoney(netDeposited, currency) : "—"}</div>
+          {!hasTranches && <div style={{ fontSize: 9.5, color: "var(--mut)", marginTop: 5 }}>doplň tranše níž</div>}
+          <div style={{ fontSize: 9.5, color: "var(--mut)", marginTop: 10 }}>
+            Živé napojení na XTB API není dostupné (XTB retailové API bylo zrušeno) — aktuální hodnota portfolia, otevřené pozice a historie obchodů se zde nezobrazují. Vede se jen ruční evidence vkladů a výběrů níže.
           </div>
         </div>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", borderTop: "1px solid var(--line)" }}>
-          <div style={{ padding: "16px 24px", borderRight: "1px solid var(--line)" }}>
-            <div style={{ ...label, marginBottom: 8 }}>Čistě vloženo</div>
-            <div className="maux-num" style={{ fontSize: 22, fontWeight: 600, color: "var(--ink)", lineHeight: 1 }}>{hasTranches ? fmtMoney(netDeposited, currency) : "—"}</div>
-            {!hasTranches && <div style={{ fontSize: 9.5, color: "var(--mut)", marginTop: 5 }}>doplň tranše níž</div>}
-          </div>
-          <div style={{ padding: "16px 24px", borderRight: "1px solid var(--line)" }}>
-            <div style={{ ...label, marginBottom: 8 }}>Aktuální hodnota</div>
-            <div className="maux-num maux-glow" style={{ fontSize: 22, fontWeight: 600, color: "#4F46E5", lineHeight: 1 }}>{fmtMoney(equity, currency)}</div>
-          </div>
-          <div style={{ padding: "16px 24px", borderRight: "1px solid var(--line)" }}>
-            <div style={{ ...label, marginBottom: 8 }}>Čistý zisk</div>
-            <div className="maux-num" style={{ fontSize: 22, fontWeight: 600, color: hasTranches ? profitColor : "var(--mut)", lineHeight: 1 }}>
-              {hasTranches ? `${profit >= 0 ? "+" : ""}${fmtMoney(profit, currency)}` : "—"}
-            </div>
-          </div>
-          <div style={{ padding: "16px 24px" }}>
-            <div style={{ ...label, marginBottom: 8 }}>Zhodnocení</div>
-            <div className="maux-num" style={{ fontSize: 22, fontWeight: 600, color: hasTranches ? profitColor : "var(--mut)", lineHeight: 1 }}>
-              {profitPct != null ? `${profitPct >= 0 ? "+" : ""}${profitPct.toFixed(1)} %` : "—"}
-            </div>
-          </div>
-        </div>
-
-        <div style={{ padding: "14px 24px 18px", borderTop: "1px solid var(--line)" }}>
-          <div style={{ ...label, marginBottom: 10 }}>Vývoj hodnoty portfolia ({snaps.length} {snaps.length === 1 ? "den" : "dní"} sbíráno)</div>
-          {snaps.length > 1 ? (
-            <svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", height: 80, display: "block" }} preserveAspectRatio="none">
-              <polyline points={chartPts} fill="none" stroke="#4F46E5" strokeWidth="1.8" vectorEffect="non-scaling-stroke" />
-            </svg>
-          ) : (
-            <div style={{ fontSize: 11.5, color: "var(--mut)" }}>
-              Graf se nabuduje postupně — appka si při každém otevření uloží dnešní hodnotu portfolia (XTB historii zpětně nedává). Vrať se zítra. :)
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* OTEVŘENÉ POZICE */}
-      <div style={{ background: "#fff", border: "1px solid var(--line)", borderRadius: 14, padding: "18px 24px" }}>
-        <div style={{ ...label, marginBottom: 14 }}>Otevřené pozice ({openTrades.length})</div>
-        {openTrades.length === 0 ? (
-          <div style={{ fontSize: 12, color: "var(--mut)" }}>Žádné otevřené pozice.</div>
-        ) : (
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(220px,1fr))", gap: 12 }}>
-            {openTrades.map((t, i) => {
-              const posValue = (t.volume || 0) * (t.openPrice || 0) + (t.profit || 0);
-              const weight = equity > 0 ? (posValue / equity) * 100 : 0;
-              const taggedDeposit = tranchesBySymbol[t.symbol];
-              return (
-                <div key={i} style={{ border: "1px solid var(--line)", borderRadius: 10, padding: "14px 16px", background: "#FAFAF9" }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 8 }}>
-                    <div style={{ fontSize: 13, fontWeight: 700, color: "var(--txt)" }}>{t.symbol}</div>
-                    <div style={{ fontSize: 9, color: "var(--mut)" }}>{t.cmd === 0 ? "BUY" : "SELL"} · {t.volume}</div>
-                  </div>
-                  <div className="maux-num" style={{ fontSize: 17, fontWeight: 600, color: t.profit >= 0 ? "#059669" : "#DC2626" }}>{t.profit >= 0 ? "+" : ""}{fmtMoney(t.profit, currency)}</div>
-                  <div style={{ fontSize: 9.5, color: "var(--mut)", marginTop: 4 }}>nákupní cena {fmtMoney(t.openPrice, "")} · {fmtDT(t.openTime)}</div>
-                  <div style={{ height: 3, background: "var(--line)", borderRadius: 2, marginTop: 10 }}>
-                    <div style={{ height: "100%", width: `${Math.min(weight, 100)}%`, background: "#4F46E5", borderRadius: 2 }} />
-                  </div>
-                  <div style={{ fontSize: 8.5, color: "var(--mut)", marginTop: 4 }}>{weight.toFixed(1)} % portfolia</div>
-                  {taggedDeposit != null && (
-                    <div style={{ fontSize: 9, color: "var(--mut)", marginTop: 6, paddingTop: 6, borderTop: "1px solid var(--line)" }}>
-                      vlastní vklad na tuto akcii: <strong>{fmtMoney(taggedDeposit, currency)}</strong>
-                    </div>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </div>
-
-      {/* NÁKUPKY — historie obchodů, automaticky z XTB */}
-      <div style={{ background: "#fff", border: "1px solid var(--line)", borderRadius: 14, padding: "18px 24px" }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 14 }}>
-          <div style={{ ...label }}>Nákupky — historie obchodů ({closedTrades.length})</div>
-          {closedTrades.length > 8 && (
-            <span style={{ fontSize: 10, color: "#4F46E5", fontWeight: 600, cursor: "pointer" }} onClick={() => setShowAllHistory(p => !p)}>
-              {showAllHistory ? "Zobrazit méně" : "Zobrazit vše →"}
-            </span>
-          )}
-        </div>
-        {closedTrades.length === 0 ? (
-          <div style={{ fontSize: 12, color: "var(--mut)" }}>Zatím žádné uzavřené obchody za posledních ~3 roky.</div>
-        ) : (
-          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11.5 }}>
-            <thead><tr style={{ borderBottom: "1px solid var(--line)" }}>
-              <th style={{ textAlign: "left", padding: "6px 8px", fontSize: 9, letterSpacing: ".08em", textTransform: "uppercase", color: "var(--mut)", fontWeight: 500 }}>Akcie</th>
-              <th style={{ textAlign: "left", padding: "6px 8px", fontSize: 9, letterSpacing: ".08em", textTransform: "uppercase", color: "var(--mut)", fontWeight: 500 }}>Otevřeno</th>
-              <th style={{ textAlign: "left", padding: "6px 8px", fontSize: 9, letterSpacing: ".08em", textTransform: "uppercase", color: "var(--mut)", fontWeight: 500 }}>Uzavřeno</th>
-              <th style={{ textAlign: "right", padding: "6px 8px", fontSize: 9, letterSpacing: ".08em", textTransform: "uppercase", color: "var(--mut)", fontWeight: 500 }}>Objem</th>
-              <th style={{ textAlign: "right", padding: "6px 8px", fontSize: 9, letterSpacing: ".08em", textTransform: "uppercase", color: "var(--mut)", fontWeight: 500 }}>Výsledek</th>
-            </tr></thead>
-            <tbody>
-              {(showAllHistory ? closedTrades : closedTrades.slice(0, 8)).map((t, i) => (
-                <tr key={i} style={{ borderBottom: "1px solid var(--line)" }}>
-                  <td style={{ padding: "7px 8px", color: "var(--txt)", fontWeight: 600 }}>{t.symbol} <span style={{ color: "var(--mut)", fontWeight: 400, fontSize: 9.5 }}>{t.cmd === 0 ? "BUY" : "SELL"}</span></td>
-                  <td style={{ padding: "7px 8px", color: "var(--mut)" }}>{fmtDT(t.openTime)}</td>
-                  <td style={{ padding: "7px 8px", color: "var(--mut)" }}>{fmtDT(t.closeTime)}</td>
-                  <td style={{ padding: "7px 8px", textAlign: "right", color: "var(--mut)" }}>{t.volume}</td>
-                  <td style={{ padding: "7px 8px", textAlign: "right", fontWeight: 600, color: t.profit >= 0 ? "#059669" : "#DC2626" }}>{t.profit >= 0 ? "+" : ""}{fmtMoney(t.profit, currency)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
       </div>
 
       {/* TRANŠE — ruční ledger vkladů/výběrů hotovosti */}
@@ -5835,6 +5657,57 @@ function AkcieModule({ xtbTranches = [], xtbSnapshots = [], onTrancheSave, onTra
                   <td style={{ padding: "9px 12px", color: "var(--mut)" }}>{t.note || "—"}</td>
                   <td style={{ padding: "9px 4px", textAlign: "center" }}>
                     <button onClick={() => onTrancheDelete(t.id)} style={{ background: "none", border: "none", color: "#DDD", cursor: "pointer", fontSize: 12 }}>✕</button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+
+      {/* HISTORIE TITULŮ — ruční poznámkový seznam akcií (drží/měl), nezávislé na API i na tranších */}
+      <div style={{ background: "#fff", border: "1px solid var(--line)", borderRadius: 14, padding: "18px 24px" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 14, gap: 12 }}>
+          <div>
+            <div style={{ ...label }}>Historie titulů</div>
+            <div style={{ fontSize: 9.5, color: "var(--mut)", marginTop: 4 }}>Ruční seznam akcií, co držíš nebo jsi měl a už nemáš — appka tohle bez živého API nevidí.</div>
+          </div>
+          <button className="btn pri" style={{ fontSize: 11, padding: "5px 12px", flexShrink: 0 }} onClick={() => setAddTitleForm(p => !p)}>+ Přidat titul</button>
+        </div>
+
+        {addTitleForm && (
+          <div style={{ padding: "12px 16px", background: "#F7F5FF", border: "1px solid var(--line)", borderRadius: 10, marginBottom: 14, display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+            <input type="text" value={newTitle.symbol} onChange={e => setNewTitle(p => ({ ...p, symbol: e.target.value.toUpperCase() }))}
+              placeholder="Ticker (např. AAPL)" style={{ ...inputStyle, width: 140 }} />
+            <select value={newTitle.status} onChange={e => setNewTitle(p => ({ ...p, status: e.target.value }))} style={inputStyle}>
+              <option value="drzim">Držím</option>
+              <option value="prodano">Prodáno</option>
+            </select>
+            <input type="text" value={newTitle.note} onChange={e => setNewTitle(p => ({ ...p, note: e.target.value }))}
+              placeholder="Poznámka (volitelné)…" style={{ ...inputStyle, flex: 1, minWidth: 140 }} />
+            <button className="btn pri" style={{ fontSize: 11, padding: "5px 12px" }} disabled={savingTitle} onClick={saveTitle}>{savingTitle ? "Ukládám…" : "Uložit"}</button>
+            <button className="btn gho" style={{ fontSize: 11 }} onClick={() => setAddTitleForm(false)}>✕</button>
+          </div>
+        )}
+
+        {sortedTitles.length === 0 ? (
+          <div style={{ fontSize: 12, color: "var(--mut)" }}>Zatím žádné tituly. Doplň, co držíš nebo jsi v minulosti prodal.</div>
+        ) : (
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+            <thead><tr style={{ background: "#F5F3FF", borderBottom: "1px solid var(--line)" }}>
+              <th style={{ textAlign: "left", padding: "8px 12px", fontSize: 9, letterSpacing: ".1em", textTransform: "uppercase", color: "var(--mut)", fontWeight: 500 }}>Ticker</th>
+              <th style={{ textAlign: "left", padding: "8px 12px", fontSize: 9, letterSpacing: ".1em", textTransform: "uppercase", color: "var(--mut)", fontWeight: 500 }}>Stav</th>
+              <th style={{ textAlign: "left", padding: "8px 12px", fontSize: 9, letterSpacing: ".1em", textTransform: "uppercase", color: "var(--mut)", fontWeight: 500 }}>Poznámka</th>
+              <th style={{ padding: "8px 4px" }}></th>
+            </tr></thead>
+            <tbody>
+              {sortedTitles.map(t => (
+                <tr key={t.id} style={{ borderBottom: "1px solid var(--line)" }}>
+                  <td style={{ padding: "9px 12px", color: "var(--txt)", fontWeight: 700 }}>{t.symbol}</td>
+                  <td style={{ padding: "9px 12px", color: t.status === "prodano" ? "var(--mut)" : "#059669", fontWeight: 600 }}>{t.status === "prodano" ? "Prodáno" : "Držím"}</td>
+                  <td style={{ padding: "9px 12px", color: "var(--mut)" }}>{t.note || "—"}</td>
+                  <td style={{ padding: "9px 4px", textAlign: "center" }}>
+                    <button onClick={() => onTitleDelete(t.id)} style={{ background: "none", border: "none", color: "#DDD", cursor: "pointer", fontSize: 12 }}>✕</button>
                   </td>
                 </tr>
               ))}
@@ -7521,7 +7394,7 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
         <WebsiteTrafficPanel />
       </Panel>
 
-      {/* ── INVESTICE (XTB, živě) ── */}
+      {/* ── INVESTICE (XTB — ruční evidence) ── */}
       <Panel id="xtb">
         <XtbPanel xtbTranches={xtbTranches} onNav={onNav} />
       </Panel>
@@ -10629,6 +10502,7 @@ export default function MauxCRM() {
   const [loanTransactions, setLoanTransactions] = useState({}); // { loanId: [] }
   const [xtbTranches, setXtbTranches] = useState([]);
   const [xtbSnapshots, setXtbSnapshots] = useState([]);
+  const [xtbTitles, setXtbTitles] = useState([]);
   const [escrows, setEscrows] = useState([]);
   const [escrowMode, setEscrowMode] = useState("list"); // list | edit | new
   const [selEscrow, setSelEscrow] = useState(null);
@@ -10689,8 +10563,9 @@ export default function MauxCRM() {
       fetchAssistantAvailability("asistent@maux.cz", `${new Date().getFullYear()}-${String(new Date().getMonth()+1).padStart(2,"0")}`).catch(() => null),
       fetchXtbTranches().catch(e => { console.error("xtb tranches:", e); return []; }),
       fetchXtbSnapshots().catch(e => { console.error("xtb snapshots:", e); return []; }),
+      fetchXtbTitles().catch(e => { console.error("xtb titles:", e); return []; }),
     ])
-      .then(async ([c, i, w, f, dpfo, tax, checks, loans, esc, aLogs, aAtt, aAvail, xtbTr, xtbSnap]) => {
+      .then(async ([c, i, w, f, dpfo, tax, checks, loans, esc, aLogs, aAtt, aAvail, xtbTr, xtbSnap, xtbTit]) => {
         setClients(c); setInvoices(i); setWorkEntries(w); setFinanceItems(f);
         setDpfoMonths(dpfo);
         setTaxRecords(tax);
@@ -10699,6 +10574,7 @@ export default function MauxCRM() {
         setEscrows(esc || []);
         setXtbTranches(xtbTr || []);
         setXtbSnapshots(xtbSnap || []);
+        setXtbTitles(xtbTit || []);
         setAssistantLogs(aLogs || []);
         setAssistantAttendance(aAtt || []);
         setAssistantAvailability(aAvail || null);
@@ -10762,6 +10638,14 @@ export default function MauxCRM() {
   const handleXtbTrancheDelete = async (id) => {
     await deleteXtbTranche(id);
     setXtbTranches(p => p.filter(t => t.id !== id));
+  };
+  const handleXtbTitleSave = async (t) => {
+    await upsertXtbTitle(t);
+    setXtbTitles(await fetchXtbTitles());
+  };
+  const handleXtbTitleDelete = async (id) => {
+    await deleteXtbTitle(id);
+    setXtbTitles(p => p.filter(t => t.id !== id));
   };
   const refreshXtbSnapshots = async () => {
     try { setXtbSnapshots(await fetchXtbSnapshots()); } catch (e) { console.error("xtb snapshots refresh:", e); }
@@ -11219,14 +11103,15 @@ export default function MauxCRM() {
             />
           )}
 
-          {/* AKCIE — XTB portfolio: souhrn, pozice, nákupky, tranše */}
+          {/* AKCIE — ruční evidence vkladů/výběrů + historie titulů (živé XTB API zrušeno) */}
           {mod === "akcie" && (
             <AkcieModule
               xtbTranches={xtbTranches}
-              xtbSnapshots={xtbSnapshots}
               onTrancheSave={handleXtbTrancheSave}
               onTrancheDelete={handleXtbTrancheDelete}
-              onSnapshotWritten={refreshXtbSnapshots}
+              xtbTitles={xtbTitles}
+              onTitleSave={handleXtbTitleSave}
+              onTitleDelete={handleXtbTitleDelete}
             />
           )}
 
