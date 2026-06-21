@@ -4635,11 +4635,11 @@ function SporakRingTile({ financeItems, onSaveFinance, invoices, dpfoMonths, loa
     && !autoLbls.has((i.label||"").toLowerCase().trim())
   );
   const envSegs    = [
-    { label: "DPH",          amount: dphAuto,   color: "#0D9488" },
-    { label: "DPFO 2026",    amount: dpfoAcc,   color: "#16A34A" },
-    ...(bobBal > 0 ? [{ label: "Bobnice", amount: bobBal, color: "#65A30D" }] : []),
-    { label: "Daň z úschov", amount: danUschov, color: "#0891B2" },
-    ...manObálky.map((o,idx) => ({ label: o.label, amount: o.amount||0, color: ["#059669","#84CC16"][idx%2] })),
+    { label: "DPH",          amount: dphAuto,   color: "#241177" },
+    { label: "DPFO 2026",    amount: dpfoAcc,   color: "#3518A5" },
+    ...(bobBal > 0 ? [{ label: "Bobnice", amount: bobBal, color: "#6358D4" }] : []),
+    { label: "Daň z úschov", amount: danUschov, color: "#8A7FE0" },
+    ...manObálky.map((o,idx) => ({ label: o.label, amount: o.amount||0, color: ["#5B4FCF","#9D93DD"][idx%2] })),
   ].filter(e => e.amount > 0);
   const totalEar   = envSegs.reduce((s,e) => s+e.amount, 0);
   const firmaRez   = actualBal - totalEar;
@@ -4651,7 +4651,7 @@ function SporakRingTile({ financeItems, onSaveFinance, invoices, dpfoMonths, loa
 
   const [editBal, setEditBal] = useState(false);
   const [balInput, setBalInput] = useState(actualBal);
-  const S_COL = "#059669";
+  const S_COL = "#3518A5";
 
   const secHdr = (col, text) => (
     <div style={{ fontSize: 8, letterSpacing: ".18em", color: col, fontWeight: 800, textTransform: "uppercase", opacity: 0.65, marginBottom: 3 }}>{text}</div>
@@ -4750,11 +4750,11 @@ function TriGrafyPanel({ financeItems, onSaveFinance, invoices, dpfoMonths, loan
     && !autoLbls.has((i.label||"").toLowerCase().trim())
   );
   const envSegs    = [
-    { label: "DPH",          amount: dphAuto,   color: "#0D9488" },
-    { label: "DPFO 2026",    amount: dpfoAcc,   color: "#16A34A" },
-    ...(bobBal > 0 ? [{ label: "Bobnice", amount: bobBal, color: "#65A30D" }] : []),
-    { label: "Daň z úschov", amount: danUschov, color: "#0891B2" },
-    ...manObálky.map((o,idx) => ({ label: o.label, amount: o.amount||0, color: ["#059669","#84CC16"][idx%2] })),
+    { label: "DPH",          amount: dphAuto,   color: "#241177" },
+    { label: "DPFO 2026",    amount: dpfoAcc,   color: "#3518A5" },
+    ...(bobBal > 0 ? [{ label: "Bobnice", amount: bobBal, color: "#6358D4" }] : []),
+    { label: "Daň z úschov", amount: danUschov, color: "#8A7FE0" },
+    ...manObálky.map((o,idx) => ({ label: o.label, amount: o.amount||0, color: ["#5B4FCF","#9D93DD"][idx%2] })),
   ].filter(e => e.amount > 0);
   const totalEar   = envSegs.reduce((s,e) => s+e.amount, 0);
   const volné      = actualBal - totalEar;
@@ -4770,8 +4770,8 @@ function TriGrafyPanel({ financeItems, onSaveFinance, invoices, dpfoMonths, loan
   const akcieItem  = (financeItems||[]).find(i => i.id === "fi_ma_01");
   const stavItem   = (financeItems||[]).find(i => i.id === "fi_ma_02");
   const extraMaj   = (financeItems||[]).filter(i => i.category === "majetek" && !["fi_ma_01","fi_ma_02","fi_ma_03"].includes(i.id));
-  // Modernější, rozlišitelná paleta (místo monotónních odstínů hnědo-zlaté)
-  const MAJ_C      = ["#4F46E5","#0D9488","#B8923D","#DB2777","#0891B2","#7C3AED"];
+  // Jeden indigo systém, víc odstínů — Tom: "klid, jistota, žádná samostatná barva navíc"
+  const MAJ_C      = ["#3518A5","#4F46E5","#6358D4","#8A7FE0","#241177","#9D93DD"];
   const allMajSegs = [
     akcieItem && { item: akcieItem, label: "Akcie / ETF",      value: akcieItem.amount||0, color: MAJ_C[0] },
     stavItem  && { item: stavItem,  label: "Stavební spoření", value: stavItem.amount||0,  color: MAJ_C[1] },
@@ -4808,7 +4808,7 @@ function TriGrafyPanel({ financeItems, onSaveFinance, invoices, dpfoMonths, loan
     setNewLabel(""); setNewAmt(0); setAdding(false);
   };
 
-  const S_COL = "#059669", M_COL = "#B8860B";
+  const S_COL = "#3518A5", M_COL = "#3518A5";
   const R_COL = "#4F46E5";
   const R_WARN = "#DC2626";
 
@@ -7315,24 +7315,24 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
                 loanTransactions={loanTransactions} escrows={escrows} square />
             </div>
 
-            {/* TILE C — Výdaje měsíčně (čtverec), promováno z bývalého "Zobrazit detail" panelu — Tom: ať je vidět hned, vedle Bilance a Spořáku, ale decentně (sekundární priorita, žádná červená/negativní asociace) */}
+            {/* TILE C — Výdaje měsíčně (čtverec), promováno z bývalého "Zobrazit detail" panelu — Tom: jeden indigo systém, víc odstínů, klid a jistota, žádná samostatná barva navíc */}
             <div style={{
               flex:1, aspectRatio:"1", minWidth:0,
               background:"#fff", borderRadius:3, overflow:"hidden",
-              borderTop: "4px solid #64748B",
+              borderTop: "4px solid #5B4FCF",
               boxShadow:"0 0 0 1px rgba(0,0,0,.08)",
               display:"flex", flexDirection:"column",
             }}>
               <div style={{padding:"22px 24px 0",textAlign:"center"}}>
                 <div style={{display:"flex",alignItems:"center",justifyContent:"center",gap:6,marginBottom:10}}>
-                  <span className="maux-dot" style={{width:6,height:6,background:"#64748B",boxShadow:"0 0 4px rgba(100,116,139,.4)"}} />
-                  <div style={{fontSize:10,letterSpacing:".22em",textTransform:"uppercase",color:"#64748B",fontWeight:800}}>Výdaje měsíčně</div>
+                  <span className="maux-dot" style={{width:6,height:6,background:"#5B4FCF",boxShadow:"0 0 4px rgba(91,79,207,.4)"}} />
+                  <div style={{fontSize:10,letterSpacing:".22em",textTransform:"uppercase",color:"#5B4FCF",fontWeight:800}}>Výdaje měsíčně</div>
                 </div>
-                <div className="maux-num" style={{fontSize:36, fontWeight:600, color:"#475569", lineHeight:1}}>
+                <div className="maux-num" style={{fontSize:36, fontWeight:600, color:"#3518A5", lineHeight:1}}>
                   {fmtKc(Math.abs(totalNutne)+josefWage+Math.abs(totalLuxus))}
                 </div>
-                <div style={{height:5,borderRadius:3,background:"rgba(100,116,139,.12)",overflow:"hidden",marginTop:12}}>
-                  <div style={{height:"100%",width:`${pct}%`,borderRadius:3,background:pct===100?"#10B981":"#94A3B8",transition:"width .7s ease"}} />
+                <div style={{height:5,borderRadius:3,background:"rgba(53,24,165,.08)",overflow:"hidden",marginTop:12}}>
+                  <div style={{height:"100%",width:`${pct}%`,borderRadius:3,background:pct===100?"#16A34A":"#3518A5",transition:"width .7s ease"}} />
                 </div>
                 <div style={{fontSize:11,color:"var(--mut)",letterSpacing:".01em",marginTop:6,fontWeight:600}}>
                   {pct===100?"✓ vše zaplaceno":`zaplaceno ${paidCount}/${all.length}`}
@@ -7340,19 +7340,19 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
               </div>
 
               <div style={{flex:1,overflowY:"auto",padding:"10px 24px 6px",marginTop:4}}>
-                <div style={{fontSize:7,letterSpacing:".28em",textTransform:"uppercase",color:"#92400E",fontWeight:700,marginBottom:6,opacity:.8}}>Nutné</div>
+                <div style={{fontSize:7,letterSpacing:".28em",textTransform:"uppercase",color:"#3518A5",fontWeight:700,marginBottom:6,opacity:.8}}>Nutné</div>
                 {nutne.map((i,idx) => (
                   <div key={idx} style={{display:"flex",justifyContent:"space-between",alignItems:"center",fontSize:11.5,color:isPaid(i.id)?"var(--mut)":"var(--txt)",padding:"3px 0",gap:6}}>
                     <span style={{display:"flex",alignItems:"center",textDecoration:isPaid(i.id)?"line-through":"none",minWidth:0,overflow:"hidden"}}>
-                      <Check item={i} color="#92400E" /><EditableLabel item={i} onSave={onSaveFinance} />
+                      <Check item={i} color="#3518A5" /><EditableLabel item={i} onSave={onSaveFinance} />
                     </span>
                     <span style={{display:"flex",alignItems:"center",gap:4,flexShrink:0}}>
-                      <span style={{opacity:isPaid(i.id)?.4:1}}><EditableMoney item={i} onSave={onSaveFinance} color="#92400E" abs /></span>
+                      <span style={{opacity:isPaid(i.id)?.4:1}}><EditableMoney item={i} onSave={onSaveFinance} color="#3518A5" abs /></span>
                       <button onClick={()=>onDeleteFinance(i.id)} title="Smazat" style={{background:"none",border:"none",color:"var(--mut)",cursor:"pointer",fontSize:10,padding:"0 2px",opacity:.35,lineHeight:1}}>✕</button>
                     </span>
                   </div>
                 ))}
-                <AddExpenseRow category="nutne" color="#92400E" onSaveFinance={onSaveFinance} />
+                <AddExpenseRow category="nutne" color="#3518A5" onSaveFinance={onSaveFinance} />
                 {/* Josef Řehák — automatický náklad */}
                 {(() => {
                   const josefPaid = isPaid("josef_wage");
@@ -7365,31 +7365,31 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
                   return (
                   <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",fontSize:11.5,padding:"3px 0",gap:6,opacity:josefPaid?.65:.85,color:josefPaid?"var(--mut)":"var(--txt)",textDecoration:josefPaid?"line-through":"none"}}>
                     <span style={{display:"flex",alignItems:"center",gap:5,cursor:"pointer"}} onClick={handleJosefToggle}>
-                      <span style={{display:"inline-flex",alignItems:"center",justifyContent:"center",width:13,height:13,borderRadius:3,border:`1.5px solid ${josefPaid?"#16a34a":"#92400E"}`,background:josefPaid?"#16a34a":"transparent",flexShrink:0,color:"#fff",fontSize:9}}>
+                      <span style={{display:"inline-flex",alignItems:"center",justifyContent:"center",width:13,height:13,borderRadius:3,border:`1.5px solid ${josefPaid?"#16a34a":"#3518A5"}`,background:josefPaid?"#16a34a":"transparent",flexShrink:0,color:"#fff",fontSize:9}}>
                         {josefPaid?"✓":""}
                       </span>
                       <span>Josef Řehák</span>
                       <span style={{fontSize:8.5,background:"rgba(53,24,165,.08)",color:"var(--ink)",borderRadius:4,padding:"1px 5px",fontWeight:600,letterSpacing:".04em"}}>{JOSEF_WAGE_MANUAL_OVERRIDES[_josefYm] != null ? "ručně" : "auto"} · {_josefYm}</span>
                     </span>
-                    <span className="maux-num" style={{color:josefPaid?"var(--mut)":"#92400E",fontSize:11}}>
+                    <span className="maux-num" style={{color:josefPaid?"var(--mut)":"#3518A5",fontSize:11}}>
                       {josefWage > 0 ? josefWage.toLocaleString("cs-CZ") + " Kč" : "— Kč"}
                     </span>
                   </div>
                   );
                 })()}
-                <div style={{fontSize:7,letterSpacing:".28em",textTransform:"uppercase",color:"#7C3AED",fontWeight:700,marginTop:10,marginBottom:6,opacity:.8}}>Lusus</div>
+                <div style={{fontSize:7,letterSpacing:".28em",textTransform:"uppercase",color:"#8A7FE0",fontWeight:700,marginTop:10,marginBottom:6,opacity:.8}}>Lusus</div>
                 {luxus.map((i,idx) => (
                   <div key={idx} style={{display:"flex",justifyContent:"space-between",alignItems:"center",fontSize:11.5,color:isPaid(i.id)?"var(--mut)":"var(--txt)",padding:"3px 0",gap:6}}>
                     <span style={{display:"flex",alignItems:"center",textDecoration:isPaid(i.id)?"line-through":"none",minWidth:0}}>
-                      <Check item={i} color="#7C3AED" /><EditableLabel item={i} onSave={onSaveFinance} />
+                      <Check item={i} color="#8A7FE0" /><EditableLabel item={i} onSave={onSaveFinance} />
                     </span>
                     <span style={{display:"flex",alignItems:"center",gap:4,flexShrink:0}}>
-                      <span style={{opacity:isPaid(i.id)?.4:1}}><EditableMoney item={i} onSave={onSaveFinance} color="#7C3AED" abs /></span>
+                      <span style={{opacity:isPaid(i.id)?.4:1}}><EditableMoney item={i} onSave={onSaveFinance} color="#8A7FE0" abs /></span>
                       <button onClick={()=>onDeleteFinance(i.id)} title="Smazat" style={{background:"none",border:"none",color:"var(--mut)",cursor:"pointer",fontSize:10,padding:"0 2px",opacity:.35,lineHeight:1}}>✕</button>
                     </span>
                   </div>
                 ))}
-                <AddExpenseRow category="luxus" color="#7C3AED" onSaveFinance={onSaveFinance} />
+                <AddExpenseRow category="luxus" color="#8A7FE0" onSaveFinance={onSaveFinance} />
               </div>
               <button className="btn gho" style={{fontSize:10.5,margin:"0 24px 14px",opacity:.65,border:"none",borderTop:"1px solid rgba(0,0,0,.06)",borderRadius:0,paddingTop:10}} onClick={()=>onNav("vykaz")}>+ Nový výkaz práce</button>
             </div>
@@ -9654,7 +9654,7 @@ function AsistentPrehled({ logs, attendance }) {
       }}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
           <div>
-            <div style={{fontSize:7.5,letterSpacing:".28em",textTransform:"uppercase",fontWeight:700,color:todayPct>=1?"#059669":"#5B21B6",marginBottom:12}}>
+            <div style={{fontSize:7.5,letterSpacing:".28em",textTransform:"uppercase",fontWeight:700,color:todayPct>=1?"#059669":"#3518A5",marginBottom:12}}>
               KLIENTSKÁ PRÁCE DNES
             </div>
             <div style={{display:"flex",alignItems:"baseline",gap:10}}>
@@ -9672,7 +9672,7 @@ function AsistentPrehled({ logs, attendance }) {
           </div>
         </div>
         <div style={{height:3,borderRadius:2,background:"rgba(0,0,0,.1)",overflow:"hidden",marginTop:20,marginBottom:6}}>
-          <div style={{height:"100%",width:`${pctRound}%`,borderRadius:2,background:todayPct>=1?"#10B981":"#7C3AED",transition:"width .7s ease"}}/>
+          <div style={{height:"100%",width:`${pctRound}%`,borderRadius:2,background:todayPct>=1?"#10B981":"#4F46E5",transition:"width .7s ease"}}/>
         </div>
         <div style={{display:"flex",justifyContent:"space-between"}}>
           <div style={{fontSize:10.5,color:todayPct>=1?"#059669":todayPct>=.67?"#D97706":"var(--mut)",fontWeight:500}}>
@@ -9699,11 +9699,11 @@ function AsistentPrehled({ logs, attendance }) {
               const done=wd.h>=ASISTENT_DAILY_H;
               return(
                 <div key={wd.ds} style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",gap:3}}>
-                  <div style={{fontSize:8,color:wd.isToday?"#7C3AED":"var(--mut)",fontWeight:wd.isToday?700:400,minHeight:12,textAlign:"center"}}>{wd.h>0?fmtH(wd.h):""}</div>
+                  <div style={{fontSize:8,color:wd.isToday?"#4F46E5":"var(--mut)",fontWeight:wd.isToday?700:400,minHeight:12,textAlign:"center"}}>{wd.h>0?fmtH(wd.h):""}</div>
                   <div style={{width:"100%",height:48,display:"flex",flexDirection:"column",justifyContent:"flex-end"}}>
-                    <div style={{width:"100%",height:barH,borderRadius:3,background:done?"#22C55E":wd.h>0?"#A78BFA":wd.isToday?"#EDE9FE":"rgba(0,0,0,.06)",transition:"height .4s"}}/>
+                    <div style={{width:"100%",height:barH,borderRadius:3,background:done?"#22C55E":wd.h>0?"#8A7FE0":wd.isToday?"rgba(53,24,165,.1)":"rgba(0,0,0,.06)",transition:"height .4s"}}/>
                   </div>
-                  <div style={{fontSize:9,color:wd.isToday?"#7C3AED":"var(--mut)",fontWeight:wd.isToday?700:400}}>{wd.name}</div>
+                  <div style={{fontSize:9,color:wd.isToday?"#4F46E5":"var(--mut)",fontWeight:wd.isToday?700:400}}>{wd.name}</div>
                 </div>
               );
             })}
@@ -10062,7 +10062,7 @@ function AsistentDochazka({ email, attendance, onRefreshAttendance }) {
         </div>
         {todayRec?.check_in && todayRec?.check_out && (
           <div style={{textAlign:"right"}}>
-            <div style={{fontFamily:"Fraunces,serif",fontWeight:300,fontSize:28,color:"#7C3AED",lineHeight:1}}>{fmtH(liveDur)}</div>
+            <div style={{fontFamily:"Fraunces,serif",fontWeight:300,fontSize:28,color:"#4F46E5",lineHeight:1}}>{fmtH(liveDur)}</div>
             <div style={{fontSize:10,color:"var(--mut)",marginTop:4}}>dnes odpracováno</div>
           </div>
         )}
@@ -10081,7 +10081,7 @@ function AsistentDochazka({ email, attendance, onRefreshAttendance }) {
         <ToggleCard
           label="Odešel jsem"
           isOn={!!todayRec?.check_out}
-          color="#7C3AED"
+          color="#4F46E5"
           subOn={fmtTime(todayRec?.check_out)}
           subOff={todayRec?.check_in?"Klikni při odchodu z kanceláře":"Nejdřív označ příchod"}
           onToggle={toggleCheckOut}
@@ -10146,11 +10146,11 @@ function AsistentDochazka({ email, attendance, onRefreshAttendance }) {
                         <button key={ds} onClick={()=>toggleDay(ds)}
                           style={{height:38,borderRadius:10,border:"none",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",
                             fontSize:13,fontWeight:isToday?700:isSel?600:400,cursor:"pointer",lineHeight:1,gap:2,transition:"all .15s",
-                            background: attended ? "#DCFCE7" : isSel ? "#16a34a" : isToday ? "#EDE9FD" : isPast ? "rgba(0,0,0,.03)" : "#F9FAFB",
-                            color: attended ? "#16a34a" : isSel ? "#fff" : isPast ? "rgba(0,0,0,.35)" : isToday ? "#7C3AED" : "var(--txt)",
+                            background: attended ? "#DCFCE7" : isSel ? "#16a34a" : isToday ? "rgba(53,24,165,.1)" : isPast ? "rgba(0,0,0,.03)" : "#F9FAFB",
+                            color: attended ? "#16a34a" : isSel ? "#fff" : isPast ? "rgba(0,0,0,.35)" : isToday ? "#4F46E5" : "var(--txt)",
                             boxShadow: isSel ? "0 2px 8px rgba(22,163,74,.3)" : "none",
                             transform: isSel ? "scale(1.04)" : "scale(1)",
-                            outline: isToday&&!isSel ? "2px solid #C4B5FD" : "none",
+                            outline: isToday&&!isSel ? "2px solid #9D93DD" : "none",
                             outlineOffset: -2,
                           }}>
                           <span>{dayNum}</span>
@@ -10502,13 +10502,13 @@ function AsistentPanel({ clients, onPreview }) {
             const done=wd.h>=ASISTENT_DAILY_H;
             return (
               <div key={wd.ds} style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",gap:2}}>
-                <div style={{fontSize:8.5,color:wd.isToday?"#7C3AED":"var(--mut)",fontWeight:wd.isToday?700:400,minHeight:12}}>
+                <div style={{fontSize:8.5,color:wd.isToday?"#4F46E5":"var(--mut)",fontWeight:wd.isToday?700:400,minHeight:12}}>
                   {wd.h>0?fmtH(wd.h):""}
                 </div>
                 <div style={{width:"100%",height:38,display:"flex",flexDirection:"column",justifyContent:"flex-end"}}>
-                  <div style={{width:"100%",height:barH,borderRadius:3,background:done?"#22C55E":wd.h>0?"#A78BFA":"var(--line)"}} />
+                  <div style={{width:"100%",height:barH,borderRadius:3,background:done?"#22C55E":wd.h>0?"#8A7FE0":"var(--line)"}} />
                 </div>
-                <div style={{fontSize:9,color:wd.isToday?"#7C3AED":"var(--mut)",fontWeight:wd.isToday?700:400}}>{wd.name}</div>
+                <div style={{fontSize:9,color:wd.isToday?"#4F46E5":"var(--mut)",fontWeight:wd.isToday?700:400}}>{wd.name}</div>
               </div>
             );
           })}
@@ -10727,7 +10727,7 @@ function AsistentPanel({ clients, onPreview }) {
               ) : (
                 <div style={{display:"flex",flexWrap:"wrap",gap:6}}>
                   {availability.planned_dates.map(d=>(
-                    <div key={d} style={{padding:"7px 13px",background:"#F7F5FF",border:"1px solid #C4B5FD",borderRadius:8,fontSize:12.5,fontWeight:500,color:"var(--ink)"}}>{fmtDate(d)}</div>
+                    <div key={d} style={{padding:"7px 13px",background:"#F7F5FF",border:"1px solid #9D93DD",borderRadius:8,fontSize:12.5,fontWeight:500,color:"var(--ink)"}}>{fmtDate(d)}</div>
                   ))}
                 </div>
               )}
