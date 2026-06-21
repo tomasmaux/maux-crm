@@ -5090,9 +5090,9 @@ function BackupReminderBanner({ onDone }) {
 /* ─── DASHBOARD ─── */
 // Drag-and-drop panel IDs — pořadí a viditelnost karet na dashboardu
 // Verze: zvýšit pokud chceme vynutit reset uloženého pořadí u všech uživatelů
-const PANEL_LAYOUT_VERSION = 8;
+const PANEL_LAYOUT_VERSION = 9;
 const DEFAULT_PANELS = [
-  "finance","uschovy","trigrafy","firma","josef","pulz",
+  "finance","kalendar","uschovy","trigrafy","firma","josef","pulz",
   "chart","klienti","navstevnost","xtb","ziskovost","claude"
 ];
 function loadPanelState() {
@@ -6604,7 +6604,7 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
   // (indigo / violet / modrá), jen v různých odstínech, ať to působí jako jeden
   // souvislý command-center systém, ne duha.
   const PANEL_ACCENTS = {
-    finance: "#3518A5", uschovy: "#7C3AED", trigrafy: "#4338CA", firma: "#4F46E5",
+    finance: "#3518A5", kalendar: "#16A34A", uschovy: "#7C3AED", trigrafy: "#4338CA", firma: "#4F46E5",
     josef: "#6D28D9", pulz: "#4C1D95", chart: "#2563EB", klienti: "#5B21B6",
     navstevnost: "#4338CA", xtb: "#4F46E5", ziskovost: "#6D28D9", claude: "#3518A5",
   };
@@ -7399,6 +7399,11 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
       })()}
       </Panel>
 
+      {/* KALENDÁŘ FAKTUROVÁNÍ — náhled, kolik bylo který den vyfakturováno */}
+      <Panel id="kalendar">
+        <InvoiceCalendar invoices={invoices} compact onOpenFull={() => onNav("fakturace")} />
+      </Panel>
+
       {/* STACKED BAR CHART — PŘÍJEM MAUX LEGAL: zelená faktury + oranžová úschovy */}
       <Panel id="chart">
       <Card style={{padding:"18px 20px 14px"}}>
@@ -7925,6 +7930,102 @@ function WorkEntryForm({ init, clients, onSave, onCancel, saving }) {
   );
 }
 
+// Od kdy Tom vede výkazy čistě přes tento systém (jeho zadání) — dřívější záznamy
+// se do analýzy pracovního rytmu nezapočítávají, ať není zkreslená historickými daty.
+const WORK_RHYTHM_CUTOFF = "2026-06-01";
+
+/* ─── ANALÝZA "KDY VYKAZUJI PRÁCI NEJVÍCE" — den v týdnu + denní doba zadání ─── */
+function WorkRhythmPanel({ entries }) {
+  const fmtH = (h) => `${(h || 0).toLocaleString("cs-CZ", { maximumFractionDigits: 1 })} h`;
+  const DOW_LABELS = ["Po","Út","St","Čt","Pá","So","Ne"];
+  const DOW_FULL = { Po:"v pondělí", Út:"v úterý", St:"ve středu", Čt:"ve čtvrtek", Pá:"v pátek", So:"v sobotu", Ne:"v neděli" };
+
+  const data = useMemo(() => {
+    const post = (entries || []).filter(e => (e.entry_date || "") >= WORK_RHYTHM_CUTOFF);
+    const byDow = DOW_LABELS.map(label => ({ label, hours: 0, count: 0 }));
+    const buckets = [
+      { label: "Noc",          from: 0,  to: 6  },
+      { label: "Ráno",         from: 6,  to: 9  },
+      { label: "Dopoledne",    from: 9,  to: 12 },
+      { label: "Odpoledne",    from: 12, to: 15 },
+      { label: "Večer",        from: 15, to: 19 },
+      { label: "Pozdní večer", from: 19, to: 24 },
+    ].map(b => ({ ...b, hours: 0, count: 0 }));
+
+    post.forEach(e => {
+      const d = new Date((e.entry_date || "") + "T00:00:00");
+      const dow = (d.getDay() + 6) % 7;
+      if (byDow[dow]) { byDow[dow].hours += (e.hours || 0); byDow[dow].count += 1; }
+      if (e.created_at) {
+        const h = new Date(e.created_at).getHours();
+        const b = buckets.find(b => h >= b.from && h < b.to);
+        if (b) { b.hours += (e.hours || 0); b.count += 1; }
+      }
+    });
+
+    const maxDowHours = Math.max(1, ...byDow.map(d => d.hours));
+    const maxBucketCount = Math.max(1, ...buckets.map(b => b.count));
+    const topDow = [...byDow].sort((a, b) => b.hours - a.hours)[0];
+    const topBucket = [...buckets].sort((a, b) => b.count - a.count)[0];
+    return { post, byDow, buckets, maxDowHours, maxBucketCount, topDow, topBucket };
+  }, [entries]);
+
+  if (data.post.length < 3) {
+    return (
+      <div style={{ background: "#F7F5FF", borderRadius: 14, padding: "16px 20px", marginBottom: 20, fontSize: 12.5, color: "var(--mut)", lineHeight: 1.6 }}>
+        Analýza pracovního rytmu se počítá od {fmtDate(WORK_RHYTHM_CUTOFF)} (od kdy vedeš výkazy čistě přes tento systém) — zatím je tu jen {data.post.length} {data.post.length === 1 ? "záznam" : "záznamy"}. Vrať se sem časem, jak přibude dat.
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ background: "#fff", borderRadius: 14, boxShadow: "0 0 0 1px rgba(0,0,0,.06), 0 4px 16px rgba(0,0,0,.04)", padding: "18px 22px", marginBottom: 24 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 16, flexWrap: "wrap", gap: 6 }}>
+        <div style={{ fontSize: 8, letterSpacing: ".24em", textTransform: "uppercase", fontWeight: 700, color: "var(--mut)" }}>KDY VYKAZUJI PRÁCI NEJVÍCE</div>
+        <div style={{ fontSize: 10.5, color: "var(--mut)" }}>od {fmtDate(WORK_RHYTHM_CUTOFF)} · {data.post.length} záznamů</div>
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 28 }}>
+        {/* Podle dne v týdnu */}
+        <div>
+          <div style={{ fontSize: 10, color: "#3518A5", fontWeight: 700, marginBottom: 10, textTransform: "uppercase", letterSpacing: ".06em" }}>Podle dne v týdnu</div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
+            {data.byDow.map(d => (
+              <div key={d.label} style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <span style={{ width: 20, fontSize: 11.5, color: "var(--mut)", fontWeight: d.label === data.topDow.label ? 700 : 400 }}>{d.label}</span>
+                <div style={{ flex: 1, height: 8, borderRadius: 4, background: "rgba(53,24,165,.06)", overflow: "hidden" }}>
+                  <div style={{ height: "100%", width: `${(d.hours / data.maxDowHours) * 100}%`, borderRadius: 4, background: d.label === data.topDow.label ? "#3518A5" : "#9D93DD", transition: "width .5s" }} />
+                </div>
+                <span style={{ fontSize: 11, color: "var(--mut)", minWidth: 60, textAlign: "right" }}>{fmtH(d.hours)} · {d.count}×</span>
+              </div>
+            ))}
+          </div>
+          <div style={{ fontSize: 11, color: "var(--mut)", marginTop: 12, lineHeight: 1.5 }}>
+            Nejvíc pracuješ <strong style={{ color: "#3518A5" }}>{DOW_FULL[data.topDow.label]}</strong> ({fmtH(data.topDow.hours)} celkem).
+          </div>
+        </div>
+        {/* Podle denní doby zadání */}
+        <div>
+          <div style={{ fontSize: 10, color: "#16A34A", fontWeight: 700, marginBottom: 10, textTransform: "uppercase", letterSpacing: ".06em" }}>Podle denní doby (kdy zapisuješ)</div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
+            {data.buckets.map(b => (
+              <div key={b.label} style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <span style={{ width: 84, fontSize: 11.5, color: "var(--mut)", fontWeight: b.label === data.topBucket.label ? 700 : 400 }}>{b.label}</span>
+                <div style={{ flex: 1, height: 8, borderRadius: 4, background: "rgba(22,163,74,.06)", overflow: "hidden" }}>
+                  <div style={{ height: "100%", width: `${(b.count / data.maxBucketCount) * 100}%`, borderRadius: 4, background: b.label === data.topBucket.label ? "#16A34A" : "#86EFAC", transition: "width .5s" }} />
+                </div>
+                <span style={{ fontSize: 11, color: "var(--mut)", minWidth: 30, textAlign: "right" }}>{b.count}×</span>
+              </div>
+            ))}
+          </div>
+          <div style={{ fontSize: 11, color: "var(--mut)", marginTop: 12, lineHeight: 1.5 }}>
+            Nejčastěji zapisuješ výkazy <strong style={{ color: "#16A34A" }}>{data.topBucket.label.toLowerCase()}</strong> ({data.topBucket.count}× z {data.post.length}).
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function WorkEntryList({ entries, clients, invoices, onNew, onEdit, onDelete, onGenerateInvoice, onPreviewInvoice, loading }) {
   const [filterClient, setFilterClient] = useState("");
 
@@ -7975,6 +8076,8 @@ function WorkEntryList({ entries, clients, invoices, onNew, onEdit, onDelete, on
           <div className="s">s nevyfakturovanou prací</div>
         </div>
       </div>
+
+      <WorkRhythmPanel entries={entries} />
 
       <div style={{ display: "flex", gap: 8, marginBottom: 16, alignItems: "center", flexWrap: "wrap" }}>
         <select value={filterClient} onChange={e => setFilterClient(e.target.value)}
@@ -8100,6 +8203,156 @@ function WorkEntryList({ entries, clients, invoices, onNew, onEdit, onDelete, on
         </details>
       )}
     </>
+  );
+}
+
+/* ─── KALENDÁŘ FAKTUROVÁNÍ — měsíční náhled, kolik bylo který den vyfakturováno (zeleně "svítí"), s historií ─── */
+function InvoiceCalendar({ invoices, compact = false, onOpenFull }) {
+  const [monthOffset, setMonthOffset] = useState(0);
+  const [selectedDay, setSelectedDay] = useState(null);
+
+  const base = new Date();
+  const viewDate = new Date(base.getFullYear(), base.getMonth() - monthOffset, 1);
+  const y = viewDate.getFullYear(), m = viewDate.getMonth();
+  const ym = `${y}-${String(m + 1).padStart(2, "0")}`;
+  const todayStr = localDs(new Date());
+  const monthNamesFull = ["leden","únor","březen","duben","květen","červen","červenec","srpen","září","říjen","listopad","prosinec"];
+
+  // Denní součty vyfakturováno (bez DPH, podle issue_date) za zobrazený měsíc
+  const dayTotals = useMemo(() => {
+    const map = {};
+    (invoices || []).forEach(i => {
+      if ((i.issue_date || "").startsWith(ym)) map[i.issue_date] = (map[i.issue_date] || 0) + (i.subtotal || 0);
+    });
+    return map;
+  }, [invoices, ym]);
+
+  const monthTotal = useMemo(() => Object.values(dayTotals).reduce((s, v) => s + v, 0), [dayTotals]);
+  const maxDay = useMemo(() => Math.max(1, ...Object.values(dayTotals)), [dayTotals]);
+
+  // Mřížka Po–Ne
+  const firstOfMonth = new Date(y, m, 1);
+  const daysInMonth = new Date(y, m + 1, 0).getDate();
+  const leadPad = (firstOfMonth.getDay() + 6) % 7;
+  const cells = [];
+  for (let i = 0; i < leadPad; i++) cells.push(null);
+  for (let d = 1; d <= daysInMonth; d++) cells.push(d);
+  while (cells.length % 7 !== 0) cells.push(null);
+  const rows = [];
+  for (let i = 0; i < cells.length; i += 7) rows.push(cells.slice(i, i + 7));
+
+  const cellSize = compact ? 24 : 44;
+  const gap = compact ? 3 : 6;
+
+  const dayInfo = (d) => {
+    const ds = `${ym}-${String(d).padStart(2, "0")}`;
+    const amt = dayTotals[ds] || 0;
+    const intensity = amt > 0 ? Math.min(1, 0.18 + (amt / maxDay) * 0.82) : 0;
+    return { ds, amt, intensity, isToday: ds === todayStr };
+  };
+
+  const selInvoices = selectedDay ? (invoices || []).filter(i => i.issue_date === selectedDay) : [];
+
+  return (
+    <div style={{ background: "#fff", borderRadius: 18, overflow: "hidden", boxShadow: "0 0 0 1px rgba(0,0,0,.06), 0 4px 16px rgba(0,0,0,.04)" }}>
+      {/* Header */}
+      <div style={{ padding: compact ? "14px 16px 10px" : "20px 22px 14px", borderBottom: "1px solid rgba(0,0,0,.05)" }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          <div>
+            {!compact && <div style={{fontSize:8,letterSpacing:".28em",textTransform:"uppercase",fontWeight:700,color:"var(--mut)",marginBottom:4}}>VYFAKTUROVÁNO — DEN PO DNI</div>}
+            <div style={{display:"flex",alignItems:"baseline",gap:7}}>
+              <span style={{fontFamily:"Fraunces,serif",fontWeight:300,fontSize:compact?15:22,color:"var(--ink)",lineHeight:1}}>{monthNamesFull[m]} {y}</span>
+              {monthOffset > 0 && (
+                <span style={{fontSize:9.5,color:"#3518A5",cursor:"pointer",textDecoration:"underline"}} onClick={() => { setMonthOffset(0); setSelectedDay(null); }}>zpět na dnešek</span>
+              )}
+            </div>
+          </div>
+          <div style={{display:"flex",alignItems:"center",gap:2}}>
+            <button onClick={() => { setMonthOffset(o => o + 1); setSelectedDay(null); }}
+              style={{background:"none",border:"none",cursor:"pointer",color:"var(--mut)",fontSize:compact?13:16,padding:"2px 7px",lineHeight:1}}
+              title="Předchozí měsíc">‹</button>
+            <button onClick={() => { setMonthOffset(o => Math.max(0, o - 1)); setSelectedDay(null); }}
+              disabled={monthOffset === 0}
+              style={{background:"none",border:"none",cursor:monthOffset===0?"default":"pointer",color:"var(--mut)",fontSize:compact?13:16,padding:"2px 7px",lineHeight:1,opacity:monthOffset===0?.25:1}}
+              title="Následující měsíc">›</button>
+          </div>
+        </div>
+        <div style={{marginTop:compact?6:10,display:"flex",alignItems:"baseline",gap:6}}>
+          <span style={{fontFamily:"Fraunces,serif",fontWeight:300,fontSize:compact?19:30,color:monthTotal>0?"#16a34a":"var(--mut)",lineHeight:1}}>{fmtKc(monthTotal)}</span>
+          <span style={{fontSize:compact?9.5:11,color:"var(--mut)"}}>za měsíc, bez DPH</span>
+        </div>
+      </div>
+
+      {/* Grid */}
+      <div style={{padding: compact ? "10px 12px 12px" : "14px 18px 18px"}}>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap,marginBottom:gap+2}}>
+          {["Po","Út","St","Čt","Pá","So","Ne"].map(n => (
+            <div key={n} style={{textAlign:"center",fontSize:compact?7:8.5,color:"var(--mut)",fontWeight:700}}>{n}</div>
+          ))}
+        </div>
+        {rows.map((row, ri) => (
+          <div key={ri} style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap,marginBottom:gap}}>
+            {row.map((d, ci) => {
+              if (!d) return <div key={ci} style={{height:cellSize}}/>;
+              const { ds, amt, intensity, isToday } = dayInfo(d);
+              const isSel = selectedDay === ds;
+              return (
+                <button key={ds}
+                  onClick={() => !compact && amt > 0 && setSelectedDay(isSel ? null : ds)}
+                  title={amt > 0 ? `${fmtDate(ds)} — ${fmtKc(amt)}` : fmtDate(ds)}
+                  style={{
+                    height: cellSize, borderRadius: compact ? 6 : 9, border: "none", position:"relative",
+                    display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center",
+                    cursor: (!compact && amt > 0) ? "pointer" : "default",
+                    background: amt > 0
+                      ? `radial-gradient(circle at 50% 28%, rgba(34,197,94,${0.10 + intensity*0.30}) 0%, rgba(34,197,94,${0.03 + intensity*0.08}) 65%, transparent 100%)`
+                      : isToday ? "rgba(53,24,165,.07)" : "#FAFAFA",
+                    boxShadow: amt > 0
+                      ? `0 0 ${4 + intensity*14}px rgba(34,197,94,${0.18*intensity}), inset 0 0 0 1px rgba(34,197,94,${0.12+intensity*0.25})`
+                      : isSel ? "inset 0 0 0 1.5px #3518A5" : "none",
+                    outline: isToday ? "1.5px solid #9D93DD" : "none",
+                    outlineOffset: -1,
+                    transition: "all .15s",
+                  }}>
+                  <span style={{fontSize:compact?9:12,fontWeight:isToday?700:amt>0?600:400,color:amt>0?"#15803d":isToday?"#3518A5":"var(--mut)",lineHeight:1}}>{d}</span>
+                  {amt > 0 && !compact && (
+                    <span style={{fontSize:8.5,fontWeight:600,color:"#16a34a",lineHeight:1,marginTop:2}}>
+                      {amt >= 1000 ? `${(amt/1000).toLocaleString("cs-CZ",{maximumFractionDigits:1})}k` : Math.round(amt)}
+                    </span>
+                  )}
+                  {amt > 0 && compact && (
+                    <span style={{position:"absolute",bottom:2,width:3,height:3,borderRadius:"50%",background:"#16a34a"}}/>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+        ))}
+      </div>
+
+      {/* Detail vybraného dne — jen plná verze */}
+      {!compact && selectedDay && selInvoices.length > 0 && (
+        <div style={{borderTop:"1px solid rgba(0,0,0,.05)",padding:"12px 18px 16px",background:"#F9FFFB"}}>
+          <div style={{fontSize:10,letterSpacing:".08em",color:"#16a34a",fontWeight:700,marginBottom:8,textTransform:"uppercase"}}>
+            {fmtDate(selectedDay)} · {selInvoices.length}× faktura
+          </div>
+          <div style={{display:"flex",flexDirection:"column",gap:5}}>
+            {selInvoices.map(inv => (
+              <div key={inv.id} style={{display:"flex",justifyContent:"space-between",fontSize:12,color:"var(--txt)"}}>
+                <span>{inv.invoice_number || "—"} · {inv.clients?.name || inv.notes?.split(" - ")[0] || "—"}</span>
+                <span style={{fontWeight:600,color:"#16a34a"}}>{fmtKc(inv.subtotal || 0)}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {compact && onOpenFull && (
+        <div style={{padding:"0 16px 12px",textAlign:"right"}}>
+          <span style={{fontSize:10,color:"#16a34a",fontWeight:600,cursor:"pointer"}} onClick={onOpenFull}>Detail v kalendáři →</span>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -8321,6 +8574,11 @@ function InvoiceList({ invoices, clients, workEntries, onOpen, onOpenClient, onT
             {poSplatnosti > 0 ? `${invoices.filter(i => invoiceStatus(i) === "po_splatnosti").length} faktur — nutná akce` : "vše v pořádku"}
           </div>
         </div>
+      </div>
+
+      {/* ── KALENDÁŘ FAKTUROVÁNÍ ── */}
+      <div style={{ marginBottom: 36 }}>
+        <InvoiceCalendar invoices={invoices} />
       </div>
 
       {/* ── FILTRY A HISTORIE ── */}
