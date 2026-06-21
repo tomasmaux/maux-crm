@@ -4654,10 +4654,10 @@ function SporakRingTile({ financeItems, onSaveFinance, invoices, dpfoMonths, loa
   const S_COL = "#3518A5";
 
   const secHdr = (col, text) => (
-    <div style={{ fontSize: 8, letterSpacing: ".18em", color: col, fontWeight: 800, textTransform: "uppercase", opacity: 0.65, marginBottom: 3 }}>{text}</div>
+    <div style={{ fontSize: 9.5, letterSpacing: ".16em", color: col, fontWeight: 800, textTransform: "uppercase", opacity: 0.7, marginBottom: 3 }}>{text}</div>
   );
   const eBtn = (onClick, active, col) => (
-    <button onClick={onClick} style={{ width: 22, height: 22, borderRadius: 6, border: "1px solid var(--line)", background: active ? `${col}18` : "none", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", color: active ? col : "var(--mut)", fontSize: 10, flexShrink: 0 }}>
+    <button onClick={onClick} style={{ width: 24, height: 24, borderRadius: 7, border: "1px solid var(--line)", background: active ? `${col}18` : "none", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", color: active ? col : "var(--mut)", fontSize: 11, flexShrink: 0 }}>
       {active ? "✕" : "✎"}
     </button>
   );
@@ -4668,7 +4668,7 @@ function SporakRingTile({ financeItems, onSaveFinance, invoices, dpfoMonths, loa
       background: "#fff", borderTop: `4px solid ${S_COL}`,
       boxShadow: "0 0 0 1px rgba(0,0,0,.08)",
       display: "flex", flexDirection: "column", alignItems: "center",
-      padding: square ? "20px 18px 14px" : "26px 34px 28px",
+      padding: square ? "22px 22px 18px" : "26px 34px 28px",
       boxSizing: "border-box",
     }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12, width: "100%" }}>
@@ -4687,17 +4687,17 @@ function SporakRingTile({ financeItems, onSaveFinance, invoices, dpfoMonths, loa
       {(() => {
         const totalAll = fullSporSegs.reduce((s, x) => s + x.value, 0) || 1;
         return (
-          <div style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0, width: "100%", gap: square ? 10 : 14 }}>
+          <div style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0, width: "100%", gap: square ? 14 : 14 }}>
             {/* Velké číslo nahoře — bez prstence, žádný "donut", jen čisté maux-glow číslo */}
             <div style={{ textAlign: "center", flexShrink: 0 }}>
-              <div className="maux-num maux-glow" style={{ fontSize: square ? 30 : 40, fontWeight: 600, color: S_COL, lineHeight: 1 }}>
+              <div className="maux-num maux-glow" style={{ fontSize: square ? 32 : 40, fontWeight: 600, color: S_COL, lineHeight: 1 }}>
                 {fmtKc(actualBal)}
               </div>
-              <div style={{ fontSize: square ? 10 : 11, color: "var(--mut)", marginTop: 5 }}>{fmtKc(totalEar)} v obálkách</div>
+              <div style={{ fontSize: square ? 11.5 : 11, color: "var(--mut)", marginTop: 6 }}>{fmtKc(totalEar)} v obálkách</div>
             </div>
 
             {/* Segmentovaná "capsule" lišta poměru — moderní náhrada donutu (2026 fintech trend: Mercury/Ramp/Linear styl) */}
-            <div style={{ flexShrink: 0, width: "100%", height: square ? 12 : 16, borderRadius: 99, background: "rgba(0,0,0,.045)", display: "flex", gap: 2, padding: 2, boxSizing: "border-box" }}>
+            <div style={{ flexShrink: 0, width: "100%", height: square ? 14 : 16, borderRadius: 99, background: "rgba(0,0,0,.045)", display: "flex", gap: 2, padding: 2, boxSizing: "border-box" }}>
               {fullSporSegs.map((s, i) => (
                 <div key={i} title={`${s.label}: ${fmtKc(s.value)}`} style={{
                   width: `${Math.max((s.value / totalAll) * 100, 1.5)}%`,
@@ -4712,15 +4712,15 @@ function SporakRingTile({ financeItems, onSaveFinance, invoices, dpfoMonths, loa
             </div>
 
             {/* Legenda — tečka, název, částka, procento; scrolluje, pokud je víc obálek než se vejde */}
-            <div style={{ flex: 1, minHeight: 0, overflowY: "auto", display: "flex", flexDirection: "column", gap: square ? 5 : 7 }}>
+            <div style={{ flex: 1, minHeight: 0, overflowY: "auto", display: "flex", flexDirection: "column", gap: square ? 9 : 9 }}>
               {fullSporSegs.map((s, i) => {
                 const pct = Math.round((s.value / totalAll) * 100);
                 return (
-                  <div key={i} style={{ display: "flex", alignItems: "center", gap: 7 }}>
-                    <span style={{ width: 7, height: 7, borderRadius: "50%", background: s.color, flexShrink: 0, boxShadow: `0 0 4px ${s.color}88` }} />
-                    <span style={{ flex: 1, fontSize: square ? 10.5 : 12, fontWeight: 600, color: "var(--ink)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.label}</span>
-                    <span className="maux-num" style={{ fontSize: square ? 10.5 : 12, fontWeight: 600, color: "var(--ink)", flexShrink: 0 }}>{fmtKc(s.value)}</span>
-                    <span style={{ fontSize: square ? 9 : 10, color: "var(--mut)", width: 28, textAlign: "right", flexShrink: 0 }}>{pct}%</span>
+                  <div key={i} style={{ display: "flex", alignItems: "center", gap: 9 }}>
+                    <span style={{ width: 8, height: 8, borderRadius: "50%", background: s.color, flexShrink: 0, boxShadow: `0 0 4px ${s.color}88` }} />
+                    <span style={{ flex: 1, fontSize: square ? 13 : 13, fontWeight: 600, color: "var(--ink)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.label}</span>
+                    <span className="maux-num" style={{ fontSize: square ? 13 : 13, fontWeight: 600, color: "var(--ink)", flexShrink: 0 }}>{fmtKc(s.value)}</span>
+                    <span style={{ fontSize: square ? 10.5 : 10.5, color: "var(--mut)", width: 32, textAlign: "right", flexShrink: 0 }}>{pct}%</span>
                   </div>
                 );
               })}
@@ -6562,7 +6562,7 @@ function JosefPanel({ logs, attendance: attendanceProp }) {
 }
 
 
-function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, loanTrackers, loanTransactions, escrows, expenseChecks, onToggleExpenseCheck, onNav, onSaveFinance, onDeleteFinance, onDpfoToggle, onLoanTxAdd, onLoanTxToggle, onLoanTxDelete, onLoanUpdate, assistantLogs=[], assistantAttendance=[], assistantAvailability=null, xtbTranches=[] }) {
+function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, loanTrackers, loanTransactions, escrows, expenseChecks, onToggleExpenseCheck, onNav, onAddWorkEntry, onSaveFinance, onDeleteFinance, onDpfoToggle, onLoanTxAdd, onLoanTxToggle, onLoanTxDelete, onLoanUpdate, assistantLogs=[], assistantAttendance=[], assistantAvailability=null, xtbTranches=[] }) {
   const [escrowAlertDismissed, setEscrowAlertDismissed] = useState(false);
   const [editLayout, setEditLayout] = useState(false);
   const [panelState, setPanelState] = useState(loadPanelState);
@@ -7194,7 +7194,7 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
 
             {/* KALENDÁŘ VÝKAZŮ — náhled, kolik práce (Kč) bylo který den zapsáno */}
             <div style={{aspectRatio:"1", minWidth:0}}>
-              <VykazyCalendar workEntries={workEntries} dense onOpenFull={() => onNav("vykaz")} />
+              <VykazyCalendar workEntries={workEntries} dense onOpenFull={() => onNav("vykaz")} onAddEntry={onAddWorkEntry} />
             </div>
 
             {/* Spořicí účet (čtverec, na celou šířku sloupce) */}
@@ -7715,9 +7715,9 @@ const CZ_MONTHS = ["Leden","Únor","Březen","Duben","Květen","Červen","Červe
 const monthKey = (d) => d ? d.slice(0, 7) : "";
 const monthLabel = (k) => { const [y,m] = k.split("-"); return `${CZ_MONTHS[parseInt(m)-1]} ${y}`; };
 
-function WorkEntryForm({ init, clients, onSave, onCancel, saving }) {
+function WorkEntryForm({ init, prefillDate, clients, onSave, onCancel, saving }) {
   const [d, setD] = useState(() => init || {
-    id: uid(), client_id: "", entry_date: today(),
+    id: uid(), client_id: "", entry_date: prefillDate || today(),
     description: "", hours: "", rate: 2000,
     notary_fee: 0, admin_fee: 0, sig_count: 0,
     real_hours: "", notes: "",
@@ -7771,6 +7771,12 @@ function WorkEntryForm({ init, clients, onSave, onCancel, saving }) {
   return (
     <div className="form" style={{ maxWidth: 680 }}>
       <h2>{init ? "Upravit záznam" : "Nový záznam"}</h2>
+      {!init && prefillDate && (
+        <div style={{ fontSize: 12, color: "#3518A5", fontWeight: 600, marginTop: -8, marginBottom: 14, display: "flex", alignItems: "center", gap: 6 }}>
+          <span style={{ width: 6, height: 6, borderRadius: "50%", background: "#3518A5", boxShadow: "0 0 6px rgba(53,24,165,.6)" }} />
+          Datum z kalendáře: {fmtDate(prefillDate)}
+        </div>
+      )}
       <div className="two">
         <div className="frow" style={{ position: "relative" }}>
           <label>Klient *</label>
@@ -8163,9 +8169,13 @@ function WorkEntryList({ entries, clients, invoices, onNew, onEdit, onDelete, on
 }
 
 /* ─── KALENDÁŘ FAKTUROVÁNÍ — měsíční náhled, kolik bylo který den vyfakturováno (zeleně "svítí"), s historií ─── */
-function VykazyCalendar({ workEntries, dense = false, onOpenFull }) {
+function VykazyCalendar({ workEntries, dense = false, onOpenFull, onAddEntry }) {
   const [monthOffset, setMonthOffset] = useState(0);
   const [selectedDay, setSelectedDay] = useState(null);
+  const [hoverDay, setHoverDay] = useState(null);
+
+  // Indigo phosphor — barva čísel místo zelené, s lehkým "glow" (Tom: "Apple feeling = Maux feeling s indigo")
+  const PHOS = "#5B4FE5";
 
   const base = new Date();
   const viewDate = new Date(base.getFullYear(), base.getMonth() - monthOffset, 1);
@@ -8206,68 +8216,93 @@ function VykazyCalendar({ workEntries, dense = false, onOpenFull }) {
 
   const selEntries = selectedDay ? (workEntries || []).filter(e => e.entry_date === selectedDay) : [];
 
+  // Chytré kliknutí na den (Apple Calendar styl):
+  //  • v "dense" (mini na Dashboardu) → vždy přímo otevři Nový záznam s tím datem
+  //  • v plné verzi: den BEZ výkazu → přímo Nový záznam; den S výkazem → rozbal/zabal detail
+  const handleDayClick = (ds, amt) => {
+    if (dense) { onAddEntry && onAddEntry(ds); return; }
+    if (amt > 0) { setSelectedDay(prev => prev === ds ? null : ds); }
+    else { onAddEntry && onAddEntry(ds); }
+  };
+
+  const circleSize = dense ? 21 : 32;
+
   return (
     <div style={{ background: "#fff", borderRadius: dense ? 3 : 18, overflow: "hidden", height: "100%", display: "flex", flexDirection: "column", boxShadow: "0 0 0 1px rgba(0,0,0,.08)" }}>
       {/* Header */}
-      <div style={{ padding: dense ? "14px 16px 8px" : "20px 22px 14px", borderBottom: "1px solid rgba(0,0,0,.05)", flexShrink: 0 }}>
+      <div style={{ padding: dense ? "16px 18px 10px" : "22px 24px 16px", borderBottom: "1px solid rgba(0,0,0,.05)", flexShrink: 0 }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
           <div>
-            {!dense && <div style={{fontSize:8,letterSpacing:".28em",textTransform:"uppercase",fontWeight:700,color:"var(--mut)",marginBottom:4}}>ZAPSANÁ PRÁCE — DEN PO DNI</div>}
-            <div style={{display:"flex",alignItems:"baseline",gap:7}}>
-              <span style={{fontFamily:"Fraunces,serif",fontWeight:300,fontSize:dense?18:22,color:"var(--ink)",lineHeight:1}}>{monthNamesFull[m]} {y}</span>
+            {!dense && <div style={{fontSize:9,letterSpacing:".26em",textTransform:"uppercase",fontWeight:700,color:"var(--mut)",marginBottom:5}}>ZAPSANÁ PRÁCE — DEN PO DNI</div>}
+            <div style={{display:"flex",alignItems:"baseline",gap:8}}>
+              <span style={{fontFamily:"Fraunces,serif",fontWeight:300,fontSize:dense?20:25,color:"var(--ink)",lineHeight:1}}>{monthNamesFull[m]} {y}</span>
               {monthOffset > 0 && (
-                <span style={{fontSize:9.5,color:"#3518A5",cursor:"pointer",textDecoration:"underline"}} onClick={() => { setMonthOffset(0); setSelectedDay(null); }}>zpět na dnešek</span>
+                <span style={{fontSize:10.5,color:PHOS,cursor:"pointer",textDecoration:"underline"}} onClick={() => { setMonthOffset(0); setSelectedDay(null); }}>zpět na dnešek</span>
               )}
             </div>
           </div>
           <div style={{display:"flex",alignItems:"center",gap:2}}>
             <button onClick={() => { setMonthOffset(o => o + 1); setSelectedDay(null); }}
-              style={{background:"none",border:"none",cursor:"pointer",color:"var(--mut)",fontSize:dense?13:16,padding:"2px 7px",lineHeight:1}}
+              style={{background:"none",border:"none",cursor:"pointer",color:"var(--mut)",fontSize:dense?15:18,padding:"3px 8px",lineHeight:1}}
               title="Předchozí měsíc">‹</button>
             <button onClick={() => { setMonthOffset(o => Math.max(0, o - 1)); setSelectedDay(null); }}
               disabled={monthOffset === 0}
-              style={{background:"none",border:"none",cursor:monthOffset===0?"default":"pointer",color:"var(--mut)",fontSize:dense?13:16,padding:"2px 7px",lineHeight:1,opacity:monthOffset===0?.25:1}}
+              style={{background:"none",border:"none",cursor:monthOffset===0?"default":"pointer",color:"var(--mut)",fontSize:dense?15:18,padding:"3px 8px",lineHeight:1,opacity:monthOffset===0?.25:1}}
               title="Následující měsíc">›</button>
           </div>
         </div>
-        <div style={{marginTop:dense?6:10,display:"flex",alignItems:"baseline",gap:6}}>
-          <span style={{fontFamily:"Fraunces,serif",fontWeight:300,fontSize:dense?24:30,color:monthTotal>0?"#16a34a":"var(--mut)",lineHeight:1}}>{monthTotal>0?"+":""}{fmtKc(monthTotal)}</span>
-          {!dense && <span style={{fontSize:11,color:"var(--mut)"}}>za měsíc, bez DPH</span>}
+        <div style={{marginTop:dense?7:11,display:"flex",alignItems:"baseline",gap:7}}>
+          <span className="maux-num" style={{fontFamily:"Fraunces,serif",fontWeight:300,fontSize:dense?27:34,color:monthTotal>0?PHOS:"var(--mut)",lineHeight:1,textShadow:monthTotal>0?`0 0 14px ${PHOS}33`:"none"}}>{monthTotal>0?"+":""}{fmtKc(monthTotal)}</span>
+          {!dense && <span style={{fontSize:11.5,color:"var(--mut)"}}>za měsíc, bez DPH</span>}
         </div>
       </div>
 
-      {/* Grid */}
-      <div style={{padding: dense ? "8px 10px 10px" : "14px 18px 18px", flex: 1, display: "flex", flexDirection: "column", minHeight: 0}}>
-        <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:dense?2:6,marginBottom:dense?3:8}}>
+      {/* Grid — Apple Calendar styl: žádné krabičky, jen čísla + tenký indigo kruh pro dnešek/výběr */}
+      <div style={{padding: dense ? "10px 12px 10px" : "18px 22px 18px", flex: 1, display: "flex", flexDirection: "column", minHeight: 0}}>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:dense?2:6,marginBottom:dense?5:10}}>
           {["Po","Út","St","Čt","Pá","So","Ne"].map(n => (
-            <div key={n} style={{textAlign:"center",fontSize:dense?8:8.5,color:"var(--mut)",fontWeight:700}}>{n}</div>
+            <div key={n} style={{textAlign:"center",fontSize:dense?9:9.5,color:"var(--mut)",fontWeight:700,letterSpacing:".03em"}}>{n}</div>
           ))}
         </div>
-        <div style={{flex:1, display:"flex", flexDirection:"column", gap:dense?2:6, minHeight:0}}>
+        <div style={{flex:1, display:"flex", flexDirection:"column", gap:dense?1:4, minHeight:0}}>
           {rows.map((row, ri) => (
             <div key={ri} style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:dense?2:6,flex:1}}>
               {row.map((d, ci) => {
                 if (!d) return <div key={ci}/>;
                 const { ds, amt, isToday } = dayInfo(d);
                 const isSel = selectedDay === ds;
+                const isHov = hoverDay === ds;
+                const canAct = dense || amt > 0 || !!onAddEntry;
                 return (
                   <button key={ds}
-                    onClick={() => !dense && amt > 0 && setSelectedDay(isSel ? null : ds)}
-                    title={amt > 0 ? `${fmtDate(ds)} — +${fmtKc(amt)}` : fmtDate(ds)}
+                    onClick={() => canAct && handleDayClick(ds, amt)}
+                    onMouseEnter={() => setHoverDay(ds)}
+                    onMouseLeave={() => setHoverDay(p => p === ds ? null : p)}
+                    title={amt > 0 ? `${fmtDate(ds)} — +${fmtKc(amt)}` : (onAddEntry ? `${fmtDate(ds)} — přidat výkaz` : fmtDate(ds))}
                     style={{
-                      borderRadius: dense ? 4 : 8, border: "none", position:"relative",
-                      display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:1,
-                      cursor: (!dense && amt > 0) ? "pointer" : "default",
-                      background: amt > 0 ? "rgba(34,197,94,.10)" : isToday ? "rgba(53,24,165,.06)" : "#FAFAFA",
-                      boxShadow: isSel ? "inset 0 0 0 1.5px #3518A5" : isToday ? "inset 0 0 0 1.5px #9D93DD" : "none",
-                      padding: dense ? "2px 0" : "4px 0",
+                      border: "none", background: isHov && !dense ? "rgba(91,79,229,.06)" : "none",
+                      borderRadius: 10, position:"relative",
+                      display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:dense?1:3,
+                      cursor: canAct ? "pointer" : "default",
+                      padding: dense ? "2px 0" : "5px 0",
+                      transition:"background .15s",
                     }}>
-                    {amt > 0 && (
-                      <span style={{fontSize:dense?8.5:10,fontWeight:700,color:"#16a34a",lineHeight:1,whiteSpace:"nowrap"}}>
-                        +{fmtKc(amt)}
-                      </span>
-                    )}
-                    <span style={{fontSize:dense?10.5:12,fontWeight:isToday?700:400,color:isToday?"#3518A5":"var(--mut)",lineHeight:1}}>{d}</span>
+                    <span style={{
+                      minHeight: dense?10:14, fontSize:dense?9:12.5, fontWeight:700, letterSpacing:"-.01em",
+                      fontVariantNumeric:"tabular-nums", lineHeight:1, whiteSpace:"nowrap",
+                      color: amt>0 ? PHOS : "transparent",
+                      textShadow: amt>0 ? `0 0 7px ${PHOS}4D` : "none",
+                    }}>
+                      {amt>0 ? `+${fmtKc(amt)}` : "0"}
+                    </span>
+                    <span style={{
+                      width: circleSize, height: circleSize, borderRadius:"50%",
+                      display:"flex", alignItems:"center", justifyContent:"center",
+                      fontSize: dense?11:14.5, fontWeight: isToday?700:500, lineHeight:1,
+                      background: isToday ? "#3518A5" : "transparent",
+                      color: isToday ? "#fff" : "var(--ink)",
+                      boxShadow: isSel && !isToday ? "inset 0 0 0 1.5px " + PHOS : "none",
+                    }}>{d}</span>
                   </button>
                 );
               })}
@@ -8277,25 +8312,35 @@ function VykazyCalendar({ workEntries, dense = false, onOpenFull }) {
       </div>
 
       {/* Detail vybraného dne — jen plná verze */}
-      {!dense && selectedDay && selEntries.length > 0 && (
-        <div style={{borderTop:"1px solid rgba(0,0,0,.05)",padding:"12px 18px 16px",background:"#F9FFFB",flexShrink:0,maxHeight:160,overflowY:"auto"}}>
-          <div style={{fontSize:10,letterSpacing:".08em",color:"#16a34a",fontWeight:700,marginBottom:8,textTransform:"uppercase"}}>
-            {fmtDate(selectedDay)} · {selEntries.length}× výkaz
+      {!dense && selectedDay && (
+        <div style={{borderTop:"1px solid rgba(0,0,0,.05)",padding:"14px 22px 18px",background:"#F8F7FF",flexShrink:0,maxHeight:200,overflowY:"auto"}}>
+          <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:10}}>
+            <div style={{fontSize:10.5,letterSpacing:".08em",color:PHOS,fontWeight:700,textTransform:"uppercase"}}>
+              {fmtDate(selectedDay)}{selEntries.length > 0 ? ` · ${selEntries.length}× výkaz` : ""}
+            </div>
+            {onAddEntry && (
+              <span style={{fontSize:11,color:PHOS,fontWeight:600,cursor:"pointer",display:"flex",alignItems:"center",gap:4}}
+                onClick={() => onAddEntry(selectedDay)}>
+                <span style={{fontSize:14,lineHeight:1}}>+</span> Přidat výkaz
+              </span>
+            )}
           </div>
-          <div style={{display:"flex",flexDirection:"column",gap:5}}>
-            {selEntries.map(e => (
-              <div key={e.id} style={{display:"flex",justifyContent:"space-between",fontSize:12,color:"var(--txt)",gap:8}}>
-                <span style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{e.clients?.name || (e.description || "—").slice(0,40)}</span>
-                <span style={{fontWeight:600,color:"#16a34a",flexShrink:0}}>+{fmtKc(entryAmt(e))}</span>
-              </div>
-            ))}
-          </div>
+          {selEntries.length > 0 && (
+            <div style={{display:"flex",flexDirection:"column",gap:6}}>
+              {selEntries.map(e => (
+                <div key={e.id} style={{display:"flex",justifyContent:"space-between",fontSize:12.5,color:"var(--txt)",gap:8}}>
+                  <span style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{e.clients?.name || (e.description || "—").slice(0,40)}</span>
+                  <span className="maux-num" style={{fontWeight:600,color:PHOS,flexShrink:0}}>+{fmtKc(entryAmt(e))}</span>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
 
       {dense && onOpenFull && (
-        <div style={{padding:"0 10px 8px",textAlign:"right",flexShrink:0}}>
-          <span style={{fontSize:9,color:"#16a34a",fontWeight:600,cursor:"pointer"}} onClick={onOpenFull}>Detail →</span>
+        <div style={{padding:"0 12px 10px",textAlign:"right",flexShrink:0}}>
+          <span style={{fontSize:9.5,color:"#3518A5",fontWeight:600,cursor:"pointer"}} onClick={onOpenFull}>Detail →</span>
         </div>
       )}
     </div>
@@ -8303,7 +8348,7 @@ function VykazyCalendar({ workEntries, dense = false, onOpenFull }) {
 }
 
 /* ─── FAKTURACE ─── */
-function InvoiceList({ invoices, clients, workEntries, onOpen, onOpenClient, onToggleStatus, onGenerateInvoice, onPreviewInvoice, onEditInvoice, onOpenDiscountModal, loading }) {
+function InvoiceList({ invoices, clients, workEntries, onOpen, onOpenClient, onToggleStatus, onGenerateInvoice, onPreviewInvoice, onEditInvoice, onOpenDiscountModal, onAddWorkEntry, loading }) {
   const [search, setSearch] = useState("");
   const [filterStatus, setFilterStatus] = useState("vse");
   const [filterClient, setFilterClient] = useState("");
@@ -8524,7 +8569,7 @@ function InvoiceList({ invoices, clients, workEntries, onOpen, onOpenClient, onT
 
       {/* ── KALENDÁŘ VÝKAZŮ ── */}
       <div style={{ marginBottom: 36 }}>
-        <VykazyCalendar workEntries={workEntries} />
+        <VykazyCalendar workEntries={workEntries} onAddEntry={onAddWorkEntry} />
       </div>
 
       {/* ── FILTRY A HISTORIE ── */}
@@ -11028,6 +11073,9 @@ export default function MauxCRM() {
   const [modHistory, setModHistory] = useState([]);
   const navTo = (k) => { setModHistory(h => [...h, { mod, mode }]); setMod(k); setMode("list"); setSel(null); setEscrowMode("list"); setSelEscrow(null); };
   const goBack = () => { if (mode !== "list" && mode !== "") { setMode("list"); setSel(null); return; } const prev = modHistory[modHistory.length-1]; if (prev) { setModHistory(h => h.slice(0,-1)); setMod(prev.mod); setMode("list"); setSel(null); } };
+  // Chytré kliknutí na den v kalendáři výkazů → přímo otevře "Nový záznam" s předdoplněným datem
+  const [prefillDate, setPrefillDate] = useState(null);
+  const navToNewWorkEntry = (ds) => { setModHistory(h => [...h, { mod, mode }]); setMod("vykaz"); setMode("new"); setSel(null); setEscrowMode("list"); setSelEscrow(null); setPrefillDate(ds); };
   const canGoBack = (mode !== "list" && mode !== "") || modHistory.length > 0;
   const [monthlyGoal, setMonthlyGoal] = useState(() => { try { const v = localStorage.getItem("maux_monthly_goal"); return v ? Number(v) : 0; } catch { return 0; } });
   const [editingGoal, setEditingGoal] = useState(false);
@@ -11175,7 +11223,7 @@ export default function MauxCRM() {
       await upsertWorkEntry(e);
       const updated = await fetchWorkEntries();
       setWorkEntries(updated);
-      setMode("list"); setSel(null);
+      setMode("list"); setSel(null); setPrefillDate(null);
     } catch (err) { alert("Chyba: " + err.message); } finally { setSaving(false); }
   };
   const doDeleteWorkEntry = async (id) => {
@@ -11530,6 +11578,7 @@ export default function MauxCRM() {
               expenseChecks={expenseChecks}
               onToggleExpenseCheck={toggleExpenseCheck}
               onNav={k => navTo(k)}
+              onAddWorkEntry={navToNewWorkEntry}
               assistantLogs={assistantLogs}
               assistantAttendance={assistantAttendance}
               assistantAvailability={assistantAvailability}
@@ -11539,7 +11588,7 @@ export default function MauxCRM() {
           {/* VÝKAZ PRÁCE */}
           {mod === "vykaz" && mode === "list" && (
             <WorkEntryList entries={workEntries} clients={clients} invoices={invoices}
-              onNew={() => setMode("new")}
+              onNew={() => { setPrefillDate(null); setMode("new"); }}
               onEdit={e => { setSel(e.id); setMode("edit"); }}
               onDelete={doDeleteWorkEntry}
               onGenerateInvoice={openIssueModal}
@@ -11547,7 +11596,7 @@ export default function MauxCRM() {
               loading={dataLoading} />
           )}
           {mod === "vykaz" && mode === "new" && (
-            <WorkEntryForm clients={clients} onSave={saveWorkEntry} onCancel={() => setMode("list")} saving={saving} />
+            <WorkEntryForm clients={clients} onSave={saveWorkEntry} onCancel={() => { setMode("list"); setPrefillDate(null); }} saving={saving} prefillDate={prefillDate} />
           )}
           {mod === "vykaz" && mode === "edit" && selWorkEntry && (
             <WorkEntryForm init={selWorkEntry} clients={clients} onSave={saveWorkEntry} onCancel={() => setMode("list")} saving={saving} />
@@ -11569,6 +11618,7 @@ export default function MauxCRM() {
               onPreviewInvoice={openPreviewModal}
               onEditInvoice={openEditInvModal}
               onOpenDiscountModal={openDiscountModal}
+              onAddWorkEntry={navToNewWorkEntry}
               loading={dataLoading}
             />
           )}
