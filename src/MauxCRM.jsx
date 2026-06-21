@@ -7159,8 +7159,8 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
         // je vždy kratší než pravý (Výdaje checklist) a zbytečně tu zůstávalo prázdno.
         const [heroKpiOpen, setHeroKpiOpen] = useState(null);
         const toggleHeroKpi = (k) => setHeroKpiOpen(v => v===k?null:k);
-        const [prijmyOpen, setPrijmyOpen] = useState(false);
-        const [vydajeOpen, setVydajeOpen] = useState(false);
+        const [prijmyOpen, setPrijmyOpen] = useState(true);
+        const [vydajeOpen, setVydajeOpen] = useState(true);
         const isPaid = (id) => !!(expenseChecks||[]).find(c => c.item_id === id && c.paid);
         const all = [...nutne.map(i=>({...i,_c:"#DC2626"})), ...luxus.map(i=>({...i,_c:"#9333EA"}))];
         const paidItems = all.filter(i => isPaid(i.id));
@@ -7194,7 +7194,7 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
 
             {/* KALENDÁŘ VÝKAZŮ — náhled, kolik práce (Kč) bylo který den zapsáno */}
             <div style={{aspectRatio:"1", minWidth:0}}>
-              <VykazyCalendar workEntries={workEntries} dense onOpenFull={() => onNav("vykaz")} onAddEntry={onAddWorkEntry} />
+              <VykazyCalendar workEntries={workEntries} onOpenFull={() => onNav("vykaz")} onAddEntry={onAddWorkEntry} />
             </div>
 
             {/* Spořicí účet (čtverec, na celou šířku sloupce) */}
@@ -7219,7 +7219,7 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
                   <div style={{fontSize:10,letterSpacing:".22em",textTransform:"uppercase",color:"#3518A5",fontWeight:800}}>Bilance příštího měsíce</div>
                 </div>
                 <div className="maux-num maux-glow" style={{
-                  fontSize:52, fontWeight:600,
+                  fontSize:58, fontWeight:800,
                   color: "#3518A5",
                   lineHeight:1,
                 }}>
@@ -7227,7 +7227,7 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
                 </div>
               </div>
 
-              <div style={{flex:1,display:"flex",flexDirection:"column",justifyContent:"center",gap:13,padding:"14px 24px",overflowY:"auto"}}>
+              <div style={{flex:1,display:"flex",flexDirection:"column",justifyContent:"flex-start",gap:13,padding:"20px 24px",overflowY:"auto"}}>
                 <div style={{borderTop:"1px solid rgba(53,24,165,.14)",paddingTop:12}}>
                   <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",cursor:"pointer"}} onClick={()=>setPrijmyOpen(v=>!v)}>
                     <span style={{fontSize:12,letterSpacing:".1em",textTransform:"uppercase",color:"var(--ink)",fontWeight:700}}>Příjmy {prijmyOpen?"▲":"▾"}</span>
@@ -8225,48 +8225,51 @@ function VykazyCalendar({ workEntries, dense = false, onOpenFull, onAddEntry }) 
     else { onAddEntry && onAddEntry(ds); }
   };
 
-  const circleSize = dense ? 21 : 32;
+  const circleSize = dense ? 24 : 42;
 
   return (
     <div style={{ background: "#fff", borderRadius: dense ? 3 : 18, overflow: "hidden", height: "100%", display: "flex", flexDirection: "column", boxShadow: "0 0 0 1px rgba(0,0,0,.08)" }}>
       {/* Header */}
-      <div style={{ padding: dense ? "16px 18px 10px" : "22px 24px 16px", borderBottom: "1px solid rgba(0,0,0,.05)", flexShrink: 0 }}>
+      <div style={{ padding: dense ? "18px 20px 12px" : "26px 30px 18px", borderBottom: "1px solid rgba(0,0,0,.05)", flexShrink: 0 }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
           <div>
             {!dense && <div style={{fontSize:9,letterSpacing:".26em",textTransform:"uppercase",fontWeight:700,color:"var(--mut)",marginBottom:5}}>ZAPSANÁ PRÁCE — DEN PO DNI</div>}
             <div style={{display:"flex",alignItems:"baseline",gap:8}}>
-              <span style={{fontFamily:"Fraunces,serif",fontWeight:300,fontSize:dense?20:25,color:"var(--ink)",lineHeight:1}}>{monthNamesFull[m]} {y}</span>
+              <span style={{fontWeight:600,fontSize:dense?20:26,color:"var(--ink)",lineHeight:1}}>{monthNamesFull[m]} {y}</span>
               {monthOffset > 0 && (
                 <span style={{fontSize:10.5,color:PHOS,cursor:"pointer",textDecoration:"underline"}} onClick={() => { setMonthOffset(0); setSelectedDay(null); }}>zpět na dnešek</span>
               )}
             </div>
           </div>
-          <div style={{display:"flex",alignItems:"center",gap:2}}>
+          <div style={{display:"flex",alignItems:"center",gap:6}}>
+            {onOpenFull && (
+              <span style={{fontSize:11,color:"#3518A5",fontWeight:700,cursor:"pointer",marginRight:4}} onClick={onOpenFull}>Otevřít →</span>
+            )}
             <button onClick={() => { setMonthOffset(o => o + 1); setSelectedDay(null); }}
-              style={{background:"none",border:"none",cursor:"pointer",color:"var(--mut)",fontSize:dense?15:18,padding:"3px 8px",lineHeight:1}}
+              style={{background:"none",border:"none",cursor:"pointer",color:"var(--mut)",fontSize:dense?16:19,padding:"3px 8px",lineHeight:1}}
               title="Předchozí měsíc">‹</button>
             <button onClick={() => { setMonthOffset(o => Math.max(0, o - 1)); setSelectedDay(null); }}
               disabled={monthOffset === 0}
-              style={{background:"none",border:"none",cursor:monthOffset===0?"default":"pointer",color:"var(--mut)",fontSize:dense?15:18,padding:"3px 8px",lineHeight:1,opacity:monthOffset===0?.25:1}}
+              style={{background:"none",border:"none",cursor:monthOffset===0?"default":"pointer",color:"var(--mut)",fontSize:dense?16:19,padding:"3px 8px",lineHeight:1,opacity:monthOffset===0?.25:1}}
               title="Následující měsíc">›</button>
           </div>
         </div>
-        <div style={{marginTop:dense?7:11,display:"flex",alignItems:"baseline",gap:7}}>
-          <span className="maux-num" style={{fontFamily:"Fraunces,serif",fontWeight:300,fontSize:dense?27:34,color:monthTotal>0?PHOS:"var(--mut)",lineHeight:1,textShadow:monthTotal>0?`0 0 14px ${PHOS}33`:"none"}}>{monthTotal>0?"+":""}{fmtKc(monthTotal)}</span>
-          {!dense && <span style={{fontSize:11.5,color:"var(--mut)"}}>za měsíc, bez DPH</span>}
+        <div style={{marginTop:dense?8:13,display:"flex",alignItems:"baseline",gap:8}}>
+          <span className="maux-num" style={{fontSize:dense?32:46,fontWeight:800,letterSpacing:"-.01em",color:monthTotal>0?PHOS:"var(--mut)",lineHeight:1,textShadow:monthTotal>0?`0 0 20px ${PHOS}40`:"none"}}>{monthTotal>0?"+":""}{fmtKc(monthTotal)}</span>
+          {!dense && <span style={{fontSize:12,color:"var(--mut)"}}>za měsíc, bez DPH</span>}
         </div>
       </div>
 
-      {/* Grid — Apple Calendar styl: žádné krabičky, jen čísla + tenký indigo kruh pro dnešek/výběr */}
-      <div style={{padding: dense ? "10px 12px 10px" : "18px 22px 18px", flex: 1, display: "flex", flexDirection: "column", minHeight: 0}}>
-        <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:dense?2:6,marginBottom:dense?5:10}}>
+      {/* Grid — velká čitelná čísla, dny s výkazem mají jemnou indigo "kartu" pod sebou, ať to nepůsobí prázdně */}
+      <div style={{padding: dense ? "12px 14px 12px" : "20px 26px 24px", flex: 1, display: "flex", flexDirection: "column", minHeight: 0}}>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:dense?2:8,marginBottom:dense?6:12}}>
           {["Po","Út","St","Čt","Pá","So","Ne"].map(n => (
-            <div key={n} style={{textAlign:"center",fontSize:dense?9:9.5,color:"var(--mut)",fontWeight:700,letterSpacing:".03em"}}>{n}</div>
+            <div key={n} style={{textAlign:"center",fontSize:dense?9.5:11,color:"var(--mut)",fontWeight:700,letterSpacing:".03em"}}>{n}</div>
           ))}
         </div>
-        <div style={{flex:1, display:"flex", flexDirection:"column", gap:dense?1:4, minHeight:0}}>
+        <div style={{flex:1, display:"flex", flexDirection:"column", gap:dense?2:8, minHeight:0}}>
           {rows.map((row, ri) => (
-            <div key={ri} style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:dense?2:6,flex:1}}>
+            <div key={ri} style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:dense?2:8,flex:1}}>
               {row.map((d, ci) => {
                 if (!d) return <div key={ci}/>;
                 const { ds, amt, isToday } = dayInfo(d);
@@ -8280,25 +8283,26 @@ function VykazyCalendar({ workEntries, dense = false, onOpenFull, onAddEntry }) 
                     onMouseLeave={() => setHoverDay(p => p === ds ? null : p)}
                     title={amt > 0 ? `${fmtDate(ds)} — +${fmtKc(amt)}` : (onAddEntry ? `${fmtDate(ds)} — přidat výkaz` : fmtDate(ds))}
                     style={{
-                      border: "none", background: isHov && !dense ? "rgba(91,79,229,.06)" : "none",
-                      borderRadius: 10, position:"relative",
-                      display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:dense?1:3,
+                      border: "none",
+                      background: amt > 0 ? "rgba(91,79,229,.09)" : (isHov ? "rgba(91,79,229,.06)" : "none"),
+                      borderRadius: dense ? 8 : 14, position:"relative",
+                      display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:dense?1:4,
                       cursor: canAct ? "pointer" : "default",
-                      padding: dense ? "2px 0" : "5px 0",
+                      padding: dense ? "3px 0" : "7px 0",
                       transition:"background .15s",
                     }}>
                     <span style={{
-                      minHeight: dense?10:14, fontSize:dense?9:12.5, fontWeight:700, letterSpacing:"-.01em",
+                      minHeight: dense?11:17, fontSize:dense?9.5:15.5, fontWeight:800, letterSpacing:"-.01em",
                       fontVariantNumeric:"tabular-nums", lineHeight:1, whiteSpace:"nowrap",
                       color: amt>0 ? PHOS : "transparent",
-                      textShadow: amt>0 ? `0 0 7px ${PHOS}4D` : "none",
+                      textShadow: amt>0 ? `0 0 9px ${PHOS}55` : "none",
                     }}>
                       {amt>0 ? `+${fmtKc(amt)}` : "0"}
                     </span>
                     <span style={{
                       width: circleSize, height: circleSize, borderRadius:"50%",
                       display:"flex", alignItems:"center", justifyContent:"center",
-                      fontSize: dense?11:14.5, fontWeight: isToday?700:500, lineHeight:1,
+                      fontSize: dense?11.5:16, fontWeight: isToday?700:500, lineHeight:1,
                       background: isToday ? "#3518A5" : "transparent",
                       color: isToday ? "#fff" : "var(--ink)",
                       boxShadow: isSel && !isToday ? "inset 0 0 0 1.5px " + PHOS : "none",
@@ -8313,24 +8317,24 @@ function VykazyCalendar({ workEntries, dense = false, onOpenFull, onAddEntry }) 
 
       {/* Detail vybraného dne — jen plná verze */}
       {!dense && selectedDay && (
-        <div style={{borderTop:"1px solid rgba(0,0,0,.05)",padding:"14px 22px 18px",background:"#F8F7FF",flexShrink:0,maxHeight:200,overflowY:"auto"}}>
+        <div style={{borderTop:"1px solid rgba(0,0,0,.05)",padding:"14px 26px 20px",background:"#F8F7FF",flexShrink:0,maxHeight:200,overflowY:"auto"}}>
           <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:10}}>
-            <div style={{fontSize:10.5,letterSpacing:".08em",color:PHOS,fontWeight:700,textTransform:"uppercase"}}>
+            <div style={{fontSize:11,letterSpacing:".08em",color:PHOS,fontWeight:700,textTransform:"uppercase"}}>
               {fmtDate(selectedDay)}{selEntries.length > 0 ? ` · ${selEntries.length}× výkaz` : ""}
             </div>
             {onAddEntry && (
-              <span style={{fontSize:11,color:PHOS,fontWeight:600,cursor:"pointer",display:"flex",alignItems:"center",gap:4}}
+              <span style={{fontSize:12,color:PHOS,fontWeight:600,cursor:"pointer",display:"flex",alignItems:"center",gap:4}}
                 onClick={() => onAddEntry(selectedDay)}>
-                <span style={{fontSize:14,lineHeight:1}}>+</span> Přidat výkaz
+                <span style={{fontSize:15,lineHeight:1}}>+</span> Přidat výkaz
               </span>
             )}
           </div>
           {selEntries.length > 0 && (
-            <div style={{display:"flex",flexDirection:"column",gap:6}}>
+            <div style={{display:"flex",flexDirection:"column",gap:7}}>
               {selEntries.map(e => (
-                <div key={e.id} style={{display:"flex",justifyContent:"space-between",fontSize:12.5,color:"var(--txt)",gap:8}}>
+                <div key={e.id} style={{display:"flex",justifyContent:"space-between",fontSize:13.5,color:"var(--txt)",gap:8}}>
                   <span style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{e.clients?.name || (e.description || "—").slice(0,40)}</span>
-                  <span className="maux-num" style={{fontWeight:600,color:PHOS,flexShrink:0}}>+{fmtKc(entryAmt(e))}</span>
+                  <span className="maux-num" style={{fontWeight:700,color:PHOS,flexShrink:0}}>+{fmtKc(entryAmt(e))}</span>
                 </div>
               ))}
             </div>
@@ -8339,8 +8343,8 @@ function VykazyCalendar({ workEntries, dense = false, onOpenFull, onAddEntry }) 
       )}
 
       {dense && onOpenFull && (
-        <div style={{padding:"0 12px 10px",textAlign:"right",flexShrink:0}}>
-          <span style={{fontSize:9.5,color:"#3518A5",fontWeight:600,cursor:"pointer"}} onClick={onOpenFull}>Detail →</span>
+        <div style={{padding:"0 14px 10px",textAlign:"right",flexShrink:0}}>
+          <span style={{fontSize:10,color:"#3518A5",fontWeight:600,cursor:"pointer"}} onClick={onOpenFull}>Detail →</span>
         </div>
       )}
     </div>
