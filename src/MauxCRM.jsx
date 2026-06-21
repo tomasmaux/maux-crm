@@ -7160,6 +7160,7 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
         const [heroKpiOpen, setHeroKpiOpen] = useState(null);
         const toggleHeroKpi = (k) => setHeroKpiOpen(v => v===k?null:k);
         const [prijmyOpen, setPrijmyOpen] = useState(false);
+        const [vydajeOpen, setVydajeOpen] = useState(false);
         const isPaid = (id) => !!(expenseChecks||[]).find(c => c.item_id === id && c.paid);
         const all = [...nutne.map(i=>({...i,_c:"#DC2626"})), ...luxus.map(i=>({...i,_c:"#9333EA"}))];
         const paidItems = all.filter(i => isPaid(i.id));
@@ -7185,111 +7186,28 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
         return (
         <div style={{display:"flex",flexDirection:"column",gap:16}}>
 
-          {/* ── LEVÝ SLOUPEC (kalendář výkazů + Výdaje/Spořák) VEDLE Bilance, roztaženo na stejnou výšku ── */}
+          {/* ── KALENDÁŘ VÝKAZŮ (hlavní prvek, zvětšeno) + BILANCE (2. nejdůležitější, vč. Výdajů) ── */}
           <div style={{display:"flex",gap:16,alignItems:"stretch"}}>
 
-          {/* LEVÝ SLOUPEC — kalendář výkazů nahoře (velký čtverec), pod ním Výdaje + Spořicí účet */}
-          <div style={{flex:1, minWidth:0, display:"flex", flexDirection:"column", gap:16}}>
+          {/* LEVÝ SLOUPEC — kalendář výkazů (velký, +25 % oproti půl-na-půl), pod ním Spořicí účet */}
+          <div style={{flex:5, minWidth:0, display:"flex", flexDirection:"column", gap:16}}>
 
             {/* KALENDÁŘ VÝKAZŮ — náhled, kolik práce (Kč) bylo který den zapsáno */}
             <div style={{aspectRatio:"1", minWidth:0}}>
               <VykazyCalendar workEntries={workEntries} dense onOpenFull={() => onNav("vykaz")} />
             </div>
 
-            <div style={{display:"flex",gap:16}}>
-
-            {/* TILE C — Výdaje měsíčně (čtverec) */}
-            <div style={{
-              flex:1, aspectRatio:"1", minWidth:0,
-              background:"#fff", borderRadius:3, overflow:"hidden",
-              borderTop: "4px solid #5B4FCF",
-              boxShadow:"0 0 0 1px rgba(0,0,0,.08)",
-              display:"flex", flexDirection:"column",
-            }}>
-              <div style={{padding:"22px 24px 0",textAlign:"center"}}>
-                <div style={{display:"flex",alignItems:"center",justifyContent:"center",gap:6,marginBottom:10}}>
-                  <span className="maux-dot" style={{width:6,height:6,background:"#5B4FCF",boxShadow:"0 0 4px rgba(91,79,207,.4)"}} />
-                  <div style={{fontSize:10,letterSpacing:".22em",textTransform:"uppercase",color:"#5B4FCF",fontWeight:800}}>Výdaje měsíčně</div>
-                </div>
-                <div className="maux-num" style={{fontSize:36, fontWeight:600, color:"#3518A5", lineHeight:1}}>
-                  {fmtKc(Math.abs(totalNutne)+josefWage+Math.abs(totalLuxus))}
-                </div>
-                <div style={{height:5,borderRadius:3,background:"rgba(53,24,165,.08)",overflow:"hidden",marginTop:12}}>
-                  <div style={{height:"100%",width:`${pct}%`,borderRadius:3,background:pct===100?"#16A34A":"#3518A5",transition:"width .7s ease"}} />
-                </div>
-                <div style={{fontSize:11,color:"var(--mut)",letterSpacing:".01em",marginTop:6,fontWeight:600}}>
-                  {pct===100?"✓ vše zaplaceno":`zaplaceno ${paidCount}/${all.length}`}
-                </div>
-              </div>
-
-              <div style={{flex:1,overflowY:"auto",padding:"10px 24px 6px",marginTop:4}}>
-                <div style={{fontSize:7,letterSpacing:".28em",textTransform:"uppercase",color:"#3518A5",fontWeight:700,marginBottom:6,opacity:.8}}>Nutné</div>
-                {nutne.map((i,idx) => (
-                  <div key={idx} style={{display:"flex",justifyContent:"space-between",alignItems:"center",fontSize:11.5,color:isPaid(i.id)?"var(--mut)":"var(--txt)",padding:"3px 0",gap:6}}>
-                    <span style={{display:"flex",alignItems:"center",textDecoration:isPaid(i.id)?"line-through":"none",minWidth:0,overflow:"hidden"}}>
-                      <Check item={i} color="#3518A5" /><EditableLabel item={i} onSave={onSaveFinance} />
-                    </span>
-                    <span style={{display:"flex",alignItems:"center",gap:4,flexShrink:0}}>
-                      <span style={{opacity:isPaid(i.id)?.4:1}}><EditableMoney item={i} onSave={onSaveFinance} color="#3518A5" abs /></span>
-                      <button onClick={()=>onDeleteFinance(i.id)} title="Smazat" style={{background:"none",border:"none",color:"var(--mut)",cursor:"pointer",fontSize:10,padding:"0 2px",opacity:.35,lineHeight:1}}>✕</button>
-                    </span>
-                  </div>
-                ))}
-                <AddExpenseRow category="nutne" color="#3518A5" onSaveFinance={onSaveFinance} />
-                {/* Josef Řehák — automatický náklad */}
-                {(() => {
-                  const josefPaid = isPaid("josef_wage");
-                  const handleJosefToggle = () => {
-                    if (!josefPaid) {
-                      if (!window.confirm(`Odeslal jsi mzdu asistentovi? (${josefWage.toLocaleString("cs-CZ")} Kč)`)) return;
-                    }
-                    onToggleExpenseCheck("josef_wage", !josefPaid);
-                  };
-                  return (
-                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",fontSize:11.5,padding:"3px 0",gap:6,opacity:josefPaid?.65:.85,color:josefPaid?"var(--mut)":"var(--txt)",textDecoration:josefPaid?"line-through":"none"}}>
-                    <span style={{display:"flex",alignItems:"center",gap:5,cursor:"pointer"}} onClick={handleJosefToggle}>
-                      <span style={{display:"inline-flex",alignItems:"center",justifyContent:"center",width:13,height:13,borderRadius:3,border:`1.5px solid ${josefPaid?"#16a34a":"#3518A5"}`,background:josefPaid?"#16a34a":"transparent",flexShrink:0,color:"#fff",fontSize:9}}>
-                        {josefPaid?"✓":""}
-                      </span>
-                      <span>Josef Řehák</span>
-                      <span style={{fontSize:8.5,background:"rgba(53,24,165,.08)",color:"var(--ink)",borderRadius:4,padding:"1px 5px",fontWeight:600,letterSpacing:".04em"}}>{JOSEF_WAGE_MANUAL_OVERRIDES[_josefYm] != null ? "ručně" : "auto"} · {_josefYm}</span>
-                    </span>
-                    <span className="maux-num" style={{color:josefPaid?"var(--mut)":"#3518A5",fontSize:11}}>
-                      {josefWage > 0 ? josefWage.toLocaleString("cs-CZ") + " Kč" : "— Kč"}
-                    </span>
-                  </div>
-                  );
-                })()}
-                <div style={{fontSize:7,letterSpacing:".28em",textTransform:"uppercase",color:"#8A7FE0",fontWeight:700,marginTop:10,marginBottom:6,opacity:.8}}>Lusus</div>
-                {luxus.map((i,idx) => (
-                  <div key={idx} style={{display:"flex",justifyContent:"space-between",alignItems:"center",fontSize:11.5,color:isPaid(i.id)?"var(--mut)":"var(--txt)",padding:"3px 0",gap:6}}>
-                    <span style={{display:"flex",alignItems:"center",textDecoration:isPaid(i.id)?"line-through":"none",minWidth:0}}>
-                      <Check item={i} color="#8A7FE0" /><EditableLabel item={i} onSave={onSaveFinance} />
-                    </span>
-                    <span style={{display:"flex",alignItems:"center",gap:4,flexShrink:0}}>
-                      <span style={{opacity:isPaid(i.id)?.4:1}}><EditableMoney item={i} onSave={onSaveFinance} color="#8A7FE0" abs /></span>
-                      <button onClick={()=>onDeleteFinance(i.id)} title="Smazat" style={{background:"none",border:"none",color:"var(--mut)",cursor:"pointer",fontSize:10,padding:"0 2px",opacity:.35,lineHeight:1}}>✕</button>
-                    </span>
-                  </div>
-                ))}
-                <AddExpenseRow category="luxus" color="#8A7FE0" onSaveFinance={onSaveFinance} />
-              </div>
-              <button className="btn gho" style={{fontSize:10.5,margin:"0 24px 14px",opacity:.65,border:"none",borderTop:"1px solid rgba(0,0,0,.06)",borderRadius:0,paddingTop:10}} onClick={()=>onNav("vykaz")}>+ Nový výkaz práce</button>
-            </div>
-
-            {/* TILE B — Spořicí účet (čtverec) */}
-            <div style={{flex:1, aspectRatio:"1", minWidth:0}}>
+            {/* Spořicí účet (čtverec, na celou šířku sloupce) */}
+            <div style={{aspectRatio:"1", minWidth:0}}>
               <SporakRingTile financeItems={financeItems} onSaveFinance={onSaveFinance}
                 invoices={invoices} dpfoMonths={dpfoMonths}
                 loanTransactions={loanTransactions} escrows={escrows} square />
             </div>
-
-            </div>
           </div>
 
-            {/* TILE A — hlavička Příjmy/Bilance/Výdaje, brand indigo, bez levandulové záře — roztaženo na výšku levého sloupce */}
+            {/* BILANCE — 2. nejdůležitější dlaždice po kalendáři, Příjmy i Výdaje pod sebou, roztaženo na výšku levého sloupce */}
             <div style={{
-              flex:1, minWidth:0,
+              flex:3, minWidth:0,
               background:"#fff", borderRadius:3, overflow:"hidden",
               borderTop: "4px solid #3518A5",
               boxShadow:"0 0 0 1px rgba(0,0,0,.08)",
@@ -7309,7 +7227,7 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
                 </div>
               </div>
 
-              <div style={{flex:1,display:"flex",flexDirection:"column",justifyContent:"center",gap:13,padding:"14px 24px"}}>
+              <div style={{flex:1,display:"flex",flexDirection:"column",justifyContent:"center",gap:13,padding:"14px 24px",overflowY:"auto"}}>
                 <div style={{borderTop:"1px solid rgba(53,24,165,.14)",paddingTop:12}}>
                   <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",cursor:"pointer"}} onClick={()=>setPrijmyOpen(v=>!v)}>
                     <span style={{fontSize:12,letterSpacing:".1em",textTransform:"uppercase",color:"var(--ink)",fontWeight:700}}>Příjmy {prijmyOpen?"▲":"▾"}</span>
@@ -7365,93 +7283,76 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
                     </div>
                   )}
                 </div>
-              </div>
-            </div>
 
-            {/* TILE B — Spořicí účet (čtverec, přesunuto z grafů níže) */}
-            <div style={{flex:1, aspectRatio:"1", minWidth:0}}>
-              <SporakRingTile financeItems={financeItems} onSaveFinance={onSaveFinance}
-                invoices={invoices} dpfoMonths={dpfoMonths}
-                loanTransactions={loanTransactions} escrows={escrows} square />
-            </div>
-
-            {/* TILE C — Výdaje měsíčně (čtverec), promováno z bývalého "Zobrazit detail" panelu — Tom: jeden indigo systém, víc odstínů, klid a jistota, žádná samostatná barva navíc */}
-            <div style={{
-              flex:1, aspectRatio:"1", minWidth:0,
-              background:"#fff", borderRadius:3, overflow:"hidden",
-              borderTop: "4px solid #5B4FCF",
-              boxShadow:"0 0 0 1px rgba(0,0,0,.08)",
-              display:"flex", flexDirection:"column",
-            }}>
-              <div style={{padding:"22px 24px 0",textAlign:"center"}}>
-                <div style={{display:"flex",alignItems:"center",justifyContent:"center",gap:6,marginBottom:10}}>
-                  <span className="maux-dot" style={{width:6,height:6,background:"#5B4FCF",boxShadow:"0 0 4px rgba(91,79,207,.4)"}} />
-                  <div style={{fontSize:10,letterSpacing:".22em",textTransform:"uppercase",color:"#5B4FCF",fontWeight:800}}>Výdaje měsíčně</div>
-                </div>
-                <div className="maux-num" style={{fontSize:36, fontWeight:600, color:"#3518A5", lineHeight:1}}>
-                  {fmtKc(Math.abs(totalNutne)+josefWage+Math.abs(totalLuxus))}
-                </div>
-                <div style={{height:5,borderRadius:3,background:"rgba(53,24,165,.08)",overflow:"hidden",marginTop:12}}>
-                  <div style={{height:"100%",width:`${pct}%`,borderRadius:3,background:pct===100?"#16A34A":"#3518A5",transition:"width .7s ease"}} />
-                </div>
-                <div style={{fontSize:11,color:"var(--mut)",letterSpacing:".01em",marginTop:6,fontWeight:600}}>
-                  {pct===100?"✓ vše zaplaceno":`zaplaceno ${paidCount}/${all.length}`}
+                {/* Výdaje — inkorporováno pod Příjmy, stejný styl, Tom: ať je to jedna dlaždice */}
+                <div style={{borderTop:"1px solid rgba(53,24,165,.14)",paddingTop:12}}>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",cursor:"pointer"}} onClick={()=>setVydajeOpen(v=>!v)}>
+                    <span style={{fontSize:12,letterSpacing:".1em",textTransform:"uppercase",color:"var(--ink)",fontWeight:700}}>Výdaje {vydajeOpen?"▲":"▾"}</span>
+                    <span className="maux-num" style={{fontSize:21,fontWeight:600,color:"#3518A5"}}>{fmtKc(Math.abs(totalNutne)+josefWage+Math.abs(totalLuxus))}</span>
+                  </div>
+                  <div style={{height:5,borderRadius:3,background:"rgba(53,24,165,.08)",overflow:"hidden",marginTop:8}}>
+                    <div style={{height:"100%",width:`${pct}%`,borderRadius:3,background:pct===100?"#16A34A":"#3518A5",transition:"width .7s ease"}} />
+                  </div>
+                  <div style={{fontSize:10,color:"var(--mut)",letterSpacing:".01em",marginTop:5,fontWeight:600}}>
+                    {pct===100?"✓ vše zaplaceno":`zaplaceno ${paidCount}/${all.length}`}
+                  </div>
+                  {vydajeOpen && (
+                    <div style={{marginTop:10,display:"flex",flexDirection:"column",gap:2,maxHeight:240,overflowY:"auto"}}>
+                      <div style={{fontSize:7,letterSpacing:".28em",textTransform:"uppercase",color:"#3518A5",fontWeight:700,marginBottom:6,opacity:.8}}>Nutné</div>
+                      {nutne.map((i,idx) => (
+                        <div key={idx} style={{display:"flex",justifyContent:"space-between",alignItems:"center",fontSize:11.5,color:isPaid(i.id)?"var(--mut)":"var(--txt)",padding:"3px 0",gap:6}}>
+                          <span style={{display:"flex",alignItems:"center",textDecoration:isPaid(i.id)?"line-through":"none",minWidth:0,overflow:"hidden"}}>
+                            <Check item={i} color="#3518A5" /><EditableLabel item={i} onSave={onSaveFinance} />
+                          </span>
+                          <span style={{display:"flex",alignItems:"center",gap:4,flexShrink:0}}>
+                            <span style={{opacity:isPaid(i.id)?.4:1}}><EditableMoney item={i} onSave={onSaveFinance} color="#3518A5" abs /></span>
+                            <button onClick={()=>onDeleteFinance(i.id)} title="Smazat" style={{background:"none",border:"none",color:"var(--mut)",cursor:"pointer",fontSize:10,padding:"0 2px",opacity:.35,lineHeight:1}}>✕</button>
+                          </span>
+                        </div>
+                      ))}
+                      <AddExpenseRow category="nutne" color="#3518A5" onSaveFinance={onSaveFinance} />
+                      {/* Josef Řehák — automatický náklad */}
+                      {(() => {
+                        const josefPaid = isPaid("josef_wage");
+                        const handleJosefToggle = () => {
+                          if (!josefPaid) {
+                            if (!window.confirm(`Odeslal jsi mzdu asistentovi? (${josefWage.toLocaleString("cs-CZ")} Kč)`)) return;
+                          }
+                          onToggleExpenseCheck("josef_wage", !josefPaid);
+                        };
+                        return (
+                        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",fontSize:11.5,padding:"3px 0",gap:6,opacity:josefPaid?.65:.85,color:josefPaid?"var(--mut)":"var(--txt)",textDecoration:josefPaid?"line-through":"none"}}>
+                          <span style={{display:"flex",alignItems:"center",gap:5,cursor:"pointer"}} onClick={handleJosefToggle}>
+                            <span style={{display:"inline-flex",alignItems:"center",justifyContent:"center",width:13,height:13,borderRadius:3,border:`1.5px solid ${josefPaid?"#16a34a":"#3518A5"}`,background:josefPaid?"#16a34a":"transparent",flexShrink:0,color:"#fff",fontSize:9}}>
+                              {josefPaid?"✓":""}
+                            </span>
+                            <span>Josef Řehák</span>
+                            <span style={{fontSize:8.5,background:"rgba(53,24,165,.08)",color:"var(--ink)",borderRadius:4,padding:"1px 5px",fontWeight:600,letterSpacing:".04em"}}>{JOSEF_WAGE_MANUAL_OVERRIDES[_josefYm] != null ? "ručně" : "auto"} · {_josefYm}</span>
+                          </span>
+                          <span className="maux-num" style={{color:josefPaid?"var(--mut)":"#3518A5",fontSize:11}}>
+                            {josefWage > 0 ? josefWage.toLocaleString("cs-CZ") + " Kč" : "— Kč"}
+                          </span>
+                        </div>
+                        );
+                      })()}
+                      <div style={{fontSize:7,letterSpacing:".28em",textTransform:"uppercase",color:"#8A7FE0",fontWeight:700,marginTop:10,marginBottom:6,opacity:.8}}>Lusus</div>
+                      {luxus.map((i,idx) => (
+                        <div key={idx} style={{display:"flex",justifyContent:"space-between",alignItems:"center",fontSize:11.5,color:isPaid(i.id)?"var(--mut)":"var(--txt)",padding:"3px 0",gap:6}}>
+                          <span style={{display:"flex",alignItems:"center",textDecoration:isPaid(i.id)?"line-through":"none",minWidth:0}}>
+                            <Check item={i} color="#8A7FE0" /><EditableLabel item={i} onSave={onSaveFinance} />
+                          </span>
+                          <span style={{display:"flex",alignItems:"center",gap:4,flexShrink:0}}>
+                            <span style={{opacity:isPaid(i.id)?.4:1}}><EditableMoney item={i} onSave={onSaveFinance} color="#8A7FE0" abs /></span>
+                            <button onClick={()=>onDeleteFinance(i.id)} title="Smazat" style={{background:"none",border:"none",color:"var(--mut)",cursor:"pointer",fontSize:10,padding:"0 2px",opacity:.35,lineHeight:1}}>✕</button>
+                          </span>
+                        </div>
+                      ))}
+                      <AddExpenseRow category="luxus" color="#8A7FE0" onSaveFinance={onSaveFinance} />
+                      <button className="btn gho" style={{fontSize:10.5,margin:"8px 0 0",opacity:.65,border:"none",borderTop:"1px solid rgba(0,0,0,.06)",borderRadius:0,paddingTop:10}} onClick={()=>onNav("vykaz")}>+ Nový výkaz práce</button>
+                    </div>
+                  )}
                 </div>
               </div>
-
-              <div style={{flex:1,overflowY:"auto",padding:"10px 24px 6px",marginTop:4}}>
-                <div style={{fontSize:7,letterSpacing:".28em",textTransform:"uppercase",color:"#3518A5",fontWeight:700,marginBottom:6,opacity:.8}}>Nutné</div>
-                {nutne.map((i,idx) => (
-                  <div key={idx} style={{display:"flex",justifyContent:"space-between",alignItems:"center",fontSize:11.5,color:isPaid(i.id)?"var(--mut)":"var(--txt)",padding:"3px 0",gap:6}}>
-                    <span style={{display:"flex",alignItems:"center",textDecoration:isPaid(i.id)?"line-through":"none",minWidth:0,overflow:"hidden"}}>
-                      <Check item={i} color="#3518A5" /><EditableLabel item={i} onSave={onSaveFinance} />
-                    </span>
-                    <span style={{display:"flex",alignItems:"center",gap:4,flexShrink:0}}>
-                      <span style={{opacity:isPaid(i.id)?.4:1}}><EditableMoney item={i} onSave={onSaveFinance} color="#3518A5" abs /></span>
-                      <button onClick={()=>onDeleteFinance(i.id)} title="Smazat" style={{background:"none",border:"none",color:"var(--mut)",cursor:"pointer",fontSize:10,padding:"0 2px",opacity:.35,lineHeight:1}}>✕</button>
-                    </span>
-                  </div>
-                ))}
-                <AddExpenseRow category="nutne" color="#3518A5" onSaveFinance={onSaveFinance} />
-                {/* Josef Řehák — automatický náklad */}
-                {(() => {
-                  const josefPaid = isPaid("josef_wage");
-                  const handleJosefToggle = () => {
-                    if (!josefPaid) {
-                      if (!window.confirm(`Odeslal jsi mzdu asistentovi? (${josefWage.toLocaleString("cs-CZ")} Kč)`)) return;
-                    }
-                    onToggleExpenseCheck("josef_wage", !josefPaid);
-                  };
-                  return (
-                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",fontSize:11.5,padding:"3px 0",gap:6,opacity:josefPaid?.65:.85,color:josefPaid?"var(--mut)":"var(--txt)",textDecoration:josefPaid?"line-through":"none"}}>
-                    <span style={{display:"flex",alignItems:"center",gap:5,cursor:"pointer"}} onClick={handleJosefToggle}>
-                      <span style={{display:"inline-flex",alignItems:"center",justifyContent:"center",width:13,height:13,borderRadius:3,border:`1.5px solid ${josefPaid?"#16a34a":"#3518A5"}`,background:josefPaid?"#16a34a":"transparent",flexShrink:0,color:"#fff",fontSize:9}}>
-                        {josefPaid?"✓":""}
-                      </span>
-                      <span>Josef Řehák</span>
-                      <span style={{fontSize:8.5,background:"rgba(53,24,165,.08)",color:"var(--ink)",borderRadius:4,padding:"1px 5px",fontWeight:600,letterSpacing:".04em"}}>{JOSEF_WAGE_MANUAL_OVERRIDES[_josefYm] != null ? "ručně" : "auto"} · {_josefYm}</span>
-                    </span>
-                    <span className="maux-num" style={{color:josefPaid?"var(--mut)":"#3518A5",fontSize:11}}>
-                      {josefWage > 0 ? josefWage.toLocaleString("cs-CZ") + " Kč" : "— Kč"}
-                    </span>
-                  </div>
-                  );
-                })()}
-                <div style={{fontSize:7,letterSpacing:".28em",textTransform:"uppercase",color:"#8A7FE0",fontWeight:700,marginTop:10,marginBottom:6,opacity:.8}}>Lusus</div>
-                {luxus.map((i,idx) => (
-                  <div key={idx} style={{display:"flex",justifyContent:"space-between",alignItems:"center",fontSize:11.5,color:isPaid(i.id)?"var(--mut)":"var(--txt)",padding:"3px 0",gap:6}}>
-                    <span style={{display:"flex",alignItems:"center",textDecoration:isPaid(i.id)?"line-through":"none",minWidth:0}}>
-                      <Check item={i} color="#8A7FE0" /><EditableLabel item={i} onSave={onSaveFinance} />
-                    </span>
-                    <span style={{display:"flex",alignItems:"center",gap:4,flexShrink:0}}>
-                      <span style={{opacity:isPaid(i.id)?.4:1}}><EditableMoney item={i} onSave={onSaveFinance} color="#8A7FE0" abs /></span>
-                      <button onClick={()=>onDeleteFinance(i.id)} title="Smazat" style={{background:"none",border:"none",color:"var(--mut)",cursor:"pointer",fontSize:10,padding:"0 2px",opacity:.35,lineHeight:1}}>✕</button>
-                    </span>
-                  </div>
-                ))}
-                <AddExpenseRow category="luxus" color="#8A7FE0" onSaveFinance={onSaveFinance} />
-              </div>
-              <button className="btn gho" style={{fontSize:10.5,margin:"0 24px 14px",opacity:.65,border:"none",borderTop:"1px solid rgba(0,0,0,.06)",borderRadius:0,paddingTop:10}} onClick={()=>onNav("vykaz")}>+ Nový výkaz práce</button>
             </div>
           </div>
         </div>
@@ -8313,7 +8214,7 @@ function VykazyCalendar({ workEntries, dense = false, onOpenFull }) {
           <div>
             {!dense && <div style={{fontSize:8,letterSpacing:".28em",textTransform:"uppercase",fontWeight:700,color:"var(--mut)",marginBottom:4}}>ZAPSANÁ PRÁCE — DEN PO DNI</div>}
             <div style={{display:"flex",alignItems:"baseline",gap:7}}>
-              <span style={{fontFamily:"Fraunces,serif",fontWeight:300,fontSize:dense?15:22,color:"var(--ink)",lineHeight:1}}>{monthNamesFull[m]} {y}</span>
+              <span style={{fontFamily:"Fraunces,serif",fontWeight:300,fontSize:dense?18:22,color:"var(--ink)",lineHeight:1}}>{monthNamesFull[m]} {y}</span>
               {monthOffset > 0 && (
                 <span style={{fontSize:9.5,color:"#3518A5",cursor:"pointer",textDecoration:"underline"}} onClick={() => { setMonthOffset(0); setSelectedDay(null); }}>zpět na dnešek</span>
               )}
@@ -8330,7 +8231,7 @@ function VykazyCalendar({ workEntries, dense = false, onOpenFull }) {
           </div>
         </div>
         <div style={{marginTop:dense?6:10,display:"flex",alignItems:"baseline",gap:6}}>
-          <span style={{fontFamily:"Fraunces,serif",fontWeight:300,fontSize:dense?19:30,color:monthTotal>0?"#16a34a":"var(--mut)",lineHeight:1}}>{monthTotal>0?"+":""}{fmtKc(monthTotal)}</span>
+          <span style={{fontFamily:"Fraunces,serif",fontWeight:300,fontSize:dense?24:30,color:monthTotal>0?"#16a34a":"var(--mut)",lineHeight:1}}>{monthTotal>0?"+":""}{fmtKc(monthTotal)}</span>
           {!dense && <span style={{fontSize:11,color:"var(--mut)"}}>za měsíc, bez DPH</span>}
         </div>
       </div>
@@ -8339,7 +8240,7 @@ function VykazyCalendar({ workEntries, dense = false, onOpenFull }) {
       <div style={{padding: dense ? "8px 10px 10px" : "14px 18px 18px", flex: 1, display: "flex", flexDirection: "column", minHeight: 0}}>
         <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:dense?2:6,marginBottom:dense?3:8}}>
           {["Po","Út","St","Čt","Pá","So","Ne"].map(n => (
-            <div key={n} style={{textAlign:"center",fontSize:dense?6.5:8.5,color:"var(--mut)",fontWeight:700}}>{n}</div>
+            <div key={n} style={{textAlign:"center",fontSize:dense?8:8.5,color:"var(--mut)",fontWeight:700}}>{n}</div>
           ))}
         </div>
         <div style={{flex:1, display:"flex", flexDirection:"column", gap:dense?2:6, minHeight:0}}>
@@ -8362,11 +8263,11 @@ function VykazyCalendar({ workEntries, dense = false, onOpenFull }) {
                       padding: dense ? "2px 0" : "4px 0",
                     }}>
                     {amt > 0 && (
-                      <span style={{fontSize:dense?6.5:10,fontWeight:700,color:"#16a34a",lineHeight:1,whiteSpace:"nowrap"}}>
+                      <span style={{fontSize:dense?8.5:10,fontWeight:700,color:"#16a34a",lineHeight:1,whiteSpace:"nowrap"}}>
                         +{fmtKc(amt)}
                       </span>
                     )}
-                    <span style={{fontSize:dense?8.5:12,fontWeight:isToday?700:400,color:isToday?"#3518A5":"var(--mut)",lineHeight:1}}>{d}</span>
+                    <span style={{fontSize:dense?10.5:12,fontWeight:isToday?700:400,color:isToday?"#3518A5":"var(--mut)",lineHeight:1}}>{d}</span>
                   </button>
                 );
               })}
