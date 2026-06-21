@@ -4763,20 +4763,23 @@ function TriGrafyPanel({ financeItems, onSaveFinance, invoices, dpfoMonths, loan
     ...(volné > 0 ? [{ label: "Volné", value: volné, color: "rgba(83,74,183,0.1)" }] : []),
   ];
 
+  // ── REZERVA (počítáno už zde, protože teď vstupuje i do Majetku — Tom: "majetek = akcie, stavební spoření a zatřetí firemní rezerva, kterou vlastním") ──
+  const firmaRez   = actualBal - totalEar;
+
   // ── MAJETEK ──
   const akcieItem  = (financeItems||[]).find(i => i.id === "fi_ma_01");
   const stavItem   = (financeItems||[]).find(i => i.id === "fi_ma_02");
   const extraMaj   = (financeItems||[]).filter(i => i.category === "majetek" && !["fi_ma_01","fi_ma_02","fi_ma_03"].includes(i.id));
-  const MAJ_C      = ["#8A6D1B","#B8860B","#D4AF37","#C9A227","#A6790A","#E2C275"];
+  // Modernější, rozlišitelná paleta (místo monotónních odstínů hnědo-zlaté)
+  const MAJ_C      = ["#4F46E5","#0D9488","#B8923D","#DB2777","#0891B2","#7C3AED"];
   const allMajSegs = [
     akcieItem && { item: akcieItem, label: "Akcie / ETF",      value: akcieItem.amount||0, color: MAJ_C[0] },
     stavItem  && { item: stavItem,  label: "Stavební spoření", value: stavItem.amount||0,  color: MAJ_C[1] },
-    ...extraMaj.map((it,idx) => ({ item: it, label: it.label, value: it.amount||0, color: MAJ_C[(2+idx)%MAJ_C.length] })),
+    ...(firmaRez > 0 ? [{ label: "Firemní rezerva", value: firmaRez, color: MAJ_C[2], auto: true }] : []),
+    ...extraMaj.map((it,idx) => ({ item: it, label: it.label, value: it.amount||0, color: MAJ_C[(3+idx)%MAJ_C.length] })),
   ].filter(Boolean).filter(s => s.value > 0 || s.item);
   const totalMaj   = allMajSegs.reduce((s,a) => s+a.value, 0);
 
-  // ── REZERVA ──
-  const firmaRez   = actualBal - totalEar;
   const planKapItem = (financeItems||[]).find(i => i.id === "fi_plan_kapital");
   const planKap    = planKapItem?.amount || 130000;
   const rezSegs    = firmaRez >= 0
@@ -4864,7 +4867,12 @@ function TriGrafyPanel({ financeItems, onSaveFinance, invoices, dpfoMonths, loan
                 <div key={i} style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 7 }}>
                   <span style={{ width: 8, height: 8, borderRadius: "50%", background: seg.color, flexShrink: 0 }} />
                   <span style={{ flex: 1, fontSize: 12, color: "var(--ink)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{seg.label}</span>
-                  {editId === seg.item?.id ? (
+                  {seg.auto ? (
+                    <>
+                      <span style={{ fontSize: 13, fontWeight: 500, color: "var(--ink)", whiteSpace: "nowrap" }}>{fmtKc(seg.value)}</span>
+                      <span title="Počítá se automaticky ze Spořicího účtu (zůstatek minus obálky) — uprav na kartě Spořák." style={{ fontSize: 9, color: "var(--mut)", fontStyle: "italic", padding: "0 2px", flexShrink: 0 }}>auto</span>
+                    </>
+                  ) : editId === seg.item?.id ? (
                     <>
                       <input type="number" value={editVal} autoFocus onChange={e => setEditVal(Number(e.target.value))}
                         onKeyDown={e => { if (e.key === "Enter") saveEdit(seg.item); if (e.key === "Escape") setEditId(null); }}
@@ -4895,8 +4903,15 @@ function TriGrafyPanel({ financeItems, onSaveFinance, invoices, dpfoMonths, loan
               )}
             </div>
           ) : (
-            <InteractiveRing segments={majGlassSegs} size={170} thickness={20} glowColor={M_COL}
-              centerTop="Majetek" centerMain={fmtKc(totalMaj)} />
+            <>
+              <InteractiveRing segments={majGlassSegs} size={170} thickness={20} glowColor={M_COL}
+                centerTop="Majetek" centerMain={fmtKc(totalMaj)} />
+              {firmaRez > 0 && (
+                <div style={{ fontSize: 9.5, color: "var(--mut)", textAlign: "center", marginTop: 10, fontStyle: "italic" }}>
+                  v.č. firemní rezervy {fmtKc(firmaRez)} (volné peníze na spořáku nad rámec obálek)
+                </div>
+              )}
+            </>
           )}
         </div>
 
@@ -7300,24 +7315,24 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
                 loanTransactions={loanTransactions} escrows={escrows} square />
             </div>
 
-            {/* TILE C — Výdaje měsíčně (čtverec), promováno z bývalého "Zobrazit detail" panelu — Tom: ať je vidět hned, vedle Bilance a Spořáku */}
+            {/* TILE C — Výdaje měsíčně (čtverec), promováno z bývalého "Zobrazit detail" panelu — Tom: ať je vidět hned, vedle Bilance a Spořáku, ale decentně (sekundární priorita, žádná červená/negativní asociace) */}
             <div style={{
               flex:1, aspectRatio:"1", minWidth:0,
               background:"#fff", borderRadius:3, overflow:"hidden",
-              borderTop: "4px solid #DC2626",
+              borderTop: "4px solid #64748B",
               boxShadow:"0 0 0 1px rgba(0,0,0,.08)",
               display:"flex", flexDirection:"column",
             }}>
               <div style={{padding:"22px 24px 0",textAlign:"center"}}>
                 <div style={{display:"flex",alignItems:"center",justifyContent:"center",gap:6,marginBottom:10}}>
-                  <span className="maux-dot" style={{width:6,height:6,background:"#DC2626",boxShadow:"0 0 4px rgba(220,38,38,.5)"}} />
-                  <div style={{fontSize:10,letterSpacing:".22em",textTransform:"uppercase",color:"#DC2626",fontWeight:800}}>Výdaje měsíčně</div>
+                  <span className="maux-dot" style={{width:6,height:6,background:"#64748B",boxShadow:"0 0 4px rgba(100,116,139,.4)"}} />
+                  <div style={{fontSize:10,letterSpacing:".22em",textTransform:"uppercase",color:"#64748B",fontWeight:800}}>Výdaje měsíčně</div>
                 </div>
-                <div className="maux-num maux-glow" style={{fontSize:40, fontWeight:600, color:"#DC2626", lineHeight:1}}>
+                <div className="maux-num" style={{fontSize:36, fontWeight:600, color:"#475569", lineHeight:1}}>
                   {fmtKc(Math.abs(totalNutne)+josefWage+Math.abs(totalLuxus))}
                 </div>
-                <div style={{height:5,borderRadius:3,background:"rgba(220,38,38,.1)",overflow:"hidden",marginTop:12}}>
-                  <div style={{height:"100%",width:`${pct}%`,borderRadius:3,background:pct===100?"#10B981":"#DC2626",transition:"width .7s ease"}} />
+                <div style={{height:5,borderRadius:3,background:"rgba(100,116,139,.12)",overflow:"hidden",marginTop:12}}>
+                  <div style={{height:"100%",width:`${pct}%`,borderRadius:3,background:pct===100?"#10B981":"#94A3B8",transition:"width .7s ease"}} />
                 </div>
                 <div style={{fontSize:11,color:"var(--mut)",letterSpacing:".01em",marginTop:6,fontWeight:600}}>
                   {pct===100?"✓ vše zaplaceno":`zaplaceno ${paidCount}/${all.length}`}
@@ -7325,19 +7340,19 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
               </div>
 
               <div style={{flex:1,overflowY:"auto",padding:"10px 24px 6px",marginTop:4}}>
-                <div style={{fontSize:7,letterSpacing:".28em",textTransform:"uppercase",color:"#DC2626",fontWeight:700,marginBottom:6,opacity:.8}}>Nutné</div>
+                <div style={{fontSize:7,letterSpacing:".28em",textTransform:"uppercase",color:"#92400E",fontWeight:700,marginBottom:6,opacity:.8}}>Nutné</div>
                 {nutne.map((i,idx) => (
                   <div key={idx} style={{display:"flex",justifyContent:"space-between",alignItems:"center",fontSize:11.5,color:isPaid(i.id)?"var(--mut)":"var(--txt)",padding:"3px 0",gap:6}}>
                     <span style={{display:"flex",alignItems:"center",textDecoration:isPaid(i.id)?"line-through":"none",minWidth:0,overflow:"hidden"}}>
-                      <Check item={i} color="#DC2626" /><EditableLabel item={i} onSave={onSaveFinance} />
+                      <Check item={i} color="#92400E" /><EditableLabel item={i} onSave={onSaveFinance} />
                     </span>
                     <span style={{display:"flex",alignItems:"center",gap:4,flexShrink:0}}>
-                      <span style={{opacity:isPaid(i.id)?.4:1}}><EditableMoney item={i} onSave={onSaveFinance} color="#DC2626" abs /></span>
+                      <span style={{opacity:isPaid(i.id)?.4:1}}><EditableMoney item={i} onSave={onSaveFinance} color="#92400E" abs /></span>
                       <button onClick={()=>onDeleteFinance(i.id)} title="Smazat" style={{background:"none",border:"none",color:"var(--mut)",cursor:"pointer",fontSize:10,padding:"0 2px",opacity:.35,lineHeight:1}}>✕</button>
                     </span>
                   </div>
                 ))}
-                <AddExpenseRow category="nutne" color="#DC2626" onSaveFinance={onSaveFinance} />
+                <AddExpenseRow category="nutne" color="#92400E" onSaveFinance={onSaveFinance} />
                 {/* Josef Řehák — automatický náklad */}
                 {(() => {
                   const josefPaid = isPaid("josef_wage");
@@ -7350,13 +7365,13 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
                   return (
                   <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",fontSize:11.5,padding:"3px 0",gap:6,opacity:josefPaid?.65:.85,color:josefPaid?"var(--mut)":"var(--txt)",textDecoration:josefPaid?"line-through":"none"}}>
                     <span style={{display:"flex",alignItems:"center",gap:5,cursor:"pointer"}} onClick={handleJosefToggle}>
-                      <span style={{display:"inline-flex",alignItems:"center",justifyContent:"center",width:13,height:13,borderRadius:3,border:`1.5px solid ${josefPaid?"#16a34a":"#DC2626"}`,background:josefPaid?"#16a34a":"transparent",flexShrink:0,color:"#fff",fontSize:9}}>
+                      <span style={{display:"inline-flex",alignItems:"center",justifyContent:"center",width:13,height:13,borderRadius:3,border:`1.5px solid ${josefPaid?"#16a34a":"#92400E"}`,background:josefPaid?"#16a34a":"transparent",flexShrink:0,color:"#fff",fontSize:9}}>
                         {josefPaid?"✓":""}
                       </span>
                       <span>Josef Řehák</span>
                       <span style={{fontSize:8.5,background:"rgba(53,24,165,.08)",color:"var(--ink)",borderRadius:4,padding:"1px 5px",fontWeight:600,letterSpacing:".04em"}}>{JOSEF_WAGE_MANUAL_OVERRIDES[_josefYm] != null ? "ručně" : "auto"} · {_josefYm}</span>
                     </span>
-                    <span className="maux-num" style={{color:josefPaid?"var(--mut)":"#DC2626",fontSize:11}}>
+                    <span className="maux-num" style={{color:josefPaid?"var(--mut)":"#92400E",fontSize:11}}>
                       {josefWage > 0 ? josefWage.toLocaleString("cs-CZ") + " Kč" : "— Kč"}
                     </span>
                   </div>
