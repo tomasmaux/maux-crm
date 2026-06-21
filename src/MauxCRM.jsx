@@ -4684,10 +4684,50 @@ function SporakRingTile({ financeItems, onSaveFinance, invoices, dpfoMonths, loa
           <button onClick={() => setEditBal(false)} style={{ background: "none", border: "1px solid rgba(0,0,0,0.12)", borderRadius: 8, padding: "5px 9px", cursor: "pointer", color: "var(--mut)" }}>✕</button>
         </div>
       )}
-      <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", minHeight: 0 }}>
-        <InteractiveRing segments={fullSporSegs} size={square ? 168 : 210} thickness={square ? 19 : 24} glowColor={S_COL}
-          centerTop="Celkem" centerMain={fmtKc(actualBal)} centerSub={`${fmtKc(totalEar)} v obálkách`} />
-      </div>
+      {(() => {
+        const totalAll = fullSporSegs.reduce((s, x) => s + x.value, 0) || 1;
+        return (
+          <div style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0, width: "100%", gap: square ? 10 : 14 }}>
+            {/* Velké číslo nahoře — bez prstence, žádný "donut", jen čisté maux-glow číslo */}
+            <div style={{ textAlign: "center", flexShrink: 0 }}>
+              <div className="maux-num maux-glow" style={{ fontSize: square ? 30 : 40, fontWeight: 600, color: S_COL, lineHeight: 1 }}>
+                {fmtKc(actualBal)}
+              </div>
+              <div style={{ fontSize: square ? 10 : 11, color: "var(--mut)", marginTop: 5 }}>{fmtKc(totalEar)} v obálkách</div>
+            </div>
+
+            {/* Segmentovaná "capsule" lišta poměru — moderní náhrada donutu (2026 fintech trend: Mercury/Ramp/Linear styl) */}
+            <div style={{ flexShrink: 0, width: "100%", height: square ? 12 : 16, borderRadius: 99, background: "rgba(0,0,0,.045)", display: "flex", gap: 2, padding: 2, boxSizing: "border-box" }}>
+              {fullSporSegs.map((s, i) => (
+                <div key={i} title={`${s.label}: ${fmtKc(s.value)}`} style={{
+                  width: `${Math.max((s.value / totalAll) * 100, 1.5)}%`,
+                  minWidth: 4, borderRadius: 99, position: "relative", overflow: "hidden",
+                  background: s.color,
+                  transition: "width .6s ease",
+                  boxShadow: `0 0 8px ${s.color}55`,
+                }}>
+                  <div style={{ position: "absolute", inset: 0, background: "linear-gradient(180deg, rgba(255,255,255,.4), rgba(255,255,255,0) 60%)" }} />
+                </div>
+              ))}
+            </div>
+
+            {/* Legenda — tečka, název, částka, procento; scrolluje, pokud je víc obálek než se vejde */}
+            <div style={{ flex: 1, minHeight: 0, overflowY: "auto", display: "flex", flexDirection: "column", gap: square ? 5 : 7 }}>
+              {fullSporSegs.map((s, i) => {
+                const pct = Math.round((s.value / totalAll) * 100);
+                return (
+                  <div key={i} style={{ display: "flex", alignItems: "center", gap: 7 }}>
+                    <span style={{ width: 7, height: 7, borderRadius: "50%", background: s.color, flexShrink: 0, boxShadow: `0 0 4px ${s.color}88` }} />
+                    <span style={{ flex: 1, fontSize: square ? 10.5 : 12, fontWeight: 600, color: "var(--ink)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.label}</span>
+                    <span className="maux-num" style={{ fontSize: square ? 10.5 : 12, fontWeight: 600, color: "var(--ink)", flexShrink: 0 }}>{fmtKc(s.value)}</span>
+                    <span style={{ fontSize: square ? 9 : 10, color: "var(--mut)", width: 28, textAlign: "right", flexShrink: 0 }}>{pct}%</span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }
@@ -5559,6 +5599,8 @@ function AkcieModule({ xtbTranches = [], onTrancheSave, onTrancheDelete, xtbTitl
   );
   const hasTranches = sortedTranches.length > 0;
   const netDeposited = sortedTranches.reduce((s, t) => s + (t.type === "výběr" ? -(t.amount || 0) : (t.amount || 0)), 0);
+  const grossDeposited = sortedTranches.reduce((s, t) => s + (t.type === "výběr" ? 0 : (t.amount || 0)), 0);
+  const grossWithdrawn = sortedTranches.reduce((s, t) => s + (t.type === "výběr" ? (t.amount || 0) : 0), 0);
 
   const saveTranche = async () => {
     const amt = Number(String(newTranche.amount).replace(/\s/g, "").replace(",", "."));
@@ -5648,6 +5690,41 @@ function AkcieModule({ xtbTranches = [], onTrancheSave, onTrancheDelete, xtbTitl
   }, [sortedClosedTrades]);
   const firstTimeTestDate = earliestOpenTime ? new Date(earliestOpenTime.getTime() + TIME_TEST_DAYS * 86400000) : null;
 
+  // ── Zhodnocení v čase — YTD / posledních 12 měsíců / od založení, jak se "kamarádi porovnávají" ──
+  // Money-weighted aproximace: realizovaný zisk za dané okno ÷ čisté zdroje vložené k začátku okna.
+  // 3/5letá historie není možná dřív, než ji appka skutečně naakumuluje (první vklad 2025-04-17).
+  const perfPeriods = useMemo(() => {
+    const now = new Date();
+    const profitSince = (from) => sortedClosedTrades.reduce((s, t) => {
+      if (!t.close_time) return s;
+      return new Date(t.close_time) >= from ? s + (t.profit || 0) : s;
+    }, 0);
+    const netDepositedAsOf = (d) => sortedTranches.reduce((s, t) => {
+      if (!t.tranche_date || new Date(t.tranche_date) >= d) return s;
+      return s + (t.type === "výběr" ? -(t.amount || 0) : (t.amount || 0));
+    }, 0);
+    const accountStart = sortedTranches.length ? new Date(sortedTranches[0].tranche_date) : null;
+    const ageDays = accountStart ? (now - accountStart) / 86400000 : 0;
+
+    const startOfYear = new Date(now.getFullYear(), 0, 1);
+    const oneYearAgo = new Date(now.getTime() - 365 * 86400000);
+
+    const ytdProfit = profitSince(startOfYear);
+    const ytdBase = netDepositedAsOf(startOfYear);
+    const m12Profit = profitSince(oneYearAgo);
+    const m12Base = netDepositedAsOf(oneYearAgo);
+
+    return {
+      ytd: { profit: ytdProfit, base: ytdBase, pct: ytdBase > 0 ? (ytdProfit / ytdBase) * 100 : null },
+      m12: { profit: m12Profit, base: m12Base, pct: m12Base > 0 ? (m12Profit / m12Base) * 100 : null },
+      accountStart, ageDays,
+      y3available: ageDays >= 3 * 365,
+      y5available: ageDays >= 5 * 365,
+      y3date: accountStart ? new Date(accountStart.getTime() + 3 * 365 * 86400000) : null,
+      y5date: accountStart ? new Date(accountStart.getTime() + 5 * 365 * 86400000) : null,
+    };
+  }, [sortedClosedTrades, sortedTranches]);
+
   // Termíny DPFO za rok 2025 (podává se v roce 2026) — pevně dané GFŘ, nemění se appkou.
   const DPFO_DEADLINES = [
     { label: "Papírově", date: "2026-04-01" },
@@ -5673,38 +5750,99 @@ function AkcieModule({ xtbTranches = [], onTrancheSave, onTrancheDelete, xtbTitl
           <span className="maux-dot" style={{ width: 6, height: 6, background: "#4F46E5", boxShadow: "0 0 4px rgba(79,70,229,.55)" }} />
           <div style={{ ...label }}>Portfolio — souhrn</div>
         </div>
+        {/* Zdroje — kolik bylo kdy vloženo/vybráno, rozepsáno (ne jen čisté číslo) */}
         <div style={{ padding: "16px 24px", borderTop: "1px solid var(--line)", display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 18 }}>
           <div>
-            <div style={{ ...label, marginBottom: 8 }}>Čistě vloženo (zdroje)</div>
-            <div className="maux-num" style={{ fontSize: 22, fontWeight: 600, color: "var(--ink)", lineHeight: 1 }}>{hasTranches ? fmtMoney(netDeposited, currency) : "—"}</div>
+            <div style={{ ...label, marginBottom: 8 }}>Vloženo celkem</div>
+            <div className="maux-num" style={{ fontSize: 20, fontWeight: 600, color: "var(--ink)", lineHeight: 1 }}>{hasTranches ? fmtMoney(grossDeposited, currency) : "—"}</div>
             {!hasTranches && <div style={{ fontSize: 9.5, color: "var(--mut)", marginTop: 5 }}>doplň tranše níž</div>}
           </div>
           <div>
-            <div style={{ ...label, marginBottom: 8 }}>Realizovaný zisk/ztráta</div>
-            <div className="maux-num" style={{ fontSize: 22, fontWeight: 600, color: totalRealizedProfit >= 0 ? "#059669" : "#DC2626", lineHeight: 1 }}>
+            <div style={{ ...label, marginBottom: 8 }}>Vybráno celkem</div>
+            <div className="maux-num" style={{ fontSize: 20, fontWeight: 600, color: grossWithdrawn > 0 ? "#DC2626" : "var(--mut)", lineHeight: 1 }}>{hasTranches ? (grossWithdrawn > 0 ? `−${fmtMoney(grossWithdrawn, currency)}` : "—") : "—"}</div>
+          </div>
+          <div>
+            <div style={{ ...label, marginBottom: 8 }}>Čistě vloženo (zdroje)</div>
+            <div className="maux-num" style={{ fontSize: 20, fontWeight: 600, color: "var(--ink)", lineHeight: 1 }}>{hasTranches ? fmtMoney(netDeposited, currency) : "—"}</div>
+            <div style={{ fontSize: 9.5, color: "var(--mut)", marginTop: 5 }}>vloženo − vybráno</div>
+          </div>
+        </div>
+
+        {/* Realizovaný zisk — zvýrazněno indigo/gold, odlišeno od "čistě vloženo" výše */}
+        <div style={{ margin: "0 24px 16px", padding: "16px 20px", borderRadius: 12, background: "linear-gradient(135deg, #3518A5 0%, #4F46E5 100%)", display: "flex", flexWrap: "wrap", gap: 24, alignItems: "center" }}>
+          <div>
+            <div style={{ fontSize: 9, letterSpacing: ".14em", textTransform: "uppercase", color: "rgba(255,255,255,.65)", fontWeight: 700, marginBottom: 6 }}>Realizovaný zisk/ztráta</div>
+            <div className="maux-num maux-glow" style={{ fontSize: 26, fontWeight: 600, color: "var(--gold)", lineHeight: 1 }}>
               {hasClosedTrades ? `${totalRealizedProfit >= 0 ? "+" : ""}${fmtMoney(totalRealizedProfit, currency)}` : "—"}
             </div>
-            {hasClosedTrades && <div style={{ fontSize: 9.5, color: "var(--mut)", marginTop: 5 }}>ze {sortedClosedTrades.length} uzavřených obchodů</div>}
+            {hasClosedTrades && <div style={{ fontSize: 9.5, color: "rgba(255,255,255,.6)", marginTop: 5 }}>ze {sortedClosedTrades.length} uzavřených obchodů, už je to hotovo a v hotovosti/na účtu</div>}
           </div>
           <div>
-            <div style={{ ...label, marginBottom: 8 }}>Zhodnocení</div>
-            <div className="maux-num" style={{ fontSize: 22, fontWeight: 600, color: returnPct >= 0 ? "#059669" : "#DC2626", lineHeight: 1 }}>
+            <div style={{ fontSize: 9, letterSpacing: ".14em", textTransform: "uppercase", color: "rgba(255,255,255,.65)", fontWeight: 700, marginBottom: 6 }}>Zhodnocení</div>
+            <div className="maux-num" style={{ fontSize: 22, fontWeight: 600, color: "#fff", lineHeight: 1 }}>
               {hasClosedTrades && hasTranches ? `${returnPct >= 0 ? "+" : ""}${returnPct.toFixed(1)} %` : "—"}
             </div>
-            <div style={{ fontSize: 9.5, color: "var(--mut)", marginTop: 5 }}>zisk vůči vloženým zdrojům</div>
+            <div style={{ fontSize: 9.5, color: "rgba(255,255,255,.6)", marginTop: 5 }}>vůči čistě vloženým zdrojům</div>
           </div>
           <div>
-            <div style={{ ...label, marginBottom: 8 }}>Úspěšnost obchodů</div>
-            <div className="maux-num" style={{ fontSize: 22, fontWeight: 600, color: "var(--ink)", lineHeight: 1 }}>
+            <div style={{ fontSize: 9, letterSpacing: ".14em", textTransform: "uppercase", color: "rgba(255,255,255,.65)", fontWeight: 700, marginBottom: 6 }}>Úspěšnost</div>
+            <div className="maux-num" style={{ fontSize: 22, fontWeight: 600, color: "#fff", lineHeight: 1 }}>
               {hasClosedTrades ? `${winRate.toFixed(0)} %` : "—"}
             </div>
-            {hasClosedTrades && <div style={{ fontSize: 9.5, color: "var(--mut)", marginTop: 5 }}>{winCount} ziskových z {sortedClosedTrades.length}</div>}
+            {hasClosedTrades && <div style={{ fontSize: 9.5, color: "rgba(255,255,255,.6)", marginTop: 5 }}>{winCount} ziskových z {sortedClosedTrades.length}</div>}
           </div>
         </div>
-        <div style={{ padding: "10px 24px 16px", borderTop: "1px solid var(--line)", fontSize: 9.5, color: "var(--mut)" }}>
-          Živé napojení na XTB API není dostupné (XTB retailové API bylo zrušeno) — aktuální hodnota portfolia a otevřené pozice se zde nezobrazují. Výše je jednorázový import reálné historie z výpisu XTB + ruční evidence tranší.
+
+        <div style={{ padding: "0 24px 16px", fontSize: 9.5, color: "var(--mut)" }}>
+          Realizovaný zisk = uzavřené obchody (napevno, z výpisu XTB). Nerealizovaný zisk z titulů, které právě držíš (živá cena), appka zatím nepočítá — XTB API je zrušené a u "Historie titulů" níže chybí počet kusů a nákupní cena. Řekni, jestli to chceš doplnit.
         </div>
       </div>
+
+      {/* ZHODNOCENÍ V ČASE — YTD / 12 měsíců / od založení, srovnatelné s tím, jak se "kamarádi" baví o zhodnocení */}
+      {hasClosedTrades && (
+        <div style={{ background: "#fff", border: "1px solid var(--line)", borderRadius: 14, overflow: "hidden" }}>
+          <div style={{ padding: "18px 24px 4px" }}>
+            <div style={{ ...label, marginBottom: 4 }}>Zhodnocení v čase</div>
+            <div style={{ fontSize: 9.5, color: "var(--mut)" }}>Stejné srovnání, jaké si lidi dělají mezi sebou — kolik to vyneslo za dané období, vztaženo k vloženému kapitálu na začátku období.</div>
+          </div>
+          <div style={{ padding: "14px 24px 18px", display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 16 }}>
+            <div>
+              <div style={{ ...label, marginBottom: 7 }}>YTD {new Date().getFullYear()}</div>
+              <div className="maux-num" style={{ fontSize: 19, fontWeight: 600, color: perfPeriods.ytd.profit >= 0 ? "#059669" : "#DC2626", lineHeight: 1 }}>
+                {perfPeriods.ytd.pct != null ? `${perfPeriods.ytd.pct >= 0 ? "+" : ""}${perfPeriods.ytd.pct.toFixed(1)} %` : `${perfPeriods.ytd.profit >= 0 ? "+" : ""}${fmtMoney(perfPeriods.ytd.profit, currency)}`}
+              </div>
+              <div style={{ fontSize: 9, color: "var(--mut)", marginTop: 4 }}>{perfPeriods.ytd.pct != null ? `zisk ${fmtMoney(perfPeriods.ytd.profit, currency)}` : "bez kapitálové báze k 1.1."}</div>
+            </div>
+            <div>
+              <div style={{ ...label, marginBottom: 7 }}>Posledních 12 měsíců</div>
+              <div className="maux-num" style={{ fontSize: 19, fontWeight: 600, color: perfPeriods.m12.profit >= 0 ? "#059669" : "#DC2626", lineHeight: 1 }}>
+                {perfPeriods.m12.pct != null ? `${perfPeriods.m12.pct >= 0 ? "+" : ""}${perfPeriods.m12.pct.toFixed(1)} %` : `${perfPeriods.m12.profit >= 0 ? "+" : ""}${fmtMoney(perfPeriods.m12.profit, currency)}`}
+              </div>
+              <div style={{ fontSize: 9, color: "var(--mut)", marginTop: 4 }}>{perfPeriods.m12.pct != null ? `zisk ${fmtMoney(perfPeriods.m12.profit, currency)}` : "—"}</div>
+            </div>
+            <div>
+              <div style={{ ...label, marginBottom: 7 }}>Od založení účtu</div>
+              <div className="maux-num" style={{ fontSize: 19, fontWeight: 600, color: returnPct >= 0 ? "#059669" : "#DC2626", lineHeight: 1 }}>
+                {hasTranches ? `${returnPct >= 0 ? "+" : ""}${returnPct.toFixed(1)} %` : "—"}
+              </div>
+              <div style={{ fontSize: 9, color: "var(--mut)", marginTop: 4 }}>{perfPeriods.accountStart ? `od ${fmtDate(perfPeriods.accountStart.toISOString().slice(0, 10))}` : "—"}</div>
+            </div>
+            <div style={{ opacity: 0.45 }}>
+              <div style={{ ...label, marginBottom: 7 }}>3 roky</div>
+              <div className="maux-num" style={{ fontSize: 19, fontWeight: 600, color: "var(--mut)", lineHeight: 1 }}>—</div>
+              <div style={{ fontSize: 9, color: "var(--mut)", marginTop: 4 }}>{perfPeriods.y3date ? `k dispozici od ${fmtDate(perfPeriods.y3date.toISOString().slice(0, 10))}` : "—"}</div>
+            </div>
+            <div style={{ opacity: 0.45 }}>
+              <div style={{ ...label, marginBottom: 7 }}>5 let</div>
+              <div className="maux-num" style={{ fontSize: 19, fontWeight: 600, color: "var(--mut)", lineHeight: 1 }}>—</div>
+              <div style={{ fontSize: 9, color: "var(--mut)", marginTop: 4 }}>{perfPeriods.y5date ? `k dispozici od ${fmtDate(perfPeriods.y5date.toISOString().slice(0, 10))}` : "—"}</div>
+            </div>
+          </div>
+          <div style={{ padding: "0 24px 16px", fontSize: 9.5, color: "var(--mut)" }}>
+            2022/2023 a 3leté/5leté srovnání zatím nejdou spočítat — historie účtu začíná až {perfPeriods.accountStart ? fmtDate(perfPeriods.accountStart.toISOString().slice(0, 10)) : "prvním vkladem"} (první vklad). Appka si data tiše ukládá dál, takže tahle pole se sama doplní, jak účet zestárne — žádný zásah nebude potřeba.
+          </div>
+        </div>
+      )}
 
       {/* DAŇOVÝ PŘEHLED — časový test, hodnotový test 100k, odhad daně, termíny DPFO */}
       {hasClosedTrades && (
@@ -5733,13 +5871,16 @@ function AkcieModule({ xtbTranches = [], onTrancheSave, onTrancheDelete, xtbTitl
             {dpfoStatus.map(d => `${d.label}: ${fmtDate(d.date)}${d.passed ? " (uplynulo)" : ""}`).join(" · ")}
           </div>
 
+          <div style={{ fontSize: 9.5, color: "var(--mut)", marginBottom: 8, fontStyle: "italic" }}>
+            Rozpad po jednotlivých kalendářních letech (ne kumulovaně) — kolik jsi ten rok skutečně prodejem akcií vydělal/prodělal a jak je to daňově.
+          </div>
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12, marginBottom: 14 }}>
             <thead><tr style={{ background: "#F5F3FF", borderBottom: "1px solid var(--line)" }}>
-              <th style={{ textAlign: "left", padding: "8px 12px", fontSize: 9, letterSpacing: ".1em", textTransform: "uppercase", color: "var(--mut)", fontWeight: 500 }}>Rok</th>
-              <th style={{ textAlign: "right", padding: "8px 12px", fontSize: 9, letterSpacing: ".1em", textTransform: "uppercase", color: "var(--mut)", fontWeight: 500 }}>Tržby (hrubé)</th>
-              <th style={{ textAlign: "right", padding: "8px 12px", fontSize: 9, letterSpacing: ".1em", textTransform: "uppercase", color: "var(--mut)", fontWeight: 500 }}>Zisk</th>
-              <th style={{ textAlign: "left", padding: "8px 12px", fontSize: 9, letterSpacing: ".1em", textTransform: "uppercase", color: "var(--mut)", fontWeight: 500 }}>Osvobození</th>
-              <th style={{ textAlign: "right", padding: "8px 12px", fontSize: 9, letterSpacing: ".1em", textTransform: "uppercase", color: "var(--mut)", fontWeight: 500 }}>Odhad daně (15 % / 23 %)</th>
+              <th style={{ textAlign: "left", padding: "8px 12px", fontSize: 9, letterSpacing: ".1em", textTransform: "uppercase", color: "var(--mut)", fontWeight: 500 }}>Kalendářní rok</th>
+              <th style={{ textAlign: "right", padding: "8px 12px", fontSize: 9, letterSpacing: ".1em", textTransform: "uppercase", color: "var(--mut)", fontWeight: 500 }}>Tržby z prodeje (hrubé, pro test 100k)</th>
+              <th style={{ textAlign: "right", padding: "8px 12px", fontSize: 9, letterSpacing: ".1em", textTransform: "uppercase", color: "var(--mut)", fontWeight: 500 }}>Realizovaný zisk za tento rok</th>
+              <th style={{ textAlign: "left", padding: "8px 12px", fontSize: 9, letterSpacing: ".1em", textTransform: "uppercase", color: "var(--mut)", fontWeight: 500 }}>Osvobozeno od daně?</th>
+              <th style={{ textAlign: "right", padding: "8px 12px", fontSize: 9, letterSpacing: ".1em", textTransform: "uppercase", color: "var(--mut)", fontWeight: 500 }}>Odhad daně z příjmu, pokud neosvobozeno (15 % / 23 %)</th>
             </tr></thead>
             <tbody>
               {yearlyTax.map(y => (
@@ -7042,9 +7183,7 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
         // je vždy kratší než pravý (Výdaje checklist) a zbytečně tu zůstávalo prázdno.
         const [heroKpiOpen, setHeroKpiOpen] = useState(null);
         const toggleHeroKpi = (k) => setHeroKpiOpen(v => v===k?null:k);
-        const [showFinDetail, setShowFinDetail] = useState(false);
         const [prijmyOpen, setPrijmyOpen] = useState(false);
-        const [nakladyOpen, setNakladyOpen] = useState(false);
         const isPaid = (id) => !!(expenseChecks||[]).find(c => c.item_id === id && c.paid);
         const all = [...nutne.map(i=>({...i,_c:"#DC2626"})), ...luxus.map(i=>({...i,_c:"#9333EA"}))];
         const paidItems = all.filter(i => isPaid(i.id));
@@ -7066,7 +7205,6 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
           );
         };
         const mName = ["ledna","února","března","dubna","května","června","července","srpna","září","října","listopadu","prosince"];
-        const SEP = "1px solid rgba(0,0,0,.055)";
         const positiveBalance = nextMonthBalance >= 0;
         return (
         <div style={{display:"flex",flexDirection:"column",gap:16}}>
@@ -7152,39 +7290,7 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
                     </div>
                   )}
                 </div>
-                <div style={{borderTop:"1px solid rgba(53,24,165,.14)",paddingTop:12}}>
-                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",cursor:"pointer"}} onClick={()=>setNakladyOpen(v=>!v)}>
-                    <span style={{fontSize:12,letterSpacing:".1em",textTransform:"uppercase",color:"var(--ink)",fontWeight:700}}>Výdaje měsíčně {nakladyOpen?"▲":"▾"}</span>
-                    <span className="maux-num" style={{fontSize:21,fontWeight:600,color:"#DC2626"}}>{fmtKc(Math.abs(totalNutne)+josefWage+Math.abs(totalLuxus))}</span>
-                  </div>
-                  {nakladyOpen && (
-                    <div style={{marginTop:8,display:"flex",flexDirection:"column",gap:4}}>
-                      <div style={{display:"flex",justifyContent:"space-between",padding:"3px 0"}}>
-                        <span style={{fontSize:10,color:"var(--mut)",letterSpacing:".02em"}}>Nutné</span>
-                        <span className="maux-num" style={{fontSize:11.5,fontWeight:500,color:"#DC2626"}}>{fmtKc(Math.abs(totalNutne))}</span>
-                      </div>
-                      <div style={{display:"flex",justifyContent:"space-between",padding:"3px 0"}}>
-                        <span style={{fontSize:10,color:"var(--mut)",letterSpacing:".02em",display:"flex",alignItems:"center",gap:5}}>Josef Řehák <span style={{fontSize:7.5,background:"rgba(53,24,165,.08)",color:"var(--ink)",padding:"1px 5px",borderRadius:3,fontWeight:700,letterSpacing:".05em"}}>{JOSEF_WAGE_MANUAL_OVERRIDES[_josefYm] != null ? "ručně" : "auto"}</span></span>
-                        <span className="maux-num" style={{fontSize:11.5,fontWeight:500,color:"#DC2626"}}>{fmtKc(josefWage)}</span>
-                      </div>
-                      <div style={{display:"flex",justifyContent:"space-between",padding:"3px 0"}}>
-                        <span style={{fontSize:10,color:"var(--mut)",letterSpacing:".02em"}}>Luxus</span>
-                        <span className="maux-num" style={{fontSize:11.5,fontWeight:500,color:"#DC2626"}}>{fmtKc(Math.abs(totalLuxus))}</span>
-                      </div>
-                    </div>
-                  )}
-                </div>
-                <div style={{height:5,borderRadius:3,background:"rgba(53,24,165,.1)",overflow:"hidden",marginTop:3}}>
-                  <div style={{height:"100%",width:`${pct}%`,borderRadius:3,background:pct===100?"#10B981":"#3518A5",transition:"width .7s ease"}} />
-                </div>
-                <div style={{fontSize:11,color:"var(--mut)",letterSpacing:".01em",textAlign:"center",fontWeight:600}}>
-                  {pct===100?"✓ vše zaplaceno":`zaplaceno ${paidCount}/${all.length}`}
-                </div>
               </div>
-
-              <button onClick={()=>setShowFinDetail(s=>!s)} style={{border:"none",borderTop:"1px solid rgba(53,24,165,.14)",background:"none",cursor:"pointer",fontSize:12,color:"#3518A5",padding:"12px 0",letterSpacing:".03em",fontWeight:700}}>
-                {showFinDetail ? "Skrýt detail ▴" : "Zobrazit detail ▾"}
-              </button>
             </div>
 
             {/* TILE B — Spořicí účet (čtverec, přesunuto z grafů níže) */}
@@ -7193,118 +7299,86 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
                 invoices={invoices} dpfoMonths={dpfoMonths}
                 loanTransactions={loanTransactions} escrows={escrows} square />
             </div>
-          </div>
 
-          {!showFinDetail ? null : (
-          <div style={{
-            background:"#fff", borderRadius:3, overflow:"hidden",
-            boxShadow:"0 0 0 1px rgba(0,0,0,.07)",
-          }}>
-          {/* ── DETAIL ── */}
-          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr"}}>
-
-            {/* Příjmy detail */}
-            <div style={{padding:"14px 26px 16px",borderRight:SEP}}>
-              {nadmernyOdpocet>0 && (
-                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"3.5px 0",gap:8}}>
-                  <span style={{display:"flex",alignItems:"center",gap:6,minWidth:0,overflow:"hidden"}}>
-                    <span style={{fontSize:7.5,background:"rgba(5,150,105,.1)",color:"#065F46",padding:"1px 5px",borderRadius:3,fontWeight:700,letterSpacing:".05em",flexShrink:0}}>auto</span>
-                    <span style={{fontSize:11.5,color:"var(--txt)",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>Nadměrný odpočet DPH za {thisMonthName.toLowerCase()}</span>
-                  </span>
-                  <span style={{fontFamily:"JetBrains Mono,monospace",color:"#059669",fontSize:11,flexShrink:0,letterSpacing:"-.01em"}}>+{fmtKc(nadmernyOdpocet)}</span>
+            {/* TILE C — Výdaje měsíčně (čtverec), promováno z bývalého "Zobrazit detail" panelu — Tom: ať je vidět hned, vedle Bilance a Spořáku */}
+            <div style={{
+              flex:1, aspectRatio:"1", minWidth:0,
+              background:"#fff", borderRadius:3, overflow:"hidden",
+              borderTop: "4px solid #DC2626",
+              boxShadow:"0 0 0 1px rgba(0,0,0,.08)",
+              display:"flex", flexDirection:"column",
+            }}>
+              <div style={{padding:"22px 24px 0",textAlign:"center"}}>
+                <div style={{display:"flex",alignItems:"center",justifyContent:"center",gap:6,marginBottom:10}}>
+                  <span className="maux-dot" style={{width:6,height:6,background:"#DC2626",boxShadow:"0 0 4px rgba(220,38,38,.5)"}} />
+                  <div style={{fontSize:10,letterSpacing:".22em",textTransform:"uppercase",color:"#DC2626",fontWeight:800}}>Výdaje měsíčně</div>
                 </div>
-              )}
-              {unbilledAmt>0 && (
-                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"3.5px 0",gap:8}}>
-                  <span style={{display:"flex",alignItems:"center",gap:6,minWidth:0}}>
-                    <span style={{fontSize:7.5,background:"rgba(5,150,105,.1)",color:"#065F46",padding:"1px 5px",borderRadius:3,fontWeight:700,letterSpacing:".05em",flexShrink:0}}>auto</span>
-                    <span style={{fontSize:11.5,color:"var(--txt)"}}>MAUX Legal — nevyfakturováno</span>
-                  </span>
-                  <span style={{fontFamily:"JetBrains Mono,monospace",color:"#059669",fontSize:11,flexShrink:0,letterSpacing:"-.01em"}}>+{fmtKc(unbilledAmt)}</span>
+                <div className="maux-num maux-glow" style={{fontSize:40, fontWeight:600, color:"#DC2626", lineHeight:1}}>
+                  {fmtKc(Math.abs(totalNutne)+josefWage+Math.abs(totalLuxus))}
                 </div>
-              )}
-              {escrowNetThisMonth>0 && (
-                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"3.5px 0",gap:8}}>
-                  <span style={{display:"flex",alignItems:"center",gap:6,minWidth:0}}>
-                    <span style={{fontSize:7.5,background:"rgba(5,150,105,.1)",color:"#065F46",padding:"1px 5px",borderRadius:3,fontWeight:700,letterSpacing:".05em",flexShrink:0}}>auto</span>
-                    <span style={{fontSize:11.5,color:"var(--txt)"}}>Úschovy — čistý úrok (k 1. {mName[(now.getMonth()+1)%12]})</span>
-                  </span>
-                  <span style={{fontFamily:"JetBrains Mono,monospace",color:"#059669",fontSize:11,flexShrink:0,letterSpacing:"-.01em"}}>+{fmtKc(Math.round(escrowNetThisMonth))}</span>
+                <div style={{height:5,borderRadius:3,background:"rgba(220,38,38,.1)",overflow:"hidden",marginTop:12}}>
+                  <div style={{height:"100%",width:`${pct}%`,borderRadius:3,background:pct===100?"#10B981":"#DC2626",transition:"width .7s ease"}} />
                 </div>
-              )}
-              {(financeItems||[]).filter(i=>i.category==="prijem"&&i.notes!=="TBD").map((item,idx)=>(
-                <div key={idx} style={{display:"flex",justifyContent:"space-between",alignItems:"center",fontSize:11.5,color:"var(--txt)",padding:"3.5px 0",gap:8}}>
-                  <span style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{item.label}</span>
-                  <EditableMoney item={item} onSave={onSaveFinance} color="#059669" sign="+" />
+                <div style={{fontSize:11,color:"var(--mut)",letterSpacing:".01em",marginTop:6,fontWeight:600}}>
+                  {pct===100?"✓ vše zaplaceno":`zaplaceno ${paidCount}/${all.length}`}
                 </div>
-              ))}
-              <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",paddingTop:10,marginTop:8,borderTop:"1px solid rgba(0,0,0,.05)"}}>
-                <span style={{fontSize:10.5,color:"var(--mut)",letterSpacing:".02em"}}>Celkové náklady</span>
-                <span className="maux-num" style={{fontSize:13,fontWeight:500,color:"#DC2626"}}>−{fmtKc(Math.abs(totalVydaje))}</span>
               </div>
-            </div>
 
-            {/* Výdaje checklist */}
-            <div style={{padding:"14px 26px 16px"}}>
-              <div style={{fontSize:7,letterSpacing:".28em",textTransform:"uppercase",color:"#DC2626",fontWeight:700,marginBottom:6,opacity:.8}}>Nutné</div>
-              {nutne.map((i,idx) => (
-                <div key={idx} style={{display:"flex",justifyContent:"space-between",alignItems:"center",fontSize:11.5,color:isPaid(i.id)?"var(--mut)":"var(--txt)",padding:"3px 0",gap:6}}>
-                  <span style={{display:"flex",alignItems:"center",textDecoration:isPaid(i.id)?"line-through":"none",minWidth:0,overflow:"hidden"}}>
-                    <Check item={i} color="#DC2626" /><EditableLabel item={i} onSave={onSaveFinance} />
-                  </span>
-                  <span style={{display:"flex",alignItems:"center",gap:4,flexShrink:0}}>
-                    <span style={{opacity:isPaid(i.id)?.4:1}}><EditableMoney item={i} onSave={onSaveFinance} color="#DC2626" abs /></span>
-                    <button onClick={()=>onDeleteFinance(i.id)} title="Smazat" style={{background:"none",border:"none",color:"var(--mut)",cursor:"pointer",fontSize:10,padding:"0 2px",opacity:.35,lineHeight:1}}>✕</button>
-                  </span>
-                </div>
-              ))}
-              <AddExpenseRow category="nutne" color="#DC2626" onSaveFinance={onSaveFinance} />
-              {/* Josef Řehák — automatický náklad */}
-              {(() => {
-                const josefPaid = isPaid("josef_wage");
-                const handleJosefToggle = () => {
-                  if (!josefPaid) {
-                    if (!window.confirm(`Odeslal jsi mzdu asistentovi? (${josefWage.toLocaleString("cs-CZ")} Kč)`)) return;
-                  }
-                  onToggleExpenseCheck("josef_wage", !josefPaid);
-                };
-                return (
-                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",fontSize:11.5,padding:"3px 0",gap:6,opacity:josefPaid?.65:.85,color:josefPaid?"var(--mut)":"var(--txt)",textDecoration:josefPaid?"line-through":"none"}}>
-                  <span style={{display:"flex",alignItems:"center",gap:5,cursor:"pointer"}} onClick={handleJosefToggle}>
-                    <span style={{display:"inline-flex",alignItems:"center",justifyContent:"center",width:13,height:13,borderRadius:3,border:`1.5px solid ${josefPaid?"#16a34a":"#DC2626"}`,background:josefPaid?"#16a34a":"transparent",flexShrink:0,color:"#fff",fontSize:9}}>
-                      {josefPaid?"✓":""}
+              <div style={{flex:1,overflowY:"auto",padding:"10px 24px 6px",marginTop:4}}>
+                <div style={{fontSize:7,letterSpacing:".28em",textTransform:"uppercase",color:"#DC2626",fontWeight:700,marginBottom:6,opacity:.8}}>Nutné</div>
+                {nutne.map((i,idx) => (
+                  <div key={idx} style={{display:"flex",justifyContent:"space-between",alignItems:"center",fontSize:11.5,color:isPaid(i.id)?"var(--mut)":"var(--txt)",padding:"3px 0",gap:6}}>
+                    <span style={{display:"flex",alignItems:"center",textDecoration:isPaid(i.id)?"line-through":"none",minWidth:0,overflow:"hidden"}}>
+                      <Check item={i} color="#DC2626" /><EditableLabel item={i} onSave={onSaveFinance} />
                     </span>
-                    <span>Josef Řehák</span>
-                    <span style={{fontSize:8.5,background:"rgba(53,24,165,.08)",color:"var(--ink)",borderRadius:4,padding:"1px 5px",fontWeight:600,letterSpacing:".04em"}}>{JOSEF_WAGE_MANUAL_OVERRIDES[_josefYm] != null ? "ručně" : "auto"} · {_josefYm}</span>
-                  </span>
-                  <span className="maux-num" style={{color:josefPaid?"var(--mut)":"#DC2626",fontSize:11}}>
-                    {josefWage > 0 ? josefWage.toLocaleString("cs-CZ") + " Kč" : "— Kč"}
-                  </span>
-                </div>
-                );
-              })()}
-              <div style={{fontSize:7,letterSpacing:".28em",textTransform:"uppercase",color:"#7C3AED",fontWeight:700,marginTop:10,marginBottom:6,opacity:.8}}>Lusus</div>
-              {luxus.map((i,idx) => (
-                <div key={idx} style={{display:"flex",justifyContent:"space-between",alignItems:"center",fontSize:11.5,color:isPaid(i.id)?"var(--mut)":"var(--txt)",padding:"3px 0",gap:6}}>
-                  <span style={{display:"flex",alignItems:"center",textDecoration:isPaid(i.id)?"line-through":"none",minWidth:0}}>
-                    <Check item={i} color="#7C3AED" /><EditableLabel item={i} onSave={onSaveFinance} />
-                  </span>
-                  <span style={{display:"flex",alignItems:"center",gap:4,flexShrink:0}}>
-                    <span style={{opacity:isPaid(i.id)?.4:1}}><EditableMoney item={i} onSave={onSaveFinance} color="#7C3AED" abs /></span>
-                    <button onClick={()=>onDeleteFinance(i.id)} title="Smazat" style={{background:"none",border:"none",color:"var(--mut)",cursor:"pointer",fontSize:10,padding:"0 2px",opacity:.35,lineHeight:1}}>✕</button>
-                  </span>
-                </div>
-              ))}
-              <AddExpenseRow category="luxus" color="#7C3AED" onSaveFinance={onSaveFinance} />
-              <div style={{marginTop:10,borderTop:"1px solid rgba(0,0,0,.05)",paddingTop:8,display:"flex",justifyContent:"space-between",alignItems:"baseline"}}>
-                <span style={{fontSize:9.5,color:"var(--mut)",letterSpacing:".06em",textTransform:"uppercase"}}>Celkem výdaje</span>
-                <span className="maux-num" style={{fontSize:14,fontWeight:500,color:"var(--ink)"}}>{fmtKc(Math.abs(totalVydaje))}</span>
+                    <span style={{display:"flex",alignItems:"center",gap:4,flexShrink:0}}>
+                      <span style={{opacity:isPaid(i.id)?.4:1}}><EditableMoney item={i} onSave={onSaveFinance} color="#DC2626" abs /></span>
+                      <button onClick={()=>onDeleteFinance(i.id)} title="Smazat" style={{background:"none",border:"none",color:"var(--mut)",cursor:"pointer",fontSize:10,padding:"0 2px",opacity:.35,lineHeight:1}}>✕</button>
+                    </span>
+                  </div>
+                ))}
+                <AddExpenseRow category="nutne" color="#DC2626" onSaveFinance={onSaveFinance} />
+                {/* Josef Řehák — automatický náklad */}
+                {(() => {
+                  const josefPaid = isPaid("josef_wage");
+                  const handleJosefToggle = () => {
+                    if (!josefPaid) {
+                      if (!window.confirm(`Odeslal jsi mzdu asistentovi? (${josefWage.toLocaleString("cs-CZ")} Kč)`)) return;
+                    }
+                    onToggleExpenseCheck("josef_wage", !josefPaid);
+                  };
+                  return (
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",fontSize:11.5,padding:"3px 0",gap:6,opacity:josefPaid?.65:.85,color:josefPaid?"var(--mut)":"var(--txt)",textDecoration:josefPaid?"line-through":"none"}}>
+                    <span style={{display:"flex",alignItems:"center",gap:5,cursor:"pointer"}} onClick={handleJosefToggle}>
+                      <span style={{display:"inline-flex",alignItems:"center",justifyContent:"center",width:13,height:13,borderRadius:3,border:`1.5px solid ${josefPaid?"#16a34a":"#DC2626"}`,background:josefPaid?"#16a34a":"transparent",flexShrink:0,color:"#fff",fontSize:9}}>
+                        {josefPaid?"✓":""}
+                      </span>
+                      <span>Josef Řehák</span>
+                      <span style={{fontSize:8.5,background:"rgba(53,24,165,.08)",color:"var(--ink)",borderRadius:4,padding:"1px 5px",fontWeight:600,letterSpacing:".04em"}}>{JOSEF_WAGE_MANUAL_OVERRIDES[_josefYm] != null ? "ručně" : "auto"} · {_josefYm}</span>
+                    </span>
+                    <span className="maux-num" style={{color:josefPaid?"var(--mut)":"#DC2626",fontSize:11}}>
+                      {josefWage > 0 ? josefWage.toLocaleString("cs-CZ") + " Kč" : "— Kč"}
+                    </span>
+                  </div>
+                  );
+                })()}
+                <div style={{fontSize:7,letterSpacing:".28em",textTransform:"uppercase",color:"#7C3AED",fontWeight:700,marginTop:10,marginBottom:6,opacity:.8}}>Lusus</div>
+                {luxus.map((i,idx) => (
+                  <div key={idx} style={{display:"flex",justifyContent:"space-between",alignItems:"center",fontSize:11.5,color:isPaid(i.id)?"var(--mut)":"var(--txt)",padding:"3px 0",gap:6}}>
+                    <span style={{display:"flex",alignItems:"center",textDecoration:isPaid(i.id)?"line-through":"none",minWidth:0}}>
+                      <Check item={i} color="#7C3AED" /><EditableLabel item={i} onSave={onSaveFinance} />
+                    </span>
+                    <span style={{display:"flex",alignItems:"center",gap:4,flexShrink:0}}>
+                      <span style={{opacity:isPaid(i.id)?.4:1}}><EditableMoney item={i} onSave={onSaveFinance} color="#7C3AED" abs /></span>
+                      <button onClick={()=>onDeleteFinance(i.id)} title="Smazat" style={{background:"none",border:"none",color:"var(--mut)",cursor:"pointer",fontSize:10,padding:"0 2px",opacity:.35,lineHeight:1}}>✕</button>
+                    </span>
+                  </div>
+                ))}
+                <AddExpenseRow category="luxus" color="#7C3AED" onSaveFinance={onSaveFinance} />
               </div>
-              <button className="btn gho" style={{fontSize:10.5,marginTop:9,width:"100%",opacity:.65}} onClick={()=>onNav("vykaz")}>+ Nový výkaz práce</button>
+              <button className="btn gho" style={{fontSize:10.5,margin:"0 24px 14px",opacity:.65,border:"none",borderTop:"1px solid rgba(0,0,0,.06)",borderRadius:0,paddingTop:10}} onClick={()=>onNav("vykaz")}>+ Nový výkaz práce</button>
             </div>
           </div>
-          </div>
-          )}
         </div>
         );
       })()}
