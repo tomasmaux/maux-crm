@@ -427,6 +427,12 @@ async function deleteXtbTitle(id) {
   const { error } = await supabase.from("xtb_titles").delete().eq("id", id);
   if (error) throw error;
 }
+// Historie uzavřených obchodů — jednorázový import z XTB výpisu (Closed Positions), read-only.
+async function fetchXtbClosedTrades() {
+  const { data, error } = await supabase.from("xtb_closed_trades").select("*").order("close_time");
+  if (error) throw error;
+  return data || [];
+}
 // Zapíše dnešní equity, jen pokud za dnešek ještě žádný snapshot neexistuje —
 // volá se z AkcieModule při každém otevření, tak roste historie pro graf v čase.
 async function ensureTodaySnapshot(equity, balance, currency) {
@@ -5534,7 +5540,7 @@ function XtbPanel({ xtbTranches = [], onNav }) {
    přístup k API (ws.xtb.com vyřazeno 14.3.2025, náhradní ws.xapi.pro slouží jen klientům
    X Open Hub, ne běžným XTB účtům, viz chyba "account from a different platform").
    Nezbylo nic, co by šlo automaticky stahovat — modul vede jen ruční ledger tranší. */
-function AkcieModule({ xtbTranches = [], onTrancheSave, onTrancheDelete, xtbTitles = [], onTitleSave, onTitleDelete }) {
+function AkcieModule({ xtbTranches = [], onTrancheSave, onTrancheDelete, xtbTitles = [], onTitleSave, onTitleDelete, xtbClosedTrades = [] }) {
   const [addForm, setAddForm] = useState(false);
   const [newTranche, setNewTranche] = useState({ date: today(), type: "vklad", amount: "", symbol: "", note: "" });
   const [savingTranche, setSavingTranche] = useState(false);
@@ -5586,6 +5592,76 @@ function AkcieModule({ xtbTranches = [], onTrancheSave, onTrancheDelete, xtbTitl
     setSavingTitle(false);
   };
 
+  // ── Historie obchodů — jednorázový import uzavřených pozic z XTB výpisu (read-only) ──
+  const sortedClosedTrades = useMemo(
+    () => [...xtbClosedTrades].sort((a, b) => (b.close_time || "").localeCompare(a.close_time || "")),
+    [xtbClosedTrades]
+  );
+  const hasClosedTrades = sortedClosedTrades.length > 0;
+  const totalRealizedProfit = sortedClosedTrades.reduce((s, t) => s + (t.profit || 0), 0);
+  const winCount = sortedClosedTrades.filter(t => (t.profit || 0) > 0).length;
+  const winRate = hasClosedTrades ? (winCount / sortedClosedTrades.length) * 100 : 0;
+  const returnPct = netDeposited > 0 ? (totalRealizedProfit / netDeposited) * 100 : 0;
+
+  const symbolBreakdown = useMemo(() => {
+    const map = {};
+    for (const t of sortedClosedTrades) {
+      const sym = t.symbol || "?";
+      if (!map[sym]) map[sym] = { symbol: sym, profit: 0, count: 0 };
+      map[sym].profit += (t.profit || 0);
+      map[sym].count += 1;
+    }
+    return Object.values(map).sort((a, b) => b.profit - a.profit);
+  }, [sortedClosedTrades]);
+  const maxAbsProfit = Math.max(1, ...symbolBreakdown.map(s => Math.abs(s.profit)), 1);
+
+  // ── Daňový přehled — časový test (3 roky držení) + hodnotový test (100 000 Kč/rok) ──
+  // §4 odst.1 písm. w) ZDP: příjem z prodeje CP osvobozen, pokud doba mezi nabytím a prodejem > 3 roky (od 1.1.2026 bez stropu).
+  // §4 odst.1 písm. v) ZDP: pokud časový test nesplněn, příjmy (hrubé tržby, ne zisk) z prodeje CP do 100 000 Kč/rok jsou osvobozené;
+  // nad limit je zdanitelný celý realizovaný zisk za ten rok jako "ostatní příjem" (§10), v rámci progresivního pásma 15 %/23 %.
+  const TIME_TEST_DAYS = 3 * 365;
+  const VALUE_LIMIT = 100000;
+  const yearlyTax = useMemo(() => {
+    const map = {};
+    for (const t of sortedClosedTrades) {
+      if (!t.close_time) continue;
+      const year = new Date(t.close_time).getFullYear();
+      if (!map[year]) map[year] = { year, profit: 0, saleValue: 0, count: 0, maxHoldDays: 0 };
+      const holdDays = t.open_time ? Math.round((new Date(t.close_time) - new Date(t.open_time)) / 86400000) : 0;
+      map[year].profit += (t.profit || 0);
+      map[year].saleValue += (t.sale_value || 0);
+      map[year].count += 1;
+      map[year].maxHoldDays = Math.max(map[year].maxHoldDays, holdDays);
+    }
+    return Object.values(map).sort((a, b) => a.year - b.year).map(y => {
+      const exemptByValue = y.saleValue <= VALUE_LIMIT;
+      const exemptByTime = y.maxHoldDays > TIME_TEST_DAYS; // jen orientačně — reálně je to per-obchod, ne za celý rok
+      const exempt = exemptByValue || exemptByTime;
+      const taxableProfit = exempt ? 0 : Math.max(0, y.profit);
+      return { ...y, exemptByValue, exemptByTime, taxableProfit, tax15: taxableProfit * 0.15, tax23: taxableProfit * 0.23 };
+    });
+  }, [sortedClosedTrades]);
+
+  const earliestOpenTime = useMemo(() => {
+    const times = sortedClosedTrades.map(t => t.open_time).filter(Boolean).map(t => new Date(t).getTime());
+    return times.length ? new Date(Math.min(...times)) : null;
+  }, [sortedClosedTrades]);
+  const firstTimeTestDate = earliestOpenTime ? new Date(earliestOpenTime.getTime() + TIME_TEST_DAYS * 86400000) : null;
+
+  // Termíny DPFO za rok 2025 (podává se v roce 2026) — pevně dané GFŘ, nemění se appkou.
+  const DPFO_DEADLINES = [
+    { label: "Papírově", date: "2026-04-01" },
+    { label: "Elektronicky (bez poradce)", date: "2026-05-04" },
+    { label: "S daňovým poradcem / advokátem", date: "2026-07-01" },
+  ];
+  const nowMs = Date.now();
+  const dpfoStatus = DPFO_DEADLINES.map(d => {
+    const dueMs = new Date(d.date + "T23:59:59").getTime();
+    const daysLeft = Math.ceil((dueMs - nowMs) / 86400000);
+    return { ...d, daysLeft, passed: daysLeft < 0 };
+  });
+  const nextDeadline = dpfoStatus.find(d => !d.passed);
+
   const label = { fontSize: 9, letterSpacing: ".14em", textTransform: "uppercase", color: "var(--mut)", fontWeight: 700 };
   const inputStyle = { font: "inherit", fontSize: 12.5, padding: "6px 9px", border: "1px solid var(--line2)", borderRadius: 7, outline: "none" };
 
@@ -5597,15 +5673,156 @@ function AkcieModule({ xtbTranches = [], onTrancheSave, onTrancheDelete, xtbTitl
           <span className="maux-dot" style={{ width: 6, height: 6, background: "#4F46E5", boxShadow: "0 0 4px rgba(79,70,229,.55)" }} />
           <div style={{ ...label }}>Portfolio — souhrn</div>
         </div>
-        <div style={{ padding: "16px 24px", borderTop: "1px solid var(--line)" }}>
-          <div style={{ ...label, marginBottom: 8 }}>Čistě vloženo</div>
-          <div className="maux-num" style={{ fontSize: 22, fontWeight: 600, color: "var(--ink)", lineHeight: 1 }}>{hasTranches ? fmtMoney(netDeposited, currency) : "—"}</div>
-          {!hasTranches && <div style={{ fontSize: 9.5, color: "var(--mut)", marginTop: 5 }}>doplň tranše níž</div>}
-          <div style={{ fontSize: 9.5, color: "var(--mut)", marginTop: 10 }}>
-            Živé napojení na XTB API není dostupné (XTB retailové API bylo zrušeno) — aktuální hodnota portfolia, otevřené pozice a historie obchodů se zde nezobrazují. Vede se jen ruční evidence vkladů a výběrů níže.
+        <div style={{ padding: "16px 24px", borderTop: "1px solid var(--line)", display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 18 }}>
+          <div>
+            <div style={{ ...label, marginBottom: 8 }}>Čistě vloženo (zdroje)</div>
+            <div className="maux-num" style={{ fontSize: 22, fontWeight: 600, color: "var(--ink)", lineHeight: 1 }}>{hasTranches ? fmtMoney(netDeposited, currency) : "—"}</div>
+            {!hasTranches && <div style={{ fontSize: 9.5, color: "var(--mut)", marginTop: 5 }}>doplň tranše níž</div>}
+          </div>
+          <div>
+            <div style={{ ...label, marginBottom: 8 }}>Realizovaný zisk/ztráta</div>
+            <div className="maux-num" style={{ fontSize: 22, fontWeight: 600, color: totalRealizedProfit >= 0 ? "#059669" : "#DC2626", lineHeight: 1 }}>
+              {hasClosedTrades ? `${totalRealizedProfit >= 0 ? "+" : ""}${fmtMoney(totalRealizedProfit, currency)}` : "—"}
+            </div>
+            {hasClosedTrades && <div style={{ fontSize: 9.5, color: "var(--mut)", marginTop: 5 }}>ze {sortedClosedTrades.length} uzavřených obchodů</div>}
+          </div>
+          <div>
+            <div style={{ ...label, marginBottom: 8 }}>Zhodnocení</div>
+            <div className="maux-num" style={{ fontSize: 22, fontWeight: 600, color: returnPct >= 0 ? "#059669" : "#DC2626", lineHeight: 1 }}>
+              {hasClosedTrades && hasTranches ? `${returnPct >= 0 ? "+" : ""}${returnPct.toFixed(1)} %` : "—"}
+            </div>
+            <div style={{ fontSize: 9.5, color: "var(--mut)", marginTop: 5 }}>zisk vůči vloženým zdrojům</div>
+          </div>
+          <div>
+            <div style={{ ...label, marginBottom: 8 }}>Úspěšnost obchodů</div>
+            <div className="maux-num" style={{ fontSize: 22, fontWeight: 600, color: "var(--ink)", lineHeight: 1 }}>
+              {hasClosedTrades ? `${winRate.toFixed(0)} %` : "—"}
+            </div>
+            {hasClosedTrades && <div style={{ fontSize: 9.5, color: "var(--mut)", marginTop: 5 }}>{winCount} ziskových z {sortedClosedTrades.length}</div>}
           </div>
         </div>
+        <div style={{ padding: "10px 24px 16px", borderTop: "1px solid var(--line)", fontSize: 9.5, color: "var(--mut)" }}>
+          Živé napojení na XTB API není dostupné (XTB retailové API bylo zrušeno) — aktuální hodnota portfolia a otevřené pozice se zde nezobrazují. Výše je jednorázový import reálné historie z výpisu XTB + ruční evidence tranší.
+        </div>
       </div>
+
+      {/* DAŇOVÝ PŘEHLED — časový test, hodnotový test 100k, odhad daně, termíny DPFO */}
+      {hasClosedTrades && (
+        <div style={{ background: "#fff", border: "1px solid var(--line)", borderRadius: 14, padding: "18px 24px" }}>
+          <div style={{ ...label, marginBottom: 4 }}>Daňový přehled</div>
+          <div style={{ fontSize: 9.5, color: "var(--mut)", marginBottom: 14 }}>
+            Časový test (3 roky držení) a hodnotový test (100 000 Kč hrubých tržeb/rok) podle §4 ZDP — orientační odhad, ne daňové poradenství.
+          </div>
+
+          {nextDeadline && (
+            <div style={{
+              padding: "10px 14px", borderRadius: 10, marginBottom: 14,
+              background: nextDeadline.daysLeft <= 14 ? "#FEF2F2" : "#F7F5FF",
+              border: `1px solid ${nextDeadline.daysLeft <= 14 ? "#FCA5A5" : "var(--line)"}`,
+              display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, flexWrap: "wrap",
+            }}>
+              <div style={{ fontSize: 12, fontWeight: 600, color: nextDeadline.daysLeft <= 14 ? "#DC2626" : "var(--ink)" }}>
+                Termín DPFO za rok 2025 — {nextDeadline.label}: {fmtDate(nextDeadline.date)}
+              </div>
+              <div style={{ fontSize: 11.5, fontWeight: 700, color: nextDeadline.daysLeft <= 14 ? "#DC2626" : "var(--mut)" }}>
+                {nextDeadline.daysLeft === 0 ? "dnes!" : `zbývá ${nextDeadline.daysLeft} ${nextDeadline.daysLeft === 1 ? "den" : "dní"}`}
+              </div>
+            </div>
+          )}
+          <div style={{ fontSize: 9.5, color: "var(--mut)", marginBottom: 14 }}>
+            {dpfoStatus.map(d => `${d.label}: ${fmtDate(d.date)}${d.passed ? " (uplynulo)" : ""}`).join(" · ")}
+          </div>
+
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12, marginBottom: 14 }}>
+            <thead><tr style={{ background: "#F5F3FF", borderBottom: "1px solid var(--line)" }}>
+              <th style={{ textAlign: "left", padding: "8px 12px", fontSize: 9, letterSpacing: ".1em", textTransform: "uppercase", color: "var(--mut)", fontWeight: 500 }}>Rok</th>
+              <th style={{ textAlign: "right", padding: "8px 12px", fontSize: 9, letterSpacing: ".1em", textTransform: "uppercase", color: "var(--mut)", fontWeight: 500 }}>Tržby (hrubé)</th>
+              <th style={{ textAlign: "right", padding: "8px 12px", fontSize: 9, letterSpacing: ".1em", textTransform: "uppercase", color: "var(--mut)", fontWeight: 500 }}>Zisk</th>
+              <th style={{ textAlign: "left", padding: "8px 12px", fontSize: 9, letterSpacing: ".1em", textTransform: "uppercase", color: "var(--mut)", fontWeight: 500 }}>Osvobození</th>
+              <th style={{ textAlign: "right", padding: "8px 12px", fontSize: 9, letterSpacing: ".1em", textTransform: "uppercase", color: "var(--mut)", fontWeight: 500 }}>Odhad daně (15 % / 23 %)</th>
+            </tr></thead>
+            <tbody>
+              {yearlyTax.map(y => (
+                <tr key={y.year} style={{ borderBottom: "1px solid var(--line)" }}>
+                  <td style={{ padding: "9px 12px", fontWeight: 700, color: "var(--ink)" }}>{y.year}{y.year === new Date().getFullYear() ? " (k dnešku)" : ""}</td>
+                  <td style={{ padding: "9px 12px", textAlign: "right", color: "var(--mut)" }}>{fmtMoney(y.saleValue, currency)}</td>
+                  <td style={{ padding: "9px 12px", textAlign: "right", fontWeight: 600, color: y.profit >= 0 ? "#059669" : "#DC2626" }}>{y.profit >= 0 ? "+" : ""}{fmtMoney(y.profit, currency)}</td>
+                  <td style={{ padding: "9px 12px" }}>
+                    {y.exemptByTime ? (
+                      <span style={{ color: "#059669", fontWeight: 600 }}>časový test (3 r.)</span>
+                    ) : y.exemptByValue ? (
+                      <span style={{ color: "#059669", fontWeight: 600 }}>do 100 000 Kč</span>
+                    ) : (
+                      <span style={{ color: "#DC2626", fontWeight: 600 }}>nesplněno — limit 100k překročen</span>
+                    )}
+                  </td>
+                  <td style={{ padding: "9px 12px", textAlign: "right", color: "var(--mut)" }}>
+                    {y.taxableProfit > 0 ? `${fmtMoney(y.tax15, currency)} – ${fmtMoney(y.tax23, currency)}` : "0 Kč"}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+
+          <div style={{ fontSize: 9.5, color: "var(--mut)" }}>
+            Žádný z {sortedClosedTrades.length} obchodů aktuálně nesplňuje 3letý časový test (max. doba držení dosud ~{Math.round((Math.max(...sortedClosedTrades.map(t => t.open_time && t.close_time ? (new Date(t.close_time) - new Date(t.open_time)) / 86400000 : 0)))/365*10)/10} roku) — proto se uplatňuje jen limit 100 000 Kč hrubých tržeb/rok.
+            {firstTimeTestDate && <> Nejstarší pozice (otevřená {fmtDate(earliestOpenTime.toISOString().slice(0,10))}) by časový test splnila až {fmtDate(firstTimeTestDate.toISOString().slice(0,10))}.</>}
+            {" "}Sazba 15 %/23 % je progresivní podle celkového ročního základu daně (hranice pro 23 % v roce 2026: 1 762 812 Kč) — záleží na souběhu s ostatními příjmy, doporučuji probrat s daňovým poradcem.
+          </div>
+        </div>
+      )}
+
+      {/* HISTORIE OBCHODŮ — uzavřené pozice, jednorázový import z XTB výpisu (read-only) */}
+      {hasClosedTrades && (
+        <div style={{ background: "#fff", border: "1px solid var(--line)", borderRadius: 14, padding: "18px 24px" }}>
+          <div style={{ ...label, marginBottom: 4 }}>Historie obchodů — podle titulu</div>
+          <div style={{ fontSize: 9.5, color: "var(--mut)", marginBottom: 14 }}>Realizovaný zisk/ztráta po jednotlivých titulech, ze všech {sortedClosedTrades.length} uzavřených obchodů v historii účtu.</div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 16 }}>
+            {symbolBreakdown.map(s => (
+              <div key={s.symbol} style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                <div style={{ width: 80, fontSize: 11.5, fontWeight: 700, color: "var(--ink)", flexShrink: 0 }}>{s.symbol}</div>
+                <div style={{ flex: 1, position: "relative", height: 16, background: "#F5F3FF", borderRadius: 4, overflow: "hidden" }}>
+                  <div style={{
+                    position: "absolute", top: 0, bottom: 0,
+                    left: s.profit >= 0 ? "50%" : `${50 - (Math.abs(s.profit) / maxAbsProfit) * 50}%`,
+                    width: `${(Math.abs(s.profit) / maxAbsProfit) * 50}%`,
+                    background: s.profit >= 0 ? "#34D399" : "#F87171", borderRadius: 4,
+                  }} />
+                  <div style={{ position: "absolute", left: "50%", top: 0, bottom: 0, width: 1, background: "var(--line2)" }} />
+                </div>
+                <div style={{ width: 110, textAlign: "right", fontSize: 11.5, fontWeight: 600, color: s.profit >= 0 ? "#059669" : "#DC2626", flexShrink: 0 }}>
+                  {s.profit >= 0 ? "+" : ""}{fmtMoney(s.profit, currency)}
+                </div>
+                <div style={{ width: 50, textAlign: "right", fontSize: 10, color: "var(--mut)", flexShrink: 0 }}>{s.count}×</div>
+              </div>
+            ))}
+          </div>
+
+          <details>
+            <summary style={{ fontSize: 11, color: "var(--mut)", cursor: "pointer", marginBottom: 10 }}>Zobrazit všech {sortedClosedTrades.length} jednotlivých obchodů</summary>
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11.5 }}>
+              <thead><tr style={{ background: "#F5F3FF", borderBottom: "1px solid var(--line)" }}>
+                <th style={{ textAlign: "left", padding: "7px 10px", fontSize: 9, letterSpacing: ".1em", textTransform: "uppercase", color: "var(--mut)", fontWeight: 500 }}>Titul</th>
+                <th style={{ textAlign: "left", padding: "7px 10px", fontSize: 9, letterSpacing: ".1em", textTransform: "uppercase", color: "var(--mut)", fontWeight: 500 }}>Otevřeno</th>
+                <th style={{ textAlign: "left", padding: "7px 10px", fontSize: 9, letterSpacing: ".1em", textTransform: "uppercase", color: "var(--mut)", fontWeight: 500 }}>Uzavřeno</th>
+                <th style={{ textAlign: "right", padding: "7px 10px", fontSize: 9, letterSpacing: ".1em", textTransform: "uppercase", color: "var(--mut)", fontWeight: 500 }}>Objem</th>
+                <th style={{ textAlign: "right", padding: "7px 10px", fontSize: 9, letterSpacing: ".1em", textTransform: "uppercase", color: "var(--mut)", fontWeight: 500 }}>Zisk/ztráta</th>
+              </tr></thead>
+              <tbody>
+                {sortedClosedTrades.map(t => (
+                  <tr key={t.id} style={{ borderBottom: "1px solid var(--line)" }}>
+                    <td style={{ padding: "7px 10px", fontWeight: 600, color: "var(--ink)" }}>{t.symbol}</td>
+                    <td style={{ padding: "7px 10px", color: "var(--mut)", whiteSpace: "nowrap" }}>{t.open_time ? fmtDate(t.open_time.slice(0,10)) : "—"}</td>
+                    <td style={{ padding: "7px 10px", color: "var(--mut)", whiteSpace: "nowrap" }}>{t.close_time ? fmtDate(t.close_time.slice(0,10)) : "—"}</td>
+                    <td style={{ padding: "7px 10px", textAlign: "right", color: "var(--mut)" }}>{t.volume}</td>
+                    <td style={{ padding: "7px 10px", textAlign: "right", fontWeight: 600, color: (t.profit || 0) >= 0 ? "#059669" : "#DC2626" }}>{(t.profit || 0) >= 0 ? "+" : ""}{fmtMoney(t.profit, currency)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </details>
+        </div>
+      )}
 
       {/* TRANŠE — ruční ledger vkladů/výběrů hotovosti */}
       <div style={{ background: "#fff", border: "1px solid var(--line)", borderRadius: 14, padding: "18px 24px" }}>
@@ -10503,6 +10720,7 @@ export default function MauxCRM() {
   const [xtbTranches, setXtbTranches] = useState([]);
   const [xtbSnapshots, setXtbSnapshots] = useState([]);
   const [xtbTitles, setXtbTitles] = useState([]);
+  const [xtbClosedTrades, setXtbClosedTrades] = useState([]);
   const [escrows, setEscrows] = useState([]);
   const [escrowMode, setEscrowMode] = useState("list"); // list | edit | new
   const [selEscrow, setSelEscrow] = useState(null);
@@ -10564,8 +10782,9 @@ export default function MauxCRM() {
       fetchXtbTranches().catch(e => { console.error("xtb tranches:", e); return []; }),
       fetchXtbSnapshots().catch(e => { console.error("xtb snapshots:", e); return []; }),
       fetchXtbTitles().catch(e => { console.error("xtb titles:", e); return []; }),
+      fetchXtbClosedTrades().catch(e => { console.error("xtb closed trades:", e); return []; }),
     ])
-      .then(async ([c, i, w, f, dpfo, tax, checks, loans, esc, aLogs, aAtt, aAvail, xtbTr, xtbSnap, xtbTit]) => {
+      .then(async ([c, i, w, f, dpfo, tax, checks, loans, esc, aLogs, aAtt, aAvail, xtbTr, xtbSnap, xtbTit, xtbCt]) => {
         setClients(c); setInvoices(i); setWorkEntries(w); setFinanceItems(f);
         setDpfoMonths(dpfo);
         setTaxRecords(tax);
@@ -10575,6 +10794,7 @@ export default function MauxCRM() {
         setXtbTranches(xtbTr || []);
         setXtbSnapshots(xtbSnap || []);
         setXtbTitles(xtbTit || []);
+        setXtbClosedTrades(xtbCt || []);
         setAssistantLogs(aLogs || []);
         setAssistantAttendance(aAtt || []);
         setAssistantAvailability(aAvail || null);
@@ -11103,7 +11323,7 @@ export default function MauxCRM() {
             />
           )}
 
-          {/* AKCIE — ruční evidence vkladů/výběrů + historie titulů (živé XTB API zrušeno) */}
+          {/* AKCIE — ruční evidence vkladů/výběrů + historie titulů + historie reálných obchodů (živé XTB API zrušeno) */}
           {mod === "akcie" && (
             <AkcieModule
               xtbTranches={xtbTranches}
@@ -11112,6 +11332,7 @@ export default function MauxCRM() {
               xtbTitles={xtbTitles}
               onTitleSave={handleXtbTitleSave}
               onTitleDelete={handleXtbTitleDelete}
+              xtbClosedTrades={xtbClosedTrades}
             />
           )}
 
