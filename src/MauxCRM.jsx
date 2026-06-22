@@ -7194,7 +7194,7 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
 
             {/* KALENDÁŘ VÝKAZŮ — náhled, kolik práce (Kč) bylo který den zapsáno */}
             <div style={{aspectRatio:"1", minWidth:0}}>
-              <VykazyCalendar workEntries={workEntries} onOpenFull={() => onNav("vykaz")} onAddEntry={onAddWorkEntry} />
+              <VykazyCalendar workEntries={workEntries} escrows={escrows} onOpenFull={() => onNav("vykaz")} onAddEntry={onAddWorkEntry} />
             </div>
 
             {/* Spořicí účet (čtverec, na celou šířku sloupce) */}
@@ -8169,13 +8169,14 @@ function WorkEntryList({ entries, clients, invoices, onNew, onEdit, onDelete, on
 }
 
 /* ─── KALENDÁŘ FAKTUROVÁNÍ — měsíční náhled, kolik bylo který den vyfakturováno (zeleně "svítí"), s historií ─── */
-function VykazyCalendar({ workEntries, dense = false, onOpenFull, onAddEntry }) {
+function VykazyCalendar({ workEntries, escrows, dense = false, onOpenFull, onAddEntry }) {
   const [monthOffset, setMonthOffset] = useState(0);
   const [selectedDay, setSelectedDay] = useState(null);
   const [hoverDay, setHoverDay] = useState(null);
 
-  // Indigo phosphor — barva čísel místo zelené, s lehkým "glow" (Tom: "Apple feeling = Maux feeling s indigo")
+  // Indigo phosphor — barva čísel z výkazů; ESC — zlatá pro denní úrok z úschov (ať vydělávám i ve dnech bez výkazu)
   const PHOS = "#5B4FE5";
+  const ESC = "#B8923D";
 
   const base = new Date();
   const viewDate = new Date(base.getFullYear(), base.getMonth() - monthOffset, 1);
@@ -8208,13 +8209,31 @@ function VykazyCalendar({ workEntries, dense = false, onOpenFull, onAddEntry }) 
   const rows = [];
   for (let i = 0; i < cells.length; i += 7) rows.push(cells.slice(i, i + 7));
 
+  // Denní úrok z úschov (skutečné peníze, vydělávají i ve dnech bez zapsaného výkazu) —
+  // jen do dneška, žádná projekce do budoucna (úschova může být kdykoliv vyplacena).
+  const todayMid = useMemo(() => { const t = new Date(); t.setHours(0,0,0,0); return t; }, []);
+  const escDayTotals = useMemo(() => {
+    const map = {};
+    if (!escrows || escrows.length === 0) return map;
+    for (let d = 1; d <= daysInMonth; d++) {
+      const dateObj = new Date(y, m, d);
+      if (dateObj > todayMid) break;
+      const amt = _dailyNetOnDate(escrows, dateObj);
+      if (amt > 0.5) map[`${ym}-${String(d).padStart(2, "0")}`] = amt;
+    }
+    return map;
+  }, [escrows, y, m, daysInMonth, ym, todayMid]);
+  const escMonthTotal = useMemo(() => Object.values(escDayTotals).reduce((s, v) => s + v, 0), [escDayTotals]);
+
   const dayInfo = (d) => {
     const ds = `${ym}-${String(d).padStart(2, "0")}`;
     const amt = dayTotals[ds] || 0;
-    return { ds, amt, isToday: ds === todayStr };
+    const escAmt = escDayTotals[ds] || 0;
+    return { ds, amt, escAmt, isToday: ds === todayStr };
   };
 
   const selEntries = selectedDay ? (workEntries || []).filter(e => e.entry_date === selectedDay) : [];
+  const selEscAmt = selectedDay ? (escDayTotals[selectedDay] || 0) : 0;
 
   // Chytré kliknutí na den (Apple Calendar styl):
   //  • v "dense" (mini na Dashboardu) → vždy přímo otevři Nový záznam s tím datem
@@ -8254,10 +8273,26 @@ function VykazyCalendar({ workEntries, dense = false, onOpenFull, onAddEntry }) 
               title="Následující měsíc">›</button>
           </div>
         </div>
-        <div style={{marginTop:dense?8:13,display:"flex",alignItems:"baseline",gap:8}}>
-          <span className="maux-num" style={{fontSize:dense?32:46,fontWeight:800,letterSpacing:"-.01em",color:monthTotal>0?PHOS:"var(--mut)",lineHeight:1,textShadow:monthTotal>0?`0 0 20px ${PHOS}40`:"none"}}>{monthTotal>0?"+":""}{fmtKc(monthTotal)}</span>
+        <div style={{marginTop:dense?8:13,display:"flex",alignItems:"baseline",gap:8,flexWrap:"wrap"}}>
+          <span className="maux-num" style={{fontSize:dense?32:46,fontWeight:800,letterSpacing:"-.01em",color:(monthTotal+escMonthTotal)>0?PHOS:"var(--mut)",lineHeight:1,textShadow:(monthTotal+escMonthTotal)>0?`0 0 20px ${PHOS}40`:"none"}}>{(monthTotal+escMonthTotal)>0?"+":""}{fmtKc(monthTotal+escMonthTotal)}</span>
           {!dense && <span style={{fontSize:12,color:"var(--mut)"}}>za měsíc, bez DPH</span>}
         </div>
+        {!dense && (monthTotal > 0 || escMonthTotal > 0) && (
+          <div style={{marginTop:8,display:"flex",gap:16,flexWrap:"wrap"}}>
+            {monthTotal > 0 && (
+              <div style={{display:"flex",alignItems:"center",gap:5}}>
+                <span style={{width:7,height:7,borderRadius:"50%",background:PHOS}} />
+                <span style={{fontSize:11.5,color:PHOS,fontWeight:600}}>{fmtKc(monthTotal)} práce</span>
+              </div>
+            )}
+            {escMonthTotal > 0 && (
+              <div style={{display:"flex",alignItems:"center",gap:5}}>
+                <span style={{width:7,height:7,borderRadius:"50%",background:ESC}} />
+                <span style={{fontSize:11.5,color:ESC,fontWeight:600}}>{fmtKc(Math.round(escMonthTotal))} úschovy</span>
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Grid — velká čitelná čísla, dny s výkazem mají jemnou indigo "kartu" pod sebou, ať to nepůsobí prázdně */}
@@ -8272,23 +8307,27 @@ function VykazyCalendar({ workEntries, dense = false, onOpenFull, onAddEntry }) 
             <div key={ri} style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:dense?2:8,flex:1}}>
               {row.map((d, ci) => {
                 if (!d) return <div key={ci}/>;
-                const { ds, amt, isToday } = dayInfo(d);
+                const { ds, amt, escAmt, isToday } = dayInfo(d);
                 const isSel = selectedDay === ds;
                 const isHov = hoverDay === ds;
                 const canAct = dense || amt > 0 || !!onAddEntry;
+                const titleBits = [];
+                if (amt > 0) titleBits.push(`+${fmtKc(amt)} práce`);
+                if (escAmt > 0) titleBits.push(`+${fmtKc(Math.round(escAmt))} úschovy`);
+                const cellTitle = titleBits.length ? `${fmtDate(ds)} — ${titleBits.join(" · ")}` : (onAddEntry ? `${fmtDate(ds)} — přidat výkaz` : fmtDate(ds));
                 return (
                   <button key={ds}
                     onClick={() => canAct && handleDayClick(ds, amt)}
                     onMouseEnter={() => setHoverDay(ds)}
                     onMouseLeave={() => setHoverDay(p => p === ds ? null : p)}
-                    title={amt > 0 ? `${fmtDate(ds)} — +${fmtKc(amt)}` : (onAddEntry ? `${fmtDate(ds)} — přidat výkaz` : fmtDate(ds))}
+                    title={cellTitle}
                     style={{
                       border: "none",
-                      background: amt > 0 ? "rgba(91,79,229,.09)" : (isHov ? "rgba(91,79,229,.06)" : "none"),
+                      background: amt > 0 ? "rgba(91,79,229,.09)" : (escAmt > 0 ? "rgba(184,146,61,.08)" : (isHov ? "rgba(91,79,229,.06)" : "none")),
                       borderRadius: dense ? 8 : 14, position:"relative",
-                      display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:dense?1:4,
+                      display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:dense?1:3,
                       cursor: canAct ? "pointer" : "default",
-                      padding: dense ? "3px 0" : "7px 0",
+                      padding: dense ? "3px 0" : "6px 0",
                       transition:"background .15s",
                     }}>
                     <span style={{
@@ -8299,6 +8338,15 @@ function VykazyCalendar({ workEntries, dense = false, onOpenFull, onAddEntry }) 
                     }}>
                       {amt>0 ? `+${fmtKc(amt)}` : "0"}
                     </span>
+                    {!dense && (
+                      <span style={{
+                        minHeight: 11, fontSize:9.5, fontWeight:700, letterSpacing:"-.01em",
+                        fontVariantNumeric:"tabular-nums", lineHeight:1, whiteSpace:"nowrap",
+                        color: escAmt>0 ? ESC : "transparent",
+                      }}>
+                        {escAmt>0 ? `+${fmtKc(Math.round(escAmt))}` : "0"}
+                      </span>
+                    )}
                     <span style={{
                       width: circleSize, height: circleSize, borderRadius:"50%",
                       display:"flex", alignItems:"center", justifyContent:"center",
@@ -8339,6 +8387,12 @@ function VykazyCalendar({ workEntries, dense = false, onOpenFull, onAddEntry }) 
               ))}
             </div>
           )}
+          {selEscAmt > 0 && (
+            <div style={{display:"flex",justifyContent:"space-between",fontSize:13.5,gap:8,marginTop:selEntries.length>0?8:0,paddingTop:selEntries.length>0?8:0,borderTop:selEntries.length>0?"1px solid rgba(0,0,0,.06)":"none"}}>
+              <span style={{color:"var(--mut)"}}>Z úschov tento den</span>
+              <span className="maux-num" style={{fontWeight:700,color:ESC,flexShrink:0}}>+{fmtKc(Math.round(selEscAmt))}</span>
+            </div>
+          )}
         </div>
       )}
 
@@ -8352,7 +8406,7 @@ function VykazyCalendar({ workEntries, dense = false, onOpenFull, onAddEntry }) 
 }
 
 /* ─── FAKTURACE ─── */
-function InvoiceList({ invoices, clients, workEntries, onOpen, onOpenClient, onToggleStatus, onGenerateInvoice, onPreviewInvoice, onEditInvoice, onOpenDiscountModal, onAddWorkEntry, loading }) {
+function InvoiceList({ invoices, clients, workEntries, escrows, onOpen, onOpenClient, onToggleStatus, onGenerateInvoice, onPreviewInvoice, onEditInvoice, onOpenDiscountModal, onAddWorkEntry, loading }) {
   const [search, setSearch] = useState("");
   const [filterStatus, setFilterStatus] = useState("vse");
   const [filterClient, setFilterClient] = useState("");
@@ -8573,7 +8627,7 @@ function InvoiceList({ invoices, clients, workEntries, onOpen, onOpenClient, onT
 
       {/* ── KALENDÁŘ VÝKAZŮ ── */}
       <div style={{ marginBottom: 36 }}>
-        <VykazyCalendar workEntries={workEntries} onAddEntry={onAddWorkEntry} />
+        <VykazyCalendar workEntries={workEntries} escrows={escrows} onAddEntry={onAddWorkEntry} />
       </div>
 
       {/* ── FILTRY A HISTORIE ── */}
@@ -11609,7 +11663,7 @@ export default function MauxCRM() {
           {/* FAKTURACE */}
           {mod === "fakturace" && curMod?.live && mode === "list" && (
             <InvoiceList
-              invoices={invoices} clients={clients} workEntries={workEntries}
+              invoices={invoices} clients={clients} workEntries={workEntries} escrows={escrows}
               onOpen={(id, action) => {
                 setSel(id);
                 if (action === "edit") setMode("edit");
