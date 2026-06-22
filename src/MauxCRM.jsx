@@ -7362,7 +7362,11 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
 
       {/* STACKED BAR CHART — PŘÍJEM MAUX LEGAL: zelená faktury + oranžová úschovy */}
       <Panel id="chart">
-      <Card style={{padding:"18px 20px 14px"}}>
+      <Card style={{padding:"18px 20px 14px",position:"relative",border:"1.5px solid rgba(53,24,165,.16)"}}>
+        <span style={{position:"absolute",top:8,left:8,width:12,height:12,borderTop:"1.5px solid #9b8cff",borderLeft:"1.5px solid #9b8cff",pointerEvents:"none"}}/>
+        <span style={{position:"absolute",top:8,right:8,width:12,height:12,borderTop:"1.5px solid #9b8cff",borderRight:"1.5px solid #9b8cff",pointerEvents:"none"}}/>
+        <span style={{position:"absolute",bottom:8,left:8,width:12,height:12,borderBottom:"1.5px solid #9b8cff",borderLeft:"1.5px solid #9b8cff",pointerEvents:"none"}}/>
+        <span style={{position:"absolute",bottom:8,right:8,width:12,height:12,borderBottom:"1.5px solid #9b8cff",borderRight:"1.5px solid #9b8cff",pointerEvents:"none"}}/>
         {(() => {
           const n = barData.length;
           if (n === 0) return null;
@@ -7392,8 +7396,8 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
               {/* Header */}
               <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:12}}>
                 <div>
-                  <div style={{fontSize:9,letterSpacing:".2em",textTransform:"uppercase",color:"var(--mut)",fontWeight:600}}>PŘÍJEM MAUX LEGAL · {year}</div>
-                  <div style={{fontSize:9,color:"var(--mut)",marginTop:3,display:"flex",gap:14}}>
+                  <div style={{fontSize:9,letterSpacing:".16em",textTransform:"uppercase",color:"var(--ink)",fontWeight:700,fontFamily:"'JetBrains Mono','SF Mono',Menlo,monospace"}}>REV — PŘÍJEM MAUX LEGAL · {year}</div>
+                  <div style={{fontSize:9,color:"var(--mut)",marginTop:3,display:"flex",gap:14,fontFamily:"'JetBrains Mono','SF Mono',Menlo,monospace"}}>
                     <span style={{display:"flex",alignItems:"center",gap:4}}>
                       <span style={{display:"inline-block",width:10,height:10,borderRadius:2,background:"#4ADE80"}}/>
                       Fakturace {fmtKc(ytdInv)}
@@ -7407,8 +7411,8 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
                   </div>
                 </div>
                 <div style={{textAlign:"right"}}>
-                  <div style={{fontSize:9,color:"var(--mut)"}}>Celkem YTD</div>
-                  <div className="maux-num" style={{fontSize:16,fontWeight:600,color:"var(--gold)"}}>{fmtKc(ytdInv + ytdEsc)}</div>
+                  <div style={{fontSize:9,color:"var(--ink)",fontFamily:"'JetBrains Mono','SF Mono',Menlo,monospace",fontWeight:600,letterSpacing:".06em"}}>CELKEM YTD</div>
+                  <div className="maux-num" style={{fontSize:17,fontWeight:700,color:"var(--gold)",textShadow:"0 0 14px rgba(184,146,61,.35)"}}>{fmtKc(ytdInv + ytdEsc)}</div>
                 </div>
               </div>
 
@@ -7422,9 +7426,9 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
                       <line
                         x1={padL} x2={W-padR}
                         y1={baseY - BAR_AREA_H * p} y2={baseY - BAR_AREA_H * p}
-                        stroke="#F3F4F6" strokeWidth={p===0?1.5:1}
+                        stroke="rgba(53,24,165,.08)" strokeWidth={p===0?1.5:1}
                       />
-                      <text x={padL} y={baseY - BAR_AREA_H * p - 4} fontSize={7.5} fontFamily="Inter" fill="#D1D5DB">
+                      <text x={padL} y={baseY - BAR_AREA_H * p - 4} fontSize={7.5} fontFamily="'JetBrains Mono','SF Mono',Menlo,monospace" fill="#b4abd9">
                         {Math.round(v/1000)}k
                       </text>
                     </g>
@@ -7450,12 +7454,20 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
                 })()}
 
                 {/* Trend linka — spojnice vrcholů sloupců, zvýrazňuje růstovou trajektorii */}
-                {n > 1 && (
-                  <polyline
-                    points={barData.map((d,i) => `${barX(i)+barW/2},${d.total>0 ? baseY - toBarH(d.total) - 2 : baseY}`).join(" ")}
-                    fill="none" stroke="#3518A5" strokeWidth={1.2} strokeDasharray="3,3" opacity={0.35}
-                  />
-                )}
+                {n > 1 && (() => {
+                  const trendPts = barData.map((d,i) => [barX(i)+barW/2, d.total>0 ? baseY - toBarH(d.total) - 2 : baseY]);
+                  const last = trendPts[trendPts.length-1];
+                  return (
+                    <g>
+                      <polyline
+                        points={trendPts.map(p=>p.join(",")).join(" ")}
+                        fill="none" stroke="#5B4FE5" strokeWidth={1.6} strokeDasharray="4,4" opacity={0.6}
+                      />
+                      <circle cx={last[0]} cy={last[1]} r={5} fill="#5B4FE5" opacity={0.18} />
+                      <circle cx={last[0]} cy={last[1]} r={2.6} fill="#3518A5" />
+                    </g>
+                  );
+                })()}
 
                 {/* Jemná pulzující animace pro "živý" sloupec příštího měsíce */}
                 <style>{`
@@ -7577,7 +7589,7 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
                         x={x + barW/2} y={padT + BAR_AREA_H + padB - 4}
                         textAnchor="middle"
                         fontSize={isNow ? 9.5 : 8.5}
-                        fontFamily="Inter"
+                        fontFamily="'JetBrains Mono','SF Mono',Menlo,monospace"
                         fontWeight={isNow ? "700" : "400"}
                         fill={isLive ? "#7C3AED" : (isNow ? "#3518A5" : "var(--mut)")}
                       >
@@ -7631,7 +7643,7 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
                   );
                 })()}
               </svg>
-              <div style={{fontSize:8,color:"var(--mut)",opacity:.55,marginTop:2,textAlign:"right"}}>
+              <div style={{fontSize:8,color:"var(--ink)",opacity:.5,marginTop:2,textAlign:"right",fontFamily:"'JetBrains Mono','SF Mono',Menlo,monospace",letterSpacing:".03em"}}>
                 osa zvýrazněna od {Math.round(baseline/1000)}k Kč — pro lepší srovnání měsíců
               </div>
             </>
