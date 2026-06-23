@@ -8257,19 +8257,19 @@ function VykazyCalendar({ workEntries, escrows, dense = false, onOpenFull, onAdd
   for (let i = 0; i < cells.length; i += 7) rows.push(cells.slice(i, i + 7));
 
   // Denní úrok z úschov (skutečné peníze, vydělávají i ve dnech bez zapsaného výkazu) —
-  // jen do dneška, žádná projekce do budoucna (úschova může být kdykoliv vyplacena).
+  // počítá se i do budoucna (dokud úschova nemá zaznamenanou výplatu, předpokládá se
+  // nezměněný zůstatek dál; jakmile přidáš výplatu/datum, projekce se sama zkrátí).
   const todayMid = useMemo(() => { const t = new Date(); t.setHours(0,0,0,0); return t; }, []);
   const escDayTotals = useMemo(() => {
     const map = {};
     if (!escrows || escrows.length === 0) return map;
     for (let d = 1; d <= daysInMonth; d++) {
       const dateObj = new Date(y, m, d);
-      if (dateObj > todayMid) break;
       const amt = _dailyNetOnDate(escrows, dateObj);
       if (amt > 0.5) map[`${ym}-${String(d).padStart(2, "0")}`] = amt;
     }
     return map;
-  }, [escrows, y, m, daysInMonth, ym, todayMid]);
+  }, [escrows, y, m, daysInMonth, ym]);
   const escMonthTotal = useMemo(() => Object.values(escDayTotals).reduce((s, v) => s + v, 0), [escDayTotals]);
 
   const dayInfo = (d) => {
@@ -8302,7 +8302,7 @@ function VykazyCalendar({ workEntries, escrows, dense = false, onOpenFull, onAdd
             {!dense && <div style={{fontSize:9,letterSpacing:".26em",textTransform:"uppercase",fontWeight:700,color:"var(--mut)",marginBottom:5}}>ZAPSANÁ PRÁCE — DEN PO DNI</div>}
             <div style={{display:"flex",alignItems:"baseline",gap:8}}>
               <span style={{fontWeight:600,fontSize:dense?20:26,color:"var(--ink)",lineHeight:1}}>{monthNamesFull[m]} {y}</span>
-              {monthOffset > 0 && (
+              {monthOffset !== 0 && (
                 <span style={{fontSize:10.5,color:PHOS,cursor:"pointer",textDecoration:"underline"}} onClick={() => { setMonthOffset(0); setSelectedDay(null); }}>zpět na dnešek</span>
               )}
             </div>
@@ -8314,9 +8314,9 @@ function VykazyCalendar({ workEntries, escrows, dense = false, onOpenFull, onAdd
             <button onClick={() => { setMonthOffset(o => o + 1); setSelectedDay(null); }}
               style={{background:"none",border:"none",cursor:"pointer",color:"var(--mut)",fontSize:dense?16:19,padding:"3px 8px",lineHeight:1}}
               title="Předchozí měsíc">‹</button>
-            <button onClick={() => { setMonthOffset(o => Math.max(0, o - 1)); setSelectedDay(null); }}
-              disabled={monthOffset === 0}
-              style={{background:"none",border:"none",cursor:monthOffset===0?"default":"pointer",color:"var(--mut)",fontSize:dense?16:19,padding:"3px 8px",lineHeight:1,opacity:monthOffset===0?.25:1}}
+            <button onClick={() => { setMonthOffset(o => Math.max(-24, o - 1)); setSelectedDay(null); }}
+              disabled={monthOffset <= -24}
+              style={{background:"none",border:"none",cursor:monthOffset<=-24?"default":"pointer",color:"var(--mut)",fontSize:dense?16:19,padding:"3px 8px",lineHeight:1,opacity:monthOffset<=-24?.25:1}}
               title="Následující měsíc">›</button>
           </div>
         </div>
