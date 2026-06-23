@@ -9093,6 +9093,12 @@ const MAY_2026_RECEIPTS = [
   { id: "imp_maj26_10", date: "2026-05-16", label: "Woolworth Home Discount – drobnosti do domácnosti", gross: 340, rate: 21, vat: 59 },
   // — faktura č. 1260040147 (PODA a.s.), DUZP 31.5., vystavena 4.6. —
   { id: "imp_maj26_11", date: "2026-05-31", label: "PODA a.s. – telefon 775938765 (vyúčtování za květen)", gross: 399, rate: 21, vat: 69 },
+  // — doplněno 23.6. po srovnání s Čechmanové podklady k DPH za květen (26FP00039–43, 26FP00050) —
+  { id: "imp_maj26_12", date: "2026-05-21", label: "Svobodová Marcela – notářka (26FP00039)", gross: 5675, rate: 21, vat: 985 },
+  { id: "imp_maj26_13", date: "2026-05-19", label: "Peterka Miloslav – notář (26FP00050)", gross: 2481, rate: 21, vat: 431 },
+  { id: "imp_maj26_14", date: "2026-05-31", label: "Alza – (26FP00041)", gross: 2102, rate: 21, vat: 365 },
+  { id: "imp_maj26_15", date: "2026-05-31", label: "Alza – (26FP00042)", gross: 89, rate: 21, vat: 15 },
+  { id: "imp_maj26_16", date: "2026-05-31", label: "Alza – (26FP00043)", gross: 1386, rate: 21, vat: 241 },
 ];
 
 // Účtenky a faktury za červen 2026 — průběžně doplňováno ze složky 001_Účetní podklady,
