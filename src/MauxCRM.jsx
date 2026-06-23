@@ -818,7 +818,7 @@ function InvoiceIssueModal({ clientId, entries, clients, invoices, onConfirm, on
         </div>
 
         <div style={{ display: "flex", gap: 10 }}>
-          <button className="btn" style={{ flex: 1 }} onClick={onCancel}>Zrušit</button>
+          <button className="btn gho" style={{ flex: 1 }} onClick={onCancel}>Zrušit</button>
           <button className="btn pri" style={{ flex: 2 }} onClick={() => setShowPreview(true)} disabled={selEntries.length === 0}>
             Náhled faktury →
           </button>
@@ -914,7 +914,7 @@ function DraftDiscountModal({ clientId, entries, clients, onConfirm, onCancel, s
           </div>
         ) : (
           <div style={{ display: "flex", gap: 10 }}>
-            <button className="btn" style={{ flex: 1 }} onClick={handleBack}>Zpět</button>
+            <button className="btn gho" style={{ flex: 1 }} onClick={handleBack}>Zpět</button>
             <button className="btn pri" style={{ flex: 2 }} onClick={handleConfirm} disabled={saving}>{saving ? "Ukládám…" : "Potvrdit"}</button>
           </div>
         )}
@@ -1518,7 +1518,7 @@ function InvoiceEditModal({ inv, clients, workEntries, onPreview, onCancel, onSa
           )}
         </div>
         <div style={{ display:"flex", gap:10 }}>
-          <button className="btn" style={{ flex:1 }} onClick={onCancel} disabled={savingDirect}>Zrušit</button>
+          <button className="btn gho" style={{ flex:1 }} onClick={onCancel} disabled={savingDirect}>Zrušit</button>
           {onSaveDirect && (
             <button className="btn" style={{ flex:1.4 }} disabled={savingDirect} onClick={() => onSaveDirect(buildUpdatedInvoice())}>
               {savingDirect ? "Ukládám…" : "Uložit"}
@@ -3668,20 +3668,27 @@ function EscrowForm({ init, onSave, onCancel, saving }) {
     setNewT({ party_type:"složitel", party_name:"", amount:0, received_date:"", notes:"" });
   };
   const removeTranche = (id) => setTranches(p => p.filter(t => t.id !== id));
-  // Oprava omylem zaškrtnuté/odškrtnuté výplaty přímo v detailu úschovy (vyplacení i datum jdou ručně přepsat zpět)
+  // Oprava omylem zaškrtnuté/odškrtnuté výplaty i ručně upravená částka/strana/datum přímo
+  // v detailu úschovy (např. po dodatku ke smlouvě) — vše jde přepsat zpět, uloží se s formulářem.
   const updateTranche = (id, patch) => setTranches(p => p.map(t => t.id === id ? { ...t, ...patch } : t));
   const save = async () => {
     if(!d.escrow_number.trim()) return;
+    // Pojistka: pokud je rozepsaná nová tranše (jméno vyplněné) a uživatel zapomněl
+    // kliknout "+ Přidat", při uložení se přidá automaticky — ať se nic neztratí.
+    const pendingDraft = newT.party_name.trim()
+      ? [{ ...newT, id: uid(), escrow_id: d.id, sort_order: tranches.length }]
+      : [];
+    const finalTranches = [...tranches, ...pendingDraft];
     // Save escrow first, then sync tranches
     await upsertEscrow(d);
     // Delete removed tranches and upsert current ones
     const existing = init?.escrow_tranches || [];
-    const removedIds = existing.filter(e => !tranches.find(t=>t.id===e.id)).map(e=>e.id);
+    const removedIds = existing.filter(e => !finalTranches.find(t=>t.id===e.id)).map(e=>e.id);
     await Promise.all([
       ...removedIds.map(id => deleteEscrowTranche(id)),
-      ...tranches.map(t => upsertEscrowTranche({ ...t, escrow_id: d.id }))
+      ...finalTranches.map(t => upsertEscrowTranche({ ...t, escrow_id: d.id }))
     ]);
-    onSave({ ...d, escrow_tranches: tranches });
+    onSave({ ...d, escrow_tranches: finalTranches });
   };
   return (
     <div className="form" style={{maxWidth:660}}>
@@ -3721,15 +3728,36 @@ function EscrowForm({ init, onSave, onCancel, saving }) {
               <th style={{padding:"5px 8px",textAlign:"left",fontWeight:500,color:"var(--mut)"}}>Typ</th>
               <th style={{padding:"5px 8px",textAlign:"left",fontWeight:500,color:"var(--mut)"}}>Strana</th>
               <th style={{padding:"5px 8px",textAlign:"right",fontWeight:500,color:"var(--mut)"}}>Částka</th>
+              <th style={{padding:"5px 8px",textAlign:"left",fontWeight:500,color:"var(--mut)"}}>Datum přijetí</th>
               <th style={{padding:"5px 8px",textAlign:"center",fontWeight:500,color:"var(--mut)"}}>Vyplaceno</th>
               <th style={{padding:"5px 8px"}}></th>
             </tr></thead>
             <tbody>
               {tranches.map((t,i) => (
                 <tr key={t.id} style={{borderTop:"1px solid var(--line)"}}>
-                  <td style={{padding:"6px 8px"}}><span style={{fontSize:10,padding:"2px 6px",borderRadius:3,background:t.party_type==='složitel'?"#EEF2FF":"#F0FDF4",color:t.party_type==='složitel'?"#3730A3":"#065F46"}}>{t.party_type}</span></td>
-                  <td style={{padding:"6px 8px",color:"var(--txt)"}}>{t.party_name}</td>
-                  <td style={{padding:"6px 8px",textAlign:"right",fontFamily:"Fraunces,serif"}}>{fmtKc(t.amount)}</td>
+                  <td style={{padding:"6px 8px"}}>
+                    <select value={t.party_type} onChange={e=>updateTranche(t.id,{party_type:e.target.value})}
+                      style={{fontSize:10,padding:"2px 4px",borderRadius:3,border:"1px solid var(--line)",background:t.party_type==='složitel'?"#EEF2FF":"#F0FDF4",color:t.party_type==='složitel'?"#3730A3":"#065F46"}}>
+                      <option value="složitel">složitel</option>
+                      <option value="oprávněný">oprávněný</option>
+                    </select>
+                  </td>
+                  <td style={{padding:"6px 8px"}}>
+                    <input value={t.party_name} onChange={e=>updateTranche(t.id,{party_name:e.target.value})}
+                      style={{fontSize:12,padding:"4px 6px",borderRadius:4,border:"1px solid var(--line)",width:"100%",color:"var(--txt)"}}/>
+                  </td>
+                  <td style={{padding:"6px 8px",textAlign:"right"}}>
+                    <input type="number" value={t.amount}
+                      title="Upravit částku — např. po dodatku ke smlouvě"
+                      onChange={e=>updateTranche(t.id,{amount:Number(e.target.value)||0})}
+                      style={{fontSize:12,padding:"4px 6px",borderRadius:4,border:"1px solid var(--line)",width:110,textAlign:"right",fontFamily:"Fraunces,serif"}}/>
+                  </td>
+                  <td style={{padding:"6px 8px"}}>
+                    {t.party_type === 'složitel' ? (
+                      <input type="date" value={t.received_date||""} onChange={e=>updateTranche(t.id,{received_date:e.target.value||null})}
+                        style={{fontSize:11,padding:"3px 5px",borderRadius:4,border:"1px solid var(--line)",width:120}}/>
+                    ) : <span style={{color:"var(--mut)",opacity:.4}}>—</span>}
+                  </td>
                   <td style={{padding:"6px 8px",textAlign:"center"}}>
                     {t.party_type === 'oprávněný' ? (
                       <div style={{display:"flex",alignItems:"center",justifyContent:"center",gap:5,flexWrap:"wrap"}}>
@@ -3752,6 +3780,7 @@ function EscrowForm({ init, onSave, onCancel, saving }) {
             </tbody>
           </table>
         )}
+        <div style={{fontSize:10.5,color:"var(--mut)",marginBottom:8}}>Změny v tabulce (částka, strana, datum…) se uloží spolu s tlačítkem "Uložit" dole.</div>
         <div style={{display:"grid",gridTemplateColumns:"auto 1fr auto auto auto",gap:6,alignItems:"center",background:"#F9FAFB",borderRadius:8,padding:"10px 12px"}}>
           <select value={newT.party_type} onChange={e=>setNewT(p=>({...p,party_type:e.target.value}))} style={{fontSize:12,padding:"5px 8px",borderRadius:4,border:"1px solid var(--line)"}}>
             <option value="složitel">složitel</option>
