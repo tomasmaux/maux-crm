@@ -3073,19 +3073,34 @@ function _buildBalanceIntervals(e) {
 
   // — Strop pro projekci do budoucna (žádná skutečná výplata zatím nezaznamenaná) —
   // Základní pravidlo: úschova trvá minimálně 20 dní (plomba) od připsání.
-  //   • je-li zadáno datum podání návrhu na vklad → odhad = ten den + 20 dní
-  //   • jinak (návrh ještě nepodán)                → odhad = den přijetí + 20 dní
-  //   • je-li známé skutečné datum vyplacení (date_paid) → to je definitivní strop
+  //   • je-li zadáno datum podání návrhu na vklad → odhad = ten den + 20 dní (ongoing, nejisté)
+  //   • jinak (návrh ještě nepodán)                → odhad = den přijetí + 20 dní (ongoing, nejisté)
+  //   • je-li známé skutečné datum vyplacení (date_paid) → definitivní strop (NE ongoing — jisté)
   // Aplikuje se jen na poslední (otevřený, "9999-01-01") interval — jakmile existuje
   // skutečná výplata tranše (is_paid+paid_date), interval je už uzavřený a tohle se neuplatní.
+  // `ongoing: true` značí, že konec je jen ODHAD (ne reálná zaznamenaná událost) — používá se
+  // místo starého sentinelu "to===9999" všude, kde appka potřebuje poznat "ještě běžící" zůstatek
+  // (escrowRunningNet, měsíční breakdown řádky…), protože teď i běžící zůstatek má konkrétní "to".
   if (intervals.length > 0) {
     const last = intervals[intervals.length - 1];
     if (last.to.getFullYear() === 9999) {
-      const cap = e.date_paid || (e.date_navrh_podan ? addDays(e.date_navrh_podan, 20) : (e.date_received ? addDays(e.date_received, 20) : null));
-      if (cap) {
-        const capD = new Date(cap + 'T00:00:00');
+      if (e.date_paid) {
+        const capD = new Date(e.date_paid + 'T00:00:00');
         if (capD < last.from) intervals.pop();
-        else if (capD < last.to) last.to = capD;
+        else last.to = capD; // jisté, ne ongoing
+      } else {
+        const sloz2 = (e.escrow_tranches || []).filter(t => t.party_type === 'složitel' && t.amount > 0);
+        const receivedDates = sloz2.map(t => t.received_date || e.date_received).filter(Boolean);
+        if (e.date_received) receivedDates.push(e.date_received);
+        const earliest = receivedDates.length ? receivedDates.sort()[0] : null;
+        const estCap = e.date_navrh_podan ? addDays(e.date_navrh_podan, 20) : (earliest ? addDays(earliest, 20) : null);
+        if (estCap) {
+          const capD = new Date(estCap + 'T00:00:00');
+          if (capD < last.from) intervals.pop();
+          else { last.to = capD; last.ongoing = true; }
+        } else {
+          last.ongoing = true; // bez info — zůstává otevřené (9999), pořád "běžící"
+        }
       }
     }
   }
@@ -3114,6 +3129,16 @@ function _dailyNetOnDate(escrows, date) {
     if (!iv) return sum;
     return sum + iv.balance * e.interest_rate / 365 * 0.85;
   }, 0);
+}
+
+// Je částka pro tento den jen ODHAD (úschova ještě nemá jistý konec — plomba/výplata
+// nepotvrzena), nebo jde o jistou/uzavřenou hodnotu? Používá se pro decentní "auto" značku v UI.
+function _dailyNetIsAuto(escrows, date) {
+  return (escrows || []).some(e => {
+    if (!e.interest_rate) return false;
+    const iv = _buildBalanceIntervals(e).find(iv => iv.from <= date && iv.to >= date);
+    return !!(iv && iv.ongoing);
+  });
 }
 
 // — Zachováme starší helpers pro EscrowCard legacy tabulku a EscrowInsights —
@@ -3178,7 +3203,7 @@ function escrowRunningNet(escrows) {
   const today = new Date(); today.setHours(0,0,0,0);
   return (escrows || []).reduce((sum, e) => {
     if (!e.interest_rate) return sum;
-    const ivs = _buildBalanceIntervals(e).filter(iv => iv.to.getFullYear() >= 9000);
+    const ivs = _buildBalanceIntervals(e).filter(iv => iv.ongoing || iv.to.getFullYear() >= 9000);
     if (ivs.length === 0) return sum;
     const epoch = new Date(0);
     return sum + _grossForPeriod(ivs, e.interest_rate, epoch, today) * 0.85;
@@ -3226,7 +3251,7 @@ function escrowNetForMonthRows(escrows, year, month) {
 
     // — Aktivní intervaly v tomto měsíci
     ivs.forEach(iv => {
-      const isRunning = iv.to.getFullYear() >= 9000;
+      const isRunning = iv.ongoing || iv.to.getFullYear() >= 9000;
       const endsThisMonth = !isRunning && iv.to >= mStart && iv.to <= mEnd;
       if (!isRunning && !endsThisMonth) return; // mimo měsíc → přeskočit
 
@@ -3327,6 +3352,25 @@ const TYP_STYLE = {
   vyplaceno: { bg:"rgba(0,0,0,0.025)",    badge:"#6B7280", badgeBg:"#F3F4F6", label:"vyplaceno" },
 };
 
+// Decentní pastelová značka u hodnot, které appka sama dopočítala (odhad/projekce),
+// ne reálně zaznamenaný/jistý údaj. Použít vždy vedle čísla nebo pole, které je auto-derived.
+function AutoTag({ title, style }) {
+  return (
+    <span
+      title={title || "Automaticky dopočítáno — odhad, dokud nepřibude jistý údaj"}
+      style={{
+        fontSize: 8.5, fontWeight: 700, padding: "1px 4.5px", borderRadius: 3,
+        background: "#EEF2FF", color: "#A5B4FC", letterSpacing: "0.04em",
+        textTransform: "uppercase", verticalAlign: "middle", marginLeft: 5,
+        border: "1px solid #E0E7FF", lineHeight: 1.4, cursor: "default",
+        ...style,
+      }}
+    >
+      auto
+    </span>
+  );
+}
+
 const BREAKDOWN_COLS = {
   nextMonth: [
     { key:"typ",        label:"" },
@@ -3412,6 +3456,7 @@ function KpiBreakdown({ rows, colSet, onClose, earnLabel, incLabel, onMarkPaid }
                       <span style={{fontSize:9,fontWeight:600,padding:"2px 5px",borderRadius:4,background:ts.badgeBg,color:ts.badge,textTransform:"uppercase",letterSpacing:"0.04em"}}>
                         {ts.label}
                       </span>
+                      {row.typ === "průběžné" && <AutoTag title="Odhad — interval ještě nemá jistý konec (čeká se na plombu/výplatu)" />}
                     </td>
                   );
                   if (c.key === "akce") return (
@@ -3677,9 +3722,19 @@ function EscrowForm({ init, onSave, onCancel, saving }) {
     interest_rate: 0.035, date_received: "", date_navrh_podan: "", date_plomba_end: "", date_paid: "", notes: ""
   });
   const set = (k,v) => setD(p=>({...p,[k]:v}));
+  // Sleduje, jestli je "Konec plomby" právě teď auto-dopočtená hodnota (vs. ručně přepsaná) —
+  // řídí zobrazení decentní "auto" značky u pole.
+  const [plombaAuto, setPlombaAuto] = useState(() => {
+    if (!init) return false;
+    return !!(init.date_navrh_podan && init.date_plomba_end === addDays(init.date_navrh_podan, 20));
+  });
   // Podání návrhu na vklad → automaticky dopočítej odhad konce plomby (+20 dní).
   // Konec plomby pak jde i ručně přepsat (např. když katastr odhad upraví).
-  const setNavrhPodan = (v) => setD(p => ({ ...p, date_navrh_podan: v, date_plomba_end: v ? addDays(v, 20) : p.date_plomba_end }));
+  const setNavrhPodan = (v) => {
+    setD(p => ({ ...p, date_navrh_podan: v, date_plomba_end: v ? addDays(v, 20) : p.date_plomba_end }));
+    setPlombaAuto(!!v);
+  };
+  const setPlombaEndManual = (v) => { set("date_plomba_end", v); setPlombaAuto(false); };
   // Tranche management
   const [tranches, setTranches] = useState(() => (init?.escrow_tranches || []));
   const [newT, setNewT] = useState({ party_type:"složitel", party_name:"", amount:0, received_date:"", notes:"" });
@@ -3734,8 +3789,8 @@ function EscrowForm({ init, onSave, onCancel, saving }) {
           <input type="date" value={d.date_navrh_podan||""} onChange={e=>setNavrhPodan(e.target.value)}/>
         </div>
         <div className="frow">
-          <label>Konec plomby (odhad)</label>
-          <input type="date" value={d.date_plomba_end||""} onChange={e=>set("date_plomba_end",e.target.value)}/>
+          <label>Konec plomby (odhad) {plombaAuto && <AutoTag title="Dopočteno automaticky: podání návrhu + 20 dní. Můžeš ručně přepsat." />}</label>
+          <input type="date" value={d.date_plomba_end||""} onChange={e=>setPlombaEndManual(e.target.value)}/>
           <div style={{fontSize:10.5,color:"var(--mut)",marginTop:4}}>
             {d.date_navrh_podan ? "Dopočteno: podání + 20 dní. Jde i ručně upravit." : "Bez podaného návrhu se počítá min. 20 dní od přijetí."}
           </div>
@@ -3857,7 +3912,7 @@ function EscrowInsights({ escrows }) {
     _buildBalanceIntervals(e).forEach(iv => {
       if (iv.to <= today) return; // interval už skončil
       const daily = iv.balance * e.interest_rate / 365 * 0.85;
-      const isRunning = iv.to.getFullYear() >= 9000;
+      const isRunning = iv.ongoing || iv.to.getFullYear() >= 9000;
       active.push({
         escrow: e.escrow_number,
         name: e.client_name || e.escrow_number,
@@ -3941,7 +3996,10 @@ function EscrowInsights({ escrows }) {
                 <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:4}}>
                   <span style={{fontSize:12,fontWeight:500,color:"var(--ink)"}}>{t.escrow} · {t.name}</span>
                   {t.isRunning
-                    ? <span style={{fontSize:9,padding:"1px 6px",borderRadius:4,background:"#FEF3C7",color:"#92400E",fontWeight:600}}>průběžné</span>
+                    ? <>
+                        <span style={{fontSize:9,padding:"1px 6px",borderRadius:4,background:"#FEF3C7",color:"#92400E",fontWeight:600}}>průběžné</span>
+                        <AutoTag title="Odhad konce úschovy — čeká se na podání návrhu na vklad / plombu / výplatu" />
+                      </>
                     : <span style={{fontSize:9,padding:"1px 6px",borderRadius:4,background:"#FEE2E2",color:"#991B1B",fontWeight:600}}>do {t.endDate.getDate()}.{t.endDate.getMonth()+1}. ({t.daysLeft}d)</span>
                   }
                 </div>
@@ -8304,13 +8362,24 @@ function VykazyCalendar({ workEntries, escrows, dense = false, onOpenFull, onAdd
     }
     return map;
   }, [escrows, y, m, daysInMonth, ym]);
+  // Které dny jsou jen ODHAD (úschova ještě nemá jistý konec) — pro decentní "auto" značku.
+  const escDayAuto = useMemo(() => {
+    const map = {};
+    if (!escrows || escrows.length === 0) return map;
+    for (const ds of Object.keys(escDayTotals)) {
+      const dateObj = new Date(ds + 'T00:00:00');
+      if (_dailyNetIsAuto(escrows, dateObj)) map[ds] = true;
+    }
+    return map;
+  }, [escrows, escDayTotals]);
   const escMonthTotal = useMemo(() => Object.values(escDayTotals).reduce((s, v) => s + v, 0), [escDayTotals]);
 
   const dayInfo = (d) => {
     const ds = `${ym}-${String(d).padStart(2, "0")}`;
     const amt = dayTotals[ds] || 0;
     const escAmt = escDayTotals[ds] || 0;
-    return { ds, amt, escAmt, isToday: ds === todayStr };
+    const escAuto = !!escDayAuto[ds];
+    return { ds, amt, escAmt, escAuto, isToday: ds === todayStr };
   };
 
   const selEntries = selectedDay ? (workEntries || []).filter(e => e.entry_date === selectedDay) : [];
@@ -8388,13 +8457,13 @@ function VykazyCalendar({ workEntries, escrows, dense = false, onOpenFull, onAdd
             <div key={ri} style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:dense?2:8,flex:1}}>
               {row.map((d, ci) => {
                 if (!d) return <div key={ci}/>;
-                const { ds, amt, escAmt, isToday } = dayInfo(d);
+                const { ds, amt, escAmt, escAuto, isToday } = dayInfo(d);
                 const isSel = selectedDay === ds;
                 const isHov = hoverDay === ds;
                 const canAct = dense || amt > 0 || !!onAddEntry;
                 const titleBits = [];
                 if (amt > 0) titleBits.push(`+${fmtKc(amt)} práce`);
-                if (escAmt > 0) titleBits.push(`+${fmtKc(Math.round(escAmt))} úschovy`);
+                if (escAmt > 0) titleBits.push(`+${fmtKc(Math.round(escAmt))} úschovy${escAuto ? " (odhad — auto)" : ""}`);
                 const cellTitle = titleBits.length ? `${fmtDate(ds)} — ${titleBits.join(" · ")}` : (onAddEntry ? `${fmtDate(ds)} — přidat výkaz` : fmtDate(ds));
                 return (
                   <button key={ds}
@@ -8411,6 +8480,12 @@ function VykazyCalendar({ workEntries, escrows, dense = false, onOpenFull, onAdd
                       padding: dense ? "3px 0" : "6px 0",
                       transition:"background .15s",
                     }}>
+                    {escAmt > 0 && escAuto && (
+                      <span title="Odhad — úschova ještě nemá jistý konec" style={{
+                        position:"absolute", top: dense?2:4, right: dense?3:6,
+                        width:4.5, height:4.5, borderRadius:"50%", background:"#A5B4FC",
+                      }}/>
+                    )}
                     <span style={{
                       minHeight: dense?11:17, fontSize:dense?9.5:15.5, fontWeight:800, letterSpacing:"-.01em",
                       fontVariantNumeric:"tabular-nums", lineHeight:1, whiteSpace:"nowrap",
