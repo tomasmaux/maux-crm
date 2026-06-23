@@ -9354,7 +9354,13 @@ function DphOdpocetTile({ invoices, financeItems, onSaveFinance }) {
     } catch { return { log: [], paid: {}, transferred: {} }; }
   };
 
-  const dphFaktury = (invoices||[]).filter(i => (i.issue_date||"").startsWith(thisMonthKey)).reduce((s,i)=>s+(i.vat_amount||0),0);
+  // DPH se přiznává podle DUZP (datum uskutečnění zdanitelného plnění), ne podle data vystavení.
+  // Faktury za uplynulý měsíc se běžně vystavují 1. den NÁSLEDUJÍCÍHO měsíce (DUZP se pak automaticky
+  // posouvá na poslední den měsíce předchozího — viz lastDayPrevMonth). Filtrovat podle issue_date by
+  // takové faktury úplně vynechalo (23.6. zjištěno: appka tak místo May faktur (29 200,50 Kč DPH dle
+  // Čechmanové) počítala starší faktury vystavené v May, tedy fakticky April práci — proto 27 787 Kč).
+  const vatPeriodKeyOf = (i) => (i.duzp || lastDayPrevMonth(i.issue_date)).slice(0,7);
+  const dphFaktury = (invoices||[]).filter(i => vatPeriodKeyOf(i) === thisMonthKey).reduce((s,i)=>s+(i.vat_amount||0),0);
   const odpItem = (financeItems||[]).find(i => i.id === "fi_dph_odpocet")
     || { id:"fi_dph_odpocet", category:"dph", label:"Odpočet z účtenek (DPH)", amount:0, notes:"SKIP_DISPLAY" };
   const odpocet = odpItem.amount || 0;
@@ -9378,7 +9384,7 @@ function DphOdpocetTile({ invoices, financeItems, onSaveFinance }) {
   // ještě se tvořícího měsíce, ale PŘEDCHOZÍHO uzavřeného období (přesně to, na co se ptáš: "kolik mi
   // pošle k úhradě tento měsíc"). Spočítáme to ze stejných dvou věcí, ze kterých vychází i ona:
   // DPH z faktur vystavených v {prevMonthName} a součet odpočtu z účtenek/archivu uplatněných za {prevMonthName}.
-  const dphFakturyPrev = (invoices||[]).filter(i => (i.issue_date||"").startsWith(prevMonthKey)).reduce((s,i)=>s+(i.vat_amount||0),0);
+  const dphFakturyPrev = (invoices||[]).filter(i => vatPeriodKeyOf(i) === prevMonthKey).reduce((s,i)=>s+(i.vat_amount||0),0);
   const odpocetPrev = log.filter(e => (e.date||"").startsWith(prevMonthKey)).reduce((s,e)=>s+(e.vat||0),0);
   const kUhradePrev = Math.max(dphFakturyPrev - odpocetPrev, 0);
 
