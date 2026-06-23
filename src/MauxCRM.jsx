@@ -1030,7 +1030,7 @@ function EntryRow({ e, inv, clients, selectedIds, toggle, editing, openEdit, clo
   );
 }
 
-function InvoiceEditModal({ inv, clients, workEntries, onPreview, onCancel, onSaveEntry, onDeleteEntry }) {
+function InvoiceEditModal({ inv, clients, workEntries, onPreview, onCancel, onSaveEntry, onDeleteEntry, onSaveDirect, savingDirect }) {
   const client = clients.find(c => c.id === inv.client_id);
 
   // entries already linked to this invoice
@@ -1518,8 +1518,13 @@ function InvoiceEditModal({ inv, clients, workEntries, onPreview, onCancel, onSa
           )}
         </div>
         <div style={{ display:"flex", gap:10 }}>
-          <button className="btn" style={{ flex:1 }} onClick={onCancel}>Zrušit</button>
-          <button className="btn pri" style={{ flex:2 }} onClick={() => onPreview(buildUpdatedInvoice(), selEntries)}>
+          <button className="btn" style={{ flex:1 }} onClick={onCancel} disabled={savingDirect}>Zrušit</button>
+          {onSaveDirect && (
+            <button className="btn" style={{ flex:1.4 }} disabled={savingDirect} onClick={() => onSaveDirect(buildUpdatedInvoice())}>
+              {savingDirect ? "Ukládám…" : "Uložit"}
+            </button>
+          )}
+          <button className="btn pri" style={{ flex:2 }} onClick={() => onPreview(buildUpdatedInvoice(), selEntries)} disabled={savingDirect}>
             Náhled faktury →
           </button>
         </div>
@@ -1576,8 +1581,9 @@ function InvoicePrintPreview({ invoice, client, workEntries, onBack, onIssue, sa
 
   const printStyles = `
     @media print {
-      body > * { display: none !important; }
-      .print-root { display: block !important; position: fixed; inset: 0; background: #fff; z-index: 9999; }
+      body * { visibility: hidden; }
+      .print-root, .print-root * { visibility: visible; }
+      .print-root { position: fixed; inset: 0; background: #fff; z-index: 9999; }
       .no-print { display: none !important; }
       @page { size: A4; margin: 0; }
     }
@@ -8424,7 +8430,7 @@ function InvoiceList({ invoices, clients, workEntries, escrows, onOpen, onOpenCl
   const [filterClient, setFilterClient] = useState("");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
-  const [sortBy, setSortBy] = useState("date_desc");
+  const [sortBy, setSortBy] = useState("number");
   const [showFilters, setShowFilters] = useState(false);
 
   // Draft invoices — aggregate unbilled work entries per client
@@ -8473,7 +8479,7 @@ function InvoiceList({ invoices, clients, workEntries, escrows, onOpen, onOpenCl
     list.sort((a, b) => {
       if (sortBy === "date_desc") return (b.issue_date || "").localeCompare(a.issue_date || "");
       if (sortBy === "date_asc") return (a.issue_date || "").localeCompare(b.issue_date || "");
-      if (sortBy === "number") return (a.invoice_number || "").localeCompare(b.invoice_number || "", undefined, { numeric: true });
+      if (sortBy === "number") return (b.invoice_number || "").localeCompare(a.invoice_number || "", undefined, { numeric: true });
       if (sortBy === "amount_desc") return (b.total || 0) - (a.total || 0);
       if (sortBy === "amount_asc") return (a.total || 0) - (b.total || 0);
       return 0;
@@ -9099,6 +9105,10 @@ const MAY_2026_RECEIPTS = [
   { id: "imp_maj26_14", date: "2026-05-31", label: "Alza – (26FP00041)", gross: 2102, rate: 21, vat: 365 },
   { id: "imp_maj26_15", date: "2026-05-31", label: "Alza – (26FP00042)", gross: 89, rate: 21, vat: 15 },
   { id: "imp_maj26_16", date: "2026-05-31", label: "Alza – (26FP00043)", gross: 1386, rate: 21, vat: 241 },
+  // — NEJISTÉ, 23.6.: PODA faktura 9260784436 je u Čechmanové zaúčtovaná 2× (26FP00036 i 26FP00049),
+  // Tom to s ní řešil 16.5. jako možnou duplicitu. Přidáno, aby dashboard seděl na reálnou platební
+  // instrukci (24 879 Kč), kterou teď posílá — ale pokud Čechmanová duplicitu opraví, smaž tento řádek.
+  { id: "imp_maj26_17", date: "2026-05-30", label: "PODA a.s. – internet (duplicitní zaúčtování 9260784436, nejisté)", gross: 499, rate: 21, vat: 87 },
 ];
 
 // Účtenky a faktury za červen 2026 — průběžně doplňováno ze složky 001_Účetní podklady,
@@ -11848,6 +11858,8 @@ export default function MauxCRM() {
           onCancel={() => setEditInvModal(null)}
           onSaveEntry={async (e) => { await upsertWorkEntry(e); const updated = await fetchWorkEntries(); setWorkEntries(updated); }}
           onDeleteEntry={async (id) => { await deleteWorkEntryDb(id); setWorkEntries(p => p.filter(x => x.id !== id)); }}
+          onSaveDirect={(updatedInv) => confirmEditInvoice(updatedInv, true)}
+          savingDirect={saving}
         />
       )}
       {editInvModal && editInvModal.previewInv && (
