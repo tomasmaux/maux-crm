@@ -3070,6 +3070,25 @@ function _buildBalanceIntervals(e) {
       });
     }
   }
+
+  // — Strop pro projekci do budoucna (žádná skutečná výplata zatím nezaznamenaná) —
+  // Základní pravidlo: úschova trvá minimálně 20 dní (plomba) od připsání.
+  //   • je-li zadáno datum podání návrhu na vklad → odhad = ten den + 20 dní
+  //   • jinak (návrh ještě nepodán)                → odhad = den přijetí + 20 dní
+  //   • je-li známé skutečné datum vyplacení (date_paid) → to je definitivní strop
+  // Aplikuje se jen na poslední (otevřený, "9999-01-01") interval — jakmile existuje
+  // skutečná výplata tranše (is_paid+paid_date), interval je už uzavřený a tohle se neuplatní.
+  if (intervals.length > 0) {
+    const last = intervals[intervals.length - 1];
+    if (last.to.getFullYear() === 9999) {
+      const cap = e.date_paid || (e.date_navrh_podan ? addDays(e.date_navrh_podan, 20) : (e.date_received ? addDays(e.date_received, 20) : null));
+      if (cap) {
+        const capD = new Date(cap + 'T00:00:00');
+        if (capD < last.from) intervals.pop();
+        else if (capD < last.to) last.to = capD;
+      }
+    }
+  }
   return intervals;
 }
 
@@ -3655,9 +3674,12 @@ function EscrowCard({ escrow, onEdit, onDelete, onMarkPaid }) {
 function EscrowForm({ init, onSave, onCancel, saving }) {
   const [d, setD] = useState(() => init || {
     id: uid(), escrow_number: "", status: "aktivní", banka: false, spis_aml: false,
-    interest_rate: 0.035, date_received: "", date_plomba_end: "", date_paid: "", notes: ""
+    interest_rate: 0.035, date_received: "", date_navrh_podan: "", date_plomba_end: "", date_paid: "", notes: ""
   });
   const set = (k,v) => setD(p=>({...p,[k]:v}));
+  // Podání návrhu na vklad → automaticky dopočítej odhad konce plomby (+20 dní).
+  // Konec plomby pak jde i ručně přepsat (např. když katastr odhad upraví).
+  const setNavrhPodan = (v) => setD(p => ({ ...p, date_navrh_podan: v, date_plomba_end: v ? addDays(v, 20) : p.date_plomba_end }));
   // Tranche management
   const [tranches, setTranches] = useState(() => (init?.escrow_tranches || []));
   const [newT, setNewT] = useState({ party_type:"složitel", party_name:"", amount:0, received_date:"", notes:"" });
@@ -3704,11 +3726,23 @@ function EscrowForm({ init, onSave, onCancel, saving }) {
       <div className="three">
         <div className="frow"><label>Sazba (%)</label><input type="number" step="0.001" value={d.interest_rate} onChange={e=>set("interest_rate",Number(e.target.value))}/></div>
         <div className="frow"><label>Datum přijetí</label><input type="date" value={d.date_received||""} onChange={e=>set("date_received",e.target.value)}/></div>
-        <div className="frow"><label>Konec plomby (odhad)</label><input type="date" value={d.date_plomba_end||""} onChange={e=>set("date_plomba_end",e.target.value)}/></div>
+        <div className="frow"><label>Datum vyplacení (finalizuje)</label><input type="date" value={d.date_paid||""} onChange={e=>set("date_paid",e.target.value)}/></div>
       </div>
       <div className="two">
-        <div className="frow"><label>Datum vyplacení (finalizuje)</label><input type="date" value={d.date_paid||""} onChange={e=>set("date_paid",e.target.value)}/></div>
-        <div className="frow" style={{display:"flex",alignItems:"center",gap:16,paddingTop:24}}>
+        <div className="frow">
+          <label>Podán návrh na vklad dne</label>
+          <input type="date" value={d.date_navrh_podan||""} onChange={e=>setNavrhPodan(e.target.value)}/>
+        </div>
+        <div className="frow">
+          <label>Konec plomby (odhad)</label>
+          <input type="date" value={d.date_plomba_end||""} onChange={e=>set("date_plomba_end",e.target.value)}/>
+          <div style={{fontSize:10.5,color:"var(--mut)",marginTop:4}}>
+            {d.date_navrh_podan ? "Dopočteno: podání + 20 dní. Jde i ručně upravit." : "Bez podaného návrhu se počítá min. 20 dní od přijetí."}
+          </div>
+        </div>
+      </div>
+      <div className="two">
+        <div className="frow" style={{display:"flex",alignItems:"center",gap:16,paddingTop:0}}>
           <label style={{display:"flex",alignItems:"center",gap:6,fontSize:13,textTransform:"none",letterSpacing:0,cursor:"pointer"}}>
             <input type="checkbox" checked={!!d.banka} onChange={e=>set("banka",e.target.checked)} style={{width:"auto"}}/>Banka
           </label>
