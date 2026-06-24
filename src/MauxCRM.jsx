@@ -10042,8 +10042,21 @@ function Placeholder({ m }) {
    Přístup přes supabase auth s emailem asistent@maux.cz.
    ══════════════════════════════════════════════════════════════════ */
 
-// ── Konstanta: denní cíl klientské práce (hodiny) ─────────────────────────────
-const ASISTENT_DAILY_H = 3;
+// ── Konstanta: denní cíl klientské (fakturovatelné) práce (hodiny) ────────────
+// BD práce se do tohoto cíle nezapočítává — je to "navíc", dokud má popis.
+const ASISTENT_DAILY_H = 3.5;
+
+// ── BUSINESS DEVELOPMENT (BD) — nefakturovatelná interní práce, 0 Kč ─────────
+const BD_CATEGORIES = [
+  "Backoffice kancelář",
+  "Zakládání a skenování spisů a jejich organizace",
+  "Pochůzka",
+  "Jiné",
+];
+const isBd = (l) => l?.entry_type === "bd";
+const billableHoursOf = (arr) => (arr || []).filter(l => !isBd(l)).reduce((s, l) => s + (l.hours || 0), 0);
+const bdHoursOf       = (arr) => (arr || []).filter(l =>  isBd(l)).reduce((s, l) => s + (l.hours || 0), 0);
+
 const LUNCH_BREAK_H = 1;       // 1h obědová pauza (zákoník práce §88)
 const LUNCH_THRESHOLD_H = 6;   // automaticky odečítá od směn ≥ 6 h
 // Čisté hodiny v kanceláři po odečtení obědové pauzy
@@ -10065,7 +10078,8 @@ function AsistentPrehled({ logs, attendance }) {
 
   const todayStr = localDs(now);
   const todayLogs = logs.filter(l=>l.entry_date===todayStr&&l.status!=="archived");
-  const todayH    = todayLogs.reduce((s,l)=>s+(l.hours||0),0);
+  const todayH    = billableHoursOf(todayLogs);
+  const todayBdH  = bdHoursOf(todayLogs);
   const todayPct  = Math.min(todayH/ASISTENT_DAILY_H,1);
 
   const todayAtt = attendance.find(a=>a.date===todayStr);
@@ -10079,17 +10093,17 @@ function AsistentPrehled({ logs, attendance }) {
     const d=new Date(weekMon); d.setDate(weekMon.getDate()+i);
     if(d>now) break;
     const ds=localDs(d);
-    const h=logs.filter(l=>l.entry_date===ds&&l.status!=="archived").reduce((s,l)=>s+(l.hours||0),0);
-    weekDays.push({ds,h,name:["Po","Út","St","Čt","Pá","So","Ne"][i],isToday:ds===todayStr});
+    const dayLogs=logs.filter(l=>l.entry_date===ds&&l.status!=="archived");
+    weekDays.push({ds,h:billableHoursOf(dayLogs),bdH:bdHoursOf(dayLogs),name:["Po","Út","St","Čt","Pá","So","Ne"][i],isToday:ds===todayStr});
   }
-  const weekH=weekDays.reduce((s,d)=>s+d.h,0), weekDone=weekDays.filter(d=>d.h>=ASISTENT_DAILY_H).length;
+  const weekH=weekDays.reduce((s,d)=>s+d.h,0), weekBdH=weekDays.reduce((s,d)=>s+d.bdH,0), weekDone=weekDays.filter(d=>d.h>=ASISTENT_DAILY_H).length;
 
   const streak=(()=>{
     let s=0,d=new Date(now); d.setHours(0,0,0,0);
     for(let i=0;i<60;i++){
       const dow=d.getDay(); if(dow===0||dow===6){d.setDate(d.getDate()-1);continue;}
       const ds=localDs(d);
-      const h=logs.filter(l=>l.entry_date===ds&&l.status!=="archived").reduce((acc,l)=>acc+(l.hours||0),0);
+      const h=billableHoursOf(logs.filter(l=>l.entry_date===ds&&l.status!=="archived"));
       if(h>=ASISTENT_DAILY_H){s++;d.setDate(d.getDate()-1);}else break;
     }
     return s;
@@ -10097,7 +10111,8 @@ function AsistentPrehled({ logs, attendance }) {
 
   const mKey=`${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,"0")}`;
   const mLogs=logs.filter(l=>(l.entry_date||"").startsWith(mKey)&&l.status!=="archived");
-  const mH=mLogs.reduce((s,l)=>s+(l.hours||0),0);
+  const mH=billableHoursOf(mLogs);
+  const mBdH=bdHoursOf(mLogs);
   const mDays=new Set(mLogs.map(l=>l.entry_date)).size;
   const mAtt=attendance.filter(a=>a.date.startsWith(mKey)&&a.check_in).length;
 
@@ -10159,6 +10174,15 @@ function AsistentPrehled({ logs, attendance }) {
           </div>
           <div style={{fontSize:11,color:"var(--mut)",fontWeight:600}}>{pctRound} %</div>
         </div>
+        {todayBdH>0&&(
+          <div style={{marginTop:14,paddingTop:12,borderTop:"1px solid rgba(0,0,0,.08)",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+            <div style={{fontSize:10,color:"#6366F1",fontWeight:600,display:"flex",alignItems:"center",gap:6}}>
+              <span style={{width:6,height:6,borderRadius:"50%",background:"#A5B4FC"}}/>
+              BUSINESS DEVELOPMENT dnes
+            </div>
+            <div style={{fontSize:13,color:"var(--ink)",fontWeight:500}}>{fmtH(todayBdH)} <span style={{fontSize:10,color:"var(--mut)",fontWeight:400}}>· 0 Kč (interní)</span></div>
+          </div>
+        )}
       </div>
 
       {/* ── Týden + KPIs ── */}
@@ -10170,6 +10194,7 @@ function AsistentPrehled({ logs, attendance }) {
             <div style={{fontSize:7.5,letterSpacing:".25em",textTransform:"uppercase",fontWeight:700,color:"var(--mut)"}}>TENTO TÝDEN</div>
             <div style={{fontSize:10.5,color:"var(--mut)"}}>
               <b style={{color:INK}}>{weekDone}</b>/{weekDays.length} dní · <b style={{color:INK}}>{fmtH(weekH)}</b>
+              {weekBdH>0&&<span style={{color:"#6366F1"}}> · BD {fmtH(weekBdH)}</span>}
             </div>
           </div>
           <div style={{display:"flex",gap:6,alignItems:"flex-end",height:70}}>
@@ -10192,7 +10217,7 @@ function AsistentPrehled({ logs, attendance }) {
         {/* KPI grid */}
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
           {[
-            {l:"Hodiny / měsíc",v:fmtH(mH),s:`${mDays} dní s výkazem`,ok:mH>0},
+            {l:"Hodiny / měsíc",v:fmtH(mH),s:`${mDays} dní s výkazem${mBdH>0?` · BD ${fmtH(mBdH)}`:""}`,ok:mH>0},
             {l:"Příchody",v:`${mAtt}`,s:"dní v kanceláři",ok:mAtt>0},
             {l:"Streak",v:streak>0?`${streak} 🔥`:"—",s:"po sobě jdoucích dní",ok:streak>=3},
             {l:"Splněno týden",v:`${weekDone}/${weekDays.length}`,s:"dní ≥ "+ASISTENT_DAILY_H+" h",ok:weekDone===weekDays.length&&weekDays.length>0},
@@ -10214,10 +10239,11 @@ function AsistentVykazy({ email, clients }) {
   const [logs, setLogs] = useState([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [form, setForm] = useState({ id: uid(), client_id: "", entry_date: today(), description: "", hours: "", notes: "" });
+  const [form, setForm] = useState({ id: uid(), client_id: "", entry_date: today(), description: "", hours: "", notes: "", entry_type: "client", bd_category: "" });
   const [clientQ, setClientQ] = useState("");
   const [clientOpen, setClientOpen] = useState(false);
   const set = (k, v) => setForm(p => ({ ...p, [k]: v }));
+  const isBdForm = form.entry_type === "bd";
 
   useEffect(() => {
     fetchAssistantWorkLogs(email).then(setLogs).catch(console.error).finally(() => setLoading(false));
@@ -10229,15 +10255,27 @@ function AsistentVykazy({ email, clients }) {
   })();
   const pickClient = (c) => { set("client_id", c.id); setClientQ(c.name); setClientOpen(false); };
 
+  const setType = (t) => {
+    set("entry_type", t);
+    if (t === "bd") { set("client_id",""); setClientQ(""); }
+    else { set("bd_category",""); }
+  };
+
+  const canSave = isBdForm
+    ? (form.bd_category && form.description.trim() && form.hours)
+    : (form.client_id && form.description.trim() && form.hours);
+
   const save = async () => {
-    if (!form.client_id || !form.description.trim() || !form.hours) return;
+    if (!canSave) return;
     setSaving(true);
     try {
-      const rec = { ...form, assistant_email: email, hours: Number(form.hours)||0 };
+      const rec = { ...form, assistant_email: email, hours: Number(form.hours)||0,
+        client_id: isBdForm ? null : form.client_id,
+        bd_category: isBdForm ? form.bd_category : null };
       await upsertAssistantWorkLog(rec);
       const updated = await fetchAssistantWorkLogs(email);
       setLogs(updated);
-      setForm({ id: uid(), client_id: "", entry_date: today(), description: "", hours: "", notes: "" });
+      setForm({ id: uid(), client_id: "", entry_date: today(), description: "", hours: "", notes: "", entry_type: "client", bd_category: "" });
       setClientQ("");
     } catch(e) { alert("Chyba: " + e.message); }
     finally { setSaving(false); }
@@ -10272,34 +10310,59 @@ function AsistentVykazy({ email, clients }) {
 
       {/* Formulář */}
       <div style={{background:"#fff",borderRadius:20,padding:"24px 28px",boxShadow:"0 0 0 1px rgba(53,24,165,.08), 0 8px 32px rgba(53,24,165,.07)"}}>
-        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:14,marginBottom:14}}>
-          <div style={{position:"relative"}}>
-            <label style={iL}>Klient *</label>
-            <input value={clientQ} onChange={e=>{setClientQ(e.target.value);setClientOpen(true);if(form.client_id)set("client_id","");}}
-              onFocus={()=>setClientOpen(true)} onBlur={()=>setTimeout(()=>setClientOpen(false),150)}
-              placeholder="Hledat klienta…" autoComplete="off" style={iS}/>
-            {clientOpen&&filteredClients.length>0&&(
-              <div style={{position:"absolute",top:"100%",left:0,right:0,zIndex:30,background:"#fff",borderRadius:12,marginTop:4,
-                boxShadow:"0 0 0 1px rgba(0,0,0,.07), 0 12px 32px rgba(0,0,0,.12)",maxHeight:200,overflowY:"auto"}}>
-                {filteredClients.map(c=>(
-                  <div key={c.id} onMouseDown={()=>pickClient(c)}
-                    style={{padding:"10px 14px",fontSize:12.5,cursor:"pointer",borderBottom:"1px solid rgba(0,0,0,.05)",background:form.client_id===c.id?"#F7F5FF":"#fff"}}>
-                    <div style={{fontWeight:500,color:"var(--ink)"}}>{c.name}</div>
-                    {c.ico&&<div style={{fontSize:9.5,color:"var(--mut)"}}>IČO {c.ico}</div>}
-                  </div>
-                ))}
-              </div>
-            )}
+        <div style={{display:"flex",gap:8,marginBottom:16}}>
+          <button type="button" onClick={()=>setType("client")}
+            style={{flex:1,padding:"9px 12px",borderRadius:10,border:`1.5px solid ${!isBdForm?"var(--ink)":"rgba(0,0,0,.1)"}`,background:!isBdForm?"var(--ink)":"#fff",color:!isBdForm?"#fff":"var(--mut)",fontSize:12,fontWeight:600,cursor:"pointer"}}>
+            Klientská práce
+          </button>
+          <button type="button" onClick={()=>setType("bd")}
+            style={{flex:1,padding:"9px 12px",borderRadius:10,border:`1.5px solid ${isBdForm?"#6366F1":"rgba(0,0,0,.1)"}`,background:isBdForm?"#EEF2FF":"#fff",color:isBdForm?"#4338CA":"var(--mut)",fontSize:12,fontWeight:600,cursor:"pointer"}}>
+            BUSINESS DEVELOPMENT <span style={{opacity:.65,fontWeight:400}}>(0 Kč)</span>
+          </button>
+        </div>
+        {isBdForm && (
+          <div style={{fontSize:10.5,color:"#4338CA",background:"#EEF2FF",border:"1px solid #E0E7FF",borderRadius:8,padding:"8px 12px",marginBottom:14,lineHeight:1.5}}>
+            Interní práce, nefakturuje se klientovi (0 Kč). Cíl {ASISTENT_DAILY_H} h klientské práce/den platí dál — BD je navíc, ale vždy s konkrétním popisem.
           </div>
+        )}
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:14,marginBottom:14}}>
+          {isBdForm ? (
+            <div>
+              <label style={iL}>Kategorie BD *</label>
+              <select value={form.bd_category} onChange={e=>set("bd_category",e.target.value)} style={iS}>
+                <option value="">Vyber kategorii…</option>
+                {BD_CATEGORIES.map(c=><option key={c} value={c}>{c}</option>)}
+              </select>
+            </div>
+          ) : (
+            <div style={{position:"relative"}}>
+              <label style={iL}>Klient *</label>
+              <input value={clientQ} onChange={e=>{setClientQ(e.target.value);setClientOpen(true);if(form.client_id)set("client_id","");}}
+                onFocus={()=>setClientOpen(true)} onBlur={()=>setTimeout(()=>setClientOpen(false),150)}
+                placeholder="Hledat klienta…" autoComplete="off" style={iS}/>
+              {clientOpen&&filteredClients.length>0&&(
+                <div style={{position:"absolute",top:"100%",left:0,right:0,zIndex:30,background:"#fff",borderRadius:12,marginTop:4,
+                  boxShadow:"0 0 0 1px rgba(0,0,0,.07), 0 12px 32px rgba(0,0,0,.12)",maxHeight:200,overflowY:"auto"}}>
+                  {filteredClients.map(c=>(
+                    <div key={c.id} onMouseDown={()=>pickClient(c)}
+                      style={{padding:"10px 14px",fontSize:12.5,cursor:"pointer",borderBottom:"1px solid rgba(0,0,0,.05)",background:form.client_id===c.id?"#F7F5FF":"#fff"}}>
+                      <div style={{fontWeight:500,color:"var(--ink)"}}>{c.name}</div>
+                      {c.ico&&<div style={{fontSize:9.5,color:"var(--mut)"}}>IČO {c.ico}</div>}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
           <div>
             <label style={iL}>Datum</label>
             <input type="date" value={form.entry_date} onChange={e=>set("entry_date",e.target.value)} style={iS}/>
           </div>
         </div>
         <div style={{marginBottom:14}}>
-          <label style={iL}>Popis úkonu *</label>
+          <label style={iL}>Popis úkonu * {isBdForm && <span style={{fontWeight:400,opacity:.6,letterSpacing:0,textTransform:"none"}}>— vždy konkrétní, co přesně jsi dělal</span>}</label>
           <textarea value={form.description} onChange={e=>set("description",e.target.value)} rows={3}
-            placeholder="Příprava podkladů, výzkum judikatury, komunikace s klientem…"
+            placeholder={isBdForm ? "Např. naskenování a založení 12 spisů do archivu; vyzvednutí dokumentů na katastru…" : "Příprava podkladů, výzkum judikatury, komunikace s klientem…"}
             style={{...iS,resize:"vertical",lineHeight:1.5}}/>
         </div>
         <div style={{display:"grid",gridTemplateColumns:"1fr auto",gap:14,alignItems:"flex-end"}}>
@@ -10307,11 +10370,11 @@ function AsistentVykazy({ email, clients }) {
             <label style={iL}>Hodiny * <span style={{fontWeight:400,opacity:.55,letterSpacing:0,textTransform:"none",fontSize:9}}>(např. 1.5 nebo 0.75)</span></label>
             <input type="text" inputMode="decimal" value={form.hours} onChange={e=>{const v=e.target.value.replace(",",".");set("hours",v);}}
               placeholder="0.5" style={iS}
-              onKeyDown={e=>{if(e.key==="Enter"&&form.client_id&&form.description.trim()&&Number(form.hours)>0)save();}}/>
+              onKeyDown={e=>{if(e.key==="Enter"&&canSave)save();}}/>
           </div>
-          <button onClick={save} disabled={saving||!form.client_id||!form.description.trim()||!form.hours}
-            style={{padding:"11px 28px",background:"var(--ink)",color:"#fff",border:"none",borderRadius:12,fontSize:13,fontWeight:600,cursor:"pointer",
-              boxShadow:"0 4px 16px rgba(53,24,165,.3)",opacity:(!form.client_id||!form.description.trim()||!form.hours)?.45:1,whiteSpace:"nowrap",transition:"opacity .15s"}}>
+          <button onClick={save} disabled={saving||!canSave}
+            style={{padding:"11px 28px",background:isBdForm?"#4F46E5":"var(--ink)",color:"#fff",border:"none",borderRadius:12,fontSize:13,fontWeight:600,cursor:"pointer",
+              boxShadow:isBdForm?"0 4px 16px rgba(79,70,229,.3)":"0 4px 16px rgba(53,24,165,.3)",opacity:!canSave?.45:1,whiteSpace:"nowrap",transition:"opacity .15s"}}>
             {saving?"Ukládám…":"Uložit →"}
           </button>
         </div>
@@ -10324,21 +10387,28 @@ function AsistentVykazy({ email, clients }) {
         <div>
           <div style={{fontSize:9,letterSpacing:".22em",textTransform:"uppercase",color:"var(--mut)",marginBottom:12}}>ZÁZNAMY</div>
           <div style={{display:"flex",flexDirection:"column",gap:8}}>
-            {logs.map(l=>(
-              <div key={l.id} style={{background:"#fff",borderRadius:14,padding:"14px 18px",
-                boxShadow:`0 0 0 1px rgba(0,0,0,.06), 0 2px 8px rgba(0,0,0,.04)`,
+            {logs.map(l=>{
+              const bd = isBd(l);
+              return (
+              <div key={l.id} style={{background:bd?"#FBFAFF":"#fff",borderRadius:14,padding:"14px 18px",
+                boxShadow:`0 0 0 1px ${bd?"rgba(99,102,241,.15)":"rgba(0,0,0,.06)"}, 0 2px 8px rgba(0,0,0,.04)`,
                 opacity:l.status==="archived"?.55:1,display:"flex",alignItems:"flex-start",gap:14}}>
                 <div style={{flex:1,minWidth:0}}>
                   <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:4}}>
-                    <span style={{fontSize:12.5,fontWeight:600,color:"var(--ink)"}}>{clientName(l.client_id)}</span>
+                    {bd ? (
+                      <span style={{fontSize:9,fontWeight:700,padding:"2px 7px",borderRadius:5,background:"#EEF2FF",color:"#4338CA",letterSpacing:".03em"}}>BD · {l.bd_category||"—"}</span>
+                    ) : (
+                      <span style={{fontSize:12.5,fontWeight:600,color:"var(--ink)"}}>{clientName(l.client_id)}</span>
+                    )}
                     <span style={{fontSize:10,color:"var(--mut)"}}>·</span>
                     <span style={{fontSize:10.5,color:"var(--mut)"}}>{fmtDate(l.entry_date)}</span>
+                    {bd&&<span style={{fontSize:9,color:"#6366F1",fontWeight:600}}>0 Kč</span>}
                     {l.status==="archived"&&<span style={{fontSize:8.5,background:"#F0FDF4",color:"#065F46",borderRadius:4,padding:"1px 6px",fontWeight:700}}>archivováno</span>}
                   </div>
                   <div style={{fontSize:12.5,color:"var(--txt)",lineHeight:1.55}}>{l.description}</div>
                 </div>
                 <div style={{flexShrink:0,textAlign:"right",display:"flex",flexDirection:"column",alignItems:"flex-end",gap:6}}>
-                  <div style={{fontFamily:"Fraunces,serif",fontWeight:300,fontSize:18,color:"var(--ink)",letterSpacing:"-.01em"}}>{l.hours} h</div>
+                  <div style={{fontFamily:"Fraunces,serif",fontWeight:300,fontSize:18,color:bd?"#4F46E5":"var(--ink)",letterSpacing:"-.01em"}}>{l.hours} h</div>
                   <div style={{display:"flex",gap:5}}>
                     <button onClick={()=>archive(l.id)}
                       style={{fontSize:9.5,padding:"3px 9px",borderRadius:6,border:"1px solid rgba(0,0,0,.1)",background:"#fff",cursor:"pointer",color:"var(--mut)"}}>
@@ -10349,7 +10419,7 @@ function AsistentVykazy({ email, clients }) {
                   </div>
                 </div>
               </div>
-            ))}
+            );})}
           </div>
         </div>
       )}
@@ -10920,10 +10990,13 @@ function AsistentPanel({ clients, onPreview }) {
   const now = new Date();
   const mKey = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,"0")}`;
   const mLogs = logs.filter(l=>(l.entry_date||"").startsWith(mKey)&&l.status!=="archived");
-  const mH    = mLogs.reduce((s,l)=>s+(l.hours||0),0);
+  const mH    = billableHoursOf(mLogs);
+  const mBdH  = bdHoursOf(mLogs);
   const mDays = new Set(mLogs.map(l=>l.entry_date)).size;
   const mAtt  = attendance.filter(a=>a.date.startsWith(mKey)&&a.check_in).length;
-  const totalH = logs.filter(l=>l.status!=="archived").reduce((s,l)=>s+(l.hours||0),0);
+  const allLogsActive = logs.filter(l=>l.status!=="archived");
+  const totalH   = billableHoursOf(allLogsActive);
+  const totalBdH = bdHoursOf(allLogsActive);
 
   // Týdenní přehled (shodný algoritmus s AsistentPrehled)
   const weekMon = new Date(now); weekMon.setDate(now.getDate()-(now.getDay()===0?6:now.getDay()-1)); weekMon.setHours(0,0,0,0);
@@ -10932,10 +11005,11 @@ function AsistentPanel({ clients, onPreview }) {
     const d=new Date(weekMon); d.setDate(weekMon.getDate()+i);
     if(d>now) break;
     const ds=localDs(d);
-    const h=logs.filter(l=>l.entry_date===ds&&l.status!=="archived").reduce((s,l)=>s+(l.hours||0),0);
-    weekDays.push({ ds, h, name:["Po","Út","St","Čt","Pá","So","Ne"][i], isToday:ds===today() });
+    const dayLogs=logs.filter(l=>l.entry_date===ds&&l.status!=="archived");
+    weekDays.push({ ds, h:billableHoursOf(dayLogs), bdH:bdHoursOf(dayLogs), name:["Po","Út","St","Čt","Pá","So","Ne"][i], isToday:ds===today() });
   }
   const weekH    = weekDays.reduce((s,d)=>s+d.h,0);
+  const weekBdH  = weekDays.reduce((s,d)=>s+d.bdH,0);
   const weekDone = weekDays.filter(d=>d.h>=ASISTENT_DAILY_H).length;
 
   const TABS = [{k:"prehled",l:"Přehled"},{k:"logs",l:"Výkazy"},{k:"dochazka",l:"Docházka"},{k:"plan",l:`Plán ${monthNames[nmm-1]}`}];
@@ -10956,10 +11030,10 @@ function AsistentPanel({ clients, onPreview }) {
       {/* ── KPI řada ── */}
       <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:12,margin:"20px 28px 0"}}>
         {[
-          { label:"Tento měsíc",  val:fmtH(mH),    sub:`${mDays} dní s výkazem · cíl ${mDays*ASISTENT_DAILY_H} h`, ok:mH>=mDays*ASISTENT_DAILY_H&&mDays>0 },
-          { label:"Celkem hodin", val:fmtH(totalH), sub:"všechny záznamy",                       ok:totalH>0 },
+          { label:"Tento měsíc (billable)",  val:fmtH(mH),    sub:`${mDays} dní s výkazem · cíl ${mDays*ASISTENT_DAILY_H} h${mBdH>0?` · BD ${fmtH(mBdH)} (0 Kč)`:""}`, ok:mH>=mDays*ASISTENT_DAILY_H&&mDays>0 },
+          { label:"Celkem hodin", val:fmtH(totalH), sub:`všechny záznamy${totalBdH>0?` · BD ${fmtH(totalBdH)}`:""}`,                       ok:totalH>0 },
           { label:"Dny v kancelář", val:`${mAtt}`,  sub:`příchodů v ${monthNames[now.getMonth()]}`, ok:mAtt>0 },
-          { label:"Týden",        val:fmtH(weekH),  sub:`${weekDone}/${weekDays.length} dní splněno`, ok:weekDone===weekDays.length&&weekDays.length>0 },
+          { label:"Týden (billable)",        val:fmtH(weekH),  sub:`${weekDone}/${weekDays.length} dní splněno${weekBdH>0?` · BD ${fmtH(weekBdH)}`:""}`, ok:weekDone===weekDays.length&&weekDays.length>0 },
         ].map(k=>(
           <div key={k.label} style={{background:"#fff",border:`1px solid ${k.ok?"#BBF7D0":"var(--line)"}`,borderRadius:12,padding:"14px 18px"}}>
             <div style={{fontSize:8.5,letterSpacing:".12em",textTransform:"uppercase",color:"var(--mut)",marginBottom:4}}>{k.label}</div>
@@ -11011,26 +11085,43 @@ function AsistentPanel({ clients, onPreview }) {
         {/* Výkazy */}
         {tab==="logs" && (
           logs.length===0 ? <div style={{color:"var(--mut)",fontSize:13}}>Josef zatím nemá žádné záznamy.</div> : (
-            <div style={{border:"1px solid var(--line)",borderRadius:12,overflow:"hidden"}}>
-              {logs.map((l,i)=>(
-                <div key={l.id} style={{display:"flex",alignItems:"flex-start",gap:14,padding:"12px 16px",borderBottom:i<logs.length-1?"1px solid var(--line)":"none",background:l.status==="archived"?"#F9FFF9":"#fff",opacity:l.status==="archived"?.75:1}}>
-                  <div style={{flex:1}}>
-                    <div style={{display:"flex",gap:8,alignItems:"center",marginBottom:3}}>
-                      <span style={{fontSize:12,fontWeight:600,color:"var(--ink)"}}>{clientName(l.client_id)}</span>
-                      <span style={{fontSize:10.5,color:"var(--mut)"}}>· {fmtDate(l.entry_date)}</span>
-                      {l.status==="archived"&&<span style={{fontSize:9,background:"#F0FDF4",color:"#065F46",border:"1px solid #BBF7D0",borderRadius:4,padding:"1px 6px",fontWeight:600}}>archivováno</span>}
-                    </div>
-                    <div style={{fontSize:12.5,color:"var(--txt)",lineHeight:1.5}}>{l.description}</div>
-                  </div>
-                  <div style={{flexShrink:0,textAlign:"right"}}>
-                    <div style={{fontFamily:"Fraunces,serif",fontWeight:300,fontSize:17,color:"var(--ink)"}}>{l.hours} h</div>
-                    <button onClick={()=>archiveLog(l)} style={{marginTop:5,fontSize:10,padding:"3px 8px",borderRadius:5,border:"1px solid var(--line2)",background:"#fff",cursor:"pointer",color:"var(--mut)"}}>
-                      {l.status==="archived"?"↩ vrátit":"✓ archivovat"}
-                    </button>
-                  </div>
+            <>
+              <div style={{display:"flex",gap:10,marginBottom:12,fontSize:11.5}}>
+                <div style={{padding:"6px 12px",borderRadius:8,background:"#F0FDF4",color:"#065F46",fontWeight:600}}>
+                  Billable: {fmtH(billableHoursOf(logs.filter(l=>l.status!=="archived")))}
                 </div>
-              ))}
-            </div>
+                <div style={{padding:"6px 12px",borderRadius:8,background:"#EEF2FF",color:"#4338CA",fontWeight:600}}>
+                  BD: {fmtH(bdHoursOf(logs.filter(l=>l.status!=="archived")))} <span style={{opacity:.7,fontWeight:400}}>(0 Kč)</span>
+                </div>
+              </div>
+              <div style={{border:"1px solid var(--line)",borderRadius:12,overflow:"hidden"}}>
+                {logs.map((l,i)=>{
+                  const bd = isBd(l);
+                  return (
+                  <div key={l.id} style={{display:"flex",alignItems:"flex-start",gap:14,padding:"12px 16px",borderBottom:i<logs.length-1?"1px solid var(--line)":"none",background:l.status==="archived"?"#F9FFF9":bd?"#FBFAFF":"#fff",opacity:l.status==="archived"?.75:1}}>
+                    <div style={{flex:1}}>
+                      <div style={{display:"flex",gap:8,alignItems:"center",marginBottom:3}}>
+                        {bd ? (
+                          <span style={{fontSize:9,fontWeight:700,padding:"2px 7px",borderRadius:5,background:"#EEF2FF",color:"#4338CA",letterSpacing:".03em"}}>BD · {l.bd_category||"—"}</span>
+                        ) : (
+                          <span style={{fontSize:12,fontWeight:600,color:"var(--ink)"}}>{clientName(l.client_id)}</span>
+                        )}
+                        <span style={{fontSize:10.5,color:"var(--mut)"}}>· {fmtDate(l.entry_date)}</span>
+                        {bd&&<span style={{fontSize:9,color:"#6366F1",fontWeight:600}}>0 Kč</span>}
+                        {l.status==="archived"&&<span style={{fontSize:9,background:"#F0FDF4",color:"#065F46",border:"1px solid #BBF7D0",borderRadius:4,padding:"1px 6px",fontWeight:600}}>archivováno</span>}
+                      </div>
+                      <div style={{fontSize:12.5,color:"var(--txt)",lineHeight:1.5}}>{l.description}</div>
+                    </div>
+                    <div style={{flexShrink:0,textAlign:"right"}}>
+                      <div style={{fontFamily:"Fraunces,serif",fontWeight:300,fontSize:17,color:bd?"#4F46E5":"var(--ink)"}}>{l.hours} h</div>
+                      <button onClick={()=>archiveLog(l)} style={{marginTop:5,fontSize:10,padding:"3px 8px",borderRadius:5,border:"1px solid var(--line2)",background:"#fff",cursor:"pointer",color:"var(--mut)"}}>
+                        {l.status==="archived"?"↩ vrátit":"✓ archivovat"}
+                      </button>
+                    </div>
+                  </div>
+                );})}
+              </div>
+            </>
           )
         )}
 
