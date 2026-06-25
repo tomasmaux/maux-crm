@@ -8129,11 +8129,26 @@ function WorkRhythmPanel({ entries }) {
 
 function WorkEntryList({ entries, clients, invoices, onNew, onEdit, onDelete, onGenerateInvoice, onPreviewInvoice, loading }) {
   const [filterClient, setFilterClient] = useState("");
+  const [search, setSearch] = useState("");
+
+  const clientNameById = useMemo(() => {
+    const map = {};
+    clients.forEach(c => { map[c.id] = c.name; });
+    return map;
+  }, [clients]);
 
   const filtered = useMemo(() => {
     let list = filterClient ? entries.filter(e => e.client_id === filterClient) : entries;
+    const q = search.trim().toLowerCase();
+    if (q) {
+      list = list.filter(e => {
+        const desc = (e.description || "").toLowerCase();
+        const cname = (e.clients?.name || clientNameById[e.client_id] || "").toLowerCase();
+        return desc.includes(q) || cname.includes(q);
+      });
+    }
     return list;
-  }, [entries, filterClient]);
+  }, [entries, filterClient, search, clientNameById]);
 
   const unbilled = filtered.filter(e => !e.invoice_id);
   const unbilledByMonth = useMemo(() => {
@@ -8189,6 +8204,14 @@ function WorkEntryList({ entries, clients, invoices, onNew, onEdit, onDelete, on
           )}
         </select>
         {filterClient && <button className="btn gho" style={{ fontSize: 12, color: "#DC2626" }} onClick={() => setFilterClient("")}>Zrušit ×</button>}
+        <input
+          type="text"
+          value={search}
+          onChange={e => setSearch(e.target.value)}
+          placeholder="Hledat v popisu / klientovi…"
+          style={{ font: "inherit", fontSize: 13, padding: "8px 12px", border: "1px solid var(--line2)", borderRadius: 8, color: "var(--ink)", background: "#fff", minWidth: 220 }}
+        />
+        {search && <button className="btn gho" style={{ fontSize: 12, color: "#DC2626" }} onClick={() => setSearch("")}>Zrušit ×</button>}
         <button className="btn pri" onClick={onNew} style={{ marginLeft: "auto" }}>+ Nový záznam</button>
       </div>
 
