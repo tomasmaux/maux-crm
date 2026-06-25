@@ -11831,8 +11831,16 @@ export default function MauxCRM() {
           const _now = new Date();
           const _todayStr = `${_now.getFullYear()}-${String(_now.getMonth()+1).padStart(2,"0")}-${String(_now.getDate()).padStart(2,"0")}`;
           const _ym = _todayStr.slice(0,7);
-          const _todayAmt = workEntries.filter(e => e.entry_date === _todayStr).reduce((s,e) => s + (Number(e.amount)||0), 0);
-          const _monthAmt = workEntries.filter(e => (e.entry_date||"").startsWith(_ym)).reduce((s,e) => s + (Number(e.amount)||0), 0);
+          // Čistá klientská práce (bez DPH, po slevě) — stejná logika jako v kalendáři "Zapsaná práce",
+          // ať si tahle čísla vždy odpovídají. "Dnes vydělal" navíc připočítává denní úrok z úschov
+          // (peníze, co reálně přibyly i ve dnech bez zapsaného výkazu); "Tento měsíc"/cíl zůstává
+          // čistě klientská fakturace — úschovy do cíle nepatří (Tom: cíl = klientská práce).
+          const _entryAmtNet = (e) => Math.max((e.amount||0) - (Number(e.discount_amount)||0), 0);
+          const _todayMid = new Date(_now.getFullYear(), _now.getMonth(), _now.getDate());
+          const _todayWork = workEntries.filter(e => e.entry_date === _todayStr).reduce((s,e) => s + _entryAmtNet(e), 0);
+          const _todayEsc = _dailyNetOnDate(escrows, _todayMid);
+          const _todayAmt = _todayWork + _todayEsc;
+          const _monthAmt = workEntries.filter(e => (e.entry_date||"").startsWith(_ym)).reduce((s,e) => s + _entryAmtNet(e), 0);
           const _goal = monthlyGoal || 0;
           const _rem = Math.max(0, _goal - _monthAmt);
           const _pct = _goal > 0 ? Math.min(1, _monthAmt / _goal) : 0;
