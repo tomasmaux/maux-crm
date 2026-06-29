@@ -11870,185 +11870,128 @@ export default function MauxCRM() {
         {(() => {
           const _now = new Date();
           const _todayStr = `${_now.getFullYear()}-${String(_now.getMonth()+1).padStart(2,"0")}-${String(_now.getDate()).padStart(2,"0")}`;
-          const _ym = _todayStr.slice(0,7);
-          // Čistá klientská práce (bez DPH, po slevě) — stejná logika jako v kalendáři "Zapsaná práce",
-          // ať si tahle čísla vždy odpovídají. "Dnes vydělal" navíc připočítává denní úrok z úschov
-          // (peníze, co reálně přibyly i ve dnech bez zapsaného výkazu); "Tento měsíc"/cíl zůstává
-          // čistě klientská fakturace — úschovy do cíle nepatří (Tom: cíl = klientská práce).
+          // Sloučená lišta (Tom, 29.6.2026): dřív tu byly DVĚ samostatné lišty, každá s vlastním %
+          // (vlastní cíl nahoře vs. automatická meta žebříčku dole) — matlo to ("97 nebo 82?").
+          // Teď JEDNO % a JEDEN cíl, vždy vztažený k tomu, co si Tom sám nastaví (✏ Cíl).
+          // Žebříček (computeMilestoneLadder, LEVEL/meta 200k→250k…) žije dál jen v detailu Financí —
+          // sem patří jen graf historie posledních měsíců + jeden srozumitelný cíl.
+          // "Dnes vydělal" = čistá klientská práce zapsaná dnes + denní čistý úrok z úschov (peníze,
+          // co reálně přibyly i ve dnech bez zapsaného výkazu) — stejná logika jako kalendář "Zapsaná práce".
+          // "Tento měsíc"/cíl = nevyfakturované výkazy (bez DPH, po slevě, BEZ ohledu na to, kdy byly
+          // zapsané — to je dluh, co čeká na fakturaci) + HRUBÝ úrok z úschov za aktuální měsíc
+          // (escrowGrossForMonth, capnutý na dnešek).
           const _entryAmtNet = (e) => Math.max((e.amount||0) - (Number(e.discount_amount)||0), 0);
           const _todayMid = new Date(_now.getFullYear(), _now.getMonth(), _now.getDate());
           const _todayWork = workEntries.filter(e => e.entry_date === _todayStr).reduce((s,e) => s + _entryAmtNet(e), 0);
           const _todayEsc = _dailyNetOnDate(escrows, _todayMid);
           const _todayAmt = _todayWork + _todayEsc;
-          const _monthAmt = workEntries.filter(e => (e.entry_date||"").startsWith(_ym)).reduce((s,e) => s + _entryAmtNet(e), 0);
+          const _monthAmt = unbilledWorkNetNoVat(workEntries) + Math.round(escrowGrossForMonth(escrows, _now.getFullYear(), _now.getMonth()));
           const _goal = monthlyGoal || 0;
           const _rem = Math.max(0, _goal - _monthAmt);
           const _pct = _goal > 0 ? Math.min(1, _monthAmt / _goal) : 0;
           const _h = _now.getHours();
           const _gr = _h < 12 ? "Dobré ráno" : _h < 18 ? "Dobré odpoledne" : "Dobrý večer";
           const _fmt = v => privacyMode ? "·····" : v.toLocaleString("cs-CZ") + " Kč";
-          return (
-            <div style={{background:"linear-gradient(135deg,#2d14a0,#4a2bc4)",padding:"10px 40px",display:"flex",alignItems:"center",justifyContent:"space-between",gap:12,flexWrap:"wrap"}}>
-              <div style={{display:"flex",alignItems:"center",gap:20,flexWrap:"wrap"}}>
-                <span style={{fontSize:12.5,color:"rgba(255,255,255,.75)",fontWeight:500,letterSpacing:".01em"}}>{_gr}, Tomáši</span>
-                <div style={{width:1,height:14,background:"rgba(255,255,255,.2)",flexShrink:0}} />
-                <div style={{display:"flex",alignItems:"baseline",gap:6}}>
-                  <span style={{fontSize:9.5,color:"rgba(255,255,255,.45)",letterSpacing:".1em",textTransform:"uppercase"}}>Dnes vydělal</span>
-                  <span style={{fontSize:15,fontFamily:"Fraunces,serif",fontWeight:300,color:"#fff"}}>{_fmt(_todayAmt)}</span>
-                </div>
-                <div style={{width:1,height:14,background:"rgba(255,255,255,.2)",flexShrink:0}} />
-                <div style={{display:"flex",alignItems:"baseline",gap:6}}>
-                  <span style={{fontSize:9.5,color:"rgba(255,255,255,.45)",letterSpacing:".1em",textTransform:"uppercase"}}>Tento měsíc</span>
-                  <span style={{fontSize:15,fontFamily:"Fraunces,serif",fontWeight:300,color:"#fff"}}>{_fmt(_monthAmt)}</span>
-                </div>
-                {_goal > 0 && <>
-                  <div style={{width:1,height:14,background:"rgba(255,255,255,.2)",flexShrink:0}} />
-                  <div style={{display:"flex",alignItems:"baseline",gap:6}}>
-                    <span style={{fontSize:9.5,color:"rgba(255,255,255,.45)",letterSpacing:".1em",textTransform:"uppercase"}}>Do cíle zbývá</span>
-                    <span style={{fontSize:15,fontFamily:"Fraunces,serif",fontWeight:300,color:_rem===0?"#4ade80":"#fff"}}>{_rem===0?"✓ Splněno":_fmt(_rem)}</span>
-                  </div>
-                  <div style={{display:"flex",alignItems:"center",gap:5,whiteSpace:"nowrap"}}>
-                    <div style={{width:60,height:3,background:"rgba(255,255,255,.15)",borderRadius:99,overflow:"hidden"}}>
-                      <div style={{width:`${_pct*100}%`,height:"100%",background:_pct>=1?"#4ade80":"rgba(255,255,255,.7)",borderRadius:99,transition:"width .5s ease"}} />
-                    </div>
-                    {/* "cíle" navíc, ať se to při pohledu na obě fialové lišty hned nepleте s "% mety" dole
-                        (vlastní cíl = ručně zadané číslo nahoře, zapsaná práce; meta = automatický
-                        žebřík 200k+ dole, fakturováno + úschovy — dvě různé věci). */}
-                    <span style={{fontSize:10,color:"rgba(255,255,255,.5)"}}>{Math.round(_pct*100)}% cíle</span>
-                  </div>
-                </>}
-              </div>
-              <div style={{display:"flex",alignItems:"center",gap:6}}>
-                {editingGoal ? (
-                  <div style={{display:"flex",alignItems:"center",gap:5}}>
-                    <input type="text" value={goalDraft} onChange={e=>setGoalDraft(e.target.value)}
-                      onKeyDown={e=>{if(e.key==="Enter")saveGoal();if(e.key==="Escape")setEditingGoal(false);}}
-                      placeholder="150000" autoFocus
-                      style={{width:88,padding:"4px 8px",borderRadius:6,border:"none",fontSize:12,fontFamily:"var(--mono)",outline:"none"}} />
-                    <button onClick={saveGoal} style={{padding:"4px 10px",borderRadius:6,background:"#4ade80",border:"none",fontSize:11,fontWeight:700,cursor:"pointer",color:"#166534"}}>OK</button>
-                    <button onClick={()=>setEditingGoal(false)} style={{padding:"4px 8px",borderRadius:6,background:"rgba(255,255,255,.12)",border:"none",fontSize:12,cursor:"pointer",color:"rgba(255,255,255,.7)"}}>✕</button>
-                  </div>
-                ) : (
-                  <button onClick={()=>{setGoalDraft(_goal>0?String(_goal):"");setEditingGoal(true);}}
-                    style={{padding:"5px 12px",borderRadius:8,background:"rgba(255,255,255,.1)",border:"1px solid rgba(255,255,255,.18)",color:"rgba(255,255,255,.75)",fontSize:11,cursor:"pointer",letterSpacing:".03em",transition:"background .15s"}}
-                    onMouseEnter={e=>e.currentTarget.style.background="rgba(255,255,255,.18)"}
-                    onMouseLeave={e=>e.currentTarget.style.background="rgba(255,255,255,.1)"}>
-                    {_goal>0?`✏ Cíl: ${_fmt(_goal)}`:"+ Nastavit měsíční cíl"}
-                  </button>
-                )}
-              </div>
-            </div>
-          );
-        })()}
-        {/* Gamifikační lišta — žebřík mety 200 000 Kč/měs. (fakturace bez DPH + hrubý úrok z úschov),
-            "zásadní lišta na začátku" (Tom). Sdílí computeMilestoneLadder s detailním panelem ve
-            Financích, takže obě místa nikdy nemůžou ukázat rozdílný počet úrovní/aktivní metu.
-            Sparkline ukazuje posledních ~9 uzavřených měsíců + 1 živý řádek na konci (rozpracovaný/
-            příští měsíc, tečkovaný okraj, nižší opacita) — nevyfakturovaná práce bez DPH
-            (unbilledWorkNetNoVat — STEJNÁ báze jako uzavřené měsíce, žádné DPH/poplatky navíc,
-            ať žebříček neukáže metu falešně dřív) + odhad úroku z úschov. 🏆 = měsíc, kde padla meta.
-            Hlavička "Tento měsíc" vždy ukazuje poslední UZAVŘENÝ měsíc, ne živou projekci. */}
-        {(() => {
-          const _now2 = new Date();
-          const _fmt2 = v => privacyMode ? "·····" : v.toLocaleString("cs-CZ") + " Kč";
-          const ladder = computeMilestoneLadder(invoices, escrows, _now2);
-          const currentRow = ladder.rows.length ? ladder.rows[ladder.rows.length - 1] : null;
-          const pctToGoal = currentRow ? Math.min(1, currentRow.totalM / ladder.activeGoal) : 0;
-          const lastY2 = _now2.getMonth() === 11 ? _now2.getFullYear() + 1 : _now2.getFullYear();
-          const lastM2 = (_now2.getMonth() + 1) % 12;
-          const nextYmStr2 = `${lastY2}-${String(lastM2 + 1).padStart(2, "0")}`;
-          const liveInvAmt2 = unbilledWorkNetNoVat(workEntries);
-          const liveEscAmt2 = Math.round(escrowGrossForMonth(escrows, _now2.getFullYear(), _now2.getMonth()));
-          const liveTotal2 = liveInvAmt2 + liveEscAmt2;
-          const liveRow = { ym: nextYmStr2, invAmt: liveInvAmt2, escAmt: liveEscAmt2, totalM: liveTotal2, live: true, monIdx: lastM2, goal: ladder.activeGoal, over: liveTotal2 > ladder.activeGoal };
-          const sparkRows = [...ladder.rows.slice(-9), liveRow];
-          const maxTotal = Math.max(...sparkRows.map(r => r.totalM), ladder.activeGoal, 1);
-          const barW = 12, gap = 5, chartH = 32;
-          const svgW = Math.max(1, sparkRows.length * (barW + gap) - gap);
-          // Skloňování "měsíc/měsíce/měsíců" pro vysvětlení LEVELu (proč jsem LVL 1? → kolik měsíců
-          // jsem od začátku přeskočil aktuální/tehdejší metu — viz milestoneCount).
-          const _mPlur = n => (n === 1 ? "měsíc" : (n >= 2 && n <= 4 ? "měsíce" : "měsíců"));
-          // Krokový (step) průběh CÍLE v čase — využívá r.goal, který computeMilestoneLadder ukládá
-          // PŘED případným posunem mety (200k→250k→+25k...), takže historické sloupce vždy ukazují
-          // metu, která tehdy reálně platila. Když Tom metu v budoucnu posune, graf se kreslí znovu
-          // z dat → minulost se nepřepíše, jen se k ní v daný měsíc přidá nový schod.
-          // TOPPAD = volný prostor navíc nad sloupci, kam se při hoveru vejde popisek s částkou
-          // (jinak by se u nejvyššího sloupce ořezával o horní okraj SVG).
-          const TOPPAD = 12;
-          let goalPathD = "";
-          sparkRows.forEach((r, idx) => {
-            const x0 = idx * (barW + gap), x1 = x0 + barW;
-            const yG = chartH - Math.min(1, r.goal / maxTotal) * chartH + 6 + TOPPAD;
-            goalPathD += (idx === 0 ? `M${x0},${yG} ` : `L${x0},${yG} `) + `L${x1},${yG} `;
-          });
           const _kc = v => privacyMode ? "···" : (Math.abs(v) >= 1000 ? `${Math.round(v / 1000)}k` : String(Math.round(v)));
+
+          // Graf historie — posledních ~9 uzavřených měsíců (computeMilestoneLadder jen jako zdroj
+          // hotových měsíčních součtů, fakturace bez DPH + hrubý úrok z úschov) + 1 živý sloupec na
+          // konci se stejnou hodnotou jako _monthAmt výše, ať si "Tento měsíc" a poslední sloupec
+          // grafu vždy odpovídají.
+          const ladder = computeMilestoneLadder(invoices, escrows, _now);
+          const lastY = _now.getMonth() === 11 ? _now.getFullYear() + 1 : _now.getFullYear();
+          const lastM = (_now.getMonth() + 1) % 12;
+          const liveRow = { ym: `${lastY}-${String(lastM + 1).padStart(2,"0")}`, totalM: _monthAmt, live: true };
+          const sparkRows = [...ladder.rows.slice(-9), liveRow];
+          const maxTotal = Math.max(...sparkRows.map(r => r.totalM), _goal, 1);
+          const barW = 12, gap = 5, chartH = 32, TOPPAD = 12;
+          const svgW = Math.max(1, sparkRows.length * (barW + gap) - gap);
+          // Jediná vodorovná čára = aktuální cíl (appka historii minulých cílů nesleduje, jen jedno
+          // číslo v localStorage — záměrně jednodušší než dřívější krokový žebříček).
+          const yGoal = _goal > 0 ? (chartH - Math.min(1, _goal / maxTotal) * chartH + 6 + TOPPAD) : null;
+
           return (
             <div className="gamif-bar" onClick={() => navTo("dashboard")} title="Klikni pro detail v Financích"
-              style={{background:"linear-gradient(135deg,#1f1147,#3518A5)",padding:"8px 40px 7px",borderTop:"1px solid rgba(255,255,255,.08)"}}>
+              style={{background:"linear-gradient(135deg,#2d14a0,#4a2bc4)",padding:"10px 40px 8px"}}>
               <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:16,flexWrap:"wrap"}}>
-                <div style={{display:"flex",alignItems:"center",gap:14,flexWrap:"wrap"}}>
+                <div style={{display:"flex",alignItems:"center",gap:18,flexWrap:"wrap"}}>
+                  <span style={{fontSize:12.5,color:"rgba(255,255,255,.75)",fontWeight:500,letterSpacing:".01em",whiteSpace:"nowrap"}}>{_gr}, Tomáši</span>
+                  <div style={{width:1,height:14,background:"rgba(255,255,255,.2)",flexShrink:0}} />
                   <div style={{display:"flex",alignItems:"baseline",gap:6,whiteSpace:"nowrap"}}>
-                    <span style={{fontSize:16}}>🏆</span>
-                    <span style={{fontSize:11,fontWeight:700,color:"#FDE68A",letterSpacing:".04em"}}>LEVEL {ladder.milestoneCount + 1}</span>
-                    <span style={{fontSize:9,color:"rgba(255,255,255,.4)"}}>({ladder.milestoneCount} {_mPlur(ladder.milestoneCount)} nad metou)</span>
+                    <span style={{fontSize:9.5,color:"rgba(255,255,255,.45)",letterSpacing:".1em",textTransform:"uppercase"}}>Dnes vydělal</span>
+                    <span style={{fontSize:15,fontFamily:"Fraunces,serif",fontWeight:300,color:"#fff"}}>{_fmt(_todayAmt)}</span>
                   </div>
-                  <div style={{width:1,height:14,background:"rgba(255,255,255,.15)",flexShrink:0}} />
+                  <div style={{width:1,height:14,background:"rgba(255,255,255,.2)",flexShrink:0}} />
                   <div style={{display:"flex",alignItems:"baseline",gap:6,whiteSpace:"nowrap"}}>
-                    <span style={{fontSize:9.5,color:"rgba(255,255,255,.45)",letterSpacing:".1em",textTransform:"uppercase"}}>Meta</span>
-                    <span style={{fontSize:13,fontFamily:"Fraunces,serif",fontWeight:300,color:"#fff"}}>{_fmt2(ladder.activeGoal)}/měs.</span>
+                    <span style={{fontSize:9.5,color:"rgba(255,255,255,.45)",letterSpacing:".1em",textTransform:"uppercase"}}>Tento měsíc</span>
+                    <span style={{fontSize:15,fontFamily:"Fraunces,serif",fontWeight:300,color:"#fff"}}>{_fmt(_monthAmt)}</span>
                   </div>
-                  {currentRow && (
-                    <>
-                      <div style={{width:1,height:14,background:"rgba(255,255,255,.15)",flexShrink:0}} />
-                      <div style={{display:"flex",alignItems:"baseline",gap:6,whiteSpace:"nowrap"}}>
-                        <span style={{fontSize:9.5,color:"rgba(255,255,255,.45)",letterSpacing:".1em",textTransform:"uppercase"}}>Tento měsíc</span>
-                        <span style={{fontSize:13,fontFamily:"Fraunces,serif",fontWeight:300,color:currentRow.over?"#4ade80":"#fff"}}>{_fmt2(currentRow.totalM)}</span>
+                  {_goal > 0 && <>
+                    <div style={{width:1,height:14,background:"rgba(255,255,255,.2)",flexShrink:0}} />
+                    <div style={{display:"flex",alignItems:"baseline",gap:6,whiteSpace:"nowrap"}}>
+                      <span style={{fontSize:9.5,color:"rgba(255,255,255,.45)",letterSpacing:".1em",textTransform:"uppercase"}}>Do cíle zbývá</span>
+                      <span style={{fontSize:15,fontFamily:"Fraunces,serif",fontWeight:300,color:_rem===0?"#4ade80":"#fff"}}>{_rem===0?"✓ Splněno":_fmt(_rem)}</span>
+                    </div>
+                    <div style={{display:"flex",alignItems:"center",gap:5,whiteSpace:"nowrap"}}>
+                      <div style={{width:60,height:3,background:"rgba(255,255,255,.15)",borderRadius:99,overflow:"hidden"}}>
+                        <div style={{width:`${_pct*100}%`,height:"100%",background:_pct>=1?"#4ade80":"#FDE68A",borderRadius:99,transition:"width .5s ease"}} />
                       </div>
-                      <div style={{display:"flex",alignItems:"center",gap:5,whiteSpace:"nowrap"}}>
-                        <div style={{width:54,height:3,background:"rgba(255,255,255,.15)",borderRadius:99,overflow:"hidden"}}>
-                          <div style={{width:`${pctToGoal*100}%`,height:"100%",background:pctToGoal>=1?"#4ade80":"#FDE68A",borderRadius:99,transition:"width .5s ease"}} />
-                        </div>
-                        {/* "mety" navíc — jiné číslo než "% cíle" nahoře (jiná báze i jiný cíl,
-                            viz legenda dole), gold barva ladí s LEVEL/trofejovým tématem této lišty. */}
-                        <span style={{fontSize:10,color:"rgba(253,230,138,.75)",fontWeight:600}}>{Math.round(pctToGoal*100)}% mety</span>
-                      </div>
-                    </>
-                  )}
+                      <span style={{fontSize:10,color:"rgba(253,230,138,.85)",fontWeight:600}}>{Math.round(_pct*100)}% cíle</span>
+                    </div>
+                  </>}
                 </div>
+
                 {sparkRows.length > 1 && (
                   <svg width={svgW} height={chartH + 16 + TOPPAD} style={{flexShrink:0}}>
-                    <path d={goalPathD} fill="none" stroke="rgba(253,230,138,.8)" strokeWidth="1.2" strokeDasharray="3,2" />
+                    {yGoal !== null && <line x1={0} y1={yGoal} x2={svgW} y2={yGoal} stroke="rgba(253,230,138,.8)" strokeWidth="1.2" strokeDasharray="3,2" />}
                     {sparkRows.map((r, idx) => {
                       const h = Math.max(2, (r.totalM / maxTotal) * chartH);
                       const x = idx * (barW + gap);
                       const y = chartH - h + 6 + TOPPAD;
-                      const color = r.live ? "rgba(167,139,250,.55)" : (r.milestoneNum ? "#FDE68A" : (r.over ? "#A78BFA" : "rgba(255,255,255,.25)"));
+                      const overGoal = _goal > 0 && r.totalM >= _goal;
+                      const color = r.live ? "rgba(167,139,250,.55)" : (overGoal ? "#FDE68A" : "rgba(255,255,255,.25)");
                       const mmYY = `${r.ym.slice(5,7)}/${r.ym.slice(2,4)}`;
                       return (
                         <g key={r.ym} className="spark-g">
-                          <title>{`${mmYY}${r.live ? " (živě)" : ""}: ${r.totalM.toLocaleString("cs-CZ")} Kč · tehdejší cíl ${r.goal.toLocaleString("cs-CZ")} Kč`}</title>
+                          <title>{`${mmYY}${r.live ? " (živě)" : ""}: ${r.totalM.toLocaleString("cs-CZ")} Kč${_goal>0?` · cíl ${_goal.toLocaleString("cs-CZ")} Kč`:""}`}</title>
                           {/* Popisek s částkou — schovaný, naskočí jen při hoveru na konkrétní sloupec (CSS .spark-label) */}
                           <text className="spark-label" x={x + barW/2} y={Math.max(8, y - 5)} textAnchor="middle" fontSize="7" fontWeight="700" fill="#fff">{_kc(r.totalM)}</text>
                           <rect className="spark-bar" x={x} y={y} width={barW} height={h} rx={2} fill={color}
-                            opacity={r.isCurrent ? 0.85 : 1}
                             stroke={r.live ? "rgba(255,255,255,.5)" : "none"}
                             strokeWidth={r.live ? 1 : 0}
                             strokeDasharray={r.live ? "2,2" : undefined} />
-                          {r.milestoneNum && <text x={x + barW/2} y={y - 4} textAnchor="middle" fontSize="9">🏆</text>}
-                          {r.isCurrent && <rect x={x} y={chartH + 8 + TOPPAD} width={barW} height={2} fill="#fff" opacity={.5} />}
                           {r.live && <text x={x + barW/2} y={chartH + 14 + TOPPAD} textAnchor="middle" fontSize="7" fill="rgba(255,255,255,.45)">živý</text>}
                         </g>
                       );
                     })}
                   </svg>
                 )}
+
+                <div onClick={e => e.stopPropagation()} style={{display:"flex",alignItems:"center",gap:6}}>
+                  {editingGoal ? (
+                    <div style={{display:"flex",alignItems:"center",gap:5}}>
+                      <input type="text" value={goalDraft} onChange={e=>setGoalDraft(e.target.value)}
+                        onKeyDown={e=>{if(e.key==="Enter")saveGoal();if(e.key==="Escape")setEditingGoal(false);}}
+                        placeholder="150000" autoFocus
+                        style={{width:88,padding:"4px 8px",borderRadius:6,border:"none",fontSize:12,fontFamily:"var(--mono)",outline:"none"}} />
+                      <button onClick={saveGoal} style={{padding:"4px 10px",borderRadius:6,background:"#4ade80",border:"none",fontSize:11,fontWeight:700,cursor:"pointer",color:"#166534"}}>OK</button>
+                      <button onClick={()=>setEditingGoal(false)} style={{padding:"4px 8px",borderRadius:6,background:"rgba(255,255,255,.12)",border:"none",fontSize:12,cursor:"pointer",color:"rgba(255,255,255,.7)"}}>✕</button>
+                    </div>
+                  ) : (
+                    <button onClick={()=>{setGoalDraft(_goal>0?String(_goal):"");setEditingGoal(true);}}
+                      style={{padding:"5px 12px",borderRadius:8,background:"rgba(255,255,255,.1)",border:"1px solid rgba(255,255,255,.18)",color:"rgba(255,255,255,.75)",fontSize:11,cursor:"pointer",letterSpacing:".03em",transition:"background .15s"}}
+                      onMouseEnter={e=>e.currentTarget.style.background="rgba(255,255,255,.18)"}
+                      onMouseLeave={e=>e.currentTarget.style.background="rgba(255,255,255,.1)"}>
+                      {_goal>0?`✏ Cíl: ${_fmt(_goal)}`:"+ Nastavit měsíční cíl"}
+                    </button>
+                  )}
+                </div>
               </div>
-              <div style={{marginTop:5,display:"flex",alignItems:"center",gap:10,flexWrap:"wrap",fontSize:8.5,color:"rgba(255,255,255,.35)",letterSpacing:".01em"}}>
-                <span>"Tento měsíc" = čistá fakturace (bez DPH, po slevě) + hrubý úrok z úschov</span>
-                <span>🏆 měsíc nad metou</span>
-                <span>┄ <span style={{color:"rgba(253,230,138,.8)"}}>cíl</span>, jak platil tehdy — historie se při posunu mety nepřepisuje</span>
-                <span>▦ tečkovaně = živý/rozpracovaný měsíc · hover na sloupec = částka</span>
-                <span>Level = +1 za měsíc nad metou, meta poté roste 200k → 250k → +25k…</span>
+
+              <div style={{marginTop:6,display:"flex",alignItems:"center",gap:10,flexWrap:"wrap",fontSize:8.5,color:"rgba(255,255,255,.35)",letterSpacing:".01em"}}>
+                <span>"Tento měsíc" = nevyfakturované výkazy (bez DPH, po slevě) + hrubý úrok z úschov</span>
+                <span>┄ <span style={{color:"rgba(253,230,138,.8)"}}>tvůj cíl</span> · hover na sloupec = částka daného měsíce</span>
+                <span>▦ tečkovaně = živý/rozpracovaný měsíc</span>
                 <span className="gamif-cta" style={{marginLeft:"auto",fontWeight:700,color:"#fff",whiteSpace:"nowrap"}}>Klikni pro detail v Financích →</span>
               </div>
             </div>
