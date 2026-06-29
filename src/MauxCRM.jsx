@@ -276,6 +276,16 @@ html,body,#root{height:100%;background:#FAFAFA}
 .cf .r{display:flex;gap:10px;justify-content:center}
 .loading{padding:60px;text-align:center;color:var(--mut);font-size:13.5px}
 @media(max-width:800px){.mx{flex-direction:column}.sb{width:100%;min-height:auto;position:relative;flex-direction:row;padding:14px;gap:6px}.brand{padding:0 12px 0 0;flex:0 0 auto}.nav{flex-direction:row;flex-wrap:wrap;gap:4px}.ni{width:auto;padding:7px 12px}.sbfoot{display:none}.top{padding:20px 20px 0}.hr{margin:16px 20px 0}.body{padding:20px 20px 32px}.kpi-row{grid-template-columns:1fr}.grid2,.two,.three{grid-template-columns:1fr}.item-head,.item-row{grid-template-columns:1fr 60px 80px 80px 30px}}
+.gamif-bar{cursor:pointer;transition:filter .15s,background-position .4s}
+.gamif-bar:hover{filter:brightness(1.08)}
+.gamif-bar:active{filter:brightness(0.95)}
+.gamif-bar .gamif-cta{opacity:.55;transition:opacity .15s,transform .15s}
+.gamif-bar:hover .gamif-cta{opacity:1;transform:translateX(2px)}
+.gamif-bar .spark-g{cursor:pointer}
+.gamif-bar .spark-g .spark-bar{transition:filter .12s,opacity .12s}
+.gamif-bar .spark-g:hover .spark-bar{filter:brightness(1.5) drop-shadow(0 0 4px rgba(253,230,138,.6))}
+.gamif-bar .spark-g .spark-label{opacity:0;transition:opacity .12s}
+.gamif-bar .spark-g:hover .spark-label{opacity:1}
 `;
 
 /* ─── SUPABASE DATA LAYER ─── */
@@ -11951,56 +11961,89 @@ export default function MauxCRM() {
           const maxTotal = Math.max(...sparkRows.map(r => r.totalM), ladder.activeGoal, 1);
           const barW = 12, gap = 5, chartH = 32;
           const svgW = Math.max(1, sparkRows.length * (barW + gap) - gap);
+          // Skloňování "měsíc/měsíce/měsíců" pro vysvětlení LEVELu (proč jsem LVL 1? → kolik měsíců
+          // jsem od začátku přeskočil aktuální/tehdejší metu — viz milestoneCount).
+          const _mPlur = n => (n === 1 ? "měsíc" : (n >= 2 && n <= 4 ? "měsíce" : "měsíců"));
+          // Krokový (step) průběh CÍLE v čase — využívá r.goal, který computeMilestoneLadder ukládá
+          // PŘED případným posunem mety (200k→250k→+25k...), takže historické sloupce vždy ukazují
+          // metu, která tehdy reálně platila. Když Tom metu v budoucnu posune, graf se kreslí znovu
+          // z dat → minulost se nepřepíše, jen se k ní v daný měsíc přidá nový schod.
+          // TOPPAD = volný prostor navíc nad sloupci, kam se při hoveru vejde popisek s částkou
+          // (jinak by se u nejvyššího sloupce ořezával o horní okraj SVG).
+          const TOPPAD = 12;
+          let goalPathD = "";
+          sparkRows.forEach((r, idx) => {
+            const x0 = idx * (barW + gap), x1 = x0 + barW;
+            const yG = chartH - Math.min(1, r.goal / maxTotal) * chartH + 6 + TOPPAD;
+            goalPathD += (idx === 0 ? `M${x0},${yG} ` : `L${x0},${yG} `) + `L${x1},${yG} `;
+          });
+          const _kc = v => privacyMode ? "···" : (Math.abs(v) >= 1000 ? `${Math.round(v / 1000)}k` : String(Math.round(v)));
           return (
-            <div style={{background:"linear-gradient(135deg,#1f1147,#3518A5)",padding:"8px 40px",display:"flex",alignItems:"center",justifyContent:"space-between",gap:16,flexWrap:"wrap",borderTop:"1px solid rgba(255,255,255,.08)"}}>
-              <div style={{display:"flex",alignItems:"center",gap:14,flexWrap:"wrap"}}>
-                <div style={{display:"flex",alignItems:"center",gap:6}}>
-                  <span style={{fontSize:16}}>🏆</span>
-                  <span style={{fontSize:11,fontWeight:700,color:"#FDE68A",letterSpacing:".04em"}}>LEVEL {ladder.milestoneCount + 1}</span>
-                </div>
-                <div style={{width:1,height:14,background:"rgba(255,255,255,.15)",flexShrink:0}} />
-                <div style={{display:"flex",alignItems:"baseline",gap:6}}>
-                  <span style={{fontSize:9.5,color:"rgba(255,255,255,.45)",letterSpacing:".1em",textTransform:"uppercase"}}>Meta</span>
-                  <span style={{fontSize:13,fontFamily:"Fraunces,serif",fontWeight:300,color:"#fff"}}>{_fmt2(ladder.activeGoal)}/měs.</span>
-                </div>
-                {currentRow && (
-                  <>
-                    <div style={{width:1,height:14,background:"rgba(255,255,255,.15)",flexShrink:0}} />
-                    <div style={{display:"flex",alignItems:"baseline",gap:6}}>
-                      <span style={{fontSize:9.5,color:"rgba(255,255,255,.45)",letterSpacing:".1em",textTransform:"uppercase"}}>Tento měsíc (fakturace + úschovy)</span>
-                      <span style={{fontSize:13,fontFamily:"Fraunces,serif",fontWeight:300,color:currentRow.over?"#4ade80":"#fff"}}>{_fmt2(currentRow.totalM)}</span>
-                    </div>
-                    <div style={{display:"flex",alignItems:"center",gap:5}}>
-                      <div style={{width:54,height:3,background:"rgba(255,255,255,.15)",borderRadius:99,overflow:"hidden"}}>
-                        <div style={{width:`${pctToGoal*100}%`,height:"100%",background:pctToGoal>=1?"#4ade80":"#FDE68A",borderRadius:99,transition:"width .5s ease"}} />
+            <div className="gamif-bar" onClick={() => navTo("dashboard")} title="Klikni pro detail v Financích"
+              style={{background:"linear-gradient(135deg,#1f1147,#3518A5)",padding:"8px 40px 7px",borderTop:"1px solid rgba(255,255,255,.08)"}}>
+              <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:16,flexWrap:"wrap"}}>
+                <div style={{display:"flex",alignItems:"center",gap:14,flexWrap:"wrap"}}>
+                  <div style={{display:"flex",alignItems:"baseline",gap:6}}>
+                    <span style={{fontSize:16}}>🏆</span>
+                    <span style={{fontSize:11,fontWeight:700,color:"#FDE68A",letterSpacing:".04em"}}>LEVEL {ladder.milestoneCount + 1}</span>
+                    <span style={{fontSize:9,color:"rgba(255,255,255,.4)"}}>({ladder.milestoneCount} {_mPlur(ladder.milestoneCount)} nad metou)</span>
+                  </div>
+                  <div style={{width:1,height:14,background:"rgba(255,255,255,.15)",flexShrink:0}} />
+                  <div style={{display:"flex",alignItems:"baseline",gap:6}}>
+                    <span style={{fontSize:9.5,color:"rgba(255,255,255,.45)",letterSpacing:".1em",textTransform:"uppercase"}}>Meta</span>
+                    <span style={{fontSize:13,fontFamily:"Fraunces,serif",fontWeight:300,color:"#fff"}}>{_fmt2(ladder.activeGoal)}/měs.</span>
+                  </div>
+                  {currentRow && (
+                    <>
+                      <div style={{width:1,height:14,background:"rgba(255,255,255,.15)",flexShrink:0}} />
+                      <div style={{display:"flex",alignItems:"baseline",gap:6}}>
+                        <span style={{fontSize:9.5,color:"rgba(255,255,255,.45)",letterSpacing:".1em",textTransform:"uppercase"}}>Tento měsíc (čistá fakturace + hrubý úrok)</span>
+                        <span style={{fontSize:13,fontFamily:"Fraunces,serif",fontWeight:300,color:currentRow.over?"#4ade80":"#fff"}}>{_fmt2(currentRow.totalM)}</span>
                       </div>
-                      <span style={{fontSize:10,color:"rgba(255,255,255,.5)"}}>{Math.round(pctToGoal*100)}%</span>
-                    </div>
-                  </>
+                      <div style={{display:"flex",alignItems:"center",gap:5}}>
+                        <div style={{width:54,height:3,background:"rgba(255,255,255,.15)",borderRadius:99,overflow:"hidden"}}>
+                          <div style={{width:`${pctToGoal*100}%`,height:"100%",background:pctToGoal>=1?"#4ade80":"#FDE68A",borderRadius:99,transition:"width .5s ease"}} />
+                        </div>
+                        <span style={{fontSize:10,color:"rgba(255,255,255,.5)"}}>{Math.round(pctToGoal*100)}%</span>
+                      </div>
+                    </>
+                  )}
+                </div>
+                {sparkRows.length > 1 && (
+                  <svg width={svgW} height={chartH + 16 + TOPPAD} style={{flexShrink:0}}>
+                    <path d={goalPathD} fill="none" stroke="rgba(253,230,138,.8)" strokeWidth="1.2" strokeDasharray="3,2" />
+                    {sparkRows.map((r, idx) => {
+                      const h = Math.max(2, (r.totalM / maxTotal) * chartH);
+                      const x = idx * (barW + gap);
+                      const y = chartH - h + 6 + TOPPAD;
+                      const color = r.live ? "rgba(167,139,250,.55)" : (r.milestoneNum ? "#FDE68A" : (r.over ? "#A78BFA" : "rgba(255,255,255,.25)"));
+                      const mmYY = `${r.ym.slice(5,7)}/${r.ym.slice(2,4)}`;
+                      return (
+                        <g key={r.ym} className="spark-g">
+                          <title>{`${mmYY}${r.live ? " (živě)" : ""}: ${r.totalM.toLocaleString("cs-CZ")} Kč · tehdejší cíl ${r.goal.toLocaleString("cs-CZ")} Kč`}</title>
+                          {/* Popisek s částkou — schovaný, naskočí jen při hoveru na konkrétní sloupec (CSS .spark-label) */}
+                          <text className="spark-label" x={x + barW/2} y={Math.max(8, y - 5)} textAnchor="middle" fontSize="7" fontWeight="700" fill="#fff">{_kc(r.totalM)}</text>
+                          <rect className="spark-bar" x={x} y={y} width={barW} height={h} rx={2} fill={color}
+                            opacity={r.isCurrent ? 0.85 : 1}
+                            stroke={r.live ? "rgba(255,255,255,.5)" : "none"}
+                            strokeWidth={r.live ? 1 : 0}
+                            strokeDasharray={r.live ? "2,2" : undefined} />
+                          {r.milestoneNum && <text x={x + barW/2} y={y - 4} textAnchor="middle" fontSize="9">🏆</text>}
+                          {r.isCurrent && <rect x={x} y={chartH + 8 + TOPPAD} width={barW} height={2} fill="#fff" opacity={.5} />}
+                          {r.live && <text x={x + barW/2} y={chartH + 14 + TOPPAD} textAnchor="middle" fontSize="7" fill="rgba(255,255,255,.45)">živý</text>}
+                        </g>
+                      );
+                    })}
+                  </svg>
                 )}
               </div>
-              {sparkRows.length > 1 && (
-                <svg width={svgW} height={chartH + 16} style={{flexShrink:0}}>
-                  {sparkRows.map((r, idx) => {
-                    const h = Math.max(2, (r.totalM / maxTotal) * chartH);
-                    const x = idx * (barW + gap);
-                    const y = chartH - h + 6;
-                    const color = r.live ? "rgba(167,139,250,.55)" : (r.milestoneNum ? "#FDE68A" : (r.over ? "#A78BFA" : "rgba(255,255,255,.25)"));
-                    return (
-                      <g key={r.ym}>
-                        <rect x={x} y={y} width={barW} height={h} rx={2} fill={color}
-                          opacity={r.isCurrent ? 0.85 : 1}
-                          stroke={r.live ? "rgba(255,255,255,.5)" : "none"}
-                          strokeWidth={r.live ? 1 : 0}
-                          strokeDasharray={r.live ? "2,2" : undefined} />
-                        {r.milestoneNum && <text x={x + barW/2} y={y - 4} textAnchor="middle" fontSize="9">🏆</text>}
-                        {r.isCurrent && <rect x={x} y={chartH + 8} width={barW} height={2} fill="#fff" opacity={.5} />}
-                        {r.live && <text x={x + barW/2} y={chartH + 14} textAnchor="middle" fontSize="7" fill="rgba(255,255,255,.45)">živý</text>}
-                      </g>
-                    );
-                  })}
-                </svg>
-              )}
+              <div style={{marginTop:5,display:"flex",alignItems:"center",gap:10,flexWrap:"wrap",fontSize:8.5,color:"rgba(255,255,255,.35)",letterSpacing:".01em"}}>
+                <span>🏆 měsíc nad metou</span>
+                <span>┄ <span style={{color:"rgba(253,230,138,.8)"}}>cíl</span>, jak platil v daném měsíci — historie se při posunu mety nepřepisuje</span>
+                <span>▦ tečkovaný sloupec = živý/rozpracovaný měsíc · najeď myší na sloupec pro částku</span>
+                <span>Level = +1 za každý měsíc nad metou, meta poté roste 200k → 250k → +25k…</span>
+                <span className="gamif-cta" style={{marginLeft:"auto",fontWeight:700,color:"#fff"}}>Klikni pro detail v Financích →</span>
+              </div>
             </div>
           );
         })()}
