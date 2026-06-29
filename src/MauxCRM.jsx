@@ -7385,9 +7385,10 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
                   <div style={{fontSize:10,letterSpacing:".22em",textTransform:"uppercase",color:"#3518A5",fontWeight:800}}>Bilance příštího měsíce</div>
                 </div>
                 <div className="maux-num maux-glow" style={{
-                  fontSize:58, fontWeight:800,
+                  fontSize:46, fontWeight:800,
                   color: "#3518A5",
                   lineHeight:1,
+                  whiteSpace:"nowrap",
                 }}>
                   {positiveBalance?"+":"−"}{fmtKc(Math.abs(nextMonthBalance))}
                 </div>
@@ -11983,24 +11984,24 @@ export default function MauxCRM() {
               style={{background:"linear-gradient(135deg,#1f1147,#3518A5)",padding:"8px 40px 7px",borderTop:"1px solid rgba(255,255,255,.08)"}}>
               <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:16,flexWrap:"wrap"}}>
                 <div style={{display:"flex",alignItems:"center",gap:14,flexWrap:"wrap"}}>
-                  <div style={{display:"flex",alignItems:"baseline",gap:6}}>
+                  <div style={{display:"flex",alignItems:"baseline",gap:6,whiteSpace:"nowrap"}}>
                     <span style={{fontSize:16}}>🏆</span>
                     <span style={{fontSize:11,fontWeight:700,color:"#FDE68A",letterSpacing:".04em"}}>LEVEL {ladder.milestoneCount + 1}</span>
                     <span style={{fontSize:9,color:"rgba(255,255,255,.4)"}}>({ladder.milestoneCount} {_mPlur(ladder.milestoneCount)} nad metou)</span>
                   </div>
                   <div style={{width:1,height:14,background:"rgba(255,255,255,.15)",flexShrink:0}} />
-                  <div style={{display:"flex",alignItems:"baseline",gap:6}}>
+                  <div style={{display:"flex",alignItems:"baseline",gap:6,whiteSpace:"nowrap"}}>
                     <span style={{fontSize:9.5,color:"rgba(255,255,255,.45)",letterSpacing:".1em",textTransform:"uppercase"}}>Meta</span>
                     <span style={{fontSize:13,fontFamily:"Fraunces,serif",fontWeight:300,color:"#fff"}}>{_fmt2(ladder.activeGoal)}/měs.</span>
                   </div>
                   {currentRow && (
                     <>
                       <div style={{width:1,height:14,background:"rgba(255,255,255,.15)",flexShrink:0}} />
-                      <div style={{display:"flex",alignItems:"baseline",gap:6}}>
-                        <span style={{fontSize:9.5,color:"rgba(255,255,255,.45)",letterSpacing:".1em",textTransform:"uppercase"}}>Tento měsíc (čistá fakturace + hrubý úrok)</span>
+                      <div style={{display:"flex",alignItems:"baseline",gap:6,whiteSpace:"nowrap"}}>
+                        <span style={{fontSize:9.5,color:"rgba(255,255,255,.45)",letterSpacing:".1em",textTransform:"uppercase"}}>Tento měsíc</span>
                         <span style={{fontSize:13,fontFamily:"Fraunces,serif",fontWeight:300,color:currentRow.over?"#4ade80":"#fff"}}>{_fmt2(currentRow.totalM)}</span>
                       </div>
-                      <div style={{display:"flex",alignItems:"center",gap:5}}>
+                      <div style={{display:"flex",alignItems:"center",gap:5,whiteSpace:"nowrap"}}>
                         <div style={{width:54,height:3,background:"rgba(255,255,255,.15)",borderRadius:99,overflow:"hidden"}}>
                           <div style={{width:`${pctToGoal*100}%`,height:"100%",background:pctToGoal>=1?"#4ade80":"#FDE68A",borderRadius:99,transition:"width .5s ease"}} />
                         </div>
@@ -12038,11 +12039,12 @@ export default function MauxCRM() {
                 )}
               </div>
               <div style={{marginTop:5,display:"flex",alignItems:"center",gap:10,flexWrap:"wrap",fontSize:8.5,color:"rgba(255,255,255,.35)",letterSpacing:".01em"}}>
+                <span>"Tento měsíc" = čistá fakturace (bez DPH, po slevě) + hrubý úrok z úschov</span>
                 <span>🏆 měsíc nad metou</span>
-                <span>┄ <span style={{color:"rgba(253,230,138,.8)"}}>cíl</span>, jak platil v daném měsíci — historie se při posunu mety nepřepisuje</span>
-                <span>▦ tečkovaný sloupec = živý/rozpracovaný měsíc · najeď myší na sloupec pro částku</span>
-                <span>Level = +1 za každý měsíc nad metou, meta poté roste 200k → 250k → +25k…</span>
-                <span className="gamif-cta" style={{marginLeft:"auto",fontWeight:700,color:"#fff"}}>Klikni pro detail v Financích →</span>
+                <span>┄ <span style={{color:"rgba(253,230,138,.8)"}}>cíl</span>, jak platil tehdy — historie se při posunu mety nepřepisuje</span>
+                <span>▦ tečkovaně = živý/rozpracovaný měsíc · hover na sloupec = částka</span>
+                <span>Level = +1 za měsíc nad metou, meta poté roste 200k → 250k → +25k…</span>
+                <span className="gamif-cta" style={{marginLeft:"auto",fontWeight:700,color:"#fff",whiteSpace:"nowrap"}}>Klikni pro detail v Financích →</span>
               </div>
             </div>
           );
