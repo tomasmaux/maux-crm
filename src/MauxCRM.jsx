@@ -3198,6 +3198,60 @@ function escrowGrossForMonth(escrows, year, month) {
   }, 0);
 }
 
+// Žebřík mety 200 000 Kč/měs. (fakturace bez DPH + hrubý úrok z úschov), s automatickým
+// posunem mety (200k → 250k → +25k pokaždé, co je měsíc překročen). Sdílená logika pro
+// gamifikační lištu v hlavičce i detailní panel v Financích, ať se obě místa nikdy nerozejdou.
+// Vrací uzavřené měsíce od prvního dokladu po AKTUÁLNÍ měsíc (včetně) — BEZ živé projekce na
+// příští měsíc, tu si volající doplní sám (potřebuje unbilledAmt, který je jen v Dashboardu).
+function computeMilestoneLadder(invoices, escrows, now) {
+  const ymSet = new Set();
+  (invoices || []).forEach(i => { if (i.issue_date) ymSet.add(i.issue_date.slice(0, 7)); });
+  (escrows || []).forEach(e => {
+    if (e.date_received) ymSet.add(e.date_received.slice(0, 7));
+    (e.escrow_tranches || []).forEach(t => {
+      if (t.received_date) ymSet.add(t.received_date.slice(0, 7));
+      if (t.paid_date) ymSet.add(t.paid_date.slice(0, 7));
+    });
+  });
+  const thisYm = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+  ymSet.add(thisYm);
+  const sortedYm = [...ymSet].sort();
+  const [startY, startM0] = sortedYm[0].split("-").map(Number);
+  let cy = startY, cm = startM0 - 1;
+  const rows = [];
+  while (cy < now.getFullYear() || (cy === now.getFullYear() && cm <= now.getMonth())) {
+    const ym = `${cy}-${String(cm + 1).padStart(2, "0")}`;
+    const invAmt = (invoices || []).filter(i => (i.issue_date || "").startsWith(ym)).reduce((s, i) => s + (i.subtotal || 0), 0);
+    const escAmt = Math.round(escrowGrossForMonth(escrows, cy, cm));
+    const totalM = invAmt + escAmt;
+    if (totalM > 0 || ym === thisYm) rows.push({ ym, invAmt, escAmt, totalM, monIdx: cm, isCurrent: ym === thisYm });
+    cm++; if (cm > 11) { cm = 0; cy++; }
+  }
+  let goal = 200000, milestoneCount = 0, firstMilestone = null;
+  rows.forEach(r => {
+    r.goal = goal;
+    r.over = r.totalM > goal;
+    if (r.over) {
+      milestoneCount++;
+      r.milestoneNum = milestoneCount;
+      if (!firstMilestone) firstMilestone = r;
+      goal = (goal === 200000) ? 250000 : goal + 25000;
+    }
+  });
+  return { rows, milestoneCount, activeGoal: goal, firstMilestone, anyOver: milestoneCount > 0 };
+}
+
+// Čistá nevyfakturovaná klientská práce BEZ DPH a BEZ pass-through poplatků (sp. poplatek,
+// prohlášení podpisu) — stejná báze jako invoice.subtotal (viz InvoiceIssueModal: subtotal =
+// workAmtAfterDiscount, admin_fee/sig fee jdou do total samostatně jako no_vat položky, NE do
+// subtotal). Used pro "živý" měsíc v žebříčku mety 200k — NENÍ totéž jako unbilledAmt (ten
+// počítá ×1,21 DPH + poplatky navíc, pro jiné metriky: "Výkazy k vystavení"/"Bilance příštího
+// měsíce", které ukazují odhad reálné příchozí hotovosti, ne srovnatelnou klientskou práci).
+function unbilledWorkNetNoVat(workEntries) {
+  return (workEntries || []).filter(e => !e.invoice_id)
+    .reduce((s, e) => s + Math.max((e.amount || 0) - (Number(e.discount_amount) || 0), 0), 0);
+}
+
 // Průběžný čistý úrok z dosud neukončených intervalů (accumulated do dnes)
 function escrowRunningNet(escrows) {
   const today = new Date(); today.setHours(0,0,0,0);
@@ -7062,59 +7116,34 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
       {/* Kontrola hranice 200 000 Kč/měs. (úschovy — čistý úrok + fakturace — vlastní odměna), s automatickým posunem mety a živým řádkem na příští měsíc */}
       {(() => {
         const MESICE_LOC = ["lednu","únoru","březnu","dubnu","květnu","červnu","červenci","srpnu","září","říjnu","listopadu","prosinci"];
-        const ymSet = new Set();
-        invoices.forEach(i => { if (i.issue_date) ymSet.add(i.issue_date.slice(0,7)); });
-        (escrows||[]).forEach(e => {
-          if (e.date_received) ymSet.add(e.date_received.slice(0,7));
-          (e.escrow_tranches||[]).forEach(t => {
-            if (t.received_date) ymSet.add(t.received_date.slice(0,7));
-            if (t.paid_date) ymSet.add(t.paid_date.slice(0,7));
-          });
-        });
-        ymSet.add(thisMonth);
-        const sortedYm = [...ymSet].sort();
-        const [startY, startM0] = sortedYm[0].split("-").map(Number);
-        // Vždy zobraz přesně JEDEN měsíc dopředu (příští, ne přespříští) jako živou projekci — posouvá se automaticky s časem.
+        // Historie (od prvního dokladu po AKTUÁLNÍ měsíc, uzavřené měsíce) + posun mety počítá
+        // sdílená funkce computeMilestoneLadder — stejná, kterou používá i gamifikační lišta
+        // nahoře v hlavičce, ať se obě místa nikdy nerozejdou.
+        const ladder = computeMilestoneLadder(invoices, escrows, now);
+        // Živý řádek (příští měsíc): nevyfakturovaná práce bez DPH (unbilledAmt — stejné číslo jako karta
+        // "Příjmy na příští měsíc") + úrok z úschov splatný k 1. tohoto měsíce — ne čerstvý "od nuly"
+        // výpočet pro budoucí měsíc samotný.
+        // Úrok je zde HRUBÝ (před -15% srážkovou daní), ne čistý: sloupec "Fakturace" je taky "před
+        // daní z příjmu" (jen bez DPH, což je daň, kterou firma neplatí, ne její příjem) — pro
+        // konzistentní srovnání proti hranici 200 000 Kč musí být úrok na stejné bázi (hrubý výnos),
+        // jinak by se fakturace a úschovy měřily podle dvou různých definic "čistého". Proto se tento
+        // řádek může lišit od karty "Příjmy na příští měsíc" výš, která naopak ukazuje reálně přijatou
+        // (čistou, po srážkové dani) hotovost. Meta tohoto řádku je AKTIVNÍ meta po historii — živý
+        // řádek ji ještě nemůže posunout (uzavře se až s koncem měsíce).
+        // invAmt zde POUZE čistá práce bez DPH (unbilledWorkNetNoVat) — NE unbilledAmt (ten má
+        // navíc ×1,21 DPH + sp.poplatek/prohlášení, což by srovnání proti uzavřeným měsícům
+        // (invoice.subtotal, taky bez DPH a bez těch poplatků) zkreslilo. Tom to 29.6.2026 potvrdil.
         const lastY = now.getMonth() === 11 ? now.getFullYear() + 1 : now.getFullYear();
         const lastM = (now.getMonth() + 1) % 12;
         const nextYmStr = `${lastY}-${String(lastM+1).padStart(2,"0")}`;
-        let cy = startY, cm = startM0 - 1; // 0-indexed
-        const rows = [];
-        while (cy < lastY || (cy === lastY && cm <= lastM)) {
-          const ym = `${cy}-${String(cm+1).padStart(2,"0")}`;
-          const live = ym === nextYmStr; // jen tento jeden řádek je "průběžné" — aktuální měsíc se počítá normálně
-          // Živý řádek (příští měsíc): nevyfakturovaná práce bez DPH (unbilledAmt — stejné číslo jako karta
-          // "Příjmy na příští měsíc") + úrok z úschov splatný k 1. tohoto měsíce — ne čerstvý "od nuly"
-          // výpočet pro budoucí měsíc samotný.
-          // Úrok je zde HRUBÝ (před -15% srážkovou daní), ne čistý: sloupec "Fakturace" je taky "před
-          // daní z příjmu" (jen bez DPH, což je daň, kterou firma neplatí, ne její příjem) — pro
-          // konzistentní srovnání proti hranici 200 000 Kč musí být úrok na stejné bázi (hrubý výnos),
-          // jinak by se fakturace a úschovy měřily podle dvou různých definic "čistého". Proto se tento
-          // řádek může lišit od karty "Příjmy na příští měsíc" výš, která naopak ukazuje reálně přijatou
-          // (čistou, po srážkové dani) hotovost.
-          const invAmt = live ? unbilledAmt : invoices.filter(i => (i.issue_date||"").startsWith(ym)).reduce((s,i)=>s+(i.subtotal||0),0);
-          const escAmt = live ? Math.round(escrowGrossThisMonth) : Math.round(escrowGrossForMonth(escrows, cy, cm));
-          const totalM = invAmt + escAmt;
-          if (totalM > 0 || ym === thisMonth || live) rows.push({ ym, invAmt, escAmt, totalM, live, monIdx: cm });
-          cm++; if (cm > 11) { cm = 0; cy++; }
-        }
-        // Postupně se posunující meta: 200 000 → po prvním prolomení 250 000 → dál vždy +25 000.
-        // Meta se posouvá jen podle UZAVŘENÝCH měsíců — živý/budoucí měsíc ji ještě nemůže posunout.
-        let goal = 200000;
-        let firstMilestone = null;
-        let milestoneCount = 0;
-        rows.forEach(r => {
-          r.goal = goal;
-          r.over = r.totalM > goal;
-          if (!r.live && r.over) {
-            milestoneCount++;
-            r.milestoneNum = milestoneCount;
-            if (!firstMilestone) firstMilestone = r;
-            goal = (goal === 200000) ? 250000 : goal + 25000;
-          }
-        });
-        const anyOver = milestoneCount > 0;
-        const activeGoal = goal;
+        const liveInvAmt = unbilledWorkNetNoVat(workEntries);
+        const liveEscAmt = Math.round(escrowGrossThisMonth);
+        const liveTotal = liveInvAmt + liveEscAmt;
+        const rows = [...ladder.rows, { ym: nextYmStr, invAmt: liveInvAmt, escAmt: liveEscAmt, totalM: liveTotal, live: true, monIdx: lastM, goal: ladder.activeGoal, over: liveTotal > ladder.activeGoal }];
+        const firstMilestone = ladder.firstMilestone;
+        const milestoneCount = ladder.milestoneCount;
+        const anyOver = ladder.anyOver;
+        const activeGoal = ladder.activeGoal;
         return (
           <>
             {firstMilestone && (
@@ -11894,6 +11923,84 @@ export default function MauxCRM() {
                   </button>
                 )}
               </div>
+            </div>
+          );
+        })()}
+        {/* Gamifikační lišta — žebřík mety 200 000 Kč/měs. (fakturace bez DPH + hrubý úrok z úschov),
+            "zásadní lišta na začátku" (Tom). Sdílí computeMilestoneLadder s detailním panelem ve
+            Financích, takže obě místa nikdy nemůžou ukázat rozdílný počet úrovní/aktivní metu.
+            Sparkline ukazuje posledních ~9 uzavřených měsíců + 1 živý řádek na konci (rozpracovaný/
+            příští měsíc, tečkovaný okraj, nižší opacita) — nevyfakturovaná práce bez DPH
+            (unbilledWorkNetNoVat — STEJNÁ báze jako uzavřené měsíce, žádné DPH/poplatky navíc,
+            ať žebříček neukáže metu falešně dřív) + odhad úroku z úschov. 🏆 = měsíc, kde padla meta.
+            Hlavička "Tento měsíc" vždy ukazuje poslední UZAVŘENÝ měsíc, ne živou projekci. */}
+        {(() => {
+          const _now2 = new Date();
+          const _fmt2 = v => privacyMode ? "·····" : v.toLocaleString("cs-CZ") + " Kč";
+          const ladder = computeMilestoneLadder(invoices, escrows, _now2);
+          const currentRow = ladder.rows.length ? ladder.rows[ladder.rows.length - 1] : null;
+          const pctToGoal = currentRow ? Math.min(1, currentRow.totalM / ladder.activeGoal) : 0;
+          const lastY2 = _now2.getMonth() === 11 ? _now2.getFullYear() + 1 : _now2.getFullYear();
+          const lastM2 = (_now2.getMonth() + 1) % 12;
+          const nextYmStr2 = `${lastY2}-${String(lastM2 + 1).padStart(2, "0")}`;
+          const liveInvAmt2 = unbilledWorkNetNoVat(workEntries);
+          const liveEscAmt2 = Math.round(escrowGrossForMonth(escrows, _now2.getFullYear(), _now2.getMonth()));
+          const liveTotal2 = liveInvAmt2 + liveEscAmt2;
+          const liveRow = { ym: nextYmStr2, invAmt: liveInvAmt2, escAmt: liveEscAmt2, totalM: liveTotal2, live: true, monIdx: lastM2, goal: ladder.activeGoal, over: liveTotal2 > ladder.activeGoal };
+          const sparkRows = [...ladder.rows.slice(-9), liveRow];
+          const maxTotal = Math.max(...sparkRows.map(r => r.totalM), ladder.activeGoal, 1);
+          const barW = 12, gap = 5, chartH = 32;
+          const svgW = Math.max(1, sparkRows.length * (barW + gap) - gap);
+          return (
+            <div style={{background:"linear-gradient(135deg,#1f1147,#3518A5)",padding:"8px 40px",display:"flex",alignItems:"center",justifyContent:"space-between",gap:16,flexWrap:"wrap",borderTop:"1px solid rgba(255,255,255,.08)"}}>
+              <div style={{display:"flex",alignItems:"center",gap:14,flexWrap:"wrap"}}>
+                <div style={{display:"flex",alignItems:"center",gap:6}}>
+                  <span style={{fontSize:16}}>🏆</span>
+                  <span style={{fontSize:11,fontWeight:700,color:"#FDE68A",letterSpacing:".04em"}}>LEVEL {ladder.milestoneCount + 1}</span>
+                </div>
+                <div style={{width:1,height:14,background:"rgba(255,255,255,.15)",flexShrink:0}} />
+                <div style={{display:"flex",alignItems:"baseline",gap:6}}>
+                  <span style={{fontSize:9.5,color:"rgba(255,255,255,.45)",letterSpacing:".1em",textTransform:"uppercase"}}>Meta</span>
+                  <span style={{fontSize:13,fontFamily:"Fraunces,serif",fontWeight:300,color:"#fff"}}>{_fmt2(ladder.activeGoal)}/měs.</span>
+                </div>
+                {currentRow && (
+                  <>
+                    <div style={{width:1,height:14,background:"rgba(255,255,255,.15)",flexShrink:0}} />
+                    <div style={{display:"flex",alignItems:"baseline",gap:6}}>
+                      <span style={{fontSize:9.5,color:"rgba(255,255,255,.45)",letterSpacing:".1em",textTransform:"uppercase"}}>Tento měsíc (fakturace + úschovy)</span>
+                      <span style={{fontSize:13,fontFamily:"Fraunces,serif",fontWeight:300,color:currentRow.over?"#4ade80":"#fff"}}>{_fmt2(currentRow.totalM)}</span>
+                    </div>
+                    <div style={{display:"flex",alignItems:"center",gap:5}}>
+                      <div style={{width:54,height:3,background:"rgba(255,255,255,.15)",borderRadius:99,overflow:"hidden"}}>
+                        <div style={{width:`${pctToGoal*100}%`,height:"100%",background:pctToGoal>=1?"#4ade80":"#FDE68A",borderRadius:99,transition:"width .5s ease"}} />
+                      </div>
+                      <span style={{fontSize:10,color:"rgba(255,255,255,.5)"}}>{Math.round(pctToGoal*100)}%</span>
+                    </div>
+                  </>
+                )}
+              </div>
+              {sparkRows.length > 1 && (
+                <svg width={svgW} height={chartH + 16} style={{flexShrink:0}}>
+                  {sparkRows.map((r, idx) => {
+                    const h = Math.max(2, (r.totalM / maxTotal) * chartH);
+                    const x = idx * (barW + gap);
+                    const y = chartH - h + 6;
+                    const color = r.live ? "rgba(167,139,250,.55)" : (r.milestoneNum ? "#FDE68A" : (r.over ? "#A78BFA" : "rgba(255,255,255,.25)"));
+                    return (
+                      <g key={r.ym}>
+                        <rect x={x} y={y} width={barW} height={h} rx={2} fill={color}
+                          opacity={r.isCurrent ? 0.85 : 1}
+                          stroke={r.live ? "rgba(255,255,255,.5)" : "none"}
+                          strokeWidth={r.live ? 1 : 0}
+                          strokeDasharray={r.live ? "2,2" : undefined} />
+                        {r.milestoneNum && <text x={x + barW/2} y={y - 4} textAnchor="middle" fontSize="9">🏆</text>}
+                        {r.isCurrent && <rect x={x} y={chartH + 8} width={barW} height={2} fill="#fff" opacity={.5} />}
+                        {r.live && <text x={x + barW/2} y={chartH + 14} textAnchor="middle" fontSize="7" fill="rgba(255,255,255,.45)">živý</text>}
+                      </g>
+                    );
+                  })}
+                </svg>
+              )}
             </div>
           );
         })()}
