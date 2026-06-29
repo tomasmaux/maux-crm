@@ -11907,11 +11907,14 @@ export default function MauxCRM() {
                     <span style={{fontSize:9.5,color:"rgba(255,255,255,.45)",letterSpacing:".1em",textTransform:"uppercase"}}>Do cíle zbývá</span>
                     <span style={{fontSize:15,fontFamily:"Fraunces,serif",fontWeight:300,color:_rem===0?"#4ade80":"#fff"}}>{_rem===0?"✓ Splněno":_fmt(_rem)}</span>
                   </div>
-                  <div style={{display:"flex",alignItems:"center",gap:5}}>
+                  <div style={{display:"flex",alignItems:"center",gap:5,whiteSpace:"nowrap"}}>
                     <div style={{width:60,height:3,background:"rgba(255,255,255,.15)",borderRadius:99,overflow:"hidden"}}>
                       <div style={{width:`${_pct*100}%`,height:"100%",background:_pct>=1?"#4ade80":"rgba(255,255,255,.7)",borderRadius:99,transition:"width .5s ease"}} />
                     </div>
-                    <span style={{fontSize:10,color:"rgba(255,255,255,.5)"}}>{Math.round(_pct*100)}%</span>
+                    {/* "cíle" navíc, ať se to při pohledu na obě fialové lišty hned nepleте s "% mety" dole
+                        (vlastní cíl = ručně zadané číslo nahoře, zapsaná práce; meta = automatický
+                        žebřík 200k+ dole, fakturováno + úschovy — dvě různé věci). */}
+                    <span style={{fontSize:10,color:"rgba(255,255,255,.5)"}}>{Math.round(_pct*100)}% cíle</span>
                   </div>
                 </>}
               </div>
@@ -12005,7 +12008,9 @@ export default function MauxCRM() {
                         <div style={{width:54,height:3,background:"rgba(255,255,255,.15)",borderRadius:99,overflow:"hidden"}}>
                           <div style={{width:`${pctToGoal*100}%`,height:"100%",background:pctToGoal>=1?"#4ade80":"#FDE68A",borderRadius:99,transition:"width .5s ease"}} />
                         </div>
-                        <span style={{fontSize:10,color:"rgba(255,255,255,.5)"}}>{Math.round(pctToGoal*100)}%</span>
+                        {/* "mety" navíc — jiné číslo než "% cíle" nahoře (jiná báze i jiný cíl,
+                            viz legenda dole), gold barva ladí s LEVEL/trofejovým tématem této lišty. */}
+                        <span style={{fontSize:10,color:"rgba(253,230,138,.75)",fontWeight:600}}>{Math.round(pctToGoal*100)}% mety</span>
                       </div>
                     </>
                   )}
