@@ -3254,9 +3254,9 @@ function computeMilestoneLadder(invoices, escrows, now) {
 // Čistá nevyfakturovaná klientská práce BEZ DPH a BEZ pass-through poplatků (sp. poplatek,
 // prohlášení podpisu) — stejná báze jako invoice.subtotal (viz InvoiceIssueModal: subtotal =
 // workAmtAfterDiscount, admin_fee/sig fee jdou do total samostatně jako no_vat položky, NE do
-// subtotal). Used pro "živý" měsíc v žebříčku mety 200k — NENÍ totéž jako unbilledAmt (ten
-// počítá ×1,21 DPH + poplatky navíc, pro jiné metriky: "Výkazy k vystavení"/"Bilance příštího
-// měsíce", které ukazují odhad reálné příchozí hotovosti, ne srovnatelnou klientskou práci).
+// subtotal). Used pro "živý" měsíc v žebříčku mety 200k a (od 29.6.2026, na žádost Toma — "chci
+// reálnou bilanci, mých peněz") i pro Dashboardův unbilledAmt/"Výkazy k vystavení"/"Bilance
+// příštího měsíce" — DPH a přefakturace nejsou Tomovy peníze, jen průtok přes firmu.
 function unbilledWorkNetNoVat(workEntries) {
   return (workEntries || []).filter(e => !e.invoice_id)
     .reduce((s, e) => s + Math.max((e.amount || 0) - (Number(e.discount_amount) || 0), 0), 0);
@@ -3292,6 +3292,30 @@ function escrowTotalTax(escrows) {
     const ivs = _buildBalanceIntervals(e);
     return sum + _grossForPeriod(ivs, e.interest_rate, new Date(0), today) * 0.15;
   }, 0);
+}
+
+// Firemní rezerva = co reálně leží volné na spořicím účtu po odečtení vyhrazených "obálek"
+// (DPH, DPFO, Bobnice, daň z úschov, ruční rezervy). Dřív duplikováno samostatně ve FirmaBar
+// i MajetekBar (riziko, že se čísla časem rozejdou) — od 29.6.2026 jeden zdroj pravdy.
+function computeFirmaRezerva(financeItems, invoices, dpfoMonths, loanTransactions, escrows) {
+  const sporBal  = (financeItems||[]).find(i => i.id === "fi_sp_99")?.amount || 0;
+  const dphF     = (invoices||[]).filter(i => i.status === "uhrazena").reduce((s,i) => s+(i.vat_amount||0), 0);
+  const dpfoF    = (dpfoMonths||[]).filter(m => m.is_paid).reduce((s,m) => s+(m.amount||8050), 0);
+  const boblF    = (loanTransactions?.loan_bobnice||[]).reduce((s,t) => s+t.amount, 0);
+  const bobFbF   = (financeItems||[]).find(i => i.id === "fi_sp_02")?.amount || 0;
+  const bobBalF  = Math.max(boblF > 0 ? boblF : bobFbF, 0);
+  const danUF    = Math.round(escrowTotalTax(escrows||[]));
+  const autoLabF = new Set(["dph","dpfo 2026","bobnice","daň z úschov"]);
+  const manEnvF  = (financeItems||[]).filter(i =>
+    i.category === "sporaci" && i.notes !== "SKIP_DISPLAY"
+    && i.id !== "fi_sp_99" && i.id !== "fi_sp_01" && i.id !== "fi_sp_02"
+    && !autoLabF.has((i.label||"").toLowerCase().trim())
+  );
+  const totalEarF   = dphF + dpfoF + (bobBalF > 0 ? bobBalF : 0) + danUF + manEnvF.reduce((s,i)=>s+(i.amount||0),0);
+  const firmaRez    = sporBal - totalEarF;
+  const planKapItem = (financeItems||[]).find(i => i.id === "fi_plan_kapital");
+  const planKap     = planKapItem?.amount || 130000;
+  return { sporBal, totalEarF, firmaRez, planKap, planKapItem };
 }
 
 // ─── Breakdown row generators (balance-interval engine) ─────────────────────
@@ -4484,27 +4508,10 @@ function MajetekBar({ financeItems, onSaveFinance, invoices, dpfoMonths, loanTra
   const akcie    = akcieItem?.amount    || 0;
   const stavebko = stavebkoItem?.amount || 0;
 
-  // Firemní rezerva = vše co zbyde na spořáku po odečtení obálek (= volné)
-  const sporBal    = (financeItems||[]).find(i => i.id === "fi_sp_99")?.amount || 0;
-  const dphAutoM   = (invoices||[]).filter(i => i.status === "uhrazena").reduce((s,i) => s+(i.vat_amount||0), 0);
-  const dpfoAccM   = (dpfoMonths||[]).filter(m => m.is_paid).reduce((s,m) => s+(m.amount||8050), 0);
-  const bobloanM   = (loanTransactions?.loan_bobnice||[]).reduce((s,t) => s+t.amount, 0);
-  const bobFbM     = (financeItems||[]).find(i => i.id === "fi_sp_02")?.amount || 0;
-  const bobBalM    = Math.max(bobloanM > 0 ? bobloanM : bobFbM, 0);
-  const danUschovM = Math.round(escrowTotalTax(escrows||[]));
-  const autoLabelsM = new Set(["dph","dpfo 2026","bobnice","daň z úschov"]);
-  const manualEnvM = (financeItems||[]).filter(i =>
-    i.category === "sporaci" && i.notes !== "SKIP_DISPLAY"
-    && i.id !== "fi_sp_99" && i.id !== "fi_sp_01" && i.id !== "fi_sp_02"
-    && !autoLabelsM.has((i.label||"").toLowerCase().trim())
-  );
-  const totalEarmarkedM = dphAutoM + dpfoAccM + (bobBalM > 0 ? bobBalM : 0) + danUschovM + manualEnvM.reduce((s,i)=>s+(i.amount||0),0);
-  const firmaKap = Math.max(sporBal - totalEarmarkedM, 0);
-
-  // Cíl firemní rezervy — interaktivně nastavitelný (V.03 — "tekutina" stoupající k metě)
-  // Sjednoceno s FirmaBar: JEDEN zdroj pravdy = fi_plan_kapital (dříve dva rozdílné cíle, opraveno na žádost)
-  const reserveGoalItem = (financeItems||[]).find(i => i.id === "fi_plan_kapital");
-  const reserveGoal = reserveGoalItem?.amount || 130000;
+  // Firemní rezerva = vše co zbyde na spořáku po odečtení obálek (= volné) — sdílený výpočet (computeFirmaRezerva)
+  const { firmaRez: firmaRezM, planKap: reserveGoal, planKapItem: reserveGoalItem } =
+    computeFirmaRezerva(financeItems, invoices, dpfoMonths, loanTransactions, escrows);
+  const firmaKap = Math.max(firmaRezM, 0);
   const setReserveGoal = (val) => onSaveFinance({ ...(reserveGoalItem||{category:"plan",label:"Cíl — kapitál"}), id: "fi_plan_kapital", amount: val });
 
   const total = akcie + stavebko + firmaKap + extraItems.reduce((s,i) => s+(i.amount||0), 0);
@@ -5127,48 +5134,102 @@ function TriGrafyPanel({ financeItems, onSaveFinance, invoices, dpfoMonths, loan
   );
 }
 
-/* ─── FIRMA BAR (firemní přehled — dedikovaný třetí řádek) ─── */
-function FirmaBar({ financeItems, invoices, dpfoMonths, loanTransactions, escrows, onSaveFinance }) {
-  // Firemní rezerva = spořák − obálky (stejná logika jako MajetekBar)
-  const sporBal    = (financeItems||[]).find(i => i.id === "fi_sp_99")?.amount || 0;
-  const dphF       = (invoices||[]).filter(i => i.status === "uhrazena").reduce((s,i) => s+(i.vat_amount||0), 0);
-  const dpfoF      = (dpfoMonths||[]).filter(m => m.is_paid).reduce((s,m) => s+(m.amount||8050), 0);
-  const boblF      = (loanTransactions?.loan_bobnice||[]).reduce((s,t) => s+t.amount, 0);
-  const bobFbF     = (financeItems||[]).find(i => i.id === "fi_sp_02")?.amount || 0;
-  const bobBalF    = Math.max(boblF > 0 ? boblF : bobFbF, 0);
-  const danUF      = Math.round(escrowTotalTax(escrows||[]));
-  const autoLabF   = new Set(["dph","dpfo 2026","bobnice","daň z úschov"]);
-  const manEnvF    = (financeItems||[]).filter(i =>
-    i.category === "sporaci" && i.notes !== "SKIP_DISPLAY"
-    && i.id !== "fi_sp_99" && i.id !== "fi_sp_01" && i.id !== "fi_sp_02"
-    && !autoLabF.has((i.label||"").toLowerCase().trim())
-  );
-  const totalEarF  = dphF + dpfoF + (bobBalF > 0 ? bobBalF : 0) + danUF + manEnvF.reduce((s,i)=>s+(i.amount||0),0);
-  const firmaRez   = sporBal - totalEarF;
-
+/* ─── FIRMA BAR (firemní přehled — dedikovaný třetí řádek) ───
+   29.6.2026 (Tom: "ta roletka u nákladů je zcela zbytečná" v Bilanci, "zbytečně vysoký sloupec") —
+   editovatelný checklist nákladů (dřív v Bilance, kde dělal dlaždici zbytečně vysokou) se přesunul
+   sem — sem patří logicky (firemní výdaje) a tahle dlaždice dřív stejně jen ukazovala mrtvý souhrn.
+   Firemní rezerva (LiquidTank) zůstala v Bilanci dole — viz Panel id="finance". */
+function FirmaBar({ financeItems, invoices, dpfoMonths, loanTransactions, escrows, onSaveFinance, onDeleteFinance, expenseChecks, onToggleExpenseCheck, josefWage, josefYm, onNav }) {
   const nutne      = (financeItems||[]).filter(i => i.category === "nutne");
   const luxus      = (financeItems||[]).filter(i => i.category === "luxus");
-  const totalVyd   = Math.abs(nutne.reduce((s,i)=>s+(i.amount||0),0) + luxus.reduce((s,i)=>s+(i.amount||0),0));
-  const planKapItem = (financeItems||[]).find(i => i.id === "fi_plan_kapital");
-  const planKap    = planKapItem?.amount || 130000;
-  const setPlanKap = (val) => onSaveFinance({ ...(planKapItem||{category:"plan",label:"Cíl — kapitál"}), id: "fi_plan_kapital", amount: val });
-  const onTheWayF  = (invoices||[]).filter(i => ["vystavena","po_splatnosti"].includes(invoiceStatus(i))).reduce((s,i)=>s+(i.subtotal||0),0);
-  const overdueF   = (invoices||[]).filter(i => invoiceStatus(i) === "po_splatnosti").reduce((s,i)=>s+(i.subtotal||0),0);
-  const mRevF      = (invoices||[]).filter(i=>(i.issue_date||"").startsWith(new Date().toISOString().slice(0,7))).reduce((s,i)=>s+(i.subtotal||0),0);
-  const zdravi     = totalVyd > 0 ? (mRevF / totalVyd).toFixed(2) : "—";
-  const rezervaDiff = firmaRez - planKap;
+  const totalVyd   = Math.abs(nutne.reduce((s,i)=>s+(i.amount||0),0)) + (josefWage||0) + Math.abs(luxus.reduce((s,i)=>s+(i.amount||0),0));
 
-  const [editTarget, setEditTarget] = useState(null);
-  const [editVal, setEditVal] = useState(0);
+  const isPaid = (id) => !!(expenseChecks||[]).find(c => c.item_id === id && c.paid);
+  const all = [...nutne, ...luxus];
+  const paidCount = all.filter(i => isPaid(i.id)).length;
+  const pct = all.length > 0 ? Math.round((paidCount/all.length)*100) : 0;
+
+  const [vydajeOpen, setVydajeOpen] = useState(true);
+
+  const Check = ({item, color}) => {
+    const p = isPaid(item.id);
+    return (
+      <span onClick={() => onToggleExpenseCheck && onToggleExpenseCheck(item.id, !p)}
+        title={p ? "Zaplaceno — klikni pro zrušení" : "Označit jako zaplacené"}
+        style={{width:14,height:14,borderRadius:3,border:`1.5px solid ${p?color:"var(--line)"}`,background:p?color:"transparent",
+          display:"inline-flex",alignItems:"center",justifyContent:"center",cursor:"pointer",
+          flexShrink:0,marginRight:6,transition:"all .15s",fontSize:9,color:"#fff"}}>
+        {p ? "✓" : ""}
+      </span>
+    );
+  };
+
+  const josefPaid = isPaid("josef_wage");
+  const handleJosefToggle = () => {
+    if (!josefPaid) {
+      if (!window.confirm(`Odeslal jsi mzdu asistentovi? (${(josefWage||0).toLocaleString("cs-CZ")} Kč)`)) return;
+    }
+    onToggleExpenseCheck && onToggleExpenseCheck("josef_wage", !josefPaid);
+  };
 
   return (
     <div style={{background:"var(--card)",border:"1px solid var(--line)",borderRadius:3,padding:"20px 28px"}}>
-      <div style={{display:"flex",alignItems:"center",gap:5,marginBottom:10}}>
-        <span className="maux-dot" style={{width:5,height:5,background:"#3518A5",boxShadow:"0 0 3px rgba(53,24,165,.5)"}} />
-        <div style={{fontSize:10,letterSpacing:".18em",textTransform:"uppercase",color:"var(--mut)",fontWeight:700}}>Měsíční výdaje</div>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",cursor:"pointer"}} onClick={()=>setVydajeOpen(v=>!v)}>
+        <div style={{display:"flex",alignItems:"center",gap:5}}>
+          <span className="maux-dot" style={{width:5,height:5,background:"#3518A5",boxShadow:"0 0 3px rgba(53,24,165,.5)"}} />
+          <div style={{fontSize:10,letterSpacing:".18em",textTransform:"uppercase",color:"var(--mut)",fontWeight:700}}>Měsíční výdaje {vydajeOpen?"▲":"▾"}</div>
+        </div>
+        <span className="maux-num" style={{fontSize:21,fontWeight:600,color:"#3518A5"}}>{fmtKc(totalVyd)}</span>
       </div>
-      <div className="maux-num" style={{fontSize:30,fontWeight:600,color:"var(--ink)",lineHeight:1}}>{fmtKc(totalVyd)}</div>
-      <div style={{fontSize:10,color:"var(--mut)",marginTop:6}}>nutné + luxus</div>
+      <div style={{height:5,borderRadius:3,background:"rgba(53,24,165,.08)",overflow:"hidden",marginTop:8}}>
+        <div style={{height:"100%",width:`${pct}%`,borderRadius:3,background:pct===100?"#16A34A":"#3518A5",transition:"width .7s ease"}} />
+      </div>
+      <div style={{fontSize:10,color:"var(--mut)",letterSpacing:".01em",marginTop:5,fontWeight:600}}>
+        {pct===100?"✓ vše zaplaceno":`zaplaceno ${paidCount}/${all.length}`}
+      </div>
+      {vydajeOpen && (
+        <div style={{marginTop:10,display:"flex",flexDirection:"column",gap:2,maxHeight:280,overflowY:"auto"}}>
+          <div style={{fontSize:7,letterSpacing:".28em",textTransform:"uppercase",color:"#3518A5",fontWeight:700,marginBottom:6,opacity:.8}}>Nutné</div>
+          {nutne.map((i,idx) => (
+            <div key={idx} style={{display:"flex",justifyContent:"space-between",alignItems:"center",fontSize:11.5,color:isPaid(i.id)?"var(--mut)":"var(--txt)",padding:"3px 0",gap:6}}>
+              <span style={{display:"flex",alignItems:"center",textDecoration:isPaid(i.id)?"line-through":"none",minWidth:0,overflow:"hidden"}}>
+                <Check item={i} color="#3518A5" /><EditableLabel item={i} onSave={onSaveFinance} />
+              </span>
+              <span style={{display:"flex",alignItems:"center",gap:4,flexShrink:0}}>
+                <span style={{opacity:isPaid(i.id)?.4:1}}><EditableMoney item={i} onSave={onSaveFinance} color="#3518A5" abs /></span>
+                <button onClick={()=>onDeleteFinance && onDeleteFinance(i.id)} title="Smazat" style={{background:"none",border:"none",color:"var(--mut)",cursor:"pointer",fontSize:10,padding:"0 2px",opacity:.35,lineHeight:1}}>✕</button>
+              </span>
+            </div>
+          ))}
+          <AddExpenseRow category="nutne" color="#3518A5" onSaveFinance={onSaveFinance} />
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",fontSize:11.5,padding:"3px 0",gap:6,opacity:josefPaid?.65:.85,color:josefPaid?"var(--mut)":"var(--txt)",textDecoration:josefPaid?"line-through":"none"}}>
+            <span style={{display:"flex",alignItems:"center",gap:5,cursor:"pointer"}} onClick={handleJosefToggle}>
+              <span style={{display:"inline-flex",alignItems:"center",justifyContent:"center",width:13,height:13,borderRadius:3,border:`1.5px solid ${josefPaid?"#16a34a":"#3518A5"}`,background:josefPaid?"#16a34a":"transparent",flexShrink:0,color:"#fff",fontSize:9}}>
+                {josefPaid?"✓":""}
+              </span>
+              <span>Josef Řehák</span>
+              <span style={{fontSize:8.5,background:"rgba(53,24,165,.08)",color:"var(--ink)",borderRadius:4,padding:"1px 5px",fontWeight:600,letterSpacing:".04em"}}>{JOSEF_WAGE_MANUAL_OVERRIDES[josefYm] != null ? "ručně" : "auto"} · {josefYm}</span>
+            </span>
+            <span className="maux-num" style={{color:josefPaid?"var(--mut)":"#3518A5",fontSize:11}}>
+              {josefWage > 0 ? josefWage.toLocaleString("cs-CZ") + " Kč" : "— Kč"}
+            </span>
+          </div>
+          <div style={{fontSize:7,letterSpacing:".28em",textTransform:"uppercase",color:"#8A7FE0",fontWeight:700,marginTop:10,marginBottom:6,opacity:.8}}>Lusus</div>
+          {luxus.map((i,idx) => (
+            <div key={idx} style={{display:"flex",justifyContent:"space-between",alignItems:"center",fontSize:11.5,color:isPaid(i.id)?"var(--mut)":"var(--txt)",padding:"3px 0",gap:6}}>
+              <span style={{display:"flex",alignItems:"center",textDecoration:isPaid(i.id)?"line-through":"none",minWidth:0}}>
+                <Check item={i} color="#8A7FE0" /><EditableLabel item={i} onSave={onSaveFinance} />
+              </span>
+              <span style={{display:"flex",alignItems:"center",gap:4,flexShrink:0}}>
+                <span style={{opacity:isPaid(i.id)?.4:1}}><EditableMoney item={i} onSave={onSaveFinance} color="#8A7FE0" abs /></span>
+                <button onClick={()=>onDeleteFinance && onDeleteFinance(i.id)} title="Smazat" style={{background:"none",border:"none",color:"var(--mut)",cursor:"pointer",fontSize:10,padding:"0 2px",opacity:.35,lineHeight:1}}>✕</button>
+              </span>
+            </div>
+          ))}
+          <AddExpenseRow category="luxus" color="#8A7FE0" onSaveFinance={onSaveFinance} />
+          {onNav && <button className="btn gho" style={{fontSize:10.5,margin:"8px 0 0",opacity:.65,border:"none",borderTop:"1px solid rgba(0,0,0,.06)",borderRadius:0,paddingTop:10}} onClick={()=>onNav("vykaz")}>+ Nový výkaz práce</button>}
+        </div>
+      )}
     </div>
   );
 }
@@ -6808,6 +6869,7 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
     if (hidden && !editLayout) return null;
     return (
       <div
+        id={`maux-panel-${id}`}
         draggable={editLayout}
         onDragStart={() => handleDragStart(id)}
         onDragOver={e => handleDragOver(e, id)}
@@ -6883,7 +6945,11 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
 
   // Unbilled
   const unbilled = workEntries.filter(e => !e.invoice_id);
-  const unbilledAmt = unbilled.reduce((s,e) => s+Math.round(Math.max((e.amount||0)-(Number(e.discount_amount)||0),0)*1.21)+(e.admin_fee||0)+(Number(e.sig_count)||0)*SIGNATURE_DECL_FEE, 0);
+  // Reálná (čistá) hodnota nevyfakturované práce — bez DPH (to není Tomovo, jen průtok přes
+  // firmu) a bez přefakturací notáře/sp.poplatku/prohlášení o pravosti podpisu (taky jen průtok,
+  // viz komentář u mRevVatAmt výše). Stejná báze jako invoice.subtotal a jako "Tento měsíc"
+  // v hlavičkové liště — Tom, 29.6.2026: "já chci reálnou moji bilanci financí, mých peněz."
+  const unbilledAmt = unbilledWorkNetNoVat(workEntries);
   const unbilledByClient = unbilled.reduce((acc,e) => { if(e.client_id) acc[e.client_id]=(acc[e.client_id]||[]).concat(e); return acc; }, {});
 
   // Overdue
@@ -7140,9 +7206,10 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
         // řádek může lišit od karty "Příjmy na příští měsíc" výš, která naopak ukazuje reálně přijatou
         // (čistou, po srážkové dani) hotovost. Meta tohoto řádku je AKTIVNÍ meta po historii — živý
         // řádek ji ještě nemůže posunout (uzavře se až s koncem měsíce).
-        // invAmt zde POUZE čistá práce bez DPH (unbilledWorkNetNoVat) — NE unbilledAmt (ten má
-        // navíc ×1,21 DPH + sp.poplatek/prohlášení, což by srovnání proti uzavřeným měsícům
-        // (invoice.subtotal, taky bez DPH a bez těch poplatků) zkreslilo. Tom to 29.6.2026 potvrdil.
+        // invAmt zde čistá práce bez DPH (unbilledWorkNetNoVat) — stejná báze jako invoice.subtotal,
+        // takže srovnatelná s uzavřenými měsíci v historii. (29.6.2026: unbilledAmt výš v Dashboardu
+        // byl dřív hrubý ×1,21 + poplatky — na žádost Toma teď taky čistý, obě čísla jsou tedy
+        // identická a vědomě duplicitní, ne náhoda.)
         const lastY = now.getMonth() === 11 ? now.getFullYear() + 1 : now.getFullYear();
         const lastM = (now.getMonth() + 1) % 12;
         const nextYmStr = `${lastY}-${String(lastM+1).padStart(2,"0")}`;
@@ -7182,7 +7249,7 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
               @keyframes mauxSparkle { 0%,100% { opacity:.25; transform:scale(.85) rotate(0deg); } 50% { opacity:1; transform:scale(1.15) rotate(12deg); } }
               @keyframes mauxTrophyPop { 0% { transform:scale(.4) rotate(-15deg); opacity:0; } 60% { transform:scale(1.15) rotate(6deg); opacity:1; } 100% { transform:scale(1) rotate(0deg); opacity:1; } }
             `}</style>
-            <details style={{marginTop:2}}>
+            <details id="maux-finance-detail" style={{marginTop:2}}>
               <summary style={{cursor:"pointer",fontSize:10.5,color:anyOver?"#DC2626":"var(--mut)",fontWeight:anyOver?700:500,letterSpacing:".02em"}}>
                 {anyOver ? `⚠ Meta ${fmtKc(activeGoal)}/měs. (úschovy + fakturace) — v historii překročeno ${milestoneCount}×` : "Kontrola hranice 200 000 Kč/měs. (úschovy + fakturace) — nikdy překročeno"}
               </summary>
@@ -7242,10 +7309,12 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
         <EscrowLiveTile escrows={escrows} onNav={onNav} />
       </Panel>
 
-      {/* FIRMA METRIKY — měsíční výdaje */}
+      {/* FIRMA METRIKY — měsíční výdaje (vč. checklistu, přesunutého sem z Bilance 29.6.2026) */}
       <Panel id="firma">
       <FirmaBar financeItems={financeItems} invoices={invoices} dpfoMonths={dpfoMonths}
-        loanTransactions={loanTransactions} escrows={escrows} onSaveFinance={onSaveFinance} />
+        loanTransactions={loanTransactions} escrows={escrows} onSaveFinance={onSaveFinance}
+        onDeleteFinance={onDeleteFinance} expenseChecks={expenseChecks} onToggleExpenseCheck={onToggleExpenseCheck}
+        josefWage={josefWage} josefYm={_josefYm} onNav={onNav} />
       </Panel>
 
       <Panel id="josef">
@@ -7326,7 +7395,11 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
         const [heroKpiOpen, setHeroKpiOpen] = useState(null);
         const toggleHeroKpi = (k) => setHeroKpiOpen(v => v===k?null:k);
         const [prijmyOpen, setPrijmyOpen] = useState(true);
-        const [vydajeOpen, setVydajeOpen] = useState(true);
+        // Editovatelný checklist nákladů (checkboxy, AddExpenseRow, mzda Josefa) se 29.6.2026 přesunul
+        // do dlaždice "Měsíční výdaje" (FirmaBar, Panel id="firma") — Tom: "ta roletka u nákladů je
+        // zcela zbytečná" (dělala tuhle dlaždici zbytečně vysokou). Tady zůstal jen souhrnný řádek
+        // (pct/paidCount níž se počítají dál, jen se nerozbalují do checklistu) a uvolněné místo
+        // dole vyplnila Firemní rezerva (viz computeFirmaRezerva níž).
         const isPaid = (id) => !!(expenseChecks||[]).find(c => c.item_id === id && c.paid);
         const all = [...nutne.map(i=>({...i,_c:"#DC2626"})), ...luxus.map(i=>({...i,_c:"#9333EA"}))];
         const paidItems = all.filter(i => isPaid(i.id));
@@ -7335,18 +7408,8 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
         const pct = all.length > 0 ? Math.round((paidCount/all.length)*100) : 0;
         const totalPrijmy = (financeItems||[]).filter(i=>i.category==="prijem"&&i.notes!=="TBD").reduce((s,i)=>s+(i.amount||0),0)
           + unbilledAmt + Math.round(escrowNetThisMonth) + nadmernyOdpocet;
-        const Check = ({item, color}) => {
-          const p = isPaid(item.id);
-          return (
-            <span onClick={() => onToggleExpenseCheck && onToggleExpenseCheck(item.id, !p)}
-              title={p ? "Zaplaceno — klikni pro zrušení" : "Označit jako zaplacené"}
-              style={{width:14,height:14,borderRadius:3,border:`1.5px solid ${p?color:"var(--line)"}`,background:p?color:"transparent",
-                display:"inline-flex",alignItems:"center",justifyContent:"center",cursor:"pointer",
-                flexShrink:0,marginRight:6,transition:"all .15s",fontSize:9,color:"#fff"}}>
-              {p ? "✓" : ""}
-            </span>
-          );
-        };
+        const { firmaRez, planKap, planKapItem } = computeFirmaRezerva(financeItems, invoices, dpfoMonths, loanTransactions, escrows);
+        const setPlanKap = (val) => onSaveFinance({ ...(planKapItem||{category:"plan",label:"Cíl — kapitál"}), id: "fi_plan_kapital", amount: val });
         const mName = ["ledna","února","března","dubna","května","června","července","srpna","září","října","listopadu","prosince"];
         const positiveBalance = nextMonthBalance >= 0;
         return (
@@ -7412,7 +7475,7 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
                             <div style={{padding:"4px 0 8px 4px",display:"flex",flexDirection:"column",gap:6,maxHeight:180,overflowY:"auto"}}>
                               {Object.entries(unbilledByClient).map(([cid, entries])=>{
                                 const cl = clients.find(c=>c.id===cid);
-                                const amt = entries.reduce((s,e)=>s+Math.round(Math.max((e.amount||0)-(Number(e.discount_amount)||0),0)*1.21)+(e.admin_fee||0)+(Number(e.sig_count)||0)*SIGNATURE_DECL_FEE,0);
+                                const amt = entries.reduce((s,e)=>s+Math.max((e.amount||0)-(Number(e.discount_amount)||0),0),0);
                                 return (
                                   <div key={cid} style={{borderBottom:"1px solid var(--line)",paddingBottom:5}}>
                                     <div style={{display:"flex",justifyContent:"space-between",fontSize:10,fontWeight:600,color:"var(--ink)"}}>
@@ -7451,73 +7514,36 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
                   )}
                 </div>
 
-                {/* Výdaje — inkorporováno pod Příjmy, stejný styl, Tom: ať je to jedna dlaždice */}
-                <div style={{borderTop:"1px solid rgba(53,24,165,.14)",paddingTop:12}}>
-                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",cursor:"pointer"}} onClick={()=>setVydajeOpen(v=>!v)}>
-                    <span style={{fontSize:12,letterSpacing:".1em",textTransform:"uppercase",color:"var(--ink)",fontWeight:700}}>Výdaje {vydajeOpen?"▲":"▾"}</span>
+                {/* Výdaje — souhrn. Editovatelný checklist (checkboxy, přidávání položek, mzda Josefa)
+                    se 29.6.2026 přestěhoval do dlaždice "Měsíční výdaje" (Panel id="firma") — Tom:
+                    "ta roletka u nákladů je zcela zbytečná" (dělala tuhle dlaždici zbytečně vysokou).
+                    Klikni pro skok na detail/úpravu. */}
+                <div style={{borderTop:"1px solid rgba(53,24,165,.14)",paddingTop:12,cursor:"pointer"}}
+                  onClick={()=>{ const el=document.getElementById("maux-panel-firma"); if(el) el.scrollIntoView({behavior:"smooth",block:"center"}); }}
+                  title="Klikni pro detail a úpravu nákladů (dlaždice Měsíční výdaje)">
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline"}}>
+                    <span style={{fontSize:12,letterSpacing:".1em",textTransform:"uppercase",color:"var(--ink)",fontWeight:700}}>Výdaje</span>
                     <span className="maux-num" style={{fontSize:21,fontWeight:600,color:"#3518A5"}}>{fmtKc(Math.abs(totalNutne)+josefWage+Math.abs(totalLuxus))}</span>
                   </div>
                   <div style={{height:5,borderRadius:3,background:"rgba(53,24,165,.08)",overflow:"hidden",marginTop:8}}>
                     <div style={{height:"100%",width:`${pct}%`,borderRadius:3,background:pct===100?"#16A34A":"#3518A5",transition:"width .7s ease"}} />
                   </div>
                   <div style={{fontSize:10,color:"var(--mut)",letterSpacing:".01em",marginTop:5,fontWeight:600}}>
-                    {pct===100?"✓ vše zaplaceno":`zaplaceno ${paidCount}/${all.length}`}
+                    {pct===100?"✓ vše zaplaceno":`zaplaceno ${paidCount}/${all.length}`} · detail ↓ v dlaždici Měsíční výdaje
                   </div>
-                  {vydajeOpen && (
-                    <div style={{marginTop:10,display:"flex",flexDirection:"column",gap:2,maxHeight:240,overflowY:"auto"}}>
-                      <div style={{fontSize:7,letterSpacing:".28em",textTransform:"uppercase",color:"#3518A5",fontWeight:700,marginBottom:6,opacity:.8}}>Nutné</div>
-                      {nutne.map((i,idx) => (
-                        <div key={idx} style={{display:"flex",justifyContent:"space-between",alignItems:"center",fontSize:11.5,color:isPaid(i.id)?"var(--mut)":"var(--txt)",padding:"3px 0",gap:6}}>
-                          <span style={{display:"flex",alignItems:"center",textDecoration:isPaid(i.id)?"line-through":"none",minWidth:0,overflow:"hidden"}}>
-                            <Check item={i} color="#3518A5" /><EditableLabel item={i} onSave={onSaveFinance} />
-                          </span>
-                          <span style={{display:"flex",alignItems:"center",gap:4,flexShrink:0}}>
-                            <span style={{opacity:isPaid(i.id)?.4:1}}><EditableMoney item={i} onSave={onSaveFinance} color="#3518A5" abs /></span>
-                            <button onClick={()=>onDeleteFinance(i.id)} title="Smazat" style={{background:"none",border:"none",color:"var(--mut)",cursor:"pointer",fontSize:10,padding:"0 2px",opacity:.35,lineHeight:1}}>✕</button>
-                          </span>
-                        </div>
-                      ))}
-                      <AddExpenseRow category="nutne" color="#3518A5" onSaveFinance={onSaveFinance} />
-                      {/* Josef Řehák — automatický náklad */}
-                      {(() => {
-                        const josefPaid = isPaid("josef_wage");
-                        const handleJosefToggle = () => {
-                          if (!josefPaid) {
-                            if (!window.confirm(`Odeslal jsi mzdu asistentovi? (${josefWage.toLocaleString("cs-CZ")} Kč)`)) return;
-                          }
-                          onToggleExpenseCheck("josef_wage", !josefPaid);
-                        };
-                        return (
-                        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",fontSize:11.5,padding:"3px 0",gap:6,opacity:josefPaid?.65:.85,color:josefPaid?"var(--mut)":"var(--txt)",textDecoration:josefPaid?"line-through":"none"}}>
-                          <span style={{display:"flex",alignItems:"center",gap:5,cursor:"pointer"}} onClick={handleJosefToggle}>
-                            <span style={{display:"inline-flex",alignItems:"center",justifyContent:"center",width:13,height:13,borderRadius:3,border:`1.5px solid ${josefPaid?"#16a34a":"#3518A5"}`,background:josefPaid?"#16a34a":"transparent",flexShrink:0,color:"#fff",fontSize:9}}>
-                              {josefPaid?"✓":""}
-                            </span>
-                            <span>Josef Řehák</span>
-                            <span style={{fontSize:8.5,background:"rgba(53,24,165,.08)",color:"var(--ink)",borderRadius:4,padding:"1px 5px",fontWeight:600,letterSpacing:".04em"}}>{JOSEF_WAGE_MANUAL_OVERRIDES[_josefYm] != null ? "ručně" : "auto"} · {_josefYm}</span>
-                          </span>
-                          <span className="maux-num" style={{color:josefPaid?"var(--mut)":"#3518A5",fontSize:11}}>
-                            {josefWage > 0 ? josefWage.toLocaleString("cs-CZ") + " Kč" : "— Kč"}
-                          </span>
-                        </div>
-                        );
-                      })()}
-                      <div style={{fontSize:7,letterSpacing:".28em",textTransform:"uppercase",color:"#8A7FE0",fontWeight:700,marginTop:10,marginBottom:6,opacity:.8}}>Lusus</div>
-                      {luxus.map((i,idx) => (
-                        <div key={idx} style={{display:"flex",justifyContent:"space-between",alignItems:"center",fontSize:11.5,color:isPaid(i.id)?"var(--mut)":"var(--txt)",padding:"3px 0",gap:6}}>
-                          <span style={{display:"flex",alignItems:"center",textDecoration:isPaid(i.id)?"line-through":"none",minWidth:0}}>
-                            <Check item={i} color="#8A7FE0" /><EditableLabel item={i} onSave={onSaveFinance} />
-                          </span>
-                          <span style={{display:"flex",alignItems:"center",gap:4,flexShrink:0}}>
-                            <span style={{opacity:isPaid(i.id)?.4:1}}><EditableMoney item={i} onSave={onSaveFinance} color="#8A7FE0" abs /></span>
-                            <button onClick={()=>onDeleteFinance(i.id)} title="Smazat" style={{background:"none",border:"none",color:"var(--mut)",cursor:"pointer",fontSize:10,padding:"0 2px",opacity:.35,lineHeight:1}}>✕</button>
-                          </span>
-                        </div>
-                      ))}
-                      <AddExpenseRow category="luxus" color="#8A7FE0" onSaveFinance={onSaveFinance} />
-                      <button className="btn gho" style={{fontSize:10.5,margin:"8px 0 0",opacity:.65,border:"none",borderTop:"1px solid rgba(0,0,0,.06)",borderRadius:0,paddingTop:10}} onClick={()=>onNav("vykaz")}>+ Nový výkaz práce</button>
+                </div>
+
+                {/* Firemní rezerva — uvolněné místo po přestěhování checklistu výš.
+                    Tom, 29.6.2026: "Možná bych to propojil a v dolní části graf na FIRMA REZERVA?" */}
+                <div style={{borderTop:"1px solid rgba(53,24,165,.14)",paddingTop:14,display:"flex",alignItems:"center",gap:14}}>
+                  <LiquidTank pct={planKap > 0 ? firmaRez / planKap : 0} color="#8B5CF6" value={firmaRez} goal={planKap} onSetGoal={setPlanKap} size={54} />
+                  <div style={{flex:1,minWidth:0}}>
+                    <div style={{fontSize:12,letterSpacing:".1em",textTransform:"uppercase",color:"var(--ink)",fontWeight:700}}>Firemní rezerva</div>
+                    <div className="maux-num" style={{fontSize:18,fontWeight:600,color:"#8B5CF6",marginTop:2}}>{fmtKc(firmaRez)}</div>
+                    <div style={{fontSize:9.5,color:"var(--mut)",marginTop:2}}>
+                      {firmaRez >= planKap ? "🎉 cíl splněn" : `${Math.round((firmaRez/Math.max(planKap,1))*100)} % k cíli ${fmtKc(planKap)}`}
                     </div>
-                  )}
+                  </div>
                 </div>
               </div>
             </div>
@@ -11911,7 +11937,17 @@ export default function MauxCRM() {
           const yGoal = _goal > 0 ? (chartH - Math.min(1, _goal / maxTotal) * chartH + 6 + TOPPAD) : null;
 
           return (
-            <div className="gamif-bar" onClick={() => navTo("dashboard")} title="Klikni pro detail v Financích"
+            <div className="gamif-bar" onClick={() => {
+                // Oprava (Tom, 29.6.2026: "kliknutí nefunguje") — navTo("dashboard") byl no-op,
+                // pokud uživatel UŽ na Přehledu je (nejčastější případ), takže klik nic viditelně
+                // neudělal. Teď klik VŽDY něco udělá: naviguje na Přehled, otevře detail panel
+                // ("Kontrola hranice 200 000 Kč/měs.") a odscrolluje k němu.
+                navTo("dashboard");
+                setTimeout(() => {
+                  const el = document.getElementById("maux-finance-detail");
+                  if (el) { el.open = true; el.scrollIntoView({ behavior: "smooth", block: "start" }); }
+                }, 80);
+              }} title="Klikni pro detail v Financích"
               style={{background:"linear-gradient(135deg,#2d14a0,#4a2bc4)",padding:"10px 40px 8px"}}>
               <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:16,flexWrap:"wrap"}}>
                 <div style={{display:"flex",alignItems:"center",gap:18,flexWrap:"wrap"}}>
