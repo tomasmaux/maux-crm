@@ -1707,8 +1707,10 @@ function InvoicePrintPreview({ invoice, client, workEntries, onBack, onIssue, sa
                 <div style={{ fontSize: 10, color: "#9C96B5", lineHeight: 2, fontFamily: "'Inter', sans-serif", fontWeight: 300 }}>
                   {client?.ico && <>IČO: {client.ico}<br /></>}
                   {client?.dic && <>DIČ: {client.dic}<br /></>}
+                  {/* Nepodnikající fyzická osoba (bez IČO) — na faktuře místo IČO datum narození */}
+                  {!client?.ico && client?.birth_date && <>Datum narození: {fmtDate(client.birth_date)}<br /></>}
                   {client?.reg && <>{client.reg.split("\n").map((l,i)=><span key={i}>{l}<br /></span>)}</>}
-                  {!client?.ico && !client?.reg && <span style={{ color: "#D4CEEA" }}>—</span>}
+                  {!client?.ico && !client?.reg && !client?.birth_date && <span style={{ color: "#D4CEEA" }}>—</span>}
                 </div>
               </div>
             </div>
@@ -10093,13 +10095,13 @@ function ClientDetail({ c, onBack, onEdit, onDelete }) {
         {c.status && c.status !== "aktivní" && <span className={"sbadge status-" + c.status}>{c.status}</span>}
         {c.uschovaaml && <span className="sbadge" style={{ background: "#fdf5e8", color: "#7a5a1a" }}>Úschova / AML</span>}
       </h2>
-      {c.reg && <div className="reg">{c.reg}</div>}
       <div className="grid2">
         <div className="fld"><div className="l">Kontaktní osoba</div><div className="d">{c.contact || "—"}</div></div>
         <div className="fld"><div className="l">Fakturováno (letos)</div><div className="bigval">{fmtKc(c.invoiced)}</div></div>
         <div className="fld"><div className="l">E-maily</div><div className="d">
           {(c.emails || []).length ? (c.emails || []).map(e => <div key={e}><a href={"mailto:" + e}>{e}</a></div>) : "—"}
         </div></div>
+        <div className="fld"><div className="l">Telefon</div><div className="d">{c.phone ? <a href={"tel:" + c.phone}>{c.phone}</a> : "—"}</div></div>
         <div className="fld"><div className="l">Specializace</div>
           <div className="svwrap">
             {(c.services || []).length ? (c.services || []).map(s => (
@@ -10109,7 +10111,9 @@ function ClientDetail({ c, onBack, onEdit, onDelete }) {
         </div>
         {c.hourly_rate > 0 && <div className="fld"><div className="l">Hodinová sazba</div><div className="d">{fmtKc(c.hourly_rate)} / h</div></div>}
         {c.ico && <div className="fld"><div className="l">IČO</div><div className="d">{c.ico}</div></div>}
-        {c.birth_date && <div className="fld"><div className="l">Narozen</div><div className="d">{fmtDate(c.birth_date)}</div></div>}
+        {c.dic && <div className="fld"><div className="l">DIČ</div><div className="d">{c.dic}</div></div>}
+        {c.reg && <div className="fld"><div className="l">{c.type === "osoba" ? "Bydliště" : "Sídlo"}</div><div className="d" style={{ whiteSpace: "pre-line" }}>{c.reg}</div></div>}
+        {c.birth_date && <div className="fld"><div className="l">Narozen</div><div className="d">{fmtDate(c.birth_date)}{!c.ico && <span style={{ color: "var(--mut)", fontWeight: 400 }}> · zobrazí se na faktuře (bez IČO)</span>}</div></div>}
         {c.last_work_date && <div className="fld"><div className="l">Datum poslední práce</div><div className="d">{fmtDate(c.last_work_date)}</div></div>}
         {c.file_link && <div className="fld"><div className="l">Odkaz na spis</div><div className="d"><a href={c.file_link} target="_blank" rel="noopener noreferrer">Otevřít spis →</a></div></div>}
       </div>
@@ -10125,8 +10129,8 @@ function ClientDetail({ c, onBack, onEdit, onDelete }) {
 
 function ClientForm({ init, onSave, onCancel, saving }) {
   const [d, setD] = useState(() => init || {
-    id: uid(), name: "", type: "firma", ico: "", reg: "", invoiced: 0,
-    contact: "", emails: [], services: [], notes: "",
+    id: uid(), name: "", type: "firma", ico: "", dic: "", reg: "", invoiced: 0,
+    contact: "", phone: "", emails: [], services: [], notes: "",
     status: "aktivní", uschovaaml: false, last_work_date: "", file_link: "", hourly_rate: 0,
     first_name: "", last_name: "", birth_date: "",
   });
@@ -10149,6 +10153,10 @@ function ClientForm({ init, onSave, onCancel, saving }) {
       first_name: isOsoba ? ((d.first_name || "").trim() || null) : null,
       last_name: isOsoba ? ((d.last_name || "").trim() || null) : null,
       birth_date: isOsoba ? (d.birth_date || null) : null,
+      ico: (d.ico || "").trim() || null,
+      dic: (d.dic || "").trim() || null,
+      phone: (d.phone || "").trim() || null,
+      reg: (d.reg || "").trim() || null,
       last_work_date: d.last_work_date || null,
       invoiced: Number(d.invoiced) || 0, hourly_rate: Number(d.hourly_rate) || 0, emails,
     });
@@ -10177,13 +10185,27 @@ function ClientForm({ init, onSave, onCancel, saving }) {
           ? <div className="frow"><label>Narozen</label><input type="date" value={d.birth_date || ""} onChange={e => set("birth_date", e.target.value)} /></div>
           : <div className="frow"><label>IČO</label><input value={d.ico || ""} onChange={e => set("ico", e.target.value)} /></div>}
       </div>
-      <div className="frow"><label>{isOsoba ? "Bydliště" : "Sídlo"}</label><input value={d.reg || ""} onChange={e => set("reg", e.target.value)} /></div>
+      {/* Fyzická osoba podnikající (OSVČ) může mít IČO i DIČ stejně jako firma —
+          na faktuře se pak datum narození NEZOBRAZUJE, použije se IČO (viz InvoicePrintPreview).
+          Pokud osoba IČO nemá (nepodnikající spotřebitel), na faktuře se místo IČO ukáže datum narození + adresa. */}
+      {isOsoba ? (
+        <div className="two">
+          <div className="frow"><label>IČO <span style={{ fontWeight: 400, textTransform: "none", letterSpacing: 0, color: "var(--mut)" }}>(jen pokud OSVČ)</span></label><input value={d.ico || ""} onChange={e => set("ico", e.target.value)} /></div>
+          <div className="frow"><label>DIČ</label><input value={d.dic || ""} onChange={e => set("dic", e.target.value)} placeholder="CZ12345678" /></div>
+        </div>
+      ) : (
+        <div className="frow"><label>DIČ</label><input value={d.dic || ""} onChange={e => set("dic", e.target.value)} placeholder="CZ12345678" /></div>
+      )}
+      <div className="frow"><label>{isOsoba ? "Bydliště" : "Sídlo"}</label><input value={d.reg || ""} onChange={e => set("reg", e.target.value)} placeholder={isOsoba ? "Ulice č.p., PSČ Město" : "Sídlo zapsané v OR — ulice č.p., PSČ Město"} /></div>
       <div className="three">
         <div className="frow"><label>Kontaktní osoba</label><input value={d.contact || ""} onChange={e => set("contact", e.target.value)} /></div>
         <div className="frow"><label>Fakturováno (Kč)</label><input type="number" value={d.invoiced || 0} onChange={e => set("invoiced", e.target.value)} /></div>
         <div className="frow"><label>Hodinová sazba (Kč)</label><input type="number" value={d.hourly_rate || 0} onChange={e => set("hourly_rate", e.target.value)} /></div>
       </div>
-      <div className="frow"><label>E-maily (oddělit čárkou)</label><input value={emailStr || ""} onChange={e => set("emails", e.target.value)} /></div>
+      <div className="two">
+        <div className="frow"><label>E-maily (oddělit čárkou)</label><input value={emailStr || ""} onChange={e => set("emails", e.target.value)} /></div>
+        <div className="frow"><label>Telefon</label><input value={d.phone || ""} onChange={e => set("phone", e.target.value)} placeholder="+420 ..." /></div>
+      </div>
       <div className="two">
         <div className="frow"><label>Datum poslední práce</label><input type="date" value={d.last_work_date || ""} onChange={e => set("last_work_date", e.target.value)} /></div>
         <div className="frow"><label>Odkaz na spis</label><input value={d.file_link || ""} onChange={e => set("file_link", e.target.value)} placeholder="https://…" /></div>
