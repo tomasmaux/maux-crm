@@ -1596,8 +1596,21 @@ function InvoicePrintPreview({ invoice, client, workEntries, onBack, onIssue, sa
       .print-root { position: fixed; inset: 0; background: #fff; z-index: 9999; }
       .no-print { display: none !important; }
       @page { size: A4; margin: 0; }
+      /* Bez tohoto prohlížeč při tisku/PDF defaultně vynechá barevná pozadí
+         (indigo header, watermark, barvy v QR) — tisknul by se jen text na bílém.
+         "Grafika na pozadí" v dialogu Tisk je pak jen doplňková pojistka. */
+      html, body, .print-root, .print-root * {
+        -webkit-print-color-adjust: exact !important;
+        print-color-adjust: exact !important;
+        color-adjust: exact !important;
+      }
     }
     .print-root { font-family: 'Inter', Arial, sans-serif; }
+    .print-root, .print-root * {
+      -webkit-print-color-adjust: exact;
+      print-color-adjust: exact;
+      color-adjust: exact;
+    }
     .inv-page { width: 210mm; min-height: 297mm; background: #FDFCFA; position: relative; overflow: hidden; }
     .inv-page + .inv-page { page-break-before: always; }
     @import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,500;0,600;1,300&family=Inter:wght@300;400;500&display=swap');
