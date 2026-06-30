@@ -592,6 +592,19 @@ function nextInvoiceNumber(invoices) {
   const next = (nums.length > 0 ? Math.max(...nums) : 0) + 1;
   return `${prefix}${String(next).padStart(3, "0")}`;
 }
+// Predikované číslo pro N-tý draft v pořadí seznamu "K vystavení" (offset 0 = ten samý
+// výsledek jako nextInvoiceNumber). Tom 30.6.2026: chce vidět nepřerušenou navazující řadu
+// čísel už u draftů, podle pořadí v listu (chronologicky). POUZE ZOBRAZENÍ — skutečné
+// vystavení si při kliknutí "Vystavit fakturu" vždy znovu spočítá nextInvoiceNumber(invoices)
+// z reálných faktur, takže nemůže dojít ke kolizi, i když se draft vystaví mimo pořadí.
+// Číslo se "zafixuje na pevno" až ve chvíli vystavení, kdy se zapíše do reálné faktury.
+function previewInvoiceNumber(invoices, offset) {
+  const base = nextInvoiceNumber(invoices);
+  const m = base.match(/^(.*\/)(\d+)$/);
+  if (!m) return base;
+  const n = parseInt(m[2], 10) + offset;
+  return `${m[1]}${String(n).padStart(3, "0")}`;
+}
 function invoiceStatus(inv) {
   if (inv.status === "dph_odvedeno") return "dph_odvedeno";
   if (inv.status === "uhrazena") return "uhrazena";
@@ -718,6 +731,20 @@ function InvoiceIssueModal({ clientId, entries, clients, invoices, onConfirm, on
   const [newDiscountTarget, setNewDiscountTarget] = useState("");
   const [newDiscountAmount, setNewDiscountAmount] = useState("");
 
+  // ── Vystavit na jiný subjekt — Tom 30.6.2026: někteří klienti (kvůli DPH/plátcovství) chtějí
+  // faktury vystavené na jinou firmu/osobu, než je jejich klientský záznam (např. paní
+  // Martinovská fakturovaná přes jinou společnost). Ruční doplnění, ukládá se na fakturu
+  // (invoice.billed_as), nemění se klientský záznam. Náhled faktury pak ukáže tento subjekt
+  // místo client.* v poli "Odběratel".
+  const [altSubject, setAltSubject] = useState(false);
+  const [altName, setAltName] = useState("");
+  const [altIco, setAltIco] = useState("");
+  const [altDic, setAltDic] = useState("");
+  const [altAddress, setAltAddress] = useState("");
+  const billedAs = (altSubject && altName.trim())
+    ? { name: altName.trim(), ico: altIco.trim(), dic: altDic.trim(), address: altAddress.trim() }
+    : null;
+
   const dueDate = adjustDueDate(dueDateBase, dueDateOffset);
   const duzp    = lastDayPrevMonth(issueDate);
 
@@ -768,6 +795,7 @@ function InvoiceIssueModal({ clientId, entries, clients, invoices, onConfirm, on
     total_before_discount: totalBefore,
     status: "pripravena", notes: varSymbol,
     var_symbol: varSymbol,
+    billed_as: billedAs,
   };
 
   if (showPreview) {
@@ -784,7 +812,42 @@ function InvoiceIssueModal({ clientId, entries, clients, invoices, onConfirm, on
       <div style={{ background: "#fff", borderRadius: 16, padding: 28, maxWidth: 620, width: "100%", maxHeight: "90vh", overflowY: "auto", boxShadow: "0 24px 64px rgba(0,0,0,.18)" }}
         onClick={e => e.stopPropagation()}>
         <div style={{ fontFamily: "Fraunces, serif", fontSize: 20, fontWeight: 300, color: "var(--txt)", marginBottom: 4 }}>Vystavit fakturu</div>
-        <div style={{ fontSize: 12.5, color: "var(--mut)", marginBottom: 20 }}>{client?.name}</div>
+        <div style={{ fontSize: 12.5, color: "var(--mut)", marginBottom: 12, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+          <span>{client?.name}</span>
+          <button className="btn" style={{ fontSize: 11, flexShrink: 0, background: altSubject ? "#F0EEFF" : "#fff", borderColor: altSubject ? "var(--ink)" : "var(--line)" }}
+            onClick={() => setAltSubject(v => !v)}>
+            {altSubject ? "✕ Zrušit jiný subjekt" : "Vystavit na jiný subjekt"}
+          </button>
+        </div>
+
+        {altSubject && (
+          <div style={{ border: "1px solid var(--line)", borderRadius: 10, padding: 14, marginBottom: 20, background: "#FAFAFE" }}>
+            <div style={{ fontSize: 9.5, letterSpacing: ".12em", textTransform: "uppercase", color: "var(--mut)", fontWeight: 500, marginBottom: 10 }}>
+              Fakturovat na jiný subjekt (dle pokynu klienta)
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+              <label className="field" style={{ gridColumn: "1 / -1" }}>
+                <span>Název / Firma</span>
+                <input value={altName} onChange={e => setAltName(e.target.value)} placeholder="např. Martinovská Holding s.r.o." />
+              </label>
+              <label className="field">
+                <span>IČO</span>
+                <input value={altIco} onChange={e => setAltIco(e.target.value)} />
+              </label>
+              <label className="field">
+                <span>DIČ</span>
+                <input value={altDic} onChange={e => setAltDic(e.target.value)} />
+              </label>
+              <label className="field" style={{ gridColumn: "1 / -1" }}>
+                <span>Sídlo</span>
+                <input value={altAddress} onChange={e => setAltAddress(e.target.value)} placeholder="ulice č.p., PSČ město" />
+              </label>
+            </div>
+            <div style={{ fontSize: 10.5, color: "var(--mut)", marginTop: 8 }}>
+              Náhled a tisk faktury v poli "Odběratel" ukáže tento subjekt místo klienta {client?.name}.
+            </div>
+          </div>
+        )}
 
         {/* Entry selection */}
         <div style={{ fontSize: 9.5, letterSpacing: ".12em", textTransform: "uppercase", color: "var(--mut)", fontWeight: 500, marginBottom: 10 }}>Výkazy k fakturaci</div>
@@ -1773,15 +1836,30 @@ function InvoicePrintPreview({ invoice, client, workEntries, onBack, onIssue, sa
               </div>
               <div>
                 <div style={{ fontSize: 7, letterSpacing: "0.4em", color: "#D4CEEA", textTransform: "uppercase", fontFamily: "'Inter', sans-serif", marginBottom: 8 }}>Odběratel</div>
-                <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 15, fontWeight: 500, color: "#1a1530", marginBottom: 5 }}>{client?.name || "—"}</div>
-                <div style={{ fontSize: 10, color: "#9C96B5", lineHeight: 2, fontFamily: "'Inter', sans-serif", fontWeight: 300 }}>
-                  {client?.ico && <>IČO: {client.ico}<br /></>}
-                  {client?.dic && <>DIČ: {client.dic}<br /></>}
-                  {/* Nepodnikající fyzická osoba (bez IČO) — na faktuře místo IČO datum narození */}
-                  {!client?.ico && client?.birth_date && <>Datum narození: {fmtDate(client.birth_date)}<br /></>}
-                  {client?.reg && <>{client.reg.split("\n").map((l,i)=><span key={i}>{l}<br /></span>)}</>}
-                  {!client?.ico && !client?.reg && !client?.birth_date && <span style={{ color: "#D4CEEA" }}>—</span>}
-                </div>
+                {invoice.billed_as ? (
+                  /* Vystavit na jiný subjekt — Tom 30.6.2026: klient si přeje fakturovat na
+                     jinou firmu/osobu (jiné IČO/sídlo), než je jeho vlastní klientský záznam. */
+                  <>
+                    <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 15, fontWeight: 500, color: "#1a1530", marginBottom: 5 }}>{invoice.billed_as.name}</div>
+                    <div style={{ fontSize: 10, color: "#9C96B5", lineHeight: 2, fontFamily: "'Inter', sans-serif", fontWeight: 300 }}>
+                      {invoice.billed_as.ico && <>IČO: {invoice.billed_as.ico}<br /></>}
+                      {invoice.billed_as.dic && <>DIČ: {invoice.billed_as.dic}<br /></>}
+                      {invoice.billed_as.address && <>{invoice.billed_as.address.split("\n").map((l,i)=><span key={i}>{l}<br /></span>)}</>}
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 15, fontWeight: 500, color: "#1a1530", marginBottom: 5 }}>{client?.name || "—"}</div>
+                    <div style={{ fontSize: 10, color: "#9C96B5", lineHeight: 2, fontFamily: "'Inter', sans-serif", fontWeight: 300 }}>
+                      {client?.ico && <>IČO: {client.ico}<br /></>}
+                      {client?.dic && <>DIČ: {client.dic}<br /></>}
+                      {/* Nepodnikající fyzická osoba (bez IČO) — na faktuře místo IČO datum narození */}
+                      {!client?.ico && client?.birth_date && <>Datum narození: {fmtDate(client.birth_date)}<br /></>}
+                      {client?.reg && <>{client.reg.split("\n").map((l,i)=><span key={i}>{l}<br /></span>)}</>}
+                      {!client?.ico && !client?.reg && !client?.birth_date && <span style={{ color: "#D4CEEA" }}>—</span>}
+                    </div>
+                  </>
+                )}
               </div>
             </div>
 
@@ -8855,8 +8933,14 @@ function InvoiceList({ invoices, clients, workEntries, escrows, onOpen, onOpenCl
       const vat = Math.round(workAmt * 0.21);
       const total = workAmt + vat + admin + sig;
       const hours = entries.reduce((s,e) => s + (e.hours||0), 0);
-      return { clientId, client, entries, workAmt, notary, admin, sig, vat, total, hours, discount };
-    }).sort((a,b) => b.total - a.total);
+      // Nejstarší datum výkazu v draftu — základ pro chronologické pořadí (viz níže).
+      const earliestDate = entries.reduce((min,e) => (!min || (e.entry_date||"") < min) ? (e.entry_date||min) : min, null);
+      return { clientId, client, entries, workAmt, notary, admin, sig, vat, total, hours, discount, earliestDate };
+    })
+      // Tom 30.6.2026: řazeno chronologicky (od nejstaršího výkazu), NE podle částky —
+      // potřebuje na tohle navázat nepřerušenou řadu čísel faktur (viz previewInvoiceNumber
+      // níže u karty draftu). Klient nově vykázaný až dnes tak přirozeně spadne na konec.
+      .sort((a,b) => (a.earliestDate||"9999-99-99").localeCompare(b.earliestDate||"9999-99-99"));
   }, [workEntries, clients]);
 
   const [expandedDraft, setExpandedDraft] = useState(null);
@@ -8936,12 +9020,21 @@ function InvoiceList({ invoices, clients, workEntries, escrows, onOpen, onOpenCl
             </span>
           </div>
           <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-            {drafts.map(d => (
+            {drafts.map((d, draftIdx) => (
               <div key={d.clientId} style={{ background: "#fff", border: "1px solid var(--line)", borderRadius: 12, overflow: "hidden" }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 16, padding: "14px 18px", cursor: "pointer" }}
                   onClick={() => setExpandedDraft(expandedDraft === d.clientId ? null : d.clientId)}>
                   <div style={{ flex: 1 }}>
-                    <div style={{ fontWeight: 600, fontSize: 14, color: "var(--txt)" }}>{d.client?.name || "—"}</div>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                      <span style={{ fontWeight: 600, fontSize: 14, color: "var(--txt)" }}>{d.client?.name || "—"}</span>
+                      {/* Tom 30.6.2026: predikované číslo faktury — nepřerušená navazující řada už u
+                          draftů, podle chronologického pořadí v listu. Pouze zobrazení (viz
+                          previewInvoiceNumber); skutečné číslo se zafixuje až při vystavení. */}
+                      <span title="Předpokládané číslo faktury — zafixuje se až při vystavení" style={{
+                        fontSize: 10.5, fontWeight: 500, color: "var(--mut)", background: "#F3F0FF",
+                        border: "1px solid var(--line)", borderRadius: 6, padding: "1px 7px", flexShrink: 0,
+                      }}>{previewInvoiceNumber(invoices, draftIdx)}</span>
+                    </div>
                     <div style={{ fontSize: 11.5, color: "var(--mut)", marginTop: 2 }}>
                       {d.entries.length} záznamů · {d.hours.toFixed(1)} h fakturovaných
                       {d.notary > 0 && ` · notář ${fmtKc(d.notary)}`}
