@@ -575,22 +575,23 @@ function computeInvoiceTotals(items) {
   return { subtotal, vat_amount: vatAmount, total };
 }
 function nextInvoiceNumber(invoices) {
-  // Pořadové číslo se počítá jen z faktur VLASTNÍHO formátu "FA {rok}/{NNN}" pro AKTUÁLNÍ rok.
-  // Díky tomu se nepletou starší/cizí formáty čísel (např. "14/2026" = pořadové/rok) za pořadové
-  // číslo — to byla příčina chyby, kdy se vygenerovalo např. "FA 2026/2027" (rok omylem braný
-  // jako pořadové číslo). Číslování je tak reálně chronologické a každý rok začíná znovu od 001.
+  // Tom 30.6.2026: REÁLNÝ formát čísel faktur je "NNN/RRRR" (např. "052/2026") — žádný
+  // "FA "-prefix se v praxi nikdy nepoužívá (to byl chybný předpoklad dřívější verze téhle
+  // funkce, kvůli kterému se draft-čísla nikdy nenapojila na skutečnou řadu 047/2026…052/2026
+  // a generovalo se vždy jen "FA 2026/001" od nuly). Pořadové číslo (1. skupina) se hledá jen
+  // u faktur AKTUÁLNÍHO roku — rok je vždy ten 4místný blok (2. skupina), díky `\d{4}` se tak
+  // nezamění pořadí a rok (to byla příčina starší chyby s "FA 2026/2027"). Historické faktury
+  // a jejich čísla se NIKDY nepřepočítávají ani nemění — jen se na ně navazuje dál.
   const year = new Date().getFullYear();
-  const prefix = `FA ${year}/`;
   const nums = invoices
     .map(i => {
-      const num = i.invoice_number || "";
-      if (!num.startsWith(prefix)) return 0;
-      const m = num.slice(prefix.length).match(/^(\d+)/);
-      return m ? parseInt(m[1], 10) : 0;
+      const m = (i.invoice_number || "").match(/^(\d+)\/(\d{4})$/);
+      if (!m || parseInt(m[2], 10) !== year) return 0;
+      return parseInt(m[1], 10);
     })
     .filter(n => n > 0);
   const next = (nums.length > 0 ? Math.max(...nums) : 0) + 1;
-  return `${prefix}${String(next).padStart(3, "0")}`;
+  return `${String(next).padStart(3, "0")}/${year}`;
 }
 // Predikované číslo pro N-tý draft v pořadí seznamu "K vystavení" (offset 0 = ten samý
 // výsledek jako nextInvoiceNumber). Tom 30.6.2026: chce vidět nepřerušenou navazující řadu
@@ -600,10 +601,10 @@ function nextInvoiceNumber(invoices) {
 // Číslo se "zafixuje na pevno" až ve chvíli vystavení, kdy se zapíše do reálné faktury.
 function previewInvoiceNumber(invoices, offset) {
   const base = nextInvoiceNumber(invoices);
-  const m = base.match(/^(.*\/)(\d+)$/);
+  const m = base.match(/^(\d+)\/(\d+)$/);
   if (!m) return base;
-  const n = parseInt(m[2], 10) + offset;
-  return `${m[1]}${String(n).padStart(3, "0")}`;
+  const n = parseInt(m[1], 10) + offset;
+  return `${String(n).padStart(3, "0")}/${m[2]}`;
 }
 function invoiceStatus(inv) {
   if (inv.status === "dph_odvedeno") return "dph_odvedeno";
