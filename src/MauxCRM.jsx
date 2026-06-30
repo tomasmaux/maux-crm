@@ -1593,11 +1593,26 @@ function InvoicePrintPreview({ invoice, client, workEntries, onBack, onIssue, sa
     @media print {
       body * { visibility: hidden; }
       .print-root, .print-root * { visibility: visible; }
-      /* POZOR: nikdy zpátky na position:fixed/inset:0 — u víceřádkového výkazu práce
-         (více stránek) tiskový engine fixní blok vykresluje opakovaně na každé stránce,
-         takže se obsah str.1 (QR, patička, součty) propíchne přes str.2/3. .no-print už
-         toolbar úplně odstraní z layoutu (display:none), takže fixed pozicování tu
-         nic neřeší a jen kazí víceřádkové výkazy. */
+      /* POZOR — tři věci, který se snadno rozbijou, pokud se na ně sáhne zvlášť
+         (ověřeno reálným renderem, ne jen okem):
+         1) .print-root NESMÍ být position:fixed/inset:0 — u víceřádkového výkazu práce
+            (více stránek) by ho tiskový engine vykresloval opakovaně na každé stránce,
+            takže by se obsah str.1 (QR, patička, součty) propíchl přes str.2/3.
+         2) "body * { visibility:hidden }" výš jen SCHOVÁ zbytek appky, ale nezruší jeho
+            prostor v layoutu (visibility ≠ display). Nestačí schovat jen .body — .main
+            (obsahuje i .top/.hr) musí jít celý pryč, jinak zůstane navíc neviditelná
+            prázdná strana před náhledem faktury.
+         3) .mx i html/body/#root mají na obrazovce height:100%/min-height:100vh (kvůli
+            layoutu sidebaru). V tisku, když se .inv-modal-host vrátí do normálního flow,
+            tahle fixní výška dokument naopak OŘEZÁVÁ na jednu "obrazovku" — místo "desítek
+            stran navíc" tak naopak ZMIZÍ druhá/třetí strana (výkaz práce) úplně. Proto
+            height/min-height musí jít v tisku na auto/0.
+         Modální obal (previewModal/editInvModal — className "inv-modal-host") je za běhu
+         vždy position:fixed (kvůli scrollu na obrazovce); to je při tisku potřeba vrátit
+         do normálního flow, jinak se víceřádkový obsah ustřihne na jednu obrazovku. */
+      .sb, .main { display: none !important; }
+      html, body, #root, .mx { height: auto !important; min-height: 0 !important; }
+      .inv-modal-host { position: static !important; inset: auto !important; overflow: visible !important; background: #fff !important; z-index: auto !important; }
       .print-root { position: static; background: #fff; }
       .no-print { display: none !important; }
       @page { size: A4; margin: 0; }
@@ -12283,7 +12298,7 @@ export default function MauxCRM() {
 
       {/* Invoice Preview Modal (only preview, no issue) */}
       {previewModal && (
-        <div style={{ position: "fixed", inset: 0, zIndex: 200, overflowY: "auto", background: "#f0eff8" }}>
+        <div className="inv-modal-host" style={{ position: "fixed", inset: 0, zIndex: 200, overflowY: "auto", background: "#f0eff8" }}>
           <InvoicePrintPreview
             invoice={previewModal.invoice}
             client={previewModal.client}
@@ -12334,7 +12349,7 @@ export default function MauxCRM() {
         />
       )}
       {editInvModal && editInvModal.previewInv && (
-        <div style={{ position:"fixed", inset:0, zIndex:200, overflowY:"auto", background:"#f0eff8" }}>
+        <div className="inv-modal-host" style={{ position:"fixed", inset:0, zIndex:200, overflowY:"auto", background:"#f0eff8" }}>
           <InvoicePrintPreview
             invoice={editInvModal.previewInv}
             client={clients.find(c => c.id === editInvModal.previewInv.client_id)}
