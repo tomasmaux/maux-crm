@@ -9456,32 +9456,34 @@ function DphKalkulacka({ odpItem, onSaveFinance }) {
     });
   };
 
+  const pendingImports = [
+    missingImport.length > 0 && { run: importApril, n: missingImport.length, vat: missingImport.reduce((s,e)=>s+(e.vat||0),0), label: "duben 2026" },
+    missingImportMay.length > 0 && { run: importMay, n: missingImportMay.length, vat: missingImportMay.reduce((s,e)=>s+(e.vat||0),0), label: "květen 2026" },
+    missingImportJune.length > 0 && { run: importJune, n: missingImportJune.length, vat: missingImportJune.reduce((s,e)=>s+(e.vat||0),0), label: "červen 2026" },
+  ].filter(Boolean);
+
   return (
-    <div style={{ marginTop: 16, paddingTop: 14, borderTop: "1px solid var(--line)" }}>
-      <div style={{ fontSize: 9, letterSpacing: ".2em", textTransform: "uppercase", color: "var(--mut)", fontWeight: 600, marginBottom: 8 }}>
-        Kalkulačka účtenek → rovnou do odpočtu DPH (a do archivu)
+    <div style={{ marginTop: 18, paddingTop: 16, borderTop: "1px solid var(--line)" }}>
+      <div style={{ fontSize: 9, letterSpacing: ".22em", textTransform: "uppercase", color: "var(--mut)", fontWeight: 700, marginBottom: 10 }}>
+        Evidence účtenek — historická databáze odpočtu
       </div>
-      {missingImport.length > 0 && (
-        <div onClick={importApril} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, fontSize: 11, color: "#3518A5", background: "#F5F3FF", border: "1px solid #DDD6FE", borderRadius: 8, padding: "8px 12px", marginBottom: 10, cursor: "pointer" }}>
-          <span>📥 Naimportovat {missingImport.length} účtenek z dubna 2026, co jsi poslal Čechmanové (Alza, T-Mobile, notářka Svobodová, FotoK-RÁM, Microsoft, Teta drogerie, Papírnictví Zbraněk, PODA…) — DPH celkem {fmtKc(missingImport.reduce((s,e)=>s+(e.vat||0),0))}</span>
-          <b style={{ whiteSpace: "nowrap" }}>importovat →</b>
+
+      {pendingImports.length > 0 && (
+        <div style={{ display:"flex", flexWrap:"wrap", gap:8, marginBottom:12 }}>
+          {pendingImports.map((p, i) => (
+            <div key={i} onClick={p.run} title={`Naimportovat ${p.n} dokladů za ${p.label}`}
+              style={{ display:"flex", alignItems:"center", gap:8, fontSize:10.5, color:"#3518A5", background:"#F5F3FF", border:"1px solid #DDD6FE", borderRadius:20, padding:"6px 12px 6px 6px", cursor:"pointer" }}>
+              <span style={{ width:20, height:20, borderRadius:10, background:"#3518A5", color:"#fff", display:"flex", alignItems:"center", justifyContent:"center", fontSize:10 }}>{p.n}</span>
+              <span>chybí za {p.label} · DPH {fmtKc(p.vat)}</span>
+              <b style={{ whiteSpace:"nowrap" }}>doplnit →</b>
+            </div>
+          ))}
         </div>
       )}
-      {missingImportMay.length > 0 && (
-        <div onClick={importMay} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, fontSize: 11, color: "#9D174D", background: "#FDF2F8", border: "1px solid #FBCFE8", borderRadius: 8, padding: "8px 12px", marginBottom: 10, cursor: "pointer" }}>
-          <span>📥 Naimportovat {missingImportMay.length} účtenek z května 2026 (Alza, dm drogerie, Action, Woolworth, Papírnictví Zbraněk, T-Mobile, PODA…) — DPH celkem {fmtKc(missingImportMay.reduce((s,e)=>s+(e.vat||0),0))}</span>
-          <b style={{ whiteSpace: "nowrap" }}>importovat →</b>
-        </div>
-      )}
-      {missingImportJune.length > 0 && (
-        <div onClick={importJune} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, fontSize: 11, color: "#9D174D", background: "#FDF2F8", border: "1px solid #FBCFE8", borderRadius: 8, padding: "8px 12px", marginBottom: 10, cursor: "pointer" }}>
-          <span>📥 Naimportovat {missingImportJune.length} dokladů z června 2026 (Blažek Praha, IKEA, JUDr. Svobodová notářka, Alza, T-Mobile, PODA…) — DPH celkem {fmtKc(missingImportJune.reduce((s,e)=>s+(e.vat||0),0))}</span>
-          <b style={{ whiteSpace: "nowrap" }}>importovat →</b>
-        </div>
-      )}
+
       {!open ? (
-        <div onClick={() => setOpen(true)} style={{ fontSize: 11, color: "#3518A5", cursor: "pointer", opacity: .8 }}>
-          + spočítat účtenku (např. faktura notářky) a přičíst DPH do odpočtu
+        <div onClick={() => setOpen(true)} style={{ display:"inline-flex", alignItems:"center", gap:6, fontSize: 11, color: "#3518A5", cursor: "pointer", fontWeight:600 }}>
+          <span style={{ fontSize:14 }}>+</span> spočítat účtenku a přičíst DPH do odpočtu
         </div>
       ) : (
         <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
@@ -9513,13 +9515,13 @@ function DphKalkulacka({ odpItem, onSaveFinance }) {
         const chartGroups = [...groups].slice(0, 12).reverse();
         const maxSum = Math.max(...chartGroups.map(g => g.sum), 1);
         return (
-          <div style={{ marginTop: 14 }}>
-            <div style={{ fontSize: 9, letterSpacing: ".2em", textTransform: "uppercase", color: "var(--mut)", fontWeight: 600, marginBottom: 8 }}>
-              Vývoj uplatněných odpočtů — které náklady ti v kterém měsíci snížily platbu DPH
+          <div style={{ marginTop: 20 }}>
+            <div style={{ fontSize: 9, letterSpacing: ".22em", textTransform: "uppercase", color: "var(--mut)", fontWeight: 700, marginBottom: 10 }}>
+              Vývoj odpočtu po měsících
             </div>
-            <div style={{ display: "flex", alignItems: "flex-end", gap: 8, height: 116, padding: "0 4px" }}>
+            <div style={{ display: "flex", alignItems: "flex-end", gap: 9, height: 110, padding: "0 2px" }}>
               {chartGroups.map(grp => {
-                const h = Math.max(6, Math.round((grp.sum / maxSum) * 84));
+                const h = Math.max(6, Math.round((grp.sum / maxSum) * 78));
                 const isOpen = expanded === grp.key || (expanded === null && groups[0] && groups[0].key === grp.key);
                 return (
                   <div key={grp.key} onClick={() => setExpanded(grp.key)}
@@ -9527,47 +9529,49 @@ function DphKalkulacka({ odpItem, onSaveFinance }) {
                     style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 4, flex: 1, cursor: "pointer" }}>
                     <span style={{ fontSize: 9.5, color: "#3518A5", fontWeight: 600, whiteSpace: "nowrap" }}>{fmtKc(grp.sum)}</span>
                     <div style={{
-                      width: "100%", maxWidth: 28, height: h,
-                      background: isOpen ? "linear-gradient(180deg,#C4B5FD,#3518A5)" : "linear-gradient(180deg,#DDD6FE,#A78BFA)",
-                      borderRadius: "4px 4px 2px 2px",
+                      width: "100%", maxWidth: 26, height: h,
+                      background: isOpen ? "linear-gradient(180deg,#C4B5FD,#3518A5)" : "linear-gradient(180deg,#E9E4FB,#B7AAF2)",
+                      borderRadius: "5px 5px 2px 2px",
                     }} />
                     <span style={{ fontSize: 9, color: "var(--mut)" }}>{groupLabel(grp.key).split(" ")[0].slice(0, 3)} {grp.key.slice(2, 4)}</span>
                   </div>
                 );
               })}
             </div>
-            <div style={{ fontSize: 10, color: "var(--mut)", marginTop: 8, lineHeight: 1.5 }}>
-              Výška sloupce = součet DPH z účtenek a faktur uplatněných v daném měsíci, tedy o kolik ti to skutečně snížilo
-              platbu Čechmanové za to období. Klikni na sloupec a archiv níže se rozbalí na vybraný měsíc.
+            <div style={{ fontSize: 9.5, color: "var(--mut)", marginTop: 9, opacity:.8 }}>
+              Klikni na sloupec — archiv níže se rozbalí na vybraný měsíc.
             </div>
           </div>
         );
       })()}
 
       {groups.length > 0 && (
-        <div style={{ marginTop: 14 }}>
-          <div style={{ fontSize: 9, letterSpacing: ".2em", textTransform: "uppercase", color: "var(--mut)", fontWeight: 600, marginBottom: 8 }}>
-            Archiv účtenek podle období — historie napříč měsíci a roky
+        <div style={{ marginTop: 20 }}>
+          <div style={{ fontSize: 9, letterSpacing: ".22em", textTransform: "uppercase", color: "var(--mut)", fontWeight: 700, marginBottom: 10 }}>
+            Archiv podle měsíce — {groups.reduce((s,g)=>s+g.items.length,0)}× dokladů celkem
           </div>
+          <div style={{ display:"flex", flexDirection:"column", gap:7 }}>
           {groups.map((grp, gi) => {
             const isOpen = expanded === grp.key || (expanded === null && gi === 0);
             return (
-              <div key={grp.key} style={{ marginBottom: 6, border: "1px solid var(--line2)", borderRadius: 8, overflow: "hidden" }}>
+              <div key={grp.key} style={{ border: "1px solid var(--line)", borderRadius: 10, overflow: "hidden" }}>
                 <div onClick={() => setExpanded(isOpen ? "_zaviti_" : grp.key)}
-                  style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 12px", cursor: "pointer", background: "#FAFAFC" }}>
-                  <span style={{ fontSize: 11.5, color: "var(--txt)", fontWeight: 500 }}>
-                    {isOpen ? "▾" : "▸"} {groupLabel(grp.key)} <span style={{ color: "var(--mut)", fontWeight: 400 }}>· {grp.items.length}×</span>
+                  style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 14px", cursor: "pointer", background: isOpen ? "#F5F3FF" : "#FAFAFC" }}>
+                  <span style={{ fontSize: 12, color: "var(--txt)", fontWeight: 600, display:"flex", alignItems:"center", gap:7 }}>
+                    <span style={{ color:"#3518A5", fontSize:10 }}>{isOpen ? "▾" : "▸"}</span>
+                    {groupLabel(grp.key)}
+                    <span style={{ color: "var(--mut)", fontWeight: 400, fontSize:10.5 }}>· {grp.items.length}×</span>
                   </span>
-                  <b style={{ fontSize: 11.5, color: "#3518A5" }}>{fmtKc(grp.sum)}</b>
+                  <b className="maux-num" style={{ fontSize: 13, color: "#3518A5" }}>{fmtKc(grp.sum)}</b>
                 </div>
                 {isOpen && (
-                  <div style={{ padding: "6px 12px 10px", display: "flex", flexDirection: "column", gap: 4 }}>
+                  <div style={{ padding: "8px 14px 12px", display: "flex", flexDirection: "column", gap: 5, background:"#fff" }}>
                     {grp.items.map(e => (
-                      <div key={e.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 11, color: "var(--mut)" }}>
+                      <div key={e.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 11, color: "var(--mut)", padding:"3px 0", borderBottom:"1px solid var(--line)" }}>
                         <span>{fmtDate(e.date)} · {e.label} · {fmtKc(e.gross)} ({e.rate} % DPH)</span>
-                        <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                          <b style={{ color: "#3518A5" }}>+{fmtKc(e.vat)}</b>
-                          <button onClick={() => removeEntry(e.id)} title="Odebrat z odpočtu i z archivu" style={{ background: "none", border: "none", color: "var(--mut)", cursor: "pointer", fontSize: 10, opacity: .7 }}>✕</button>
+                        <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                          <b className="maux-num" style={{ color: "#3518A5" }}>+{fmtKc(e.vat)}</b>
+                          <button onClick={() => removeEntry(e.id)} title="Odebrat z odpočtu i z archivu" style={{ background: "none", border: "none", color: "var(--mut)", cursor: "pointer", fontSize: 10, opacity: .6 }}>✕</button>
                         </span>
                       </div>
                     ))}
@@ -9576,13 +9580,15 @@ function DphKalkulacka({ odpItem, onSaveFinance }) {
               </div>
             );
           })}
+          </div>
         </div>
       )}
     </div>
   );
 }
 
-function DphOdpocetTile({ invoices, financeItems, onSaveFinance }) {
+function DphOdpocetTile({ invoices, financeItems, onSaveFinance, onNav, dashNadmernyOdpocet = 0 }) {
+  const [infoOpen, setInfoOpen] = useState(false);
   // POZOR: záměrně NEPOUŽÍVÁME toISOString().slice(0,7) — to převádí na UTC a o půlnoci
   // (zejména 1. den v měsíci) to v české časové zóně (UTC+1/+2) ukrojí den a vrátí
   // PŘEDCHOZÍ měsíc (např. "2026-05-01 00:00 SELČ" → "2026-04-30T22:00:00Z" → "2026-04").
@@ -9646,89 +9652,94 @@ function DphOdpocetTile({ invoices, financeItems, onSaveFinance }) {
     onSaveFinance({ ...odpItem, notes: JSON.stringify(next) });
   };
 
+  const kpis = [
+    { label: `DPH z faktur · ${prevMonthName}`, value: fmtKc(dphFakturyPrev), color: "var(--txt)", hint: "určuje, kolik dostaneš 25. " + CZM[now.getMonth()] },
+    { label: `Odpočet z účtenek · ${prevMonthName}`, value: "−" + fmtKc(odpocetPrev), color: "#3518A5", hint: "uplatněný k tomuto vyúčtování" },
+    { label: "K úhradě Čechmanové do 25. " + CZM[now.getMonth()], value: kUhradePrev>0 ? fmtKc(kUhradePrev) : "✓ kryto", color: kUhradePrev>0 ? "#DC2626" : "#059669", hint: `vyúčtování za ${prevMonthName}`, big: true },
+    { label: `Odhad za ${CZM[now.getMonth()]} (do 25. ${dueMonthName})`, value: kUhrade>0 ? fmtKc(kUhrade) : "✓ kryto", color: kUhrade>0 ? "#B45309" : "#059669", hint: "orientační — měsíc se ještě tvoří" },
+  ];
+  if (prevodPrev > 0) kpis.push({ label: `Přesah odpočtu · ${prevMonthName}`, value: fmtKc(prevodPrev), color: "#7C3AED", hint: "nadměrný odpočet — převádí se dál" });
+
   return (
-    <div style={{ background:"#fff", border:"1px solid var(--line)", borderRadius:14, padding:"20px 22px" }}>
-      <div style={{ fontSize:9, letterSpacing:".28em", textTransform:"uppercase", fontWeight:600, color:"var(--mut)", marginBottom:12 }}>
-        DPH za {prevMonthName} (vyúčtování) · splatnost Čechmanové do 25. {CZM[now.getMonth()]} · počítá se do příjmů {CZM[now.getMonth()]}
-      </div>
-      <div style={{ display:"flex", gap:32, flexWrap:"wrap", alignItems:"flex-start" }}>
-        <div>
-          <div style={{ fontSize:10, color:"var(--mut)" }}>
-            DPH z vystavených faktur ({prevMonthName}) <span style={{opacity:.7}}>— určuje, kolik dostaneš 25. {CZM[now.getMonth()]}</span>
-          </div>
-          <div style={{ fontFamily:"Fraunces,serif", fontSize:24, fontWeight:300, color:"var(--txt)" }}>{fmtKc(dphFakturyPrev)}</div>
+    <div style={{ background:"#fff", borderRadius:14, overflow:"hidden", border:"1px solid var(--line)", borderTop:"4px solid #3518A5", boxShadow:"0 1px 3px rgba(53,24,165,.06)" }}>
+      {/* Header — stav, ne věta */}
+      <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", gap:12, flexWrap:"wrap", padding:"18px 22px 0" }}>
+        <div style={{ display:"flex", alignItems:"center", gap:7 }}>
+          <span className="maux-dot" style={{ width:6, height:6, background:"#3518A5", boxShadow:"0 0 4px rgba(53,24,165,.5)" }} />
+          <span style={{ fontSize:10, letterSpacing:".22em", textTransform:"uppercase", color:"#3518A5", fontWeight:800 }}>
+            DPH odpočet · vyúčtování {prevMonthName}
+          </span>
         </div>
-        <div>
-          <div style={{ fontSize:10, color:"var(--mut)" }}>
-            Odpočet z účtenek za {prevMonthName} <span style={{opacity:.7}}>— uplatněný k tomuto vyúčtování</span>
-          </div>
-          <div style={{ fontFamily:"Fraunces,serif", fontSize:24, fontWeight:300, color:"#3518A5" }}>−{fmtKc(odpocetPrev)}</div>
-          <div style={{ fontSize:9, color:"var(--mut)", marginTop:3 }}>
-            celkem zadáno (kumulativně, napříč měsíci): <EditableMoney item={odpItem} onSave={onSaveFinance} color="#3518A5" sign="−" abs />
-            <span style={{opacity:.7}}> — zadáváš ručně / kalkulačkou níže</span>
-          </div>
-        </div>
-        <div>
-          <div style={{ fontSize:10, color:"var(--mut)" }}>
-            Co ti Čechmanová pošle k úhradě do 25. {CZM[now.getMonth()]} <span style={{opacity:.7}}>(vyúčtování za {prevMonthName})</span>
-          </div>
-          <div style={{ fontFamily:"Fraunces,serif", fontSize:26, fontWeight:500, color: kUhradePrev>0 ? "#DC2626" : "#059669" }}>
-            {kUhradePrev>0 ? fmtKc(kUhradePrev) : "✓ kryto odpočtem"}
-          </div>
-          <div style={{ fontSize:9, color:"var(--mut)", marginTop:2, maxWidth:230, lineHeight:1.4 }}>
-            dopočteno ze stejných podkladů jako u Čechmanové: DPH z faktur za {prevMonthName} ({fmtKc(dphFakturyPrev)}) minus odpočet
-            z účtenek uplatněných za {prevMonthName} ({fmtKc(odpocetPrev)})
-          </div>
-          <div style={{ marginTop:8 }}>
-            {paidPrev ? (
-              <span style={{ fontSize:9, fontWeight:700, color:"#059669", background:"#ECFDF5", border:"1px solid #A7F3D0", borderRadius:5, padding:"3px 9px", whiteSpace:"nowrap" }}>
-                ✓ Zaplaceno {fmtDate(paidPrev.date)}{paidPrev.amount ? ` · ${fmtKc(paidPrev.amount)}` : ""}
-              </span>
-            ) : (
-              <button
-                onClick={markPaidCechmanova}
-                style={{ fontSize:9, fontWeight:700, color:"#fff", background:"#059669", border:"none", borderRadius:5, padding:"3px 10px", cursor:"pointer", whiteSpace:"nowrap" }}
-                title="Označí, že jsi 25. dne uhradil Čechmanové DPH za uzavřený měsíc — appka si to zapamatuje"
-              >
-                ✓ Zaplatil jsem Čechmanové
-              </button>
-            )}
-          </div>
-        </div>
-        <div>
-          <div style={{ fontSize:10, color:"var(--mut)" }}>Odhad za {CZM[now.getMonth()]} (do 25. {dueMonthName})</div>
-          <div style={{ fontFamily:"Fraunces,serif", fontSize:20, fontWeight:300, color: kUhrade>0 ? "#B45309" : "#059669" }}>
-            {kUhrade>0 ? fmtKc(kUhrade) : "✓ kryto odpočtem"}
-          </div>
-          <div style={{ fontSize:9, color:"var(--mut)", marginTop:2 }}>orientační — měsíc se ještě tvoří</div>
-        </div>
-        {prevodPrev > 0 && (
-          <div>
-            <div style={{ fontSize:10, color:"var(--mut)" }}>Přesah odpočtu za {prevMonthName} (převádí se dál)</div>
-            <div style={{ fontFamily:"Fraunces,serif", fontSize:24, fontWeight:300, color:"#7C3AED" }}>{fmtKc(prevodPrev)}</div>
-          </div>
+        {paidPrev ? (
+          <span style={{ fontSize:9.5, fontWeight:700, color:"#059669", background:"#ECFDF5", border:"1px solid #A7F3D0", borderRadius:20, padding:"4px 12px", whiteSpace:"nowrap" }}>
+            ✓ Čechmanové zaplaceno {fmtDate(paidPrev.date)}{paidPrev.amount ? ` · ${fmtKc(paidPrev.amount)}` : ""}
+          </span>
+        ) : (
+          <button onClick={markPaidCechmanova}
+            title="Označí, že jsi 25. dne uhradil Čechmanové DPH za uzavřený měsíc — appka si to zapamatuje"
+            style={{ fontSize:9.5, fontWeight:700, color:"#fff", background:"#059669", border:"none", borderRadius:20, padding:"6px 14px", cursor:"pointer", whiteSpace:"nowrap" }}>
+            ✓ Zaplatil jsem Čechmanové
+          </button>
         )}
       </div>
-      <div style={{ fontSize:10.5, color:"var(--mut)", marginTop:14, lineHeight:1.55, maxWidth:740 }}>
-        <b style={{ color:"var(--txt)" }}>Důležité k načasování:</b> DPH se neplatí za běžící měsíc, ale až zpětně — přiznání
-        a platba za daný měsíc je splatná až <b>25. dne měsíce následujícího</b> (přesně takhle postupuje i Čechmanová). Číslo
-        <b> „Co ti Čechmanová pošle k úhradě do 25. {CZM[now.getMonth()]}"</b> je proto dopočítané z uzavřeného měsíce
-        <b> {prevMonthName}</b> — ze stejných dvou věcí jako u ní: z DPH na vystavených fakturách za {prevMonthName}
-        a z odpočtu, který se ti za {prevMonthName} nasčítal v archivu účtenek výše. Mělo by se tedy reálně shodovat
-        (s drobnými odchylkami v zaokrouhlení) s číslem, které ti Čechmanová pošle — a appka ho teď umí spočítat
-        sama, dřív než ti dorazí od ní. Druhé, menší číslo „Odhad za {CZM[now.getMonth()]}" je naopak orientační
-        výhled na příští platbu (splatnou 25. {dueMonthName}) — ten se ještě mění s každou novou fakturou
-        i účtenkou, kterou tento měsíc přidáš.
+
+      {/* KPI grid — vzdušné karty místo souvislého textu */}
+      <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(160px,1fr))", gap:1, background:"var(--line)", marginTop:16 }}>
+        {kpis.map((k, i) => (
+          <div key={i} style={{ background:"#fff", padding:"14px 18px" }}>
+            <div style={{ fontSize:9.5, color:"var(--mut)", letterSpacing:".02em", lineHeight:1.35, minHeight:26 }}>{k.label}</div>
+            <div style={{ fontFamily:"Fraunces,serif", fontSize:k.big?26:22, fontWeight:k.big?500:300, color:k.color, marginTop:4, whiteSpace:"nowrap" }}>{k.value}</div>
+            <div style={{ fontSize:9, color:"var(--mut)", marginTop:3, opacity:.8 }}>{k.hint}</div>
+          </div>
+        ))}
       </div>
-      <div style={{ fontSize:10.5, color:"var(--mut)", marginTop:10, lineHeight:1.55, maxWidth:740 }}>
-        Princip odpočtu: DPH vybrané z vystavených faktur snižuješ o DPH z účtenek, které posíláš Čechmanové jako odpočet —
-        Čechmanové reálně uhradíš jen rozdíl. Co z odpočtu „přebývá" (nadměrný odpočet), to ti fakticky zůstává —
-        a appka to automaticky započítá jako novou položku v měsíčním přehledu příjmů, aniž by se tím měnilo
-        stávající souhrnné číslo daně výše. Číslo „Kolik jsi ušetřil na DPH" výše appka počítá ze stejných párů
-        jako Čechmanová — DPH na fakturách a odpočet z účtenek <b>za jeden a tentýž uzavřený měsíc</b> (ne součet
-        napříč různými měsíci a ne mix dvou různých období, jak appka počítala dřív). Jakmile 25. zaplatíš
-        Čechmanové, klikni na „✓ Zaplatil jsem Čechmanové" — appka si to zapamatuje. Ušetřenou částku pak rovnou
-        pošli do zvolené obálky na spořáku tlačítkem „→ Převést".
+
+      {/* Vstup pro kumulativní ruční částku (zachováno, jen přesunuto z odstavce textu) */}
+      <div style={{ display:"flex", alignItems:"center", gap:8, fontSize:10, color:"var(--mut)", padding:"12px 22px 0" }}>
+        <span>Celkem zadáno do odpočtu (kumulativně, napříč měsíci):</span>
+        <EditableMoney item={odpItem} onSave={onSaveFinance} color="#3518A5" sign="−" abs />
+      </div>
+
+      {/* Konektor na Dashboard — Tom chtěl vidět, jak se tohle promítá do Bilance příštího měsíce */}
+      <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", gap:12, flexWrap:"wrap", margin:"14px 22px 0", padding:"11px 14px", background:"#F5F3FF", border:"1px solid #DDD6FE", borderRadius:10 }}>
+        <div style={{ fontSize:10.5, color:"#3518A5", lineHeight:1.5 }}>
+          ↳ Z odpočtu za {CZM[now.getMonth()]} se do <b>Dashboardu → Bilance příštího měsíce</b> právě promítá{" "}
+          <b className="maux-num">{fmtKc(dashNadmernyOdpocet)}</b> (řádek „Odpočet DPH za {CZM[now.getMonth()]}").
+        </div>
+        {onNav && (
+          <button onClick={() => onNav("dashboard")}
+            style={{ fontSize:9.5, fontWeight:700, color:"#3518A5", background:"#fff", border:"1px solid #DDD6FE", borderRadius:20, padding:"5px 12px", cursor:"pointer", whiteSpace:"nowrap" }}>
+            Zobrazit na Dashboardu →
+          </button>
+        )}
+      </div>
+
+      {/* Vysvětlení — sbalené, ať nepřekáží, ale je k dispozici pro kontrolu/audit */}
+      <div style={{ margin:"12px 22px 0" }}>
+        <div onClick={() => setInfoOpen(v => !v)} style={{ display:"flex", alignItems:"center", gap:6, fontSize:10, color:"var(--mut)", cursor:"pointer", userSelect:"none" }}>
+          <span style={{ display:"inline-flex", width:14, height:14, borderRadius:7, border:"1px solid var(--mut)", alignItems:"center", justifyContent:"center", fontSize:9 }}>ⓘ</span>
+          Jak appka tohle počítá (pro kontrolu vratky / přiznání) {infoOpen ? "▲" : "▾"}
+        </div>
+        {infoOpen && (
+          <div style={{ fontSize:10.5, color:"var(--mut)", marginTop:10, lineHeight:1.6, maxWidth:740 }}>
+            <p style={{margin:"0 0 8px"}}>
+              <b style={{ color:"var(--txt)" }}>Načasování:</b> DPH se neplatí za běžící měsíc, ale až zpětně — přiznání a platba
+              za daný měsíc je splatná až <b>25. dne měsíce následujícího</b> (přesně takhle postupuje i Čechmanová). Číslo
+              „K úhradě Čechmanové do 25. {CZM[now.getMonth()]}" je dopočítané z uzavřeného měsíce <b>{prevMonthName}</b> — ze
+              stejných dvou věcí jako u ní: DPH z faktur za {prevMonthName} a odpočet uplatněný za {prevMonthName} v archivu
+              níže. Mělo by se tedy shodovat (s drobnými odchylkami v zaokrouhlení) s částkou od Čechmanové. Druhé číslo,
+              „Odhad za {CZM[now.getMonth()]}", je orientační výhled na příští platbu (splatnou 25. {dueMonthName}) — měnící
+              se s každou novou fakturou i účtenkou tento měsíc.
+            </p>
+            <p style={{margin:0}}>
+              <b style={{ color:"var(--txt)" }}>Princip odpočtu:</b> DPH vybrané z faktur snižuješ o DPH z účtenek — Čechmanové
+              uhradíš jen rozdíl. Co z odpočtu „přebývá" (nadměrný odpočet), to ti fakticky zůstává a appka to započítá jako
+              příjem do Bilance příštího měsíce (viz konektor výše), aniž by se tím měnilo souhrnné číslo daně v kartě níže.
+              Jakmile 25. zaplatíš Čechmanové, klikni „✓ Zaplatil jsem Čechmanové". Ušetřenou částku pak pošli do zvolené
+              obálky na spořáku.
+            </p>
+          </div>
+        )}
       </div>
 
       <DphKalkulacka odpItem={odpItem} onSaveFinance={onSaveFinance} />
@@ -9736,7 +9747,7 @@ function DphOdpocetTile({ invoices, financeItems, onSaveFinance }) {
   );
 }
 
-function DaneModule({ year, taxRecords, financeItems, invoices, dpfoMonths, escrows, onSaveTax, onSaveFinance }) {
+function DaneModule({ year, taxRecords, financeItems, invoices, dpfoMonths, escrows, onSaveTax, onSaveFinance, onNav }) {
   const now = new Date();
   const monthsElapsed = (year === now.getFullYear()) ? now.getMonth() + 1 : 12;
 
@@ -9756,6 +9767,24 @@ function DaneModule({ year, taxRecords, financeItems, invoices, dpfoMonths, escr
   const zdravMonthly  = findMonthly(/zdravot|vzp/i);
   const socialEst = Math.round(socialMonthly * monthsElapsed);
   const zdravEst  = Math.round(zdravMonthly * monthsElapsed);
+
+  // DPH — zrcadlo výpočtu "nadměrný odpočet" z Dashboardu (Dashboard(), řádky kolem
+  // dphFakturyMesic/dphOdpocet/nadmernyOdpocet), ČISTĚ pro zobrazení na téhle stránce.
+  // Tom chtěl, ať modul Daně "vyladěně komunikuje" s Dashboardem o tom, kolik z odpočtu
+  // se reálně promítne do Bilance příštího měsíce — ale neukládáme/nepřepočítáváme nic,
+  // jen ZRCADLÍME stejnou formuli na stejných vstupech (invoices + fi_dph_odpocet log),
+  // aby tu zobrazené číslo vždy přesně sedělo s tím na Dashboardu. Pokud se vzorec na
+  // Dashboardu někdy změní, je třeba změnit i tento blok.
+  const dmKeyOf = (d) => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`;
+  const dmThisMonth = dmKeyOf(now);
+  const dmFakturyMesic = invoices.filter(i => (i.issue_date||"").startsWith(dmThisMonth)).reduce((s,i)=>s+(i.vat_amount||0),0);
+  const dmOdpItem = (financeItems||[]).find(i => i.id === "fi_dph_odpocet");
+  const dmOdpocetLogVse = (() => {
+    try { const p = JSON.parse(dmOdpItem?.notes || "{}"); return Array.isArray(p.log) ? p.log : []; }
+    catch { return []; }
+  })();
+  const dmOdpocet = dmOdpocetLogVse.filter(e => (e.date||"").startsWith(dmThisMonth)).reduce((s,e)=>s+(e.vat||0),0);
+  const dashNadmernyOdpocet = Math.min(dmOdpocet, dmFakturyMesic);
 
   const AUTO = {
     dpfo:      { paid: dpfoAcc,   basis: `${dpfoPaid.length} / 12 měsíců zaplaceno × ${fmtKc(dpfoYear[0]?.amount||8050)}`, hasData: true },
@@ -9780,56 +9809,53 @@ function DaneModule({ year, taxRecords, financeItems, invoices, dpfoMonths, escr
       <SroOptimizationPanel year={year} invoices={invoices} />
 
       {/* DPH — měsíční odpočet: kolik na konci měsíce zaplatím Čechmanové po odečtení účtenek (na žádost) */}
-      <DphOdpocetTile invoices={invoices} financeItems={financeItems} onSaveFinance={onSaveFinance} />
+      <DphOdpocetTile invoices={invoices} financeItems={financeItems} onSaveFinance={onSaveFinance} onNav={onNav} dashNadmernyOdpocet={dashNadmernyOdpocet} />
 
-      {/* Souhrnná karta — daňový přehled roku */}
-      <div style={{ background: "#fff", border: "1px solid var(--line)", borderRadius: 14, padding: "20px 22px" }}>
-        <div style={{ fontSize: 9, letterSpacing: ".28em", textTransform: "uppercase", fontWeight: 600, color: "var(--mut)", marginBottom: 10 }}>
-          Daňový přehled {year} · základ pro přesný výpočet a optimalizaci záloh
-        </div>
-        <div style={{ display: "flex", gap: 32, flexWrap: "wrap", alignItems: "baseline" }}>
-          <div>
-            <div style={{ fontSize: 10, color: "var(--mut)" }}>Zaplaceno na zálohách (YTD, automaticky)</div>
-            <div style={{ fontFamily: "Fraunces,serif", fontSize: 24, fontWeight: 300, color: "var(--txt)" }}>{fmtKc(totalPaid)}</div>
+      {/* Souhrnná karta — daňový přehled roku, ve stylu "Bilance" dlaždice na Dashboardu */}
+      <div style={{ background: "#fff", borderRadius: 14, overflow: "hidden", border: "1px solid var(--line)", borderTop: "4px solid #3518A5", boxShadow: "0 1px 3px rgba(53,24,165,.06)", padding: "20px 22px" }}>
+        <div style={{ display:"flex", alignItems:"center", gap:7, marginBottom: 14 }}>
+          <span className="maux-dot" style={{ width:6, height:6, background:"#3518A5", boxShadow:"0 0 4px rgba(53,24,165,.5)" }} />
+          <div style={{ fontSize: 10, letterSpacing: ".22em", textTransform: "uppercase", fontWeight: 800, color: "#3518A5" }}>
+            Daňový přehled {year}
           </div>
-          <div>
-            <div style={{ fontSize: 10, color: "var(--mut)" }}>Skutečné vyúčtování (zadáváš ručně)</div>
-            <div style={{ fontFamily: "Fraunces,serif", fontSize: 24, fontWeight: 300, color: haveAllSettlements ? "var(--txt)" : "var(--mut)" }}>
-              {haveAllSettlements ? fmtKc(totalSettled) : "doplň v tabulce ↓"}
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(150px,1fr))", gap: 1, background: "var(--line)" }}>
+          <div style={{ background:"#fff", padding:"4px 16px 4px 0" }}>
+            <div style={{ fontSize: 9.5, color: "var(--mut)" }}>Zaplaceno na zálohách (YTD, auto)</div>
+            <div style={{ fontFamily: "Fraunces,serif", fontSize: 23, fontWeight: 300, color: "var(--txt)", marginTop:3 }}>{fmtKc(totalPaid)}</div>
+          </div>
+          <div style={{ background:"#fff", padding:"4px 16px" }}>
+            <div style={{ fontSize: 9.5, color: "var(--mut)" }}>Skutečné vyúčtování (ruční)</div>
+            <div style={{ fontFamily: "Fraunces,serif", fontSize: 23, fontWeight: 300, color: haveAllSettlements ? "var(--txt)" : "var(--mut)", marginTop:3 }}>
+              {haveAllSettlements ? fmtKc(totalSettled) : "doplň ↓"}
             </div>
           </div>
           {totalDiff != null && (
-            <div>
-              <div style={{ fontSize: 10, color: "var(--mut)" }}>{totalDiff >= 0 ? "Přeplatek celkem" : "Nedoplatek celkem"}</div>
-              <div style={{ fontFamily: "Fraunces,serif", fontSize: 24, fontWeight: 500, color: totalDiff >= 0 ? "#059669" : "#DC2626" }}>
+            <div style={{ background:"#fff", padding:"4px 16px" }}>
+              <div style={{ fontSize: 9.5, color: "var(--mut)" }}>{totalDiff >= 0 ? "Přeplatek celkem" : "Nedoplatek celkem"}</div>
+              <div style={{ fontFamily: "Fraunces,serif", fontSize: 23, fontWeight: 500, color: totalDiff >= 0 ? "#059669" : "#DC2626", marginTop:3 }}>
                 {totalDiff >= 0 ? "+" : "−"}{fmtKc(Math.abs(totalDiff))}
               </div>
             </div>
           )}
           {danUschov > 0 && (
-            <div>
-              <div style={{ fontSize: 10, color: "var(--mut)" }}>Daň z výnosu úschov (informativně)</div>
-              <div style={{ fontFamily: "Fraunces,serif", fontSize: 24, fontWeight: 300, color: "var(--mut)" }}>{fmtKc(danUschov)}</div>
+            <div style={{ background:"#fff", padding:"4px 16px" }}>
+              <div style={{ fontSize: 9.5, color: "var(--mut)" }}>Daň z výnosu úschov (info)</div>
+              <div style={{ fontFamily: "Fraunces,serif", fontSize: 23, fontWeight: 300, color: "var(--mut)", marginTop:3 }}>{fmtKc(danUschov)}</div>
             </div>
           )}
         </div>
-        <div style={{ fontSize: 10.5, color: "var(--mut)", marginTop: 14, lineHeight: 1.55, maxWidth: 720 }}>
-          Sloupec „Zaplaceno" se počítá živě z dat, která appka už eviduje — DPFO tracker, uhrazené faktury (DPH) a pravidelné výdaje.
-          Jakmile po podání přiznání nebo přehledů od ČSSZ/VZP zjistíš skutečnou částku, klikni do sloupce „Skutečné vyúčtování" a zapiš ji —
-          appka sama dopočítá přeplatek nebo nedoplatek a vše si pamatuje pro příští rok, kdy z toho společně přesně nastavíme výši záloh.
+        <div style={{ fontSize: 10, color: "var(--mut)", marginTop: 16, lineHeight: 1.5, maxWidth: 720, opacity:.85 }}>
+          „Zaplaceno" appka počítá živě z DPFO trackeru, uhrazených faktur (DPH) a pravidelných výdajů. Jakmile zjistíš
+          skutečnou částku z přiznání nebo přehledů ČSSZ/VZP, zapiš ji u dané kategorie níže — appka dopočítá rozdíl.
         </div>
       </div>
 
-      {/* Tabulka kategorií — auto vs. ruční */}
-      <div style={{ background: "#fff", border: "1px solid var(--line)", borderRadius: 14, overflow: "hidden" }}>
-        <div style={{ display: "grid", gridTemplateColumns: "1.5fr 1fr 1.1fr 1fr 1.7fr", padding: "11px 22px", borderBottom: "1px solid var(--line)", background: "#FAFAFC" }}>
-          {["Kategorie","Zaplaceno (auto)","Skutečné vyúčtování","Rozdíl","Poznámka k optimalizaci záloh"].map((h,i) => (
-            <div key={i} style={{ fontSize: 9, letterSpacing: ".12em", textTransform: "uppercase", fontWeight: 600, color: "var(--mut)" }}>{h}</div>
-          ))}
-        </div>
+      {/* Kategorie — auto vs. ruční, jako vzdušné karty místo tabulky */}
+      <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
         {records.map(rec => <TaxRow key={rec.id} rec={rec} auto={AUTO[rec.category]} onSave={onSaveTax} />)}
         {records.length === 0 && (
-          <div style={{ padding: "28px 22px", textAlign: "center", color: "var(--mut)", fontSize: 12.5 }}>
+          <div style={{ background: "#fff", border: "1px solid var(--line)", borderRadius: 14, padding: "28px 22px", textAlign: "center", color: "var(--mut)", fontSize: 12.5 }}>
             Evidence pro rok {year} se právě zakládá — za chvíli se objeví čtyři kategorie k vyplnění.
           </div>
         )}
@@ -9851,49 +9877,68 @@ function TaxRow({ rec, auto, onSave }) {
   const commitNote = () => { onSave({ ...rec, note }); setEditingNote(false); };
 
   return (
-    <div style={{ display: "grid", gridTemplateColumns: "1.5fr 1fr 1.1fr 1fr 1.7fr", padding: "14px 22px", borderBottom: "1px solid var(--line)", alignItems: "center", gap: 6 }}>
-      <div>
-        <div style={{ fontSize: 13, color: "var(--txt)", fontWeight: 500 }}>{rec.label}</div>
-        <div style={{ fontSize: 9.5, color: "var(--mut)", marginTop: 2 }}>{auto.basis}</div>
-      </div>
-      <div style={{ fontFamily: "var(--mono)", fontSize: 13, color: "var(--txt)" }}>{fmtKc(auto.paid)}</div>
-      <div>
-        {editingSettlement ? (
-          <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
-            <input type="number" autoFocus value={settlement}
-              onChange={e => setSettlement(e.target.value)}
-              onKeyDown={e => { if (e.key === "Enter") commitSettlement(); if (e.key === "Escape") setEditingSettlement(false); }}
-              style={{ width: 88, fontSize: 12, fontFamily: "var(--mono)", padding: "3px 6px", border: "1px solid var(--ink)", borderRadius: 5, outline: "none" }} />
-            <button onClick={commitSettlement} style={{ fontSize: 12, border: "none", background: "none", cursor: "pointer", color: "var(--ink)" }}>✓</button>
-          </span>
-        ) : (
-          <span onClick={() => { setSettlement(rec.actual_settlement ?? ""); setEditingSettlement(true); }}
-            title="Klikni a zadej skutečné vyúčtování po podání přiznání / přehledu"
-            style={{ fontFamily: "var(--mono)", fontSize: 13, cursor: "pointer", borderBottom: "1px dotted var(--mut)", color: hasSettlement ? "var(--txt)" : "var(--mut)" }}>
-            {hasSettlement ? fmtKc(Number(rec.actual_settlement)) : "klikni a zadej…"}
+    <div style={{ background: "#fff", border: "1px solid var(--line)", borderRadius: 12, padding: "14px 18px" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12, flexWrap: "wrap" }}>
+        <div>
+          <div style={{ fontSize: 13, color: "var(--txt)", fontWeight: 600 }}>{rec.label}</div>
+          <div style={{ fontSize: 9.5, color: "var(--mut)", marginTop: 2, opacity:.85 }}>{auto.basis}</div>
+        </div>
+        {diff != null && (
+          <span className="maux-num" style={{
+            fontSize: 11.5, fontWeight: 700, padding: "3px 10px", borderRadius: 20,
+            color: diff >= 0 ? "#059669" : "#DC2626",
+            background: diff >= 0 ? "#ECFDF5" : "#FEF2F2",
+            border: `1px solid ${diff >= 0 ? "#A7F3D0" : "#FECACA"}`,
+            whiteSpace: "nowrap",
+          }}>
+            {diff >= 0 ? "+" : "−"}{fmtKc(Math.abs(diff))} {diff >= 0 ? "přeplatek" : "nedoplatek"}
           </span>
         )}
       </div>
-      <div style={{ fontFamily: "var(--mono)", fontSize: 13, fontWeight: 600, color: diff == null ? "var(--mut)" : (diff >= 0 ? "#059669" : "#DC2626") }}>
-        {diff == null ? "—" : `${diff >= 0 ? "+" : "−"}${fmtKc(Math.abs(diff))}`}
-      </div>
-      <div>
-        {editingNote ? (
-          <span style={{ display: "inline-flex", alignItems: "center", gap: 4, width: "100%" }}>
-            <input type="text" autoFocus value={note}
-              onChange={e => setNote(e.target.value)}
-              onKeyDown={e => { if (e.key === "Enter") commitNote(); if (e.key === "Escape") setEditingNote(false); }}
-              placeholder="např. snížit zálohu od ledna o…"
-              style={{ flex: 1, fontSize: 12, padding: "3px 6px", border: "1px solid var(--ink)", borderRadius: 5, outline: "none" }} />
-            <button onClick={commitNote} style={{ fontSize: 12, border: "none", background: "none", cursor: "pointer", color: "var(--ink)" }}>✓</button>
-          </span>
-        ) : (
-          <span onClick={() => { setNote(rec.note || ""); setEditingNote(true); }}
-            title="Klikni a napiš poznámku k optimalizaci záloh na příští rok"
-            style={{ fontSize: 12, cursor: "pointer", color: rec.note ? "var(--txt)" : "var(--mut)", borderBottom: "1px dotted var(--mut)" }}>
-            {rec.note || "klikni a přidej poznámku…"}
-          </span>
-        )}
+
+      <div style={{ display: "flex", gap: 24, flexWrap: "wrap", marginTop: 12, paddingTop: 12, borderTop: "1px solid var(--line)" }}>
+        <div>
+          <div style={{ fontSize: 9, letterSpacing:".06em", textTransform:"uppercase", color: "var(--mut)" }}>Zaplaceno (auto)</div>
+          <div className="maux-num" style={{ fontSize: 14, color: "var(--txt)", fontWeight:600, marginTop:2 }}>{fmtKc(auto.paid)}</div>
+        </div>
+        <div>
+          <div style={{ fontSize: 9, letterSpacing:".06em", textTransform:"uppercase", color: "var(--mut)" }}>Skutečné vyúčtování</div>
+          {editingSettlement ? (
+            <span style={{ display: "inline-flex", alignItems: "center", gap: 4, marginTop:2 }}>
+              <input type="number" autoFocus value={settlement}
+                onChange={e => setSettlement(e.target.value)}
+                onKeyDown={e => { if (e.key === "Enter") commitSettlement(); if (e.key === "Escape") setEditingSettlement(false); }}
+                style={{ width: 88, fontSize: 12, fontFamily: "var(--mono)", padding: "3px 6px", border: "1px solid var(--ink)", borderRadius: 5, outline: "none" }} />
+              <button onClick={commitSettlement} style={{ fontSize: 12, border: "none", background: "none", cursor: "pointer", color: "var(--ink)" }}>✓</button>
+            </span>
+          ) : (
+            <div onClick={() => { setSettlement(rec.actual_settlement ?? ""); setEditingSettlement(true); }}
+              title="Klikni a zadej skutečné vyúčtování po podání přiznání / přehledu"
+              className="maux-num"
+              style={{ fontSize: 14, fontWeight:600, cursor: "pointer", borderBottom: "1px dotted var(--mut)", color: hasSettlement ? "var(--txt)" : "var(--mut)", marginTop:2, display:"inline-block" }}>
+              {hasSettlement ? fmtKc(Number(rec.actual_settlement)) : "klikni a zadej…"}
+            </div>
+          )}
+        </div>
+        <div style={{ flex: 1, minWidth: 180 }}>
+          <div style={{ fontSize: 9, letterSpacing:".06em", textTransform:"uppercase", color: "var(--mut)" }}>Poznámka k optimalizaci záloh</div>
+          {editingNote ? (
+            <span style={{ display: "inline-flex", alignItems: "center", gap: 4, width: "100%", marginTop:2 }}>
+              <input type="text" autoFocus value={note}
+                onChange={e => setNote(e.target.value)}
+                onKeyDown={e => { if (e.key === "Enter") commitNote(); if (e.key === "Escape") setEditingNote(false); }}
+                placeholder="např. snížit zálohu od ledna o…"
+                style={{ flex: 1, fontSize: 12, padding: "3px 6px", border: "1px solid var(--ink)", borderRadius: 5, outline: "none" }} />
+              <button onClick={commitNote} style={{ fontSize: 12, border: "none", background: "none", cursor: "pointer", color: "var(--ink)" }}>✓</button>
+            </span>
+          ) : (
+            <div onClick={() => { setNote(rec.note || ""); setEditingNote(true); }}
+              title="Klikni a napiš poznámku k optimalizaci záloh na příští rok"
+              style={{ fontSize: 12, cursor: "pointer", color: rec.note ? "var(--txt)" : "var(--mut)", borderBottom: "1px dotted var(--mut)", marginTop:4, display:"inline-block" }}>
+              {rec.note || "klikni a přidej poznámku…"}
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );
@@ -12189,6 +12234,7 @@ export default function MauxCRM() {
               escrows={escrows}
               onSaveTax={saveTaxRecord}
               onSaveFinance={saveFinanceItem}
+              onNav={navTo}
             />
           )}
 
