@@ -1550,7 +1550,9 @@ function InvoicePrintPreview({ invoice, client, workEntries, onBack, onIssue, sa
   const [editConfirmDialog, setEditConfirmDialog] = useState(false);
 
   const ibanRaw = FIRMA.iban.replace(/\s/g, "");
-  const amountStr = (invoice.total / 100).toFixed(2);
+  // POZOR: invoice.total je už v celých Kč (viz fmtKc/celá appka — nikdy se nedělí 100),
+  // takže QR platba NESMÍ dělit /100, jinak banka navrhne 100× menší částku (47 060 Kč → 470,60 Kč).
+  const amountStr = (invoice.total || 0).toFixed(2);
   const vsStr = invoice.var_symbol || invoice.notes || "";
   const qrData = `SPD*1.0*ACC:${ibanRaw}*AM:${amountStr}*CC:CZK*X-VS:${vsStr}*MSG:${invoice.invoice_number}*DT:${(invoice.due_date || "").replace(/-/g, "")}`;
 
@@ -1740,7 +1742,7 @@ function InvoicePrintPreview({ invoice, client, workEntries, onBack, onIssue, sa
                 <tbody>
                   {/* Main work row */}
                   {invoice.subtotal > 0 && (
-                    <tr>
+                    <tr style={{ breakInside: "avoid", pageBreakInside: "avoid" }}>
                       <td style={{ padding: "11px 0", borderBottom: ".5px solid rgba(53,24,165,.05)", fontSize: 11.5, color: "#3a3355", fontFamily: "'Inter', sans-serif", fontWeight: 300 }}>
                         Právní služby poskytnuté v {prevMonthLabel()}
                         <div style={{ fontSize: 9, color: "#D4CEEA", marginTop: 3, fontFamily: "'Inter', sans-serif" }}>dle přílohy č. 1</div>
@@ -1757,7 +1759,7 @@ function InvoicePrintPreview({ invoice, client, workEntries, onBack, onIssue, sa
                   {/* No-VAT items — sp. poplatek a zákonné poplatky (statutory_note) se zobrazují
                       jako dosud. Jen notář je skrytá nákladová položka a splyne do hlavního řádku výše. */}
                   {visibleNoVatItems.map((it, i) => (
-                    <tr key={i}>
+                    <tr key={i} style={{ breakInside: "avoid", pageBreakInside: "avoid" }}>
                       <td style={{ padding: "11px 0", borderBottom: ".5px solid rgba(53,24,165,.05)", fontSize: 11.5, color: "#3a3355", fontFamily: "'Inter', sans-serif", fontWeight: 300 }}>
                         {it.description}
                         <div style={{ fontSize: 9, color: "#D4CEEA", marginTop: 3, fontFamily: "'Inter', sans-serif", maxWidth: 340, lineHeight: 1.5 }}>
@@ -1964,7 +1966,7 @@ function InvoicePrintPreview({ invoice, client, workEntries, onBack, onIssue, sa
                       const lineTotal = (e.amount||0) + (Number(e.sig_count)||0) * SIGNATURE_DECL_FEE;
                       const lineFinal = lineTotal - discAmt;
                       return (
-                      <tr key={i} style={{ background: i % 2 === 0 ? "transparent" : "rgba(53,24,165,.012)" }}>
+                      <tr key={i} style={{ background: i % 2 === 0 ? "transparent" : "rgba(53,24,165,.012)", breakInside: "avoid", pageBreakInside: "avoid" }}>
                         <td style={{ padding: "12px 4mm 12px 0", borderBottom: ".5px solid rgba(53,24,165,.045)", fontSize: 10.5, color: "#9C96B5", fontWeight: 300, whiteSpace: "nowrap", verticalAlign: "top" }}>{fmtDate(e.entry_date)}</td>
                         <td style={{ padding: "12px 4mm 12px 0", borderBottom: ".5px solid rgba(53,24,165,.045)", fontSize: 11.5, color: "#2d2840", fontWeight: 300, lineHeight: 1.55, verticalAlign: "top" }}>
                           {e.description}
