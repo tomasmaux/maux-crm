@@ -1676,7 +1676,16 @@ function InvoicePrintPreview({ invoice, client, workEntries, onBack, onIssue, sa
       .sb, .main { display: none !important; }
       html, body, #root, .mx { height: auto !important; min-height: 0 !important; }
       .inv-modal-host { position: static !important; inset: auto !important; overflow: visible !important; background: #fff !important; z-index: auto !important; }
-      .print-root { position: static; background: #fff; }
+      /* KRITICKÉ — .print-root má na obrazovce (kvůli "naskládaným listům" v náhledu)
+         inline styly padding:"40px 0" a gap:32 (mezera mezi .inv-page sourozenci).
+         V tisku se ale .print-root nezruší, jen zfixuje position/background — takže
+         těch 40px nahoře/dole a 32px MEZI KAŽDÝMI DVĚMA STRÁNKAMI zůstávaly ve flow.
+         Protože stránky mají page-break-before:always a jsou už samy přesně 297mm,
+         každá taková "mezera" se nevejde na aktuální stranu a vytiskne se jako
+         VLASTNÍ TÉMĚŘ PRÁZDNÁ FYZICKÁ STRANA navíc (jedna za každou mezeru/patičku) —
+         to byl pravý důvod, proč 1 příloha = 4 strany místo 2, a 6 stran místo 3.
+         Bez !important by zde "vyhrály" inline styly (vyšší specificita). */
+      .print-root { position: static; background: #fff; padding: 0 !important; gap: 0 !important; }
       .no-print { display: none !important; }
       @page { size: A4; margin: 0; }
       /* Bez tohoto prohlížeč při tisku/PDF defaultně vynechá barevná pozadí
