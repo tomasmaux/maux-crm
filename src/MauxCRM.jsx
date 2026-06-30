@@ -9346,6 +9346,17 @@ const JUNE_2026_RECEIPTS = [
   { id: "imp_cer26_03", date: "2026-06-05", label: "JUDr. Svobodová – notářka (NZ 134+135/2026, Freedom stav realizační s.r.o.)", gross: 5639, rate: 21, vat: 979 },
   // — faktura č. 9260944518 (PODA a.s.), DUZP i vystavení 2.6. —
   { id: "imp_cer26_04", date: "2026-06-02", label: "PODA a.s. – internet a WiFi (vyúčtování za červen)", gross: 499, rate: 21, vat: 87 },
+  // — doplněno 30.6. po kontrole duplicit ve složce 001_Účetní podklady/2026_06 (Alza 4022534871, 4022924967,
+  // 4023497743, 4023520680 + IKEA 13.6. + T-Mobile vyúčtování). Pozn.: Alza 4019905658 (22.5.) je shodná s
+  // imp_maj26_08 a faktura PODA 1260040147 (DUZP 31.5.) je shodná s imp_maj26_11 — obě už v květnové dávce,
+  // nepřidáváno znovu. Stejně tak IKEA 7.6. (9463 Kč) byla naskenovaná 2× pod různými názvy souborů —
+  // je to JEDNA účtenka, už zahrnutá výše jako imp_cer26_02, druhý soubor je duplicita a NEpočítá se znovu.
+  { id: "imp_cer26_05", date: "2026-06-16", label: "Alza – (faktura 4022534871)", gross: 279, rate: 21, vat: 48 },
+  { id: "imp_cer26_06", date: "2026-06-20", label: "Alza – (faktura 4022924967)", gross: 569, rate: 21, vat: 99 },
+  { id: "imp_cer26_07", date: "2026-06-13", label: "IKEA – odpadkový koš STENTRAPPA", gross: 799, rate: 21, vat: 139 },
+  { id: "imp_cer26_08", date: "2026-06-19", label: "T-Mobile – vyúčtování služeb (20.5.–19.6.)", gross: 398, rate: 21, vat: 69 },
+  { id: "imp_cer26_09", date: "2026-06-24", label: "Alza – (faktura 4023497743)", gross: 2499, rate: 21, vat: 434 },
+  { id: "imp_cer26_10", date: "2026-06-25", label: "Alza – (faktura 4023520680)", gross: 3273, rate: 21, vat: 568 },
 ];
 
 function DphKalkulacka({ odpItem, onSaveFinance }) {
@@ -9464,7 +9475,7 @@ function DphKalkulacka({ odpItem, onSaveFinance }) {
       )}
       {missingImportJune.length > 0 && (
         <div onClick={importJune} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, fontSize: 11, color: "#9D174D", background: "#FDF2F8", border: "1px solid #FBCFE8", borderRadius: 8, padding: "8px 12px", marginBottom: 10, cursor: "pointer" }}>
-          <span>📥 Naimportovat {missingImportJune.length} doklady z června 2026 (Blažek Praha, IKEA, JUDr. Svobodová notářka) — DPH celkem {fmtKc(missingImportJune.reduce((s,e)=>s+(e.vat||0),0))}</span>
+          <span>📥 Naimportovat {missingImportJune.length} dokladů z června 2026 (Blažek Praha, IKEA, JUDr. Svobodová notářka, Alza, T-Mobile, PODA…) — DPH celkem {fmtKc(missingImportJune.reduce((s,e)=>s+(e.vat||0),0))}</span>
           <b style={{ whiteSpace: "nowrap" }}>importovat →</b>
         </div>
       )}
