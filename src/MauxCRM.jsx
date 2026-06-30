@@ -1593,7 +1593,12 @@ function InvoicePrintPreview({ invoice, client, workEntries, onBack, onIssue, sa
     @media print {
       body * { visibility: hidden; }
       .print-root, .print-root * { visibility: visible; }
-      .print-root { position: fixed; inset: 0; background: #fff; z-index: 9999; }
+      /* POZOR: nikdy zpátky na position:fixed/inset:0 — u víceřádkového výkazu práce
+         (více stránek) tiskový engine fixní blok vykresluje opakovaně na každé stránce,
+         takže se obsah str.1 (QR, patička, součty) propíchne přes str.2/3. .no-print už
+         toolbar úplně odstraní z layoutu (display:none), takže fixed pozicování tu
+         nic neřeší a jen kazí víceřádkové výkazy. */
+      .print-root { position: static; background: #fff; }
       .no-print { display: none !important; }
       @page { size: A4; margin: 0; }
       /* Bez tohoto prohlížeč při tisku/PDF defaultně vynechá barevná pozadí
