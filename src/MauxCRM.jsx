@@ -7507,6 +7507,7 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
         const [heroKpiOpen, setHeroKpiOpen] = useState(null);
         const toggleHeroKpi = (k) => setHeroKpiOpen(v => v===k?null:k);
         const [prijmyOpen, setPrijmyOpen] = useState(true);
+        const [sporOpen, setSporOpen] = useState(false);
         // Editovatelný checklist nákladů (checkboxy, AddExpenseRow, mzda Josefa) se 29.6.2026 přesunul
         // do dlaždice "Měsíční výdaje" (FirmaBar, Panel id="firma") — Tom: "ta roletka u nákladů je
         // zcela zbytečná" (dělala tuhle dlaždici zbytečně vysokou). Tady zůstal jen souhrnný řádek
@@ -7538,12 +7539,6 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
               <VykazyCalendar workEntries={workEntries} escrows={escrows} onOpenFull={() => onNav("vykaz")} onAddEntry={onAddWorkEntry} />
             </div>
 
-            {/* Spořicí účet (čtverec, na celou šířku sloupce) */}
-            <div style={{aspectRatio:"1", minWidth:0}}>
-              <SporakRingTile financeItems={financeItems} onSaveFinance={onSaveFinance}
-                invoices={invoices} dpfoMonths={dpfoMonths}
-                loanTransactions={loanTransactions} escrows={escrows} square />
-            </div>
           </div>
 
             {/* BILANCE — 2. nejdůležitější dlaždice po kalendáři, Příjmy i Výdaje pod sebou, roztaženo na výšku levého sloupce */}
@@ -7657,6 +7652,71 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
                     </div>
                   </div>
                 </div>
+
+                {/* Spořicí účet — Tom 30.6.2026: bývalý samostatný velký čtverec (vlevo nahoře
+                    vedle kalendáře) byl "naprosto hnusně graficky nebrandově" — přestěhováno
+                    sem pod Firemní rezervu, do stejného vizuálního jazyka jako Příjmy/Výdaje
+                    výš (uppercase label + číslo vpravo, rozbalovací detail obálek). Je to jeden
+                    zdroj pravdy se SporakRingTile, jen kompaktní a integrované do Bilance. */}
+                {(() => {
+                  const sporaciItems = (financeItems||[]).filter(i => i.category === "sporaci" && i.notes !== "SKIP_DISPLAY");
+                  const zItemS     = sporaciItems.find(i => i.id === "fi_sp_99");
+                  const sporBalS   = zItemS?.amount || 0;
+                  const dphAutoS   = (invoices||[]).filter(i => i.status === "uhrazena").reduce((s,i) => s+(i.vat_amount||0), 0);
+                  const dpfoAccS   = (dpfoMonths||[]).filter(m => m.is_paid).reduce((s,m) => s+(m.amount||8050), 0);
+                  const bobloanS   = (loanTransactions?.loan_bobnice||[]).reduce((s,t) => s+t.amount, 0);
+                  const bobFbS     = (financeItems||[]).find(i => i.id === "fi_sp_02")?.amount || 0;
+                  const bobBalS    = Math.max(bobloanS > 0 ? bobloanS : bobFbS, 0);
+                  const danUschovS = Math.round(escrowTotalTax(escrows||[]));
+                  const autoLblsS  = new Set(["dph","dpfo 2026","bobnice","daň z úschov"]);
+                  const manObalkyS = sporaciItems.filter(i =>
+                    i.id !== "fi_sp_99" && i.id !== "fi_sp_01" && i.id !== "fi_sp_02"
+                    && !autoLblsS.has((i.label||"").toLowerCase().trim())
+                  );
+                  const sEnvSegs = [
+                    { label: "DPH",          value: dphAutoS,   color: "#3518A5" },
+                    { label: "DPFO 2026",    value: dpfoAccS,   color: "#5B4FCF" },
+                    ...(bobBalS > 0 ? [{ label: "Bobnice", value: bobBalS, color: "#7C6FE0" }] : []),
+                    { label: "Daň z úschov", value: danUschovS, color: "#9D93DD" },
+                    ...manObalkyS.map((o,idx) => ({ label: o.label, value: o.amount||0, color: ["#B8ACEF","#D6CFF5"][idx%2] })),
+                  ].filter(e => e.value > 0);
+                  const sTotalEar = sEnvSegs.reduce((s,e) => s+e.value, 0);
+                  const sFirmaRez = sporBalS - sTotalEar;
+                  const sFullSegs = [...sEnvSegs, ...(sFirmaRez > 0 ? [{ label: "Volné (rezerva)", value: sFirmaRez, color: "#8B5CF6" }] : [])];
+                  const sTotalAll = sFullSegs.reduce((s,e)=>s+e.value,0) || 1;
+                  return (
+                    <div style={{borderTop:"1px solid rgba(53,24,165,.14)",paddingTop:12}}>
+                      <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",cursor:"pointer"}} onClick={()=>setSporOpen(v=>!v)}>
+                        <span style={{fontSize:12,letterSpacing:".1em",textTransform:"uppercase",color:"var(--ink)",fontWeight:700}}>Spořicí účet {sporOpen?"▲":"▾"}</span>
+                        <span className="maux-num" style={{fontSize:21,fontWeight:600,color:"#3518A5"}}>{fmtKc(sporBalS)}</span>
+                      </div>
+                      <div style={{display:"flex",gap:2,marginTop:9,height:8,borderRadius:99,background:"rgba(53,24,165,.06)",padding:1,boxSizing:"border-box"}}>
+                        {sFullSegs.map((s,i)=>(
+                          <div key={i} title={`${s.label}: ${fmtKc(s.value)}`} style={{
+                            width:`${Math.max((s.value/sTotalAll)*100,1.5)}%`, minWidth:3, borderRadius:99,
+                            background:s.color, boxShadow:`0 0 6px ${s.color}55`,
+                          }} />
+                        ))}
+                      </div>
+                      <div style={{fontSize:9.5,color:"var(--mut)",marginTop:6}}>{fmtKc(sTotalEar)} v obálkách</div>
+                      {sporOpen && (
+                        <div style={{marginTop:9,display:"flex",flexDirection:"column",gap:5}}>
+                          {sFullSegs.map((s,i) => {
+                            const pct = Math.round((s.value/sTotalAll)*100);
+                            return (
+                              <div key={i} style={{display:"flex",alignItems:"center",gap:8}}>
+                                <span style={{width:7,height:7,borderRadius:"50%",background:s.color,flexShrink:0,boxShadow:`0 0 4px ${s.color}88`}} />
+                                <span style={{flex:1,fontSize:10.5,color:"var(--mut)",letterSpacing:".02em",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{s.label}</span>
+                                <span className="maux-num" style={{fontSize:11,fontWeight:500,color:"var(--ink)",flexShrink:0}}>{fmtKc(s.value)}</span>
+                                <span style={{fontSize:9.5,color:"var(--mut)",width:28,textAlign:"right",flexShrink:0}}>{pct}%</span>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
               </div>
             </div>
           </div>
@@ -8949,43 +9009,11 @@ function InvoiceList({ invoices, clients, workEntries, escrows, onOpen, onOpenCl
         </div>
       )}
 
-      {/* ── STATISTIKY ── */}
-      <div className="kpi-row">
-        <div className="kpi hi">
-          <div className="k">Fakturováno celkem — bez DPH</div>
-          <div className="v">{fmtKc(total)}</div>
-          <div className="s">s DPH: {fmtKc(invoices.reduce((s,i)=>s+(i.total||0),0))} · {invoices.length} faktur</div>
-        </div>
-        {/* MÁ PŘIJÍT — tento měsíc, vystaveno, čeká na úhradu */}
-        <div className="kpi" style={{background:"#FFFBEB",border:`1px solid ${maPrijitAmt>0?"#FDE68A":"#E5E7EB"}`}}>
-          <div className="k" style={{color:"#92400E"}}>Má přijít — tento měsíc</div>
-          <div className="v" style={{color:maPrijitAmt>0?"#D97706":"var(--mut)"}}>{fmtKc(maPrijitAmt)}</div>
-          <div className="s" style={{color:"#92400E"}}>{maPrijitInvs.length > 0 ? `${maPrijitInvs.length}× faktura vystavena · čeká na úhradu` : "žádná nevyřízená"}</div>
-        </div>
-        {/* UŽ PŘIŠLO — tento měsíc, uhrazeno */}
-        <div className="kpi" style={{background:"#F0FDF4",border:`1px solid ${uzPrisloAmt>0?"#BBF7D0":"#E5E7EB"}`}}>
-          <div className="k" style={{color:"#065F46"}}>Už přišlo — tento měsíc</div>
-          <div className="v" style={{color:uzPrisloAmt>0?"#059669":"var(--mut)"}}>{fmtKc(uzPrisloAmt)}</div>
-          <div className="s" style={{color:"#065F46"}}>{uzPrisloInvs.length > 0 ? `${uzPrisloInvs.length}× faktura uhrazena ✓` : "zatím nic neuhrazeno"}</div>
-        </div>
-        <div className="kpi" style={{background:"#F0FDF4",border:"1px solid #BBF7D0"}}>
-          <div className="k" style={{color:"#065F46"}}>Bude fakturováno — tento měsíc</div>
-          <div className="v" style={{color:"#059669"}}>{fmtKc((workEntries||[]).filter(e=>!e.invoice_id).reduce((s,e)=>s+Math.round(Math.max((e.amount||0)-(Number(e.discount_amount)||0),0)*1.21)+(e.admin_fee||0)+(Number(e.sig_count)||0)*SIGNATURE_DECL_FEE,0))}</div>
-          <div className="s" style={{color:"#065F46"}}>nevyfakturované výkazy · s DPH</div>
-        </div>
-        <div className="kpi">
-          <div className="k">Po splatnosti — bez DPH</div>
-          <div className="v" style={{ color: poSplatnosti > 0 ? "#DC2626" : "var(--txt)" }}>{fmtKc(poSplatnosti)}</div>
-          <div className="s" style={{ color: poSplatnosti > 0 ? "#DC2626" : "var(--mut)" }}>
-            {poSplatnosti > 0 ? `${invoices.filter(i => invoiceStatus(i) === "po_splatnosti").length} faktur — nutná akce` : "vše v pořádku"}
-          </div>
-        </div>
-      </div>
-
-      {/* ── KALENDÁŘ VÝKAZŮ ── */}
-      <div style={{ marginBottom: 36 }}>
-        <VykazyCalendar workEntries={workEntries} escrows={escrows} onAddEntry={onAddWorkEntry} />
-      </div>
+      {/* ── STATISTIKY + KALENDÁŘ VÝKAZŮ ──
+          Tom 30.6.2026: tohle všechno už vidí na Dashboardu (Pulz firmy / Finance command
+          center), takže je to na listu Fakturace zbytečné duplicitní zobrazení — odstraněno.
+          Pokud by se sem v budoucnu měl něco z toho vrátit, dotyčné proměnné (total, maPrijitAmt,
+          maPrijitInvs, uzPrisloAmt, uzPrisloInvs, poSplatnosti) jsou stále počítané výš v komponentě. */}
 
       {/* ── FILTRY A HISTORIE ── */}
       <div className="sec-hd" style={{ marginBottom: 12 }}><span>Historie faktur</span></div>
