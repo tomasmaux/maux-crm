@@ -709,7 +709,7 @@ function chunkWorkEntriesForPrint(sorted) {
 }
 
 /* ─── INVOICE ISSUE MODAL ─── */
-function InvoiceIssueModal({ clientId, entries, clients, invoices, onConfirm, onCancel, saving }) {
+function InvoiceIssueModal({ clientId, entries, clients, invoices, initialBilledAs, onConfirm, onCancel, saving }) {
   const client = clients.find(c => c.id === clientId);
   const [selected, setSelected] = useState(() => new Set(entries.map(e => e.id)));
   const [invoiceNo, setInvoiceNo] = useState(() => nextInvoiceNumber(invoices));
@@ -737,11 +737,13 @@ function InvoiceIssueModal({ clientId, entries, clients, invoices, onConfirm, on
   // Martinovská fakturovaná přes jinou společnost). Ruční doplnění, ukládá se na fakturu
   // (invoice.billed_as), nemění se klientský záznam. Náhled faktury pak ukáže tento subjekt
   // místo client.* v poli "Odběratel".
-  const [altSubject, setAltSubject] = useState(false);
-  const [altName, setAltName] = useState("");
-  const [altIco, setAltIco] = useState("");
-  const [altDic, setAltDic] = useState("");
-  const [altAddress, setAltAddress] = useState("");
+  // initialBilledAs: pokud byl jiný subjekt už zadaný přímo na panelu draftu (tlačítko
+  // "Vystavit na jiný subjekt"), předvyplní se sem — Tom ho tu může ještě doladit před vystavením.
+  const [altSubject, setAltSubject] = useState(() => !!initialBilledAs);
+  const [altName, setAltName] = useState(() => initialBilledAs?.name || "");
+  const [altIco, setAltIco] = useState(() => initialBilledAs?.ico || "");
+  const [altDic, setAltDic] = useState(() => initialBilledAs?.dic || "");
+  const [altAddress, setAltAddress] = useState(() => initialBilledAs?.address || "");
   const billedAs = (altSubject && altName.trim())
     ? { name: altName.trim(), ico: altIco.trim(), dic: altDic.trim(), address: altAddress.trim() }
     : null;
@@ -1053,6 +1055,64 @@ function DraftDiscountModal({ clientId, entries, clients, onConfirm, onCancel, s
             <button className="btn pri" style={{ flex: 2 }} onClick={handleConfirm} disabled={saving}>{saving ? "Ukládám…" : "Potvrdit"}</button>
           </div>
         )}
+      </div>
+    </div>
+  );
+}
+
+// "Vystavit na jiný subjekt" — Tom 30.6.2026: samostatný krok přímo z panelu draftu (vedle
+// "Změny"), aby nebylo potřeba první otevřít dialog vystavení, jen aby se na to narazilo. Ukládá
+// se per-klient do lokálního stavu (altSubjects v hlavní komponentě), dokud se draft nevystaví.
+// DŮLEŽITÉ — Tom výslovně potvrdil: tohle NIKDY nemění, na kterého klienta jsou výkazy/evidence
+// vedené (client_id zůstává původní, např. Freedom – stav s.r.o.) — mění se jen to, jaký subjekt
+// se vytiskne v poli "Odběratel" na výsledné faktuře (invoice.billed_as).
+function AltSubjectModal({ clientId, entries, clients, initial, onConfirm, onCancel }) {
+  const client = clients.find(c => c.id === clientId);
+  const [name, setName] = useState(initial?.name || "");
+  const [ico, setIco] = useState(initial?.ico || "");
+  const [dic, setDic] = useState(initial?.dic || "");
+  const [address, setAddress] = useState(initial?.address || "");
+
+  const handleConfirm = () => {
+    if (!name.trim()) { onConfirm(null); return; }
+    onConfirm({ name: name.trim(), ico: ico.trim(), dic: dic.trim(), address: address.trim() });
+  };
+
+  return (
+    <div className="ov" onClick={onCancel}>
+      <div style={{ background: "#fff", borderRadius: 16, padding: 28, maxWidth: 520, width: "100%", maxHeight: "90vh", overflowY: "auto", boxShadow: "0 24px 64px rgba(0,0,0,.18)" }}
+        onClick={e => e.stopPropagation()}>
+        <div style={{ fontFamily: "Fraunces, serif", fontSize: 20, fontWeight: 300, color: "var(--txt)", marginBottom: 4 }}>Vystavit na jiný subjekt</div>
+        <div style={{ fontSize: 12.5, color: "var(--mut)", marginBottom: 20 }}>
+          {client?.name} · evidence (výkazy, klient) zůstává na {client?.name} — jen výsledná faktura ukáže v poli "Odběratel" subjekt zadaný níže.
+        </div>
+
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 16 }}>
+          <label className="field" style={{ gridColumn: "1 / -1" }}>
+            <span>Název / Firma</span>
+            <input value={name} onChange={e => setName(e.target.value)} placeholder="např. Martinovská Holding s.r.o." autoFocus />
+          </label>
+          <label className="field">
+            <span>IČO</span>
+            <input value={ico} onChange={e => setIco(e.target.value)} />
+          </label>
+          <label className="field">
+            <span>DIČ</span>
+            <input value={dic} onChange={e => setDic(e.target.value)} />
+          </label>
+          <label className="field" style={{ gridColumn: "1 / -1" }}>
+            <span>Sídlo</span>
+            <input value={address} onChange={e => setAddress(e.target.value)} placeholder="ulice č.p., PSČ město" />
+          </label>
+        </div>
+
+        <div style={{ display: "flex", gap: 10 }}>
+          <button className="btn gho" style={{ flex: 1 }} onClick={onCancel}>Zpět</button>
+          {initial && (
+            <button className="btn" style={{ flex: 1, color: "#A8527A" }} onClick={() => onConfirm(null)}>Zrušit jiný subjekt</button>
+          )}
+          <button className="btn pri" style={{ flex: 2 }} onClick={handleConfirm}>Uložit</button>
+        </div>
       </div>
     </div>
   );
@@ -8902,7 +8962,7 @@ function VykazyCalendar({ workEntries, escrows, dense = false, onOpenFull, onAdd
 }
 
 /* ─── FAKTURACE ─── */
-function InvoiceList({ invoices, clients, workEntries, escrows, onOpen, onOpenClient, onToggleStatus, onGenerateInvoice, onPreviewInvoice, onEditInvoice, onOpenDiscountModal, onAddWorkEntry, loading }) {
+function InvoiceList({ invoices, clients, workEntries, escrows, onOpen, onOpenClient, onToggleStatus, onGenerateInvoice, onPreviewInvoice, onEditInvoice, onOpenDiscountModal, onOpenAltSubjectModal, altSubjects, onAddWorkEntry, loading }) {
   const [search, setSearch] = useState("");
   const [filterStatus, setFilterStatus] = useState("vse");
   const [filterClient, setFilterClient] = useState("");
@@ -9053,6 +9113,16 @@ function InvoiceList({ invoices, clients, workEntries, escrows, onOpen, onOpenCl
                   <button className="btn" style={{ fontSize: 12, flexShrink: 0 }}
                     onClick={e => { e.stopPropagation(); onOpenDiscountModal && onOpenDiscountModal(d.clientId, d.entries); }}>
                     Změny{d.entries.some(e => Number(e.discount_amount) > 0) ? " •" : ""}
+                  </button>
+                  {/* Tom 30.6.2026: musí být vidět přímo na panelu draftu, ne až skryté v dialogu
+                      vystavení — evidence/klient se tímto nemění, jen "Odběratel" na faktuře. */}
+                  <button className="btn" style={{
+                    fontSize: 12, flexShrink: 0,
+                    background: altSubjects?.[d.clientId] ? "#F0EEFF" : "#fff",
+                    borderColor: altSubjects?.[d.clientId] ? "var(--ink)" : "var(--line)",
+                  }}
+                    onClick={e => { e.stopPropagation(); onOpenAltSubjectModal && onOpenAltSubjectModal(d.clientId, d.entries); }}>
+                    {altSubjects?.[d.clientId] ? `Jiný subjekt: ${altSubjects[d.clientId].name} •` : "Vystavit na jiný subjekt"}
                   </button>
                   <button className="btn" style={{ fontSize: 12, flexShrink: 0 }}
                     onClick={e => { e.stopPropagation(); onPreviewInvoice && onPreviewInvoice(d.clientId, d.entries); }}>
@@ -11814,6 +11884,13 @@ export default function MauxCRM() {
   const [previewModal, setPreviewModal] = useState(null); // { invoice, client, workEntries }
   const [editInvModal, setEditInvModal] = useState(null); // { inv } — edit existing invoice
   const [discountModal, setDiscountModal] = useState(null); // { clientId, entries } — "Změny" krok před vystavením faktury
+  // Tom 30.6.2026: "Vystavit na jiný subjekt" musí být dostupné přímo z panelu draftu (ne až
+  // skryté v dialogu vystavení) — drží se per-klient, dokud se draft nevystaví. Klientský
+  // záznam/evidence (client_id na výkazech) se TÍMTO NIKDY nemění — jen se to propíše do
+  // invoice.billed_as, takže na vystavené faktuře vidíš jiného odběratele, ale v evidenci to
+  // pořád patří původnímu klientovi (např. Freedom – stav s.r.o, i když fakturujeme na realitní).
+  const [altSubjectModal, setAltSubjectModal] = useState(null); // { clientId, entries }
+  const [altSubjects, setAltSubjects] = useState({}); // { [clientId]: { name, ico, dic, address } }
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => setSession(session));
@@ -11975,6 +12052,22 @@ export default function MauxCRM() {
     } catch (err) { alert("Chyba: " + err.message); } finally { setSaving(false); }
   };
 
+  // "Vystavit na jiný subjekt" — Tom 30.6.2026: stejný princip jako "Změny" výše, samostatný
+  // krok přímo z panelu draftu. Ukládá se jen do lokálního stavu (altSubjects), dokud se
+  // draft nevystaví — nic se nepíše do klienta ani výkazů, jen se to předá do dialogu
+  // vystavení/náhledu jako předvyplněný invoice.billed_as.
+  const openAltSubjectModal = (clientId, entries) => {
+    setAltSubjectModal({ clientId, entries });
+  };
+  const confirmAltSubject = (clientId, billedAs) => {
+    setAltSubjects(prev => {
+      const next = { ...prev };
+      if (billedAs) next[clientId] = billedAs; else delete next[clientId];
+      return next;
+    });
+    setAltSubjectModal(null);
+  };
+
   const openPreviewModal = (clientId, entries) => {
     const client = clients.find(c => c.id === clientId);
     // Slevy potvrzené přes "Změny" (discount_amount na výkazu) se promítnou i do tohoto rychlého náhledu.
@@ -12004,6 +12097,9 @@ export default function MauxCRM() {
       vat_amount_before_discount: vatBefore,
       total_before_discount: workAmtBefore+vatBefore+admin+sig,
       status: "pripravena", notes: "", var_symbol: nextInvoiceNumber(invoices).replace(/\D/g,"").slice(-6),
+      // Tom 30.6.2026: pokud byl na draftu nastaven "Vystavit na jiný subjekt", rychlý náhled to musí
+      // okamžitě respektovat — jen v poli Odběratel, klient/evidence (client_id výše) se nemění.
+      billed_as: altSubjects[clientId] || null,
     };
     setPreviewModal({ invoice: inv, client, workEntries: entries });
   };
@@ -12417,6 +12513,8 @@ export default function MauxCRM() {
               onPreviewInvoice={openPreviewModal}
               onEditInvoice={openEditInvModal}
               onOpenDiscountModal={openDiscountModal}
+              onOpenAltSubjectModal={openAltSubjectModal}
+              altSubjects={altSubjects}
               onAddWorkEntry={navToNewWorkEntry}
               loading={dataLoading}
             />
@@ -12540,6 +12638,7 @@ export default function MauxCRM() {
           entries={issueModal.entries}
           clients={clients}
           invoices={invoices}
+          initialBilledAs={altSubjects[issueModal.clientId] || null}
           onConfirm={confirmIssueInvoice}
           onCancel={() => setIssueModal(null)}
           saving={saving}
@@ -12554,6 +12653,17 @@ export default function MauxCRM() {
           onConfirm={confirmDraftDiscounts}
           onCancel={() => setDiscountModal(null)}
           saving={saving}
+        />
+      )}
+
+      {altSubjectModal && (
+        <AltSubjectModal
+          clientId={altSubjectModal.clientId}
+          entries={altSubjectModal.entries}
+          clients={clients}
+          initial={altSubjects[altSubjectModal.clientId] || null}
+          onConfirm={billedAs => confirmAltSubject(altSubjectModal.clientId, billedAs)}
+          onCancel={() => setAltSubjectModal(null)}
         />
       )}
 
