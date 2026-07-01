@@ -7403,17 +7403,18 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
   const totalNutne = nutne.reduce((s,i) => s+(i.amount||0), 0);
   const totalLuxus = luxus.reduce((s,i) => s+(i.amount||0), 0);
   // Josef Řehák — živý automatický náklad za AKTUÁLNÍ (běžící) měsíc.
-  // Mzda se vyplácí zpětně až po uzavření měsíce, takže částka tady je to, co se
-  // promítne jako náklad do projekce PŘÍŠTÍHO měsíce. Dny, co už proběhly, počítáme
-  // z reálné docházky; dny, co ještě nenastaly ale Josef si je naplánoval (assistant_availability),
-  // presumujeme na 8 h/den — jak den proběhne a docházka se zapíše, presumpce se nahradí reálným číslem.
+  // Mzda se platí za PŘEDCHOZÍ měsíc — v červenci platím mzdu za červen atd.
+  // _josefYm = měsíc PRÁCE (= předchozí měsíc), nikoliv aktuální měsíc.
+  // Dny, co proběhly, počítáme z reálné docházky; pro běžící měsíc (přechod měsíce)
+  // ještě nenastané dny s plánovanou docházkou presumujeme na 8 h/den.
   const _josefNow = new Date();
-  const _josefYm = `${_josefNow.getFullYear()}-${String(_josefNow.getMonth()+1).padStart(2,"0")}`;
+  const _josefPayMonth = new Date(_josefNow.getFullYear(), _josefNow.getMonth() - 1, 1); // předchozí měsíc
+  const _josefYm = `${_josefPayMonth.getFullYear()}-${String(_josefPayMonth.getMonth()+1).padStart(2,"0")}`;
   const _josefTodayStr = _josefNow.toISOString().slice(0,10);
   const _josefAttByDate = {};
   (assistantAttendance||[]).forEach(a => { if ((a.date||"").startsWith(_josefYm)) _josefAttByDate[a.date] = a; });
   const _josefPlannedSet = new Set((assistantAvailability && assistantAvailability.year_month === _josefYm ? assistantAvailability.planned_dates : null) || []);
-  const _josefDaysInMonth = new Date(_josefNow.getFullYear(), _josefNow.getMonth()+1, 0).getDate();
+  const _josefDaysInMonth = new Date(_josefPayMonth.getFullYear(), _josefPayMonth.getMonth()+1, 0).getDate();
   let _josefHoursSum = 0;
   for (let d=1; d<=_josefDaysInMonth; d++) {
     const dateStr = `${_josefYm}-${String(d).padStart(2,"0")}`;
@@ -9177,7 +9178,7 @@ function VykazyCalendar({ workEntries, escrows, dense = false, onOpenFull, onAdd
 }
 
 /* ─── FAKTURACE ─── */
-function InvoiceList({ invoices, clients, workEntries, escrows, onOpen, onOpenClient, onToggleStatus, onGenerateInvoice, onPreviewInvoice, onEditInvoice, onOpenDiscountModal, onOpenAltSubjectModal, altSubjects, onAddWorkEntry, onRevertInvoice, loading }) {
+function InvoiceList({ invoices, clients, workEntries, escrows, onOpen, onOpenClient, onToggleStatus, onGenerateInvoice, onPreviewInvoice, onEditInvoice, onOpenDiscountModal, onOpenAltSubjectModal, altSubjects, onAddWorkEntry, onRevertInvoice, onIssueExistingInvoice, loading }) {
   const [search, setSearch] = useState("");
   const [filterStatus, setFilterStatus] = useState("vse");
   const [filterClient, setFilterClient] = useState("");
@@ -9219,7 +9220,14 @@ function InvoiceList({ invoices, clients, workEntries, escrows, onOpen, onOpenCl
       .sort((a,b) => (a.earliestDate||"9999-99-99").localeCompare(b.earliestDate||"9999-99-99"));
   }, [workEntries, clients]);
 
+  // Vrácené faktury — 'pripravena' faktury s napárovanými výkazy (po "Vrátit do nevystavených")
+  const draftInvoices = useMemo(() =>
+    invoices.filter(i => i.status === 'pripravena'),
+    [invoices]
+  );
+
   const [expandedDraft, setExpandedDraft] = useState(null);
+  const [expandedDraftInv, setExpandedDraftInv] = useState(null);
 
   const filtered = useMemo(() => {
     let list = filterStatus === "pripravena" ? [...invoices] : invoices.filter(i => i.status !== 'pripravena');
@@ -9284,6 +9292,92 @@ function InvoiceList({ invoices, clients, workEntries, escrows, onOpen, onOpenCl
 
   return (
     <>
+      {/* ── VRÁCENÉ FAKTURY K OPĚTOVNÉMU VYSTAVENÍ ── */}
+      {draftInvoices.length > 0 && (
+        <div style={{ marginBottom: 28 }}>
+          <div className="sec-hd" style={{ marginBottom: 14 }}>
+            <span style={{ color: "var(--ink)", fontWeight: 600 }}>
+              Vráceno k vystavení · {draftInvoices.length} {draftInvoices.length === 1 ? "faktura" : "faktury"}
+            </span>
+            <span style={{ fontSize: 12, color: "var(--mut)", fontWeight: 400, textTransform: "none", letterSpacing: 0 }}>
+              Napárované výkazy zůstávají zachovány
+            </span>
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            {draftInvoices.map(inv => {
+              const linkedEntries = (workEntries || []).filter(e => e.invoice_id === inv.id);
+              const clientObj = clients.find(c => c.id === inv.client_id) || inv.clients;
+              return (
+                <div key={inv.id} style={{ background: "#fff", border: "1.5px solid #EDE9FE", borderRadius: 12, overflow: "hidden" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 16, padding: "14px 18px", cursor: "pointer" }}
+                    onClick={() => setExpandedDraftInv(expandedDraftInv === inv.id ? null : inv.id)}>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                        <span style={{ fontWeight: 600, fontSize: 14, color: "var(--txt)" }}>
+                          {clientObj?.name || inv.notes?.split(" - ")[0] || "—"}
+                        </span>
+                        <span style={{
+                          fontSize: 10.5, fontWeight: 600, color: "#7C3AED", background: "#F5F3FF",
+                          border: "1px solid #DDD6FE", borderRadius: 6, padding: "1px 7px", flexShrink: 0,
+                        }}>{inv.invoice_number || "—"}</span>
+                        <span style={{
+                          fontSize: 10, fontWeight: 500, color: "#92400E", background: "#FEF3C7",
+                          border: "1px solid #FDE68A", borderRadius: 6, padding: "1px 7px", flexShrink: 0,
+                        }}>↩ vrácena</span>
+                      </div>
+                      <div style={{ fontSize: 11.5, color: "var(--mut)", marginTop: 2 }}>
+                        {linkedEntries.length} výkazů napárováno · vydáno {fmtDate(inv.issue_date) || "—"}
+                      </div>
+                    </div>
+                    <div style={{ textAlign: "right", marginRight: 16 }}>
+                      <div style={{ fontFamily: "Fraunces, serif", fontSize: 18, fontWeight: 300, color: "var(--gold)" }}>
+                        {fmtKc(inv.total || 0)}
+                      </div>
+                      <div style={{ fontSize: 11, color: "var(--mut)" }}>
+                        základ {fmtKc(inv.subtotal || 0)} + DPH {fmtKc((inv.total || 0) - (inv.subtotal || 0))}
+                      </div>
+                    </div>
+                    <button className="btn" style={{ fontSize: 12, flexShrink: 0 }}
+                      onClick={e => { e.stopPropagation(); onPreviewInvoice && onPreviewInvoice(inv.client_id, linkedEntries); }}>
+                      Náhled
+                    </button>
+                    <button className="btn pri" style={{ fontSize: 12, flexShrink: 0 }}
+                      onClick={e => { e.stopPropagation(); onIssueExistingInvoice && onIssueExistingInvoice(inv); }}>
+                      Vystavit fakturu →
+                    </button>
+                    <span style={{ fontSize: 11, color: "var(--mut)", cursor: "pointer" }}>{expandedDraftInv === inv.id ? "▲" : "▼"}</span>
+                  </div>
+                  {expandedDraftInv === inv.id && linkedEntries.length > 0 && (
+                    <div style={{ borderTop: "1px solid var(--line)", background: "#FAFAFA" }}>
+                      <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5 }}>
+                        <thead><tr style={{ background: "#F5F3FF" }}>
+                          <th style={{ padding: "8px 18px", textAlign: "left", fontWeight: 500, color: "var(--mut)", fontSize: 10, letterSpacing: ".1em", textTransform: "uppercase" }}>Datum</th>
+                          <th style={{ padding: "8px 18px", textAlign: "left", fontWeight: 500, color: "var(--mut)", fontSize: 10, letterSpacing: ".1em", textTransform: "uppercase" }}>Popis</th>
+                          <th style={{ padding: "8px 18px", textAlign: "right", fontWeight: 500, color: "var(--mut)", fontSize: 10, letterSpacing: ".1em", textTransform: "uppercase" }}>Hodiny</th>
+                          <th style={{ padding: "8px 18px", textAlign: "right", fontWeight: 500, color: "var(--mut)", fontSize: 10, letterSpacing: ".1em", textTransform: "uppercase" }}>Bez DPH</th>
+                        </tr></thead>
+                        <tbody>
+                          {linkedEntries.sort((a,b)=>(a.entry_date||"").localeCompare(b.entry_date||"")).map(e => (
+                            <tr key={e.id} style={{ borderTop: "1px solid var(--line)" }}>
+                              <td style={{ padding: "10px 18px", color: "var(--mut)", whiteSpace: "nowrap" }}>{fmtDate(e.entry_date)}</td>
+                              <td style={{ padding: "10px 18px", color: "var(--txt)" }}>{e.description}</td>
+                              <td style={{ padding: "10px 18px", textAlign: "right", color: "var(--mut)" }}>{e.hours > 0 ? `${e.hours} h` : "—"}</td>
+                              <td style={{ padding: "10px 18px", textAlign: "right", fontFamily: "Fraunces, serif", fontWeight: 300 }}>
+                                {fmtKc(Math.max((e.amount||0)-(Number(e.discount_amount)||0),0)+(e.admin_fee||0)+(Number(e.sig_count)||0)*SIGNATURE_DECL_FEE)}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
       {/* ── PŘIPRAVENO K VYSTAVENÍ ── */}
       {drafts.length > 0 && (
         <div style={{ marginBottom: 36 }}>
@@ -12527,6 +12621,17 @@ export default function MauxCRM() {
     } catch (err) { alert("Chyba: " + err.message); } finally { setSaving(false); }
   };
 
+  const issueExistingInvoice = async (inv) => {
+    if (!window.confirm(`Vystavit fakturu ${inv.invoice_number || inv.id}?`)) return;
+    setSaving(true);
+    try {
+      const { clients: _c, ...cleanInv } = inv;
+      await upsertInvoice({ ...cleanInv, status: 'vystavena', issue_date: cleanInv.issue_date || new Date().toISOString().slice(0, 10) });
+      const updInvs = await fetchInvoices();
+      setInvoices(updInvs);
+    } catch (err) { alert("Chyba: " + err.message); } finally { setSaving(false); }
+  };
+
   const saveClient = async (c) => {
     setSaving(true);
     try { await upsertClient(c); const updated = await fetchClients(); setClients(updated); setSel(c.id); setMode("detail"); }
@@ -12895,6 +13000,7 @@ export default function MauxCRM() {
               altSubjects={altSubjects}
               onAddWorkEntry={navToNewWorkEntry}
               onRevertInvoice={revertInvoiceToDraft}
+              onIssueExistingInvoice={issueExistingInvoice}
               loading={dataLoading}
             />
           )}
