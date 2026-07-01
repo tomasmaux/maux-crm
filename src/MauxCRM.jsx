@@ -9144,7 +9144,7 @@ function VykazyCalendar({ workEntries, escrows, dense = false, onOpenFull, onAdd
 }
 
 /* ─── FAKTURACE ─── */
-function InvoiceList({ invoices, clients, workEntries, escrows, onOpen, onOpenClient, onToggleStatus, onGenerateInvoice, onPreviewInvoice, onEditInvoice, onOpenDiscountModal, onOpenAltSubjectModal, altSubjects, onAddWorkEntry, loading }) {
+function InvoiceList({ invoices, clients, workEntries, escrows, onOpen, onOpenClient, onToggleStatus, onGenerateInvoice, onPreviewInvoice, onEditInvoice, onOpenDiscountModal, onOpenAltSubjectModal, altSubjects, onAddWorkEntry, onRevertInvoice, loading }) {
   const [search, setSearch] = useState("");
   const [filterStatus, setFilterStatus] = useState("vse");
   const [filterClient, setFilterClient] = useState("");
@@ -9189,7 +9189,7 @@ function InvoiceList({ invoices, clients, workEntries, escrows, onOpen, onOpenCl
   const [expandedDraft, setExpandedDraft] = useState(null);
 
   const filtered = useMemo(() => {
-    let list = [...invoices];
+    let list = filterStatus === "pripravena" ? [...invoices] : invoices.filter(i => i.status !== 'pripravena');
     const q = search.trim().toLowerCase();
     if (q) list = list.filter(i =>
       (i.clients?.name || i.notes || "").toLowerCase().includes(q) ||
@@ -9457,6 +9457,11 @@ function InvoiceList({ invoices, clients, workEntries, escrows, onOpen, onOpenCl
                   <button className="btn gho" style={{ fontSize: 11, padding: "4px 8px", color: "var(--ink)" }}
                     title="Upravit fakturu"
                     onClick={() => onEditInvoice && onEditInvoice(inv)}>✎ Upravit</button>
+                  {invoiceStatus(inv) === "vystavena" && (
+                    <button className="btn gho" style={{ fontSize: 11, padding: "4px 8px", color: "#7C3AED" }}
+                      title="Vrátit do nevystavených"
+                      onClick={() => onRevertInvoice && onRevertInvoice(inv)}>↩ Vrátit</button>
+                  )}
                   <button className="btn gho" style={{ fontSize: 11, padding: "4px 8px", color: "#DC2626" }}
                     onClick={() => onOpen(inv.id, "delete")}>✕</button>
                 </td>
@@ -12478,6 +12483,20 @@ export default function MauxCRM() {
     } catch (err) { alert("Chyba: " + err.message); } finally { setSaving(false); }
   };
 
+  const revertInvoiceToDraft = async (inv) => {
+    if (!window.confirm(`Vrátit fakturu ${inv.invoice_number || inv.id} do nevystavených? Výkazy práce budou odpojeny.`)) return;
+    setSaving(true);
+    try {
+      const { clients: _c, ...cleanInv } = inv;
+      await upsertInvoice({ ...cleanInv, status: 'pripravena' });
+      const linked = workEntries.filter(e => e.invoice_id === inv.id);
+      await Promise.all(linked.map(e => upsertWorkEntry({ ...e, invoice_id: null })));
+      const [updInvs, updWE] = await Promise.all([fetchInvoices(), fetchWorkEntries()]);
+      setInvoices(updInvs);
+      setWorkEntries(updWE);
+    } catch (err) { alert("Chyba: " + err.message); } finally { setSaving(false); }
+  };
+
   const saveClient = async (c) => {
     setSaving(true);
     try { await upsertClient(c); const updated = await fetchClients(); setClients(updated); setSel(c.id); setMode("detail"); }
@@ -12845,6 +12864,7 @@ export default function MauxCRM() {
               onOpenAltSubjectModal={openAltSubjectModal}
               altSubjects={altSubjects}
               onAddWorkEntry={navToNewWorkEntry}
+              onRevertInvoice={revertInvoiceToDraft}
               loading={dataLoading}
             />
           )}
