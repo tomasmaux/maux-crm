@@ -7064,6 +7064,156 @@ function JosefPanel({ logs, attendance: attendanceProp }) {
   );
 }
 
+/* ─── TRIPLE RING PANEL — Karlín 2154 ──────────────────────────────────────────────────
+   Tom 30.6.2026: "brand, ale Karlín 2154" — barevné animované ringy místo ploché linky.
+   Spořicí účet + Firemní rezerva + Osobní majetek v jedné kompaktní sekci Bilance.
+   Zásada: evidence/client_id se nemění, jen vizuální vrstva.                          */
+function TripleRingPanel({ sporSegs, sporBal, sporEarmarked, firmaRez, planKap,
+                           majSegs, totalMaj, onSetGoal }) {
+  const [mounted, setMounted]   = useState(false);
+  const [expanded, setExpanded] = useState(null); // "spor" | "rez" | "maj"
+  useEffect(() => { const t = setTimeout(() => setMounted(true), 80); return () => clearTimeout(t); }, []);
+
+  // ── Mini segmented ring renderer ──
+  const MiniRing = ({ segs, accent, size = 72 }) => {
+    const R = (size - 10) / 2, C = 2 * Math.PI * R, cx = size / 2, cy = size / 2;
+    const total = segs.reduce((s, x) => s + (x.value || 0), 0) || 1;
+    const GAP   = C * 0.012; // visual gap between segments (% of circumference)
+    let acc     = 0;
+    const arcs  = segs.filter(x => (x.value || 0) > 0).map(seg => {
+      const len = Math.max((seg.value / total) * C - GAP, 0);
+      const startDeg = (acc / C) * 360 - 90;
+      acc += (seg.value / total) * C;
+      return { ...seg, len, startDeg };
+    });
+    return (
+      <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} style={{ overflow: "visible", display: "block" }}>
+        <defs>
+          <filter id={`trg-glow-${accent.replace("#","")}`} x="-40%" y="-40%" width="180%" height="180%">
+            <feGaussianBlur stdDeviation="2.5" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+          </filter>
+        </defs>
+        {/* track */}
+        <circle cx={cx} cy={cy} r={R} fill="none" stroke={`${accent}18`} strokeWidth={5} />
+        {/* segments */}
+        {arcs.map((arc, i) => (
+          <circle key={i} cx={cx} cy={cy} r={R} fill="none"
+            stroke={arc.color || accent}
+            strokeWidth={5}
+            strokeLinecap={arcs.length === 1 ? "round" : "butt"}
+            strokeDasharray={`${mounted ? arc.len : 0} ${C}`}
+            style={{
+              transform: `rotate(${arc.startDeg}deg)`,
+              transformOrigin: `${cx}px ${cy}px`,
+              transition: `stroke-dasharray 1.3s cubic-bezier(.4,0,.2,1) ${i * 0.1}s`,
+              filter: `url(#trg-glow-${accent.replace("#","")})`,
+            }}
+          />
+        ))}
+      </svg>
+    );
+  };
+
+  const RING_SIZE = 70;
+  const rezPct = planKap > 0 ? Math.min(firmaRez / planKap, 1) : 0;
+  // Rezerva: 2 segmenty — naplněno (zelená) + do cíle (průhledná)
+  const rezSegs = [
+    { value: Math.max(firmaRez, 0), color: "#1D9E75" },
+    { value: Math.max(planKap - firmaRez, 0), color: "rgba(29,158,117,.1)" },
+  ];
+
+  const ringBlock = (key, ring, label, mainVal, sub, accentCol) => (
+    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 5, flex: 1, cursor: "pointer", minWidth: 0 }}
+      onClick={() => setExpanded(e => e === key ? null : key)}>
+      <div style={{ position: "relative" }}>
+        {ring}
+        {/* center dot — small accent indicator */}
+        <div style={{
+          position: "absolute", top: "50%", left: "50%", transform: "translate(-50%,-50%)",
+          width: 7, height: 7, borderRadius: "50%", background: accentCol,
+          boxShadow: `0 0 8px ${accentCol}`,
+          opacity: mounted ? 1 : 0, transition: "opacity 1s ease 0.6s",
+        }} />
+      </div>
+      <div style={{ fontSize: 7, letterSpacing: ".18em", textTransform: "uppercase", color: "var(--mut)", fontWeight: 800, textAlign: "center", lineHeight: 1.2 }}>{label}</div>
+      <div style={{ fontFamily: "Fraunces,serif", fontSize: 14, fontWeight: 300, color: "var(--ink)", textAlign: "center", lineHeight: 1 }}>{mainVal}</div>
+      {sub && <div style={{ fontSize: 8.5, color: accentCol, textAlign: "center", opacity: 0.85 }}>{sub}</div>}
+      <div style={{ fontSize: 8, color: "var(--mut)", opacity: 0.6 }}>{expanded === key ? "▲" : "▾"}</div>
+    </div>
+  );
+
+  return (
+    <div style={{ borderTop: "1px solid rgba(53,24,165,.14)", paddingTop: 14 }}>
+      {/* 3 rings */}
+      <div style={{ display: "flex", gap: 6, alignItems: "flex-start" }}>
+        {ringBlock("spor",
+          <MiniRing segs={sporSegs} accent="#3518A5" size={RING_SIZE} />,
+          "Spořicí účet", fmtKc(sporBal),
+          `${fmtKc(sporEarmarked)} obálky`,
+          "#3518A5"
+        )}
+        <div style={{ width: 1, background: "rgba(53,24,165,.1)", alignSelf: "stretch", marginTop: 4, marginBottom: 4 }} />
+        {ringBlock("rez",
+          <MiniRing segs={rezSegs} accent="#1D9E75" size={RING_SIZE} />,
+          "Firemní rezerva", fmtKc(firmaRez),
+          `${Math.round(rezPct * 100)} % z ${fmtKc(planKap)}`,
+          "#1D9E75"
+        )}
+        <div style={{ width: 1, background: "rgba(53,24,165,.1)", alignSelf: "stretch", marginTop: 4, marginBottom: 4 }} />
+        {ringBlock("maj",
+          <MiniRing segs={majSegs} accent="#6358D4" size={RING_SIZE} />,
+          "Osobní majetek", fmtKc(totalMaj),
+          null,
+          "#6358D4"
+        )}
+      </div>
+
+      {/* Expanded detail */}
+      {expanded === "spor" && (
+        <div style={{ marginTop: 10, padding: "10px 6px 2px", borderTop: "1px solid rgba(53,24,165,.08)", display: "flex", flexDirection: "column", gap: 5 }}>
+          {sporSegs.map((s, i) => (
+            <div key={i} style={{ display: "flex", alignItems: "center", gap: 7 }}>
+              <span style={{ width: 7, height: 7, borderRadius: "50%", background: s.color, flexShrink: 0, boxShadow: `0 0 5px ${s.color}88` }} />
+              <span style={{ flex: 1, fontSize: 10, color: "var(--mut)", letterSpacing: ".01em", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.label}</span>
+              <span className="maux-num" style={{ fontSize: 11, fontWeight: 500, color: "var(--ink)", flexShrink: 0 }}>{fmtKc(s.value)}</span>
+              <span style={{ fontSize: 9, color: "var(--mut)", width: 26, textAlign: "right", flexShrink: 0 }}>{Math.round((s.value / (sporBal || 1)) * 100)}%</span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {expanded === "rez" && (
+        <div style={{ marginTop: 10, padding: "10px 6px 2px", borderTop: "1px solid rgba(29,158,117,.12)", display: "flex", flexDirection: "column", gap: 6 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10.5, color: "var(--ink)" }}>
+            <span style={{ color: "#1D9E75", fontWeight: 600 }}>Naplněno</span>
+            <span className="maux-num" style={{ fontWeight: 600 }}>{fmtKc(firmaRez)}</span>
+          </div>
+          <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10.5, color: "var(--mut)" }}>
+            <span>Zbývá do cíle</span>
+            <span className="maux-num">{fmtKc(Math.max(planKap - firmaRez, 0))}</span>
+          </div>
+          <div style={{ height: 4, borderRadius: 99, background: "rgba(29,158,117,.12)", overflow: "hidden", marginTop: 2 }}>
+            <div style={{ height: "100%", width: `${rezPct * 100}%`, background: "#1D9E75", borderRadius: 99, transition: "width 1.2s ease" }} />
+          </div>
+        </div>
+      )}
+
+      {expanded === "maj" && (
+        <div style={{ marginTop: 10, padding: "10px 6px 2px", borderTop: "1px solid rgba(99,88,212,.12)", display: "flex", flexDirection: "column", gap: 5 }}>
+          {majSegs.map((s, i) => (
+            <div key={i} style={{ display: "flex", alignItems: "center", gap: 7 }}>
+              <span style={{ width: 7, height: 7, borderRadius: "50%", background: s.color, flexShrink: 0, boxShadow: `0 0 5px ${s.color}88` }} />
+              <span style={{ flex: 1, fontSize: 10, color: "var(--mut)", letterSpacing: ".01em", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.label}</span>
+              <span className="maux-num" style={{ fontSize: 11, fontWeight: 500, color: "var(--ink)", flexShrink: 0 }}>{fmtKc(s.value)}</span>
+              <span style={{ fontSize: 9, color: "var(--mut)", width: 26, textAlign: "right", flexShrink: 0 }}>{Math.round((s.value / (totalMaj || 1)) * 100)}%</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 
 function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, loanTrackers, loanTransactions, escrows, expenseChecks, onToggleExpenseCheck, onNav, onAddWorkEntry, onSaveFinance, onDeleteFinance, onDpfoToggle, onLoanTxAdd, onLoanTxToggle, onLoanTxDelete, onLoanUpdate, assistantLogs=[], assistantAttendance=[], assistantAvailability=null, xtbTranches=[] }) {
   const [escrowAlertDismissed, setEscrowAlertDismissed] = useState(false);
@@ -11005,11 +11155,142 @@ function AsistentDochazka({ email, attendance, onRefreshAttendance }) {
     catch(e) { alert("Chyba: "+e.message); } finally { setSavingAtt(false); }
   };
   const monthNames = ["leden","únor","březen","duben","květen","červen","červenec","srpen","září","říjen","listopad","prosinec"];
+  const monthNamesGen = ["ledna","února","března","dubna","května","června","července","srpna","září","října","listopadu","prosince"];
   const getWorkDays = (ym) => {
     const [y,m] = ym.split("-").map(Number);
     const days=[]; const d=new Date(y,m-1,1);
     while(d.getMonth()===m-1){if(d.getDay()!==0&&d.getDay()!==6)days.push({ds:localDs(d),dow:d.getDay(),dayNum:d.getDate()});d.setDate(d.getDate()+1);}
     return days;
+  };
+
+  // ── Export docházky za uzavřený měsíc — Tom 1.7.2026 ──
+  const exportDochazka = (ym) => {
+    const [ey, em] = ym.split("-").map(Number);
+    const rows = attendance
+      .filter(a => (a.date || "").startsWith(ym) && a.check_in && a.check_out)
+      .sort((a,b) => a.date.localeCompare(b.date));
+    if (rows.length === 0) { alert(`Žádné záznamy docházky za ${monthNames[em-1]} ${ey}.`); return; }
+
+    const toT = (ts) => new Date(ts).toLocaleTimeString("cs-CZ", { hour: "2-digit", minute: "2-digit" });
+    const fmtHm = (h) => {
+      if (!h || h <= 0) return "0 h";
+      const fl = Math.floor(h), m = Math.round((h - fl) * 60);
+      return m > 0 ? `${fl} h ${m} min` : `${fl} h`;
+    };
+    const totalNet = rows.reduce((s, a) => s + netAttHours(a.check_in, a.check_out), 0);
+    const totalWage = Math.round(totalNet * ASSISTANT_HOURLY_RATE);
+
+    const rowsHtml = rows.map(a => {
+      const gross = (new Date(a.check_out) - new Date(a.check_in)) / 36e5;
+      const net   = netAttHours(a.check_in, a.check_out);
+      const lunch = gross >= LUNCH_THRESHOLD_H;
+      const d     = new Date(a.date + "T00:00:00");
+      const dayLabel = d.toLocaleDateString("cs-CZ", { weekday: "short", day: "numeric", month: "numeric" });
+      return `
+        <tr>
+          <td>${dayLabel}</td>
+          <td>${toT(a.check_in)} – ${toT(a.check_out)}</td>
+          <td style="text-align:center;color:${lunch?"#854D0E":"#9CA3AF"}">${lunch ? `−${LUNCH_BREAK_H} h` : "—"}</td>
+          <td style="text-align:right;font-weight:600">${fmtHm(net)}</td>
+        </tr>`;
+    }).join("");
+
+    const html = `<!DOCTYPE html>
+<html lang="cs">
+<head>
+<meta charset="UTF-8">
+<title>Docházka — ${monthNames[em-1].charAt(0).toUpperCase()+monthNames[em-1].slice(1)} ${ey}</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,300;9..144,400&family=Inter:wght@400;500;600&display=swap');
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Inter', sans-serif; color: #16142A; background: #fff; padding: 48px 56px; max-width: 720px; margin: 0 auto; }
+  .brand { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 40px; }
+  .brand-name { font-family: 'Fraunces', serif; font-size: 22px; font-weight: 400; color: #3518A5; letter-spacing: .06em; }
+  .brand-sub { font-size: 8px; letter-spacing: .42em; text-transform: uppercase; color: #B8923D; margin-top: 3px; font-weight: 600; }
+  .brand-right { text-align: right; font-size: 10px; color: #8A8A93; line-height: 1.7; }
+  h1 { font-family: 'Fraunces', serif; font-size: 28px; font-weight: 300; color: #3518A5; margin-bottom: 4px; }
+  .subtitle { font-size: 11px; letter-spacing: .18em; text-transform: uppercase; color: #8A8A93; font-weight: 600; margin-bottom: 28px; }
+  table { width: 100%; border-collapse: collapse; }
+  thead tr { border-bottom: 2px solid #3518A5; }
+  thead th { font-size: 9px; letter-spacing: .18em; text-transform: uppercase; color: #3518A5; font-weight: 700; padding: 0 0 10px; text-align: left; }
+  thead th:last-child { text-align: right; }
+  thead th:nth-child(3) { text-align: center; }
+  tbody tr { border-bottom: 1px solid #E4E4E7; }
+  tbody td { font-size: 12.5px; padding: 9px 0; color: #16142A; }
+  .total-row { border-top: 2px solid #3518A5; border-bottom: none; }
+  .total-row td { padding: 13px 0 4px; font-weight: 700; font-size: 14px; color: #3518A5; }
+  .rate-block { margin-top: 28px; padding: 16px 20px; background: #F4F3FF; border-radius: 10px; border-left: 3px solid #3518A5; }
+  .rate-block .rate-line { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 4px; }
+  .rate-block .lbl { font-size: 10px; letter-spacing: .1em; text-transform: uppercase; color: #6B6B75; font-weight: 600; }
+  .rate-block .val { font-family: 'Fraunces', serif; font-size: 22px; font-weight: 300; color: #3518A5; }
+  .rate-note { font-size: 10px; color: #8A8A93; margin-top: 8px; line-height: 1.5; }
+  .footer { margin-top: 44px; padding-top: 16px; border-top: 1px solid #E4E4E7; display: flex; justify-content: space-between; font-size: 9px; color: #8A8A93; letter-spacing: .04em; }
+  @media print {
+    body { padding: 24px 32px; }
+    .no-print { display: none !important; }
+  }
+</style>
+</head>
+<body>
+<div class="brand">
+  <div>
+    <div class="brand-name">MAUX LEGAL</div>
+    <div class="brand-sub">Interní výkaz</div>
+  </div>
+  <div class="brand-right">
+    Josef Řehák &nbsp;·&nbsp; ${email}<br>
+    Hodinovka: ${ASSISTANT_HOURLY_RATE} Kč/h
+  </div>
+</div>
+
+<h1>Docházka — ${monthNames[em-1].charAt(0).toUpperCase()+monthNames[em-1].slice(1)} ${ey}</h1>
+<div class="subtitle">Uzavřený měsíc · ${rows.length} pracovních dní</div>
+
+<table>
+  <thead>
+    <tr>
+      <th>Den</th>
+      <th>Od – Do</th>
+      <th style="text-align:center">Pauza</th>
+      <th style="text-align:right">Hodin čistě</th>
+    </tr>
+  </thead>
+  <tbody>
+    ${rowsHtml}
+    <tr class="total-row">
+      <td colspan="3">Celkem</td>
+      <td style="text-align:right">${fmtHm(totalNet)}</td>
+    </tr>
+  </tbody>
+</table>
+
+<div class="rate-block">
+  <div class="rate-line">
+    <span class="lbl">Hrubá odměna za měsíc</span>
+    <span class="val">${totalWage.toLocaleString("cs-CZ")} Kč</span>
+  </div>
+  <div class="rate-line" style="margin-top:2px">
+    <span style="font-size:11px;color:#6B6B75">${fmtHm(totalNet)} × ${ASSISTANT_HOURLY_RATE} Kč/h</span>
+  </div>
+  <div class="rate-note">
+    Obědové pauzy (−${LUNCH_BREAK_H} h ze směn ≥ ${LUNCH_THRESHOLD_H} h) jsou již odečteny v čistých hodinách. Základ pro výpočet = čisté hodiny.
+  </div>
+</div>
+
+<button class="no-print" onclick="window.print()" style="margin-top:28px;padding:10px 22px;background:#3518A5;color:#fff;border:none;border-radius:8px;font-size:13px;font-family:inherit;cursor:pointer;font-weight:600;letter-spacing:.04em">
+  🖨 Vytisknout / uložit jako PDF
+</button>
+
+<div class="footer">
+  <span>MAUX LEGAL s.r.o. — interní dokument</span>
+  <span>Vygenerováno ${new Date().toLocaleDateString("cs-CZ")}</span>
+</div>
+</body>
+</html>`;
+
+    const w = window.open("", "_blank", "width=800,height=900");
+    w.document.write(html);
+    w.document.close();
   };
 
   // Toggle card component
@@ -11194,7 +11475,23 @@ function AsistentDochazka({ email, attendance, onRefreshAttendance }) {
       <div style={{background:"#fff",borderRadius:18,overflow:"hidden",boxShadow:"0 0 0 1px rgba(0,0,0,.06), 0 4px 16px rgba(0,0,0,.04)"}}>
         <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"18px 22px 12px"}}>
           <div style={{fontSize:7.5,letterSpacing:".25em",textTransform:"uppercase",fontWeight:700,color:"var(--mut)"}}>ZÁZNAMY DOCHÁZKY</div>
-          <button className="btn gho" style={{fontSize:11}} onClick={()=>openNewAtt(todayStr)}>+ Přidat záznam</button>
+          <div style={{display:"flex",gap:8,alignItems:"center"}}>
+            {/* Export za předchozí uzavřený měsíc — Tom 1.7.2026 */}
+            {(() => {
+              const prev = new Date(); prev.setDate(1); prev.setMonth(prev.getMonth()-1);
+              const pym  = `${prev.getFullYear()}-${String(prev.getMonth()+1).padStart(2,"0")}`;
+              const pm   = prev.getMonth(); const py = prev.getFullYear();
+              const hasRecs = attendance.some(a => (a.date||"").startsWith(pym) && a.check_in && a.check_out);
+              return hasRecs ? (
+                <button className="btn" style={{fontSize:11,background:"#3518A505",borderColor:"#3518A5",color:"#3518A5"}}
+                  onClick={()=>exportDochazka(pym)}
+                  title={`Exportovat docházku za ${monthNames[pm]} ${py}`}>
+                  ↓ Export {monthNamesGen[pm]}
+                </button>
+              ) : null;
+            })()}
+            <button className="btn gho" style={{fontSize:11}} onClick={()=>openNewAtt(todayStr)}>+ Přidat záznam</button>
+          </div>
         </div>
         {/* Info o obědové pauze */}
         <div style={{margin:"0 22px 10px",padding:"8px 12px",background:"rgba(53,24,165,.04)",borderRadius:8,display:"flex",alignItems:"center",gap:8}}>
