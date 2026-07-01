@@ -1781,10 +1781,29 @@ function InvoicePrintPreview({ invoice, client, workEntries, onBack, onIssue, sa
 
   // Potvrzení JE PŘED vystavením (ne až po vytisknutí) — jednoduché "opravdu? ano / ještě ne".
   // Po potvrzení: vytiskne se PDF a faktura se uloží jako Vystavena. Bez potvrzení se nic neuloží ani nevytiskne.
+
+  // Sestaví název souboru pro dialog "Uložit jako PDF" — browser používá document.title.
+  // Formát: "Faktura č. 054-2026_Freedom – stav s.r.o._01.07.2026"
+  const buildPdfFilename = () => {
+    const num = (invoice.invoice_number || invoice.id || "").replace(/\//g, "-");
+    const clientName = (client?.name || "").replace(/[/\\:*?"<>|]/g, "").trim();
+    const dateStr = invoice.issue_date
+      ? invoice.issue_date.split("-").reverse().join(".")  // "2026-07-01" → "01.07.2026"
+      : new Date().toLocaleDateString("cs-CZ");
+    return `Faktura č. ${num}_${clientName}_${dateStr}`;
+  };
+
+  const printWithFilename = (callback) => {
+    const original = document.title;
+    document.title = buildPdfFilename();
+    window.print();
+    setTimeout(() => { document.title = original; }, 2000);
+    if (callback) callback();
+  };
+
   const handleConfirmIssue = () => {
     setIssueConfirmDialog(false);
-    window.print();
-    onIssue(true);
+    printWithFilename(() => onIssue(true));
   };
 
   // Last day of prev month description for items
@@ -2286,8 +2305,8 @@ function InvoicePrintPreview({ invoice, client, workEntries, onBack, onIssue, sa
               V obou případech se stáhne PDF.
             </div>
             <div style={{ display:"flex", gap:10 }}>
-              <button className="btn gho" style={{ flex:1 }} onClick={() => { setEditConfirmDialog(false); window.print(); if (onConfirmEdit) onConfirmEdit(false); }}>Ne — jen PDF</button>
-              <button className="btn pri" style={{ flex:1 }} onClick={() => { setEditConfirmDialog(false); window.print(); if (onConfirmEdit) onConfirmEdit(true); }}>Ano — uložit &amp; PDF</button>
+              <button className="btn gho" style={{ flex:1 }} onClick={() => { setEditConfirmDialog(false); printWithFilename(() => onConfirmEdit && onConfirmEdit(false)); }}>Ne — jen PDF</button>
+              <button className="btn pri" style={{ flex:1 }} onClick={() => { setEditConfirmDialog(false); printWithFilename(() => onConfirmEdit && onConfirmEdit(true)); }}>Ano — uložit &amp; PDF</button>
             </div>
           </div>
         </div>
