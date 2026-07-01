@@ -802,10 +802,14 @@ function InvoiceIssueModal({ clientId, entries, clients, invoices, initialBilled
   };
 
   if (showPreview) {
-    return <InvoicePrintPreview invoice={invoice} client={client} workEntries={selEntries}
-      onBack={() => setShowPreview(false)}
-      onIssue={(sent) => onConfirm({ ...invoice, status: sent ? "vystavena" : "pripravena" }, selEntries.map(e => e.id))}
-      saving={saving} />;
+    return (
+      <div className="inv-modal-host" style={{ position: "fixed", inset: 0, zIndex: 200, overflowY: "auto", background: "#f0eff8" }}>
+        <InvoicePrintPreview invoice={invoice} client={client} workEntries={selEntries}
+          onBack={() => setShowPreview(false)}
+          onIssue={(sent) => onConfirm({ ...invoice, status: sent ? "vystavena" : "pripravena" }, selEntries.map(e => e.id))}
+          saving={saving} />
+      </div>
+    );
   }
 
   const stepStyle = { width: 28, height: 28, borderRadius: 6, border: "1px solid var(--line)", background: "#fff", cursor: "pointer", fontSize: 16, color: "var(--ink)", display:"flex", alignItems:"center", justifyContent:"center", userSelect:"none", flexShrink:0 };
@@ -2095,6 +2099,10 @@ function InvoicePrintPreview({ invoice, client, workEntries, onBack, onIssue, sa
                       <div style={{ width: 20, height: .5, background: "rgba(53,24,165,.2)" }} />
                       <div style={{ fontSize: 6, letterSpacing: "0.42em", color: "#D4CEEA", textTransform: "uppercase", fontFamily: "'Inter', sans-serif" }}>Zaplatit převodem</div>
                       <div style={{ width: 20, height: .5, background: "rgba(53,24,165,.2)" }} />
+                    </div>
+                    {/* QR amount verification label — Tom 1.7.2026: vždy nutno ověřit, že QR sedí na správnou částku */}
+                    <div style={{ fontSize: 9.5, fontFamily: "'Inter', sans-serif", color: "#3518A5", fontWeight: 500, letterSpacing: ".02em", textAlign: "center", marginTop: 3 }}>
+                      QR: {fmtKc(invoice.total || 0)} Kč
                     </div>
                   </div>
                 )}
