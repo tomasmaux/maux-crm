@@ -709,14 +709,16 @@ function chunkWorkEntriesForPrint(sorted) {
 }
 
 /* ─── INVOICE ISSUE MODAL ─── */
-function InvoiceIssueModal({ clientId, entries, clients, invoices, initialBilledAs, onConfirm, onCancel, saving }) {
+function InvoiceIssueModal({ clientId, entries, clients, invoices, initialBilledAs, existingInvoice, onConfirm, onCancel, saving }) {
   const client = clients.find(c => c.id === clientId);
   const [selected, setSelected] = useState(() => new Set(entries.map(e => e.id)));
-  const [invoiceNo, setInvoiceNo] = useState(() => nextInvoiceNumber(invoices));
-  const [issueDate, setIssueDate] = useState(() => defaultInvoiceIssueDate(entries));
-  const [dueDateBase, setDueDateBase] = useState(() => nextDueDate(defaultInvoiceIssueDate(entries)));
+  const [invoiceNo, setInvoiceNo] = useState(() => existingInvoice?.invoice_number || nextInvoiceNumber(invoices));
+  const [issueDate, setIssueDate] = useState(() => existingInvoice?.issue_date || defaultInvoiceIssueDate(entries));
+  const [dueDateBase, setDueDateBase] = useState(() => nextDueDate(existingInvoice?.issue_date || defaultInvoiceIssueDate(entries)));
   const [dueDateOffset, setDueDateOffset] = useState(0); // -5..+5
   const [varSymbol, setVarSymbol] = useState(() => {
+    if (existingInvoice?.var_symbol) return existingInvoice.var_symbol;
+    if (existingInvoice?.notes) return existingInvoice.notes;
     const next = nextInvoiceNumber(invoices);
     return next.replace(/[^0-9]/g, "").slice(-6) || String(new Date().getFullYear()).slice(2) + String(invoices.length + 1).padStart(3, "0");
   });
@@ -776,7 +778,7 @@ function InvoiceIssueModal({ clientId, entries, clients, invoices, initialBilled
   const sigEntries = selEntries.filter(e => Number(e.sig_count) > 0);
 
   const invoice = {
-    id: uid(), invoice_number: invoiceNo,
+    id: existingInvoice?.id || uid(), invoice_number: invoiceNo,
     client_id: clientId, issue_date: issueDate, due_date: dueDate, duzp,
     items: [
       ...selEntries.filter(e => e.hours > 0 || e.billing_type === "flat_rate").map(e => ({ id: uid(), description: e.description, hours: e.hours, rate: e.rate, amount: e.amount, no_vat: false, flat_rate: e.billing_type === "flat_rate" })),
@@ -12491,8 +12493,8 @@ export default function MauxCRM() {
     } catch (err) { alert("Chyba: " + err.message); }
   };
 
-  const openIssueModal = (clientId, entries) => {
-    setIssueModal({ clientId, entries });
+  const openIssueModal = (clientId, entries, existingInvoice = null) => {
+    setIssueModal({ clientId, entries, existingInvoice });
   };
 
   // "Změny" — samostatný krok PŘED vystavením faktury, kde se na jednotlivé výkazy
@@ -12621,15 +12623,11 @@ export default function MauxCRM() {
     } catch (err) { alert("Chyba: " + err.message); } finally { setSaving(false); }
   };
 
-  const issueExistingInvoice = async (inv) => {
-    if (!window.confirm(`Vystavit fakturu ${inv.invoice_number || inv.id}?`)) return;
-    setSaving(true);
-    try {
-      const { clients: _c, ...cleanInv } = inv;
-      await upsertInvoice({ ...cleanInv, status: 'vystavena', issue_date: cleanInv.issue_date || new Date().toISOString().slice(0, 10) });
-      const updInvs = await fetchInvoices();
-      setInvoices(updInvs);
-    } catch (err) { alert("Chyba: " + err.message); } finally { setSaving(false); }
+  const issueExistingInvoice = (inv) => {
+    // Otevře standardní InvoiceIssueModal s předvyplněnými daty existující faktury.
+    // Modal zachová číslo faktury (invoice_number) a id — pouze přestaví status na 'vystavena'.
+    const linkedEntries = workEntries.filter(e => e.invoice_id === inv.id);
+    openIssueModal(inv.client_id, linkedEntries, inv);
   };
 
   const saveClient = async (c) => {
@@ -13124,6 +13122,7 @@ export default function MauxCRM() {
           clients={clients}
           invoices={invoices}
           initialBilledAs={altSubjects[issueModal.clientId] || null}
+          existingInvoice={issueModal.existingInvoice || null}
           onConfirm={confirmIssueInvoice}
           onCancel={() => setIssueModal(null)}
           saving={saving}
