@@ -1863,6 +1863,11 @@ function InvoicePrintPreview({ invoice, client, workEntries, onBack, onIssue, sa
         {/* PAGE 1 — FAKTURA */}
         <div className="inv-page" style={{ boxShadow: "0 16px 60px rgba(0,0,0,.22)", fontFamily: "'Cormorant Garamond', 'Inter', serif" }}>
 
+          {/* Text watermark — čistý DOM text, tiskne se identicky jako na obrazovce, žádné PNG white-band artefakty */}
+          <div aria-hidden="true" style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", pointerEvents: "none", userSelect: "none", zIndex: 0, overflow: "hidden" }}>
+            <div style={{ transform: "rotate(-45deg)", fontFamily: "'Cormorant Garamond', serif", fontSize: 76, fontWeight: 300, letterSpacing: "0.32em", color: "#3518A5", opacity: 0.045, whiteSpace: "nowrap" }}>MAUX LEGAL</div>
+          </div>
+
           <div style={{ position: "relative", zIndex: 1 }}>
             {/* ── INDIGO HEADER ── */}
             <div style={{ background: "#3518A5", position: "relative", overflow: "hidden" }}>
@@ -2123,6 +2128,11 @@ function InvoicePrintPreview({ invoice, client, workEntries, onBack, onIssue, sa
             const isLast = pageIdx === pages.length - 1;
             return (
           <div className="inv-page" key={pageIdx} style={{ boxShadow: "0 16px 60px rgba(0,0,0,.22)", fontFamily: "'Inter', Arial, sans-serif", position: "relative" }}>
+
+            {/* Text watermark — stejný jako str.1, print-safe */}
+            <div aria-hidden="true" style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", pointerEvents: "none", userSelect: "none", zIndex: 0, overflow: "hidden" }}>
+              <div style={{ transform: "rotate(-45deg)", fontFamily: "'Cormorant Garamond', serif", fontSize: 76, fontWeight: 300, letterSpacing: "0.32em", color: "#3518A5", opacity: 0.045, whiteSpace: "nowrap" }}>MAUX LEGAL</div>
+            </div>
 
             <div style={{ position: "relative", zIndex: 1 }}>
               {/* ── HEADER ── */}
@@ -12484,16 +12494,13 @@ export default function MauxCRM() {
   };
 
   const revertInvoiceToDraft = async (inv) => {
-    if (!window.confirm(`Vrátit fakturu ${inv.invoice_number || inv.id} do nevystavených? Výkazy práce budou odpojeny.`)) return;
+    if (!window.confirm(`Vrátit fakturu ${inv.invoice_number || inv.id} do nevystavených? Výkazy zůstanou napárovány.`)) return;
     setSaving(true);
     try {
       const { clients: _c, ...cleanInv } = inv;
       await upsertInvoice({ ...cleanInv, status: 'pripravena' });
-      const linked = workEntries.filter(e => e.invoice_id === inv.id);
-      await Promise.all(linked.map(e => upsertWorkEntry({ ...e, invoice_id: null })));
-      const [updInvs, updWE] = await Promise.all([fetchInvoices(), fetchWorkEntries()]);
+      const updInvs = await fetchInvoices();
       setInvoices(updInvs);
-      setWorkEntries(updWE);
     } catch (err) { alert("Chyba: " + err.message); } finally { setSaving(false); }
   };
 
