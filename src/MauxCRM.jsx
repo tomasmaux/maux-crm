@@ -9180,7 +9180,7 @@ function VykazyCalendar({ workEntries, escrows, dense = false, onOpenFull, onAdd
 }
 
 /* ─── FAKTURACE ─── */
-function InvoiceList({ invoices, clients, workEntries, escrows, onOpen, onOpenClient, onToggleStatus, onGenerateInvoice, onPreviewInvoice, onEditInvoice, onOpenDiscountModal, onOpenAltSubjectModal, altSubjects, onAddWorkEntry, onRevertInvoice, onIssueExistingInvoice, loading }) {
+function InvoiceList({ invoices, clients, workEntries, escrows, onOpen, onOpenClient, onToggleStatus, onGenerateInvoice, onPreviewInvoice, onEditInvoice, onOpenDiscountModal, onOpenAltSubjectModal, altSubjects, onAddWorkEntry, onRevertInvoice, onIssueExistingInvoice, onDeleteDraftInvoice, loading }) {
   const [search, setSearch] = useState("");
   const [filterStatus, setFilterStatus] = useState("vse");
   const [filterClient, setFilterClient] = useState("");
@@ -9222,10 +9222,15 @@ function InvoiceList({ invoices, clients, workEntries, escrows, onOpen, onOpenCl
       .sort((a,b) => (a.earliestDate||"9999-99-99").localeCompare(b.earliestDate||"9999-99-99"));
   }, [workEntries, clients]);
 
-  // Vrácené faktury — 'pripravena' faktury s napárovanými výkazy (po "Vrátit do nevystavených")
+  // Vrácené faktury — 'pripravena' faktury s alespoň 1 napárovaným výkazem.
+  // Faktury s 0 výkazy (ghost entries z neúplných operací) se NEZOBRAZUJÍ — jsou neviditelné
+  // dokud je Tom nesmaže přes Supabase nebo přes ✕ tlačítko na kartě.
   const draftInvoices = useMemo(() =>
-    invoices.filter(i => i.status === 'pripravena'),
-    [invoices]
+    invoices.filter(i => {
+      if (i.status !== 'pripravena') return false;
+      return (workEntries || []).some(e => e.invoice_id === i.id);
+    }),
+    [invoices, workEntries]
   );
 
   const [expandedDraft, setExpandedDraft] = useState(null);
@@ -9346,6 +9351,11 @@ function InvoiceList({ invoices, clients, workEntries, escrows, onOpen, onOpenCl
                     <button className="btn pri" style={{ fontSize: 12, flexShrink: 0 }}
                       onClick={e => { e.stopPropagation(); onIssueExistingInvoice && onIssueExistingInvoice(inv); }}>
                       Vystavit fakturu →
+                    </button>
+                    <button className="btn" style={{ fontSize: 11, flexShrink: 0, color: "#DC2626", borderColor: "#FCA5A5" }}
+                      title="Smazat ghost fakturu"
+                      onClick={e => { e.stopPropagation(); if (window.confirm(`Smazat fakturu ${inv.invoice_number}? Výkazy zůstanou odpojeny.`)) onDeleteDraftInvoice && onDeleteDraftInvoice(inv.id); }}>
+                      ✕
                     </button>
                     <span style={{ fontSize: 11, color: "var(--mut)", cursor: "pointer" }}>{expandedDraftInv === inv.id ? "▲" : "▼"}</span>
                   </div>
@@ -12999,6 +13009,7 @@ export default function MauxCRM() {
               onAddWorkEntry={navToNewWorkEntry}
               onRevertInvoice={revertInvoiceToDraft}
               onIssueExistingInvoice={issueExistingInvoice}
+              onDeleteDraftInvoice={doDeleteInvoice}
               loading={dataLoading}
             />
           )}
