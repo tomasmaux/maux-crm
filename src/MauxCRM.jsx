@@ -1733,8 +1733,35 @@ function InvoiceEditModal({ inv, clients, workEntries, onPreview, onCancel, onSa
 }
 
 
+// Hook: zpracuje LOGO_WM přes canvas, odstraní bílé pixely → vrátí transparentní data URL.
+// Díky tomu stačí jen opacity (bez mix-blend-mode), takže vodoznak funguje i v tisku/PDF.
+function useTransparentWatermark(src) {
+  const [result, setResult] = useState(null);
+  useEffect(() => {
+    if (!src) return;
+    const img = new Image();
+    img.onload = () => {
+      const c = document.createElement('canvas');
+      c.width = img.width; c.height = img.height;
+      const ctx = c.getContext('2d');
+      ctx.drawImage(img, 0, 0);
+      const px = ctx.getImageData(0, 0, c.width, c.height);
+      const d = px.data;
+      for (let i = 0; i < d.length; i += 4) {
+        // Pixely blízké bílé → průhledné
+        if (d[i] > 230 && d[i+1] > 230 && d[i+2] > 230) d[i+3] = 0;
+      }
+      ctx.putImageData(px, 0, 0);
+      setResult(c.toDataURL('image/png'));
+    };
+    img.src = src;
+  }, [src]);
+  return result;
+}
+
 function InvoicePrintPreview({ invoice, client, workEntries, onBack, onIssue, saving, previewOnly = false, isEditMode = false, onConfirmEdit = null }) {
   const [qrUrl, setQrUrl] = useState("");
+  const wmSrc = useTransparentWatermark(LOGO_WM);
   const [issueConfirmDialog, setIssueConfirmDialog] = useState(false);
   const [editConfirmDialog, setEditConfirmDialog] = useState(false);
 
@@ -1863,10 +1890,8 @@ function InvoicePrintPreview({ invoice, client, workEntries, onBack, onIssue, sa
         {/* PAGE 1 — FAKTURA */}
         <div className="inv-page" style={{ boxShadow: "0 16px 60px rgba(0,0,0,.22)", fontFamily: "'Cormorant Garamond', 'Inter', serif" }}>
 
-          {/* Text watermark — čistý DOM text, tiskne se identicky jako na obrazovce, žádné PNG white-band artefakty */}
-          <div aria-hidden="true" style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", pointerEvents: "none", userSelect: "none", zIndex: 0, overflow: "hidden" }}>
-            <div style={{ transform: "rotate(-45deg)", fontFamily: "'Cormorant Garamond', serif", fontSize: 76, fontWeight: 300, letterSpacing: "0.32em", color: "#3518A5", opacity: 0.045, whiteSpace: "nowrap" }}>MAUX LEGAL</div>
-          </div>
+          {/* Logo watermark — canvas odstranil bílé px, proto jen opacity (funguje v tisku) */}
+          {wmSrc && <div aria-hidden="true" style={{ position: "absolute", inset: 0, backgroundImage: `url(${wmSrc})`, backgroundRepeat: "no-repeat", backgroundPosition: "center", backgroundSize: "60%", opacity: 0.06, pointerEvents: "none", zIndex: 0 }} />}
 
           <div style={{ position: "relative", zIndex: 1 }}>
             {/* ── INDIGO HEADER ── */}
@@ -2129,10 +2154,8 @@ function InvoicePrintPreview({ invoice, client, workEntries, onBack, onIssue, sa
             return (
           <div className="inv-page" key={pageIdx} style={{ boxShadow: "0 16px 60px rgba(0,0,0,.22)", fontFamily: "'Inter', Arial, sans-serif", position: "relative" }}>
 
-            {/* Text watermark — stejný jako str.1, print-safe */}
-            <div aria-hidden="true" style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", pointerEvents: "none", userSelect: "none", zIndex: 0, overflow: "hidden" }}>
-              <div style={{ transform: "rotate(-45deg)", fontFamily: "'Cormorant Garamond', serif", fontSize: 76, fontWeight: 300, letterSpacing: "0.32em", color: "#3518A5", opacity: 0.045, whiteSpace: "nowrap" }}>MAUX LEGAL</div>
-            </div>
+            {/* Logo watermark — stejný jako str.1 */}
+            {wmSrc && <div aria-hidden="true" style={{ position: "absolute", inset: 0, backgroundImage: `url(${wmSrc})`, backgroundRepeat: "no-repeat", backgroundPosition: "center", backgroundSize: "60%", opacity: 0.06, pointerEvents: "none", zIndex: 0 }} />}
 
             <div style={{ position: "relative", zIndex: 1 }}>
               {/* ── HEADER ── */}
