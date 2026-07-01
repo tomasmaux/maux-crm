@@ -1864,7 +1864,7 @@ function InvoicePrintPreview({ invoice, client, workEntries, onBack, onIssue, sa
         <div className="inv-page" style={{ boxShadow: "0 16px 60px rgba(0,0,0,.22)", fontFamily: "'Cormorant Garamond', 'Inter', serif" }}>
 
           {/* Full-page watermark — mix-blend-mode:multiply eliminuje bílé plochy loga (bílá × pozadí = pozadí = neviditelná), tmavě-indigo plochy zůstanou jako subtilní tisk */}
-          <div style={{ position: "absolute", left: "50%", top: "52%", transform: "translate(-50%,-50%)", width: 860, height: 860, backgroundImage: `url(${LOGO_WM})`, backgroundRepeat: "no-repeat", backgroundPosition: "center", backgroundSize: "contain", opacity: .08, zIndex: 0, pointerEvents: "none", mixBlendMode: "multiply" }} />
+          <div style={{ position: "absolute", left: "50%", top: "52%", transform: "translate(-50%,-50%)", width: 860, height: 860, backgroundImage: `url(${LOGO_WM})`, backgroundRepeat: "no-repeat", backgroundPosition: "center", backgroundSize: "contain", opacity: .035, zIndex: 0, pointerEvents: "none", mixBlendMode: "multiply" }} />
 
           <div style={{ position: "relative", zIndex: 1 }}>
             {/* ── INDIGO HEADER ── */}
@@ -2128,7 +2128,7 @@ function InvoicePrintPreview({ invoice, client, workEntries, onBack, onIssue, sa
           <div className="inv-page" key={pageIdx} style={{ boxShadow: "0 16px 60px rgba(0,0,0,.22)", fontFamily: "'Inter', Arial, sans-serif", position: "relative" }}>
 
             {/* Page watermark — mix-blend-mode:multiply eliminuje bílé plochy loga */}
-            <div style={{ position: "absolute", left: "50%", top: "52%", transform: "translate(-50%,-50%)", width: 860, height: 860, backgroundImage: `url(${LOGO_WM})`, backgroundRepeat: "no-repeat", backgroundPosition: "center", backgroundSize: "contain", opacity: .08, zIndex: 0, pointerEvents: "none", mixBlendMode: "multiply" }} />
+            <div style={{ position: "absolute", left: "50%", top: "52%", transform: "translate(-50%,-50%)", width: 860, height: 860, backgroundImage: `url(${LOGO_WM})`, backgroundRepeat: "no-repeat", backgroundPosition: "center", backgroundSize: "contain", opacity: .035, zIndex: 0, pointerEvents: "none", mixBlendMode: "multiply" }} />
 
             <div style={{ position: "relative", zIndex: 1 }}>
               {/* ── HEADER ── */}
