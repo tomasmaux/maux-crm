@@ -1891,7 +1891,7 @@ function InvoicePrintPreview({ invoice, client, workEntries, onBack, onIssue, sa
         <div className="inv-page" style={{ boxShadow: "0 16px 60px rgba(0,0,0,.22)", fontFamily: "'Cormorant Garamond', 'Inter', serif" }}>
 
           {/* Logo watermark — canvas odstranil bílé px, proto jen opacity (funguje v tisku) */}
-          {wmSrc && <div aria-hidden="true" style={{ position: "absolute", inset: 0, backgroundImage: `url(${wmSrc})`, backgroundRepeat: "no-repeat", backgroundPosition: "center", backgroundSize: "60%", opacity: 0.06, pointerEvents: "none", zIndex: 0 }} />}
+          {wmSrc && <div aria-hidden="true" style={{ position: "absolute", inset: 0, backgroundImage: `url(${wmSrc})`, backgroundRepeat: "no-repeat", backgroundPosition: "center", backgroundSize: "60%", opacity: 0.038, pointerEvents: "none", zIndex: 0 }} />}
 
           <div style={{ position: "relative", zIndex: 1 }}>
             {/* ── INDIGO HEADER ── */}
@@ -2127,9 +2127,9 @@ function InvoicePrintPreview({ invoice, client, workEntries, onBack, onIssue, sa
                       <div style={{ fontSize: 6, letterSpacing: "0.42em", color: "#D4CEEA", textTransform: "uppercase", fontFamily: "'Inter', sans-serif" }}>Zaplatit převodem</div>
                       <div style={{ width: 20, height: .5, background: "rgba(53,24,165,.2)" }} />
                     </div>
-                    {/* QR amount verification label — Tom 1.7.2026: vždy nutno ověřit, že QR sedí na správnou částku */}
-                    <div style={{ fontSize: 9.5, fontFamily: "'Inter', sans-serif", color: "#3518A5", fontWeight: 500, letterSpacing: ".02em", textAlign: "center", marginTop: 3 }}>
-                      QR: {fmtKc(invoice.total || 0)} Kč
+                    {/* QR amount verification label */}
+                    <div style={{ fontSize: 8.5, fontFamily: "'Inter', sans-serif", color: "rgba(53,24,165,.5)", fontWeight: 400, letterSpacing: ".04em", textAlign: "center", marginTop: 4 }}>
+                      {fmtKc(invoice.total || 0)}
                     </div>
                   </div>
                 )}
@@ -2155,7 +2155,7 @@ function InvoicePrintPreview({ invoice, client, workEntries, onBack, onIssue, sa
           <div className="inv-page" key={pageIdx} style={{ boxShadow: "0 16px 60px rgba(0,0,0,.22)", fontFamily: "'Inter', Arial, sans-serif", position: "relative" }}>
 
             {/* Logo watermark — stejný jako str.1 */}
-            {wmSrc && <div aria-hidden="true" style={{ position: "absolute", inset: 0, backgroundImage: `url(${wmSrc})`, backgroundRepeat: "no-repeat", backgroundPosition: "center", backgroundSize: "60%", opacity: 0.06, pointerEvents: "none", zIndex: 0 }} />}
+            {wmSrc && <div aria-hidden="true" style={{ position: "absolute", inset: 0, backgroundImage: `url(${wmSrc})`, backgroundRepeat: "no-repeat", backgroundPosition: "center", backgroundSize: "60%", opacity: 0.038, pointerEvents: "none", zIndex: 0 }} />}
 
             <div style={{ position: "relative", zIndex: 1 }}>
               {/* ── HEADER ── */}
@@ -12517,7 +12517,7 @@ export default function MauxCRM() {
   };
 
   const revertInvoiceToDraft = async (inv) => {
-    if (!window.confirm(`Vrátit fakturu ${inv.invoice_number || inv.id} do nevystavených? Výkazy zůstanou napárovány.`)) return;
+    if (!window.confirm(`Vrátit ${inv.invoice_number || inv.id} zpět do nevystavených?`)) return;
     setSaving(true);
     try {
       const { clients: _c, ...cleanInv } = inv;
