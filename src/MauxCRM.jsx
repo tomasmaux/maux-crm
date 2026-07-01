@@ -7217,6 +7217,9 @@ function TripleRingPanel({ sporSegs, sporBal, sporEarmarked, firmaRez, planKap,
 
 function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, loanTrackers, loanTransactions, escrows, expenseChecks, onToggleExpenseCheck, onNav, onAddWorkEntry, onSaveFinance, onDeleteFinance, onDpfoToggle, onLoanTxAdd, onLoanTxToggle, onLoanTxDelete, onLoanUpdate, assistantLogs=[], assistantAttendance=[], assistantAvailability=null, xtbTranches=[] }) {
   const [escrowAlertDismissed, setEscrowAlertDismissed] = useState(false);
+  const prevMonthStr = (() => { const d = new Date(); d.setDate(1); d.setMonth(d.getMonth()-1); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`; })();
+  const dochazkaKey = `maux_dochazka_odeslana_${prevMonthStr}`;
+  const [dochazkaOdeslana, setDochazkaOdeslana] = useState(() => !!localStorage.getItem(dochazkaKey));
   const [editLayout, setEditLayout] = useState(false);
   const [panelState, setPanelState] = useState(loadPanelState);
   const [dragOver, setDragOver] = useState(null);
@@ -7589,6 +7592,33 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
           </button>
         </div>
       </div>
+
+      {/* Reminder: odeslat Josefovu docházku účetní — zobrazí se od 1. každého měsíce, zmizí po kliknutí */}
+      {!dochazkaOdeslana && (() => {
+        const mn = ["ledna","února","března","dubna","května","června","července","srpna","září","října","listopadu","prosince"][new Date(prevMonthStr+"-01").getMonth()];
+        return (
+          <div style={{
+            display:"flex", alignItems:"center", justifyContent:"space-between", gap:12,
+            background:"linear-gradient(90deg,rgba(53,24,165,.06),rgba(53,24,165,.03))",
+            border:"1px solid rgba(53,24,165,.22)", borderRadius:10, padding:"10px 16px", marginTop:12
+          }}>
+            <div style={{display:"flex",alignItems:"center",gap:10}}>
+              <span style={{fontSize:15}}>📋</span>
+              <div>
+                <span style={{fontSize:13,color:"var(--ink)",fontWeight:500}}>Nezapomeň odeslat Josefovu docházku za <strong>{mn}</strong> účetní</span>
+                <span style={{display:"block",fontSize:10.5,color:"var(--mut)",marginTop:1}}>Každý měsíc připomínám, dokud nepotvrdíš odeslání</span>
+              </div>
+            </div>
+            <button
+              className="btn"
+              style={{fontSize:11,background:"#3518A5",color:"#fff",border:"none",flexShrink:0,padding:"6px 14px"}}
+              onClick={() => { localStorage.setItem(dochazkaKey, "1"); setDochazkaOdeslana(true); }}
+            >
+              ✓ Odesláno účetní
+            </button>
+          </div>
+        );
+      })()}
 
       {/* Kontrola hranice 200 000 Kč/měs. (úschovy — čistý úrok + fakturace — vlastní odměna), s automatickým posunem mety a živým řádkem na příští měsíc */}
       {(() => {
