@@ -2003,22 +2003,51 @@ function InvoicePrintPreview({ invoice, client, workEntries, onBack, onIssue, sa
                   </tr>
                 </thead>
                 <tbody>
-                  {/* Main work row */}
-                  {invoice.subtotal > 0 && (
-                    <tr style={{ breakInside: "avoid", pageBreakInside: "avoid" }}>
-                      <td style={{ padding: "11px 0", borderBottom: ".5px solid rgba(53,24,165,.05)", fontSize: 11.5, color: "#3a3355", fontFamily: "'Inter', sans-serif", fontWeight: 300 }}>
-                        Právní služby poskytnuté v {prevMonthLabel()}
-                        <div style={{ fontSize: 9, color: "#D4CEEA", marginTop: 3, fontFamily: "'Inter', sans-serif" }}>dle přílohy č. 1</div>
-                      </td>
-                      <td style={{ padding: "11px 0 11px 8px", borderBottom: ".5px solid rgba(53,24,165,.05)", textAlign: "right", fontSize: 11, color: "#B0ABCA", fontFamily: "'Inter', sans-serif", fontWeight: 300, whiteSpace: "nowrap" }}>
-                        {(workEntries || []).reduce((s, e) => s + (e.hours || 0), 0).toFixed(1).replace(".", ",")}
-                      </td>
-                      <td style={{ padding: "11px 0 11px 8px", borderBottom: ".5px solid rgba(53,24,165,.05)", textAlign: "right", fontSize: 11, color: "#B0ABCA", fontFamily: "'Inter', sans-serif", fontWeight: 300, whiteSpace: "nowrap" }}>
-                        {(workEntries || []).length > 0 ? fmtKc((workEntries || [])[0]?.rate || 0) : "—"}
-                      </td>
-                      <td style={{ padding: "11px 0 11px 8px", borderBottom: ".5px solid rgba(53,24,165,.05)", textAlign: "right", fontSize: 11.5, color: "#2d2840", fontFamily: "'Inter', sans-serif", fontWeight: 400, whiteSpace: "nowrap" }}>{fmtKc(invoice.subtotal + hiddenPassthroughTotal)}</td>
-                    </tr>
-                  )}
+                  {/* Main work rows — hourly summary + individual paušál entries */}
+                  {(() => {
+                    const allEnt = workEntries || [];
+                    const hourlyEnt = allEnt.filter(e => e.rate > 0);
+                    const paushalEnt = allEnt.filter(e => !(e.rate > 0) && (e.amount || 0) > 0);
+                    const paushalSubtotal = paushalEnt.reduce((s, e) => s + (e.amount || 0), 0);
+                    const hourlySubtotal = (invoice.subtotal || 0) - paushalSubtotal;
+                    const hourlyHours = hourlyEnt.reduce((s, e) => s + (e.hours || 0), 0);
+                    const rows = [];
+                    if (hourlySubtotal > 0 || hiddenPassthroughTotal > 0) {
+                      rows.push(
+                        <tr key="hourly" style={{ breakInside: "avoid", pageBreakInside: "avoid" }}>
+                          <td style={{ padding: "11px 0", borderBottom: ".5px solid rgba(53,24,165,.05)", fontSize: 11.5, color: "#3a3355", fontFamily: "'Inter', sans-serif", fontWeight: 300 }}>
+                            Právní služby poskytnuté v {prevMonthLabel()}
+                            <div style={{ fontSize: 9, color: "#D4CEEA", marginTop: 3, fontFamily: "'Inter', sans-serif" }}>dle přílohy č. 1</div>
+                          </td>
+                          <td style={{ padding: "11px 0 11px 8px", borderBottom: ".5px solid rgba(53,24,165,.05)", textAlign: "right", fontSize: 11, color: "#B0ABCA", fontFamily: "'Inter', sans-serif", fontWeight: 300, whiteSpace: "nowrap" }}>
+                            {hourlyHours.toFixed(1).replace(".", ",")}
+                          </td>
+                          <td style={{ padding: "11px 0 11px 8px", borderBottom: ".5px solid rgba(53,24,165,.05)", textAlign: "right", fontSize: 11, color: "#B0ABCA", fontFamily: "'Inter', sans-serif", fontWeight: 300, whiteSpace: "nowrap" }}>
+                            {hourlyEnt.length > 0 ? fmtKc(hourlyEnt[0]?.rate || 0) : "—"}
+                          </td>
+                          <td style={{ padding: "11px 0 11px 8px", borderBottom: ".5px solid rgba(53,24,165,.05)", textAlign: "right", fontSize: 11.5, color: "#2d2840", fontFamily: "'Inter', sans-serif", fontWeight: 400, whiteSpace: "nowrap" }}>
+                            {fmtKc(hourlySubtotal + hiddenPassthroughTotal)}
+                          </td>
+                        </tr>
+                      );
+                    }
+                    paushalEnt.forEach((e, idx) => {
+                      rows.push(
+                        <tr key={`paushal-${idx}`} style={{ breakInside: "avoid", pageBreakInside: "avoid" }}>
+                          <td style={{ padding: "11px 0", borderBottom: ".5px solid rgba(53,24,165,.05)", fontSize: 11.5, color: "#3a3355", fontFamily: "'Inter', sans-serif", fontWeight: 300 }}>
+                            {e.description || "Paušální odměna"}
+                            <div style={{ fontSize: 9, color: "#D4CEEA", marginTop: 3, fontFamily: "'Inter', sans-serif" }}>paušální odměna dle přílohy č. 1</div>
+                          </td>
+                          <td style={{ padding: "11px 0 11px 8px", borderBottom: ".5px solid rgba(53,24,165,.05)", textAlign: "right", fontSize: 11, color: "#D4CEEA", fontFamily: "'Inter', sans-serif", fontWeight: 300, whiteSpace: "nowrap" }}>—</td>
+                          <td style={{ padding: "11px 0 11px 8px", borderBottom: ".5px solid rgba(53,24,165,.05)", textAlign: "right", fontSize: 11, color: "#D4CEEA", fontFamily: "'Inter', sans-serif", fontWeight: 300, whiteSpace: "nowrap" }}>paušál</td>
+                          <td style={{ padding: "11px 0 11px 8px", borderBottom: ".5px solid rgba(53,24,165,.05)", textAlign: "right", fontSize: 11.5, color: "#2d2840", fontFamily: "'Inter', sans-serif", fontWeight: 400, whiteSpace: "nowrap" }}>
+                            {fmtKc(e.amount || 0)}
+                          </td>
+                        </tr>
+                      );
+                    });
+                    return rows;
+                  })()}
                   {/* No-VAT items — sp. poplatek a zákonné poplatky (statutory_note) se zobrazují
                       jako dosud. Jen notář je skrytá nákladová položka a splyne do hlavního řádku výše. */}
                   {visibleNoVatItems.map((it, i) => (
