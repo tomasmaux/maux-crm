@@ -2660,6 +2660,110 @@ function LoanDashTile({ tracker, transactions, onAddTransaction, onToggleTransac
   const accentTint = isInv ? "rgba(5,150,105,.045)" : "rgba(220,38,38,.045)";
   const SEP = "1px solid rgba(0,0,0,.055)";
 
+  const handleExportPdf = () => {
+    const doneRows = withBal.filter(tx => tx.is_done);
+    const rows = withBal;
+    const pct = totalDrawnInv > 0 ? Math.round((totalRepaidInv / totalDrawnInv) * 100) : 0;
+    const html = `<!DOCTYPE html><html lang="cs"><head><meta charset="utf-8"/>
+<title>Přehled úvěru — ${tracker?.name}</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&family=Fraunces:ital,wght@0,300;0,600&display=swap');
+  *{box-sizing:border-box;margin:0;padding:0;}
+  body{font-family:'Inter',sans-serif;background:#fff;color:#1a1530;-webkit-print-color-adjust:exact;print-color-adjust:exact;}
+  @page{size:A4;margin:14mm 16mm;}
+  .header{background:linear-gradient(135deg,#3518A5 0%,#1e0a6b 100%);color:#fff;padding:10mm 12mm 8mm;border-radius:4px;margin-bottom:7mm;}
+  .header-top{display:flex;justify-content:space-between;align-items:flex-start;}
+  .logo{font-family:'Fraunces',serif;font-size:22pt;font-weight:300;letter-spacing:.12em;}
+  .logo sub{font-size:7pt;letter-spacing:.35em;text-transform:uppercase;display:block;opacity:.55;margin-top:2px;font-family:'Inter',sans-serif;font-weight:400;}
+  .doc-title{text-align:right;font-size:8pt;letter-spacing:.25em;text-transform:uppercase;opacity:.55;}
+  .doc-name{font-family:'Fraunces',serif;font-size:15pt;font-weight:300;margin-top:3px;}
+  .divider{height:1px;background:rgba(255,255,255,.15);margin:5mm 0;}
+  .meta-row{display:flex;gap:8mm;}
+  .meta-item label{font-size:6pt;letter-spacing:.3em;text-transform:uppercase;opacity:.45;display:block;margin-bottom:3px;}
+  .meta-item span{font-size:10pt;font-weight:300;}
+  .kpi-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:4mm;margin-bottom:6mm;}
+  .kpi{background:#f8f7ff;border-radius:8px;padding:5mm 6mm;border-left:3px solid #3518A5;}
+  .kpi.green{border-left-color:#059669;background:#f0fdf4;}
+  .kpi.red{border-left-color:#DC2626;background:#fef2f2;}
+  .kpi label{font-size:6pt;letter-spacing:.28em;text-transform:uppercase;color:#9C96B5;display:block;margin-bottom:3px;font-weight:600;}
+  .kpi .val{font-family:'Fraunces',serif;font-size:18pt;font-weight:300;color:#1a1530;}
+  .kpi .sub{font-size:8pt;color:#9C96B5;margin-top:2px;}
+  .progress-wrap{margin-bottom:6mm;}
+  .progress-label{display:flex;justify-content:space-between;font-size:8.5pt;color:#6B7280;margin-bottom:2mm;}
+  .progress-bar{height:6px;background:#E5E7EB;border-radius:3px;overflow:hidden;}
+  .progress-fill{height:100%;background:linear-gradient(90deg,#3518A5,#059669);border-radius:3px;}
+  h2{font-size:8pt;letter-spacing:.3em;text-transform:uppercase;color:#9C96B5;font-weight:600;margin-bottom:3mm;border-bottom:1px solid #E5E7EB;padding-bottom:2mm;}
+  table{width:100%;border-collapse:collapse;font-size:9pt;}
+  thead th{font-size:6.5pt;letter-spacing:.28em;text-transform:uppercase;color:#9C96B5;font-weight:600;padding:0 4px 6px;border-bottom:1.5px solid #E5E7EB;text-align:left;}
+  thead th.r{text-align:right;}
+  tbody tr:nth-child(even){background:#fafafa;}
+  tbody td{padding:5px 4px;color:#374151;border-bottom:1px solid #F3F4F6;vertical-align:top;}
+  tbody td.r{text-align:right;font-variant-numeric:tabular-nums;}
+  tbody td.pos{color:#059669;font-weight:600;}
+  tbody td.neg{color:#DC2626;}
+  tbody td.bal{font-weight:600;color:#1a1530;}
+  tbody td.done{text-align:center;}
+  .check{color:#059669;}
+  .footer{margin-top:8mm;padding-top:4mm;border-top:1px solid #E5E7EB;display:flex;justify-content:space-between;font-size:7.5pt;color:#9C96B5;}
+</style>
+</head><body>
+<div class="header">
+  <div class="header-top">
+    <div class="logo">MAUX LEGAL<sub>Mgr. Tomáš Maux · advokát</sub></div>
+    <div class="doc-title">Přehled úvěru<div class="doc-name">${tracker?.name || ""}</div></div>
+  </div>
+  <div class="divider"></div>
+  <div class="meta-row">
+    <div class="meta-item"><label>Sestaveno</label><span>${new Date().toLocaleDateString("cs-CZ",{day:"numeric",month:"long",year:"numeric"})}</span></div>
+    <div class="meta-item"><label>Počet pohybů</label><span>${rows.length}</span></div>
+    <div class="meta-item"><label>Potvrzených</label><span>${doneRows.length}</span></div>
+  </div>
+</div>
+
+<div class="kpi-grid">
+  <div class="kpi"><label>Zbývá splatit</label><div class="val">${fmtKc(remaining)}</div><div class="sub">aktuální zůstatek dluhu</div></div>
+  <div class="kpi green"><label>Celkem splaceno</label><div class="val">${fmtKc(totalRepaidInv)}</div><div class="sub">z načerpaných ${fmtKc(totalDrawnInv)}</div></div>
+  <div class="kpi"><label>Splátka / měsíc</label><div class="val">${fmtKc(monthly)}</div><div class="sub">${monthsLeft > 0 ? `zbývá ~${monthsLeft} splátek` : "splaceno"}</div></div>
+</div>
+<div class="kpi-grid">
+  <div class="kpi"><label>Načerpáno celkem</label><div class="val">${fmtKc(totalDrawnInv)}</div><div class="sub">&nbsp;</div></div>
+  <div class="kpi"><label>Odhadovaný konec</label><div class="val" style="font-size:13pt">${finalDate}</div><div class="sub">&nbsp;</div></div>
+  <div class="kpi"><label>Splaceno %</label><div class="val">${pct} %</div><div class="sub">&nbsp;</div></div>
+</div>
+
+<div class="progress-wrap">
+  <div class="progress-label"><span>Průběh splácení</span><span>${pct} % splaceno</span></div>
+  <div class="progress-bar"><div class="progress-fill" style="width:${Math.min(pct,100)}%"></div></div>
+</div>
+
+<h2>Pohyby na úvěru</h2>
+<table>
+  <thead><tr>
+    <th>Datum</th><th>Popis</th><th class="r">Částka</th><th class="r">Zůstatek</th><th class="r done">✓</th>
+  </tr></thead>
+  <tbody>
+    ${rows.map(tx => `<tr>
+      <td style="white-space:nowrap;color:#9C96B5">${tx.transaction_date ? tx.transaction_date.split("-").reverse().join(". ") : "—"}</td>
+      <td>${tx.description || "—"}</td>
+      <td class="r ${tx.amount>0?"pos":"neg"}">${tx.amount>0?"+":""}${new Intl.NumberFormat("cs-CZ").format(tx.amount)} Kč</td>
+      <td class="r bal">${new Intl.NumberFormat("cs-CZ").format(tx.balance)} Kč</td>
+      <td class="done">${tx.is_done?"<span class='check'>✓</span>":"<span style='color:#D1D5DB'>○</span>"}</td>
+    </tr>`).join("")}
+  </tbody>
+</table>
+
+<div class="footer">
+  <span>Mgr. Tomáš Maux, advokát · IČO 22148973 · advokat@maux.cz</span>
+  <span>Interní přehled · vygenerováno ${new Date().toLocaleString("cs-CZ")}</span>
+</div>
+</body></html>`;
+    const w = window.open("", "_blank");
+    if (!w) return;
+    w.document.write(html);
+    w.document.close();
+    setTimeout(() => { w.focus(); w.print(); }, 600);
+  };
+
   // Auto-půjčka: jednorázový import historie ze excelu (úkol #33)
   const isAutoLoan = !isInv && /auto/i.test(tracker?.name || "");
   const missingAutoImport = isAutoLoan
@@ -2727,6 +2831,9 @@ function LoanDashTile({ tracker, transactions, onAddTransaction, onToggleTransac
             {importing ? "Importuju…" : `Import logu (${missingAutoImport.length})`}
           </button>
         )}
+        <button className="btn gho" style={{ fontSize: 11 }} onClick={handleExportPdf}>
+          ↓ PDF
+        </button>
         <button className="btn gho" style={{ fontSize: 11 }} onClick={() => setShowLog(!showLog)}>
           {showLog ? "Skrýt" : `Log (${transactions.length})`}
         </button>
