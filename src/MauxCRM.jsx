@@ -1860,16 +1860,14 @@ function InvoicePrintPreview({ invoice, client, workEntries, onBack, onIssue, on
       html, body, #root, .mx { height: auto !important; min-height: 0 !important; }
       .inv-modal-host { position: static !important; inset: auto !important; overflow: visible !important; background: #fff !important; z-index: auto !important; }
       /* KRITICKÉ — .print-root má na obrazovce (kvůli "naskládaným listům" v náhledu)
-         inline styly padding:"40px 0" a gap:32 (mezera mezi .inv-page sourozenci).
-         V tisku se ale .print-root nezruší, jen zfixuje position/background — takže
-         těch 40px nahoře/dole a 32px MEZI KAŽDÝMI DVĚMA STRÁNKAMI zůstávaly ve flow.
-         Protože stránky mají page-break-before:always a jsou už samy přesně 297mm,
-         každá taková "mezera" se nevejde na aktuální stranu a vytiskne se jako
-         VLASTNÍ TÉMĚŘ PRÁZDNÁ FYZICKÁ STRANA navíc (jedna za každou mezeru/patičku) —
-         to byl pravý důvod, proč 1 příloha = 4 strany místo 2, a 6 stran místo 3.
-         Bez !important by zde "vyhrály" inline styly (vyšší specificita). */
-      .print-root { position: static; background: #fff !important; padding: 0 !important; gap: 0 !important; }
-      .inv-page { min-height: 297mm !important; height: 297mm !important; overflow: hidden !important; }
+         inline styly display:flex, padding:"40px 0", gap:32, background:#C8C4BC.
+         Flex kontejner v Chrome PDF rendereru způsobuje šedé pruhy na lomech stran
+         (background wrapperu prosvítá přes page-break hranice).
+         Řešení: přepnout na display:block — pak jsou .inv-page prosté blokové elementy,
+         žádné flex artefakty, žádné mezery. !important přebíjí inline styly. */
+      html, body { background: white !important; }
+      .print-root { display: block !important; position: static !important; background: transparent !important; padding: 0 !important; gap: 0 !important; margin: 0 !important; }
+      .inv-page { display: block !important; width: 210mm !important; min-height: 297mm !important; margin: 0 !important; overflow: hidden !important; }
       .no-print { display: none !important; }
       @page { size: A4; margin: 0; }
       /* Bez tohoto prohlížeč při tisku/PDF defaultně vynechá barevná pozadí
