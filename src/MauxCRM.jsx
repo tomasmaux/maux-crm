@@ -2726,7 +2726,7 @@ function LoanDashTile({ tracker, transactions, onAddTransaction, onToggleTransac
 </div>
 
 <div class="progress-wrap">
-  <div class="progress-label"><span>Průběh splácení</span><span>${pct} % splaceno</span></div>
+  <div class="progress-label"><span>Vyčerpáno z dostupných prostředků (celkem načerpáno minus náklady)</span><span>${pct} % vyčerpáno</span></div>
   <div class="progress-bar"><div class="progress-fill" style="width:${Math.min(pct,100)}%"></div></div>
 </div>
 
