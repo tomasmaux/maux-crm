@@ -2720,15 +2720,9 @@ function LoanDashTile({ tracker, transactions, onAddTransaction, onToggleTransac
   </div>
 </div>
 
-<div class="kpi-grid">
-  <div class="kpi"><label>Zbývá k dispozici prostředků</label><div class="val">${fmtKc(remaining)}</div><div class="sub">aktuální zůstatek čerpání</div></div>
-  <div class="kpi green"><label>Celkem splaceno</label><div class="val">${fmtKc(totalRepaidInv)}</div><div class="sub">z načerpaných ${fmtKc(totalDrawnInv)}</div></div>
-  <div class="kpi"><label>Splátka / měsíc</label><div class="val">${fmtKc(monthly)}</div><div class="sub">${monthsLeft > 0 ? `zbývá ~${monthsLeft} splátek` : "splaceno"}</div></div>
-</div>
-<div class="kpi-grid">
-  <div class="kpi"><label>Načerpáno celkem</label><div class="val">${fmtKc(totalDrawnInv)}</div><div class="sub">&nbsp;</div></div>
-  <div class="kpi"><label>Odhadovaný konec</label><div class="val" style="font-size:13pt">${finalDate}</div><div class="sub">&nbsp;</div></div>
-  <div class="kpi"><label>Splaceno %</label><div class="val">${pct} %</div><div class="sub">&nbsp;</div></div>
+<div class="kpi-grid" style="grid-template-columns:1fr 1fr;">
+  <div class="kpi red"><label>Zbývá k dispozici prostředků</label><div class="val">${fmtKc(remaining)}</div><div class="sub">aktuální zůstatek čerpání</div></div>
+  <div class="kpi green"><label>Načerpáno celkem</label><div class="val">${fmtKc(totalDrawnInv)}</div><div class="sub">celkem čerpáno z úvěru</div></div>
 </div>
 
 <div class="progress-wrap">
