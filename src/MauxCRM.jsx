@@ -2271,7 +2271,7 @@ function InvoicePrintPreview({ invoice, client, workEntries, onBack, onIssue, on
                   <tbody>
                     {pageEntries.map((e, i) => {
                       const discAmt = Math.min(Number(e.discount_amount) || 0, e.amount || 0);
-                      const lineTotal = (e.amount||0) + (Number(e.sig_count)||0) * SIGNATURE_DECL_FEE;
+                      const lineTotal = (e.amount||0) + (Number(e.sig_count)||0) * SIGNATURE_DECL_FEE + (Number(e.admin_fee)||0) + (Number(e.notary_fee)||0);
                       const lineFinal = lineTotal - discAmt;
                       return (
                       <tr key={i} style={{ background: i % 2 === 0 ? "transparent" : "rgba(53,24,165,.012)", breakInside: "avoid", pageBreakInside: "avoid" }}>
@@ -2290,7 +2290,7 @@ function InvoicePrintPreview({ invoice, client, workEntries, onBack, onIssue, on
                           )}
                         </td>
                         <td style={{ padding: "12px 4mm 12px 0", borderBottom: ".5px solid rgba(53,24,165,.045)", textAlign: "right", fontSize: 11, color: "#B0ABCA", fontWeight: 300, verticalAlign: "top", whiteSpace: "nowrap" }}>{e.hours > 0 ? `${e.hours} h` : "—"}</td>
-                        <td style={{ padding: "12px 4mm 12px 0", borderBottom: ".5px solid rgba(53,24,165,.045)", textAlign: "right", fontSize: 11, color: "#B0ABCA", fontWeight: 300, verticalAlign: "top", whiteSpace: "nowrap" }}>{e.rate > 0 ? fmtKc(e.rate) : <span style={{ color: "#D4CEEA" }}>paušál</span>}</td>
+                        <td style={{ padding: "12px 4mm 12px 0", borderBottom: ".5px solid rgba(53,24,165,.045)", textAlign: "right", fontSize: 11, color: "#B0ABCA", fontWeight: 300, verticalAlign: "top", whiteSpace: "nowrap" }}>{e.hours > 0 ? fmtKc(e.rate) : (e.rate > 0 ? "—" : <span style={{ color: "#D4CEEA" }}>paušál</span>)}</td>
                         <td style={{ padding: "12px 0 12px 0", borderBottom: ".5px solid rgba(53,24,165,.045)", textAlign: "right", fontSize: 12, color: "#1a1530", fontWeight: 400, verticalAlign: "top", whiteSpace: "nowrap" }}>
                           {discAmt > 0 ? (
                             <>
