@@ -1879,7 +1879,7 @@ function InvoicePrintPreview({ invoice, client, workEntries, onBack, onIssue, on
         color-adjust: exact !important;
       }
     }
-    .print-root { font-family: 'Inter', Arial, sans-serif; }
+    .print-root { font-family: 'Inter', Arial, sans-serif; background: #C8C4BC; }
     .print-root, .print-root * {
       -webkit-print-color-adjust: exact;
       print-color-adjust: exact;
@@ -1916,7 +1916,7 @@ function InvoicePrintPreview({ invoice, client, workEntries, onBack, onIssue, on
       </div>
 
       {/* Preview wrapper */}
-      <div className="print-root" style={{ background: "#C8C4BC", display: "flex", flexDirection: "column", alignItems: "center", padding: "40px 0", gap: 32 }}>
+      <div className="print-root" style={{ display: "flex", flexDirection: "column", alignItems: "center", padding: "40px 0", gap: 32 }}>
 
         {/* PAGE 1 — FAKTURA */}
         <div className="inv-page" style={{ boxShadow: "0 16px 60px rgba(0,0,0,.22)", fontFamily: "'Cormorant Garamond', 'Inter', serif" }}>
