@@ -1868,7 +1868,8 @@ function InvoicePrintPreview({ invoice, client, workEntries, onBack, onIssue, on
          VLASTNÍ TÉMĚŘ PRÁZDNÁ FYZICKÁ STRANA navíc (jedna za každou mezeru/patičku) —
          to byl pravý důvod, proč 1 příloha = 4 strany místo 2, a 6 stran místo 3.
          Bez !important by zde "vyhrály" inline styly (vyšší specificita). */
-      .print-root { position: static; background: #fff; padding: 0 !important; gap: 0 !important; }
+      .print-root { position: static; background: #fff !important; padding: 0 !important; gap: 0 !important; }
+      .inv-page { min-height: 297mm !important; height: 297mm !important; overflow: hidden !important; }
       .no-print { display: none !important; }
       @page { size: A4; margin: 0; }
       /* Bez tohoto prohlížeč při tisku/PDF defaultně vynechá barevná pozadí
