@@ -1879,7 +1879,7 @@ function InvoicePrintPreview({ invoice, client, workEntries, onBack, onIssue, on
         color-adjust: exact !important;
       }
     }
-    .print-root { font-family: 'Inter', Arial, sans-serif; background: #C8C4BC; }
+    .print-root { font-family: 'Inter', Arial, sans-serif; background: #C8C4BC; display: flex; flex-direction: column; align-items: center; padding: 40px 0; gap: 32px; }
     .print-root, .print-root * {
       -webkit-print-color-adjust: exact;
       print-color-adjust: exact;
@@ -1916,7 +1916,7 @@ function InvoicePrintPreview({ invoice, client, workEntries, onBack, onIssue, on
       </div>
 
       {/* Preview wrapper */}
-      <div className="print-root" style={{ display: "flex", flexDirection: "column", alignItems: "center", padding: "40px 0", gap: 32 }}>
+      <div className="print-root">
 
         {/* PAGE 1 — FAKTURA */}
         <div className="inv-page" style={{ boxShadow: "0 16px 60px rgba(0,0,0,.22)", fontFamily: "'Cormorant Garamond', 'Inter', serif" }}>
@@ -2068,7 +2068,7 @@ function InvoicePrintPreview({ invoice, client, workEntries, onBack, onIssue, on
                           {it.statutory_note || "přefakturace — osvobozeno od DPH"}
                         </div>
                       </td>
-                      <td colSpan={2} style={{ padding: "11px 0 11px 8px", borderBottom: ".5px solid rgba(53,24,165,.05)", textAlign: "right", fontSize: 11, color: "#D4CEEA", fontFamily: "'Inter', sans-serif" }}>{it.statutory_note ? "zákonná sazba" : "paušál"}</td>
+                      <td colSpan={2} style={{ padding: "11px 0 11px 8px", borderBottom: ".5px solid rgba(53,24,165,.05)", textAlign: "right", fontSize: 11, color: "#D4CEEA", fontFamily: "'Inter', sans-serif" }}>{it.statutory_note ? "zákonná sazba" : "hradil advokát"}</td>
                       <td style={{ padding: "11px 0 11px 8px", borderBottom: ".5px solid rgba(53,24,165,.05)", textAlign: "right", fontSize: 11.5, color: "#2d2840", fontFamily: "'Inter', sans-serif", fontWeight: 400, whiteSpace: "nowrap" }}>{fmtKc(it.amount)}</td>
                     </tr>
                   ))}
