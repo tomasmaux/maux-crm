@@ -2035,8 +2035,8 @@ function InvoicePrintPreview({ invoice, client, workEntries, onBack, onIssue, sa
                       rows.push(
                         <tr key={`paushal-${idx}`} style={{ breakInside: "avoid", pageBreakInside: "avoid" }}>
                           <td style={{ padding: "11px 0", borderBottom: ".5px solid rgba(53,24,165,.05)", fontSize: 11.5, color: "#3a3355", fontFamily: "'Inter', sans-serif", fontWeight: 300 }}>
-                            {e.description || "Paušální odměna"}
-                            <div style={{ fontSize: 9, color: "#D4CEEA", marginTop: 3, fontFamily: "'Inter', sans-serif" }}>paušální odměna dle přílohy č. 1</div>
+                            Paušální odměna za právní služby
+                            <div style={{ fontSize: 9, color: "#D4CEEA", marginTop: 3, fontFamily: "'Inter', sans-serif" }}>detail dle přílohy č. 1</div>
                           </td>
                           <td style={{ padding: "11px 0 11px 8px", borderBottom: ".5px solid rgba(53,24,165,.05)", textAlign: "right", fontSize: 11, color: "#D4CEEA", fontFamily: "'Inter', sans-serif", fontWeight: 300, whiteSpace: "nowrap" }}>—</td>
                           <td style={{ padding: "11px 0 11px 8px", borderBottom: ".5px solid rgba(53,24,165,.05)", textAlign: "right", fontSize: 11, color: "#D4CEEA", fontFamily: "'Inter', sans-serif", fontWeight: 300, whiteSpace: "nowrap" }}>paušál</td>
