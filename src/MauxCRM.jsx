@@ -2721,7 +2721,7 @@ function LoanDashTile({ tracker, transactions, onAddTransaction, onToggleTransac
 </div>
 
 <div class="kpi-grid">
-  <div class="kpi"><label>Zbývá splatit</label><div class="val">${fmtKc(remaining)}</div><div class="sub">aktuální zůstatek dluhu</div></div>
+  <div class="kpi"><label>Zbývá k dispozici prostředků</label><div class="val">${fmtKc(remaining)}</div><div class="sub">aktuální zůstatek čerpání</div></div>
   <div class="kpi green"><label>Celkem splaceno</label><div class="val">${fmtKc(totalRepaidInv)}</div><div class="sub">z načerpaných ${fmtKc(totalDrawnInv)}</div></div>
   <div class="kpi"><label>Splátka / měsíc</label><div class="val">${fmtKc(monthly)}</div><div class="sub">${monthsLeft > 0 ? `zbývá ~${monthsLeft} splátek` : "splaceno"}</div></div>
 </div>
