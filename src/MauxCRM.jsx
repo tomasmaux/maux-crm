@@ -1867,7 +1867,7 @@ function InvoicePrintPreview({ invoice, client, workEntries, onBack, onIssue, on
          žádné flex artefakty, žádné mezery. !important přebíjí inline styly. */
       html, body { background: white !important; }
       .print-root { display: block !important; position: static !important; background: transparent !important; padding: 0 !important; gap: 0 !important; margin: 0 !important; }
-      .inv-page { display: block !important; width: 210mm !important; min-height: 297mm !important; margin: 0 !important; overflow: hidden !important; }
+      .inv-page { display: block !important; width: 210mm !important; min-height: 297mm !important; margin: 0 !important; overflow: hidden !important; box-shadow: none !important; }
       .no-print { display: none !important; }
       @page { size: A4; margin: 0; }
       /* Bez tohoto prohlížeč při tisku/PDF defaultně vynechá barevná pozadí
