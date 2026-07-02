@@ -808,6 +808,7 @@ function InvoiceIssueModal({ clientId, entries, clients, invoices, initialBilled
       <div className="inv-modal-host" style={{ position: "fixed", inset: 0, zIndex: 200, overflowY: "auto", background: "#f0eff8" }}>
         <InvoicePrintPreview invoice={invoice} client={client} workEntries={selEntries}
           onBack={() => setShowPreview(false)}
+          onDone={onCancel}
           onIssue={(sent) => onConfirm({ ...invoice, status: sent ? "vystavena" : "pripravena" }, selEntries.map(e => e.id))}
           saving={saving} />
       </div>
@@ -1761,11 +1762,12 @@ function useTransparentWatermark(src) {
   return result;
 }
 
-function InvoicePrintPreview({ invoice, client, workEntries, onBack, onIssue, saving, previewOnly = false, isEditMode = false, onConfirmEdit = null }) {
+function InvoicePrintPreview({ invoice, client, workEntries, onBack, onIssue, onDone = null, saving, previewOnly = false, isEditMode = false, onConfirmEdit = null }) {
   const [qrUrl, setQrUrl] = useState("");
   const wmSrc = useTransparentWatermark(LOGO_WM);
   const [issueConfirmDialog, setIssueConfirmDialog] = useState(false);
   const [editConfirmDialog, setEditConfirmDialog] = useState(false);
+  const [issued, setIssued] = useState(false);
 
   const ibanRaw = FIRMA.iban.replace(/\s/g, "");
   // POZOR: invoice.total je už v celých Kč (viz fmtKc/celá appka — nikdy se nedělí 100),
@@ -1801,9 +1803,14 @@ function InvoicePrintPreview({ invoice, client, workEntries, onBack, onIssue, sa
     if (callback) callback();
   };
 
-  const handleConfirmIssue = () => {
+  const handleConfirmIssue = async () => {
     setIssueConfirmDialog(false);
-    printWithFilename(() => onIssue(true));
+    const original = document.title;
+    document.title = buildPdfFilename();
+    window.print();
+    setTimeout(() => { document.title = original; }, 2000);
+    await onIssue(true);
+    setIssued(true);
   };
 
   // Last day of prev month description for items
@@ -1892,7 +1899,11 @@ function InvoicePrintPreview({ invoice, client, workEntries, onBack, onIssue, sa
       <div className="no-print" style={{ background: "#1A0E5C", padding: "14px 28px", display: "flex", alignItems: "center", gap: 12 }}>
         <button className="btn" style={{ background: "rgba(255,255,255,.1)", color: "#fff", border: "1px solid rgba(255,255,255,.2)", fontSize: 12 }} onClick={onBack}>← Zpět</button>
         <div style={{ flex: 1, color: "#fff", opacity: .7, fontSize: 13 }}>Náhled faktury {invoice.invoice_number} — {client?.name}</div>
-        {previewOnly ? (
+        {issued ? (
+          <button onClick={onDone || onBack} style={{ background: "#16A34A", color: "#fff", border: "none", borderRadius: 8, padding: "9px 20px", fontSize: 13, fontWeight: 600, cursor: "pointer", display: "flex", alignItems: "center", gap: 8, boxShadow: "0 0 16px rgba(22,163,74,.45)", letterSpacing: ".01em" }}>
+            ✓ Vystaveno · zpět na faktury
+          </button>
+        ) : previewOnly ? (
           <span style={{ fontSize: 12, color: "rgba(255,255,255,.5)" }}>Pouze náhled — pro vystavení použij "Vystavit fakturu →"</span>
         ) : isEditMode ? (
           <button className="btn pri" style={{ fontSize: 13 }} onClick={() => setEditConfirmDialog(true)} disabled={saving}>
