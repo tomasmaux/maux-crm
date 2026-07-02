@@ -12389,11 +12389,11 @@ export default function MauxCRM() {
   // kteří volají fmtKc/fmtN/K/Kd) — žádná reálná data se tím nemění, jde čistě o masku zobrazení.
   PRIVACY_MODE = privacyMode;
   const togglePrivacy = () => { setPrivacyMode(p => { savePrivacyMode(!p); return !p; }); };
-  const [mod, setMod] = useState("dashboard");
+  const [mod, setMod] = useState(() => { try { return localStorage.getItem("maux_mod") || "dashboard"; } catch { return "dashboard"; } });
   const [mode, setMode] = useState("list");
   const [modHistory, setModHistory] = useState([]);
-  const navTo = (k) => { setModHistory(h => [...h, { mod, mode }]); setMod(k); setMode("list"); setSel(null); setEscrowMode("list"); setSelEscrow(null); };
-  const goBack = () => { if (mode !== "list" && mode !== "") { setMode("list"); setSel(null); return; } const prev = modHistory[modHistory.length-1]; if (prev) { setModHistory(h => h.slice(0,-1)); setMod(prev.mod); setMode("list"); setSel(null); } };
+  const navTo = (k) => { setModHistory(h => [...h, { mod, mode }]); setMod(k); try { localStorage.setItem("maux_mod", k); } catch {} setMode("list"); setSel(null); setEscrowMode("list"); setSelEscrow(null); };
+  const goBack = () => { if (mode !== "list" && mode !== "") { setMode("list"); setSel(null); return; } const prev = modHistory[modHistory.length-1]; if (prev) { setModHistory(h => h.slice(0,-1)); setMod(prev.mod); try { localStorage.setItem("maux_mod", prev.mod); } catch {} setMode("list"); setSel(null); } };
   // Chytré kliknutí na den v kalendáři výkazů → přímo otevře "Nový záznam" s předdoplněným datem
   const [prefillDate, setPrefillDate] = useState(null);
   const navToNewWorkEntry = (ds) => { setModHistory(h => [...h, { mod, mode }]); setMod("vykaz"); setMode("new"); setSel(null); setEscrowMode("list"); setSelEscrow(null); setPrefillDate(ds); };
