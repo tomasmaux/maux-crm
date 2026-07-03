@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useRef, Fragment } from "react";
+import { useState, useEffect, useMemo, useRef, Fragment, createContext, useContext } from "react";
 import { supabase } from "./supabase";
 import QRCode from "qrcode";
 
@@ -108,23 +108,23 @@ html,body,#root{height:100%;background:#FAFAFA}
 @keyframes mauxDotBlink{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.35;transform:scale(.8)}}
 .maux-glow{animation:mauxNumGlow 3s ease-in-out infinite}
 .maux-dot{display:inline-block;border-radius:50%;animation:mauxDotBlink 1.8s ease-in-out infinite}
-@keyframes mxSlideUp{from{opacity:0;transform:translateY(16px)}to{opacity:1;transform:translateY(0)}}
+@keyframes mxSlideUp{from{opacity:0;transform:translateY(24px) scale(.97)}to{opacity:1;transform:translateY(0) scale(1)}}
 @keyframes mxGrowX{from{transform:scaleX(0)}to{transform:scaleX(1)}}
+@keyframes mxShimmer{0%{background-position:200% center}100%{background-position:-200% center}}
 .maux-bar-grow{transform-origin:left;animation:mxGrowX .75s cubic-bezier(.34,1.2,.64,1) .35s both}
-#maux-panel-trigrafy{animation:mxSlideUp .5s ease 0ms both}
-#maux-panel-uschovy{animation:mxSlideUp .5s ease 65ms both}
-#maux-panel-firma{animation:mxSlideUp .5s ease 130ms both}
-#maux-panel-josef{animation:mxSlideUp .5s ease 195ms both}
-#maux-panel-pulz{animation:mxSlideUp .5s ease 260ms both}
-#maux-panel-finance{animation:mxSlideUp .5s ease 325ms both}
-#maux-panel-chart{animation:mxSlideUp .5s ease 390ms both}
-#maux-panel-klienti{animation:mxSlideUp .5s ease 455ms both}
-#maux-panel-navstevnost{animation:mxSlideUp .5s ease 520ms both}
-#maux-panel-xtb{animation:mxSlideUp .5s ease 585ms both}
-#maux-panel-ziskovost{animation:mxSlideUp .5s ease 650ms both}
-#maux-panel-claude{animation:mxSlideUp .5s ease 715ms both}
-[id^="maux-panel-"]{transition:transform .2s ease,box-shadow .2s ease}
-[id^="maux-panel-"]:hover{transform:translateY(-2px)}
+#maux-panel-trigrafy{animation:mxSlideUp .65s cubic-bezier(.16,1,.3,1) 0ms both}
+#maux-panel-uschovy{animation:mxSlideUp .65s cubic-bezier(.16,1,.3,1) 90ms both}
+#maux-panel-firma{animation:mxSlideUp .65s cubic-bezier(.16,1,.3,1) 180ms both}
+#maux-panel-josef{animation:mxSlideUp .65s cubic-bezier(.16,1,.3,1) 270ms both}
+#maux-panel-pulz{animation:mxSlideUp .65s cubic-bezier(.16,1,.3,1) 360ms both}
+#maux-panel-finance{animation:mxSlideUp .65s cubic-bezier(.16,1,.3,1) 450ms both}
+#maux-panel-chart{animation:mxSlideUp .65s cubic-bezier(.16,1,.3,1) 540ms both}
+#maux-panel-klienti{animation:mxSlideUp .65s cubic-bezier(.16,1,.3,1) 630ms both}
+#maux-panel-navstevnost{animation:mxSlideUp .65s cubic-bezier(.16,1,.3,1) 720ms both}
+#maux-panel-xtb{animation:mxSlideUp .65s cubic-bezier(.16,1,.3,1) 810ms both}
+#maux-panel-ziskovost{animation:mxSlideUp .65s cubic-bezier(.16,1,.3,1) 900ms both}
+#maux-panel-claude{animation:mxSlideUp .65s cubic-bezier(.16,1,.3,1) 990ms both}
+[id^="maux-panel-"]{transition:box-shadow .2s ease}
 .num{font-family:var(--mono);font-variant-numeric:tabular-nums;letter-spacing:.01em}
 .mx table td.r,.mx table th.r{text-align:right;font-family:var(--mono);font-variant-numeric:tabular-nums;letter-spacing:.01em}
 .sb{width:220px;flex:0 0 220px;background:#FFFFFF;border-right:1px solid #EEEDF5;display:flex;flex-direction:column;padding:32px 16px 24px;height:100vh;overflow-y:auto;position:sticky;top:0;scrollbar-width:none}
@@ -7525,6 +7525,52 @@ function TripleRingPanel({ sporSegs, sporBal, sporEarmarked, firmaRez, planKap,
 }
 
 
+/* ─── PANEL CONTEXT — defined at file level so Panel is a stable component reference ─── */
+const PanelCtx = createContext(null);
+const PANEL_ACCENTS = {
+  finance: "#3518A5", uschovy: "#7C3AED", trigrafy: "#4338CA", firma: "#4F46E5",
+  josef: "#6D28D9", pulz: "#4C1D95", chart: "#2563EB", klienti: "#5B21B6",
+  navstevnost: "#4338CA", xtb: "#4F46E5", ziskovost: "#6D28D9", claude: "#3518A5",
+};
+function Panel({ id, children }) {
+  const { panelState, dragOver, editLayout, handleDragStart, handleDragOver, handleDrop, setDragOver, toggleHide } = useContext(PanelCtx);
+  const hidden = panelState.hidden.includes(id);
+  const isOver = dragOver === id;
+  const cssOrder = panelState.order.indexOf(id);
+  const accent = PANEL_ACCENTS[id] || "#3518A5";
+  if (hidden && !editLayout) return null;
+  return (
+    <div
+      id={`maux-panel-${id}`}
+      draggable={editLayout}
+      onDragStart={() => handleDragStart(id)}
+      onDragOver={e => handleDragOver(e, id)}
+      onDrop={e => handleDrop(e, id)}
+      onDragLeave={() => setDragOver(null)}
+      style={{
+        order: cssOrder >= 0 ? cssOrder : 99,
+        outline: isOver ? "2px dashed #3518A5" : editLayout ? "2px dashed rgba(209,213,219,.7)" : "none",
+        outlineOffset: 4,
+        borderRadius: 3,
+        border: `1px solid ${accent}22`,
+        opacity: hidden ? 0.4 : 1,
+        position: "relative",
+        cursor: editLayout ? "grab" : "default",
+        boxShadow: `0 0 0 1px ${accent}14, 0 1px 10px ${accent}0d`,
+      }}
+    >
+      {editLayout && (
+        <button
+          onClick={() => toggleHide(id)}
+          style={{position:"absolute",top:6,right:6,zIndex:10,background:hidden?"#059669":"#DC2626",color:"#fff",border:"none",borderRadius:"50%",width:22,height:22,fontSize:13,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",fontWeight:700,boxShadow:"0 1px 4px rgba(0,0,0,.25)"}}
+          title={hidden ? "Zobrazit" : "Skrýt"}
+        >{hidden ? "+" : "×"}</button>
+      )}
+      {children}
+    </div>
+  );
+}
+
 function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, loanTrackers, loanTransactions, escrows, expenseChecks, onToggleExpenseCheck, onNav, onAddWorkEntry, onSaveFinance, onDeleteFinance, onDpfoToggle, onLoanTxAdd, onLoanTxToggle, onLoanTxDelete, onLoanUpdate, assistantLogs=[], assistantAttendance=[], assistantAvailability=null, xtbTranches=[] }) {
   const [escrowAlertDismissed, setEscrowAlertDismissed] = useState(false);
   const prevMonthStr = (() => { const d = new Date(); d.setDate(1); d.setMonth(d.getMonth()-1); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`; })();
@@ -7562,56 +7608,8 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
     const ns = { order: DEFAULT_PANELS, hidden: [] };
     setPanelState(ns); savePanelState(ns);
   }
-  // Barevné odlišení panelů Přehledu podle kategorie (převzato z brandové palety webu) —
-  // každý panel má svůj akcent, který se projeví jako tenký okraj a při najetí myší jako
-  // jemný spotlight + 3D náklon karty (stejný efekt jako na maux.cz, jen zeslabený, ať to
-  // nerozhodí grafy/tabulky uvnitř).
-  // Sjednocená fluorescentní indigo paleta — celý Dashboard v jedné barevné rodině
-  // (indigo / violet / modrá), jen v různých odstínech, ať to působí jako jeden
-  // souvislý command-center systém, ne duha.
-  const PANEL_ACCENTS = {
-    finance: "#3518A5", uschovy: "#7C3AED", trigrafy: "#4338CA", firma: "#4F46E5",
-    josef: "#6D28D9", pulz: "#4C1D95", chart: "#2563EB", klienti: "#5B21B6",
-    navstevnost: "#4338CA", xtb: "#4F46E5", ziskovost: "#6D28D9", claude: "#3518A5",
-  };
-  function Panel({ id, children }) {
-    const hidden = panelState.hidden.includes(id);
-    const isOver = dragOver === id;
-    const cssOrder = panelState.order.indexOf(id);
-    const accent = PANEL_ACCENTS[id] || "#3518A5";
-
-    if (hidden && !editLayout) return null;
-    return (
-      <div
-        id={`maux-panel-${id}`}
-        draggable={editLayout}
-        onDragStart={() => handleDragStart(id)}
-        onDragOver={e => handleDragOver(e, id)}
-        onDrop={e => handleDrop(e, id)}
-        onDragLeave={() => setDragOver(null)}
-        style={{
-          order: cssOrder >= 0 ? cssOrder : 99,
-          outline: isOver ? "2px dashed #3518A5" : editLayout ? "2px dashed rgba(209,213,219,.7)" : "none",
-          outlineOffset: 4,
-          borderRadius: 3,
-          border: `1px solid ${accent}22`,
-          opacity: hidden ? 0.4 : 1,
-          position: "relative",
-          cursor: editLayout ? "grab" : "default",
-          boxShadow: `0 0 0 1px ${accent}14, 0 1px 10px ${accent}0d`,
-        }}
-      >
-        {editLayout && (
-          <button
-            onClick={() => toggleHide(id)}
-            style={{position:"absolute",top:6,right:6,zIndex:10,background:hidden?"#059669":"#DC2626",color:"#fff",border:"none",borderRadius:"50%",width:22,height:22,fontSize:13,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",fontWeight:700,boxShadow:"0 1px 4px rgba(0,0,0,.25)"}}
-            title={hidden ? "Zobrazit" : "Skrýt"}
-          >{hidden ? "+" : "×"}</button>
-        )}
-        {children}
-      </div>
-    );
-  }
+  // PANEL_ACCENTS a Panel component jsou definovány na úrovni souboru (výše),
+  // aby byly stabilní referencí a nezpůsobovaly unmount/remount při každém re-renderu Dashboardu.
   const now = new Date();
   // Lokální (ne UTC) klíč měsíce — toISOString() o půlnoci 1. dne v měsíci v české časové zóně
   // ukrojí přes UTC převod den a vrátí PŘEDCHOZÍ měsíc (stejná chyba jako v DPH dlaždici).
@@ -7823,6 +7821,7 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
   );
 
   return (
+    <PanelCtx.Provider value={{panelState, dragOver, editLayout, handleDragStart, handleDragOver, handleDrop, setDragOver, toggleHide}}>
     <div style={{display:"flex",flexDirection:"column",gap:16}}>
 
       {/* Backup Reminder */}
@@ -8810,6 +8809,7 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
       </Panel>
 
     </div>
+    </PanelCtx.Provider>
   );
 }
 
