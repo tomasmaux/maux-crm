@@ -8268,7 +8268,7 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
                   </div>
                 </div>
 
-                {/* ── SPOŘICÍ ÚČET — clean fintech redesign (3.7.2026) ── */}
+                {/* ── SPOŘICÍ ÚČET — fintech v3 airy+interactive (3.7.2026) ── */}
                 {(() => {
                   const sporaciItems = (financeItems||[]).filter(i => i.category === "sporaci" && i.notes !== "SKIP_DISPLAY");
                   const zItemS     = sporaciItems.find(i => i.id === "fi_sp_99");
@@ -8296,8 +8296,8 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
                   const sFullSegs = [...sEnvSegs, ...(sFirmaRez > 0 ? [{ label: "Volné", value: sFirmaRez, color: "#22c55e" }] : [])];
                   const sTotalAll = sFullSegs.reduce((s,e)=>s+e.value,0) || 1;
                   const boundPct  = Math.round((sTotalEar / Math.max(sporBalS,1)) * 100);
-                  // SVG donut
-                  const R_D = 26, CIRC_D = 2 * Math.PI * R_D;
+                  // SVG donut — r=34
+                  const R_D = 34, CIRC_D = 2 * Math.PI * R_D;
                   let cumPct = 0;
                   const donutSegs = sFullSegs.map(s => {
                     const pct = s.value / sTotalAll;
@@ -8313,78 +8313,86 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
                     <div style={{
                       borderRadius:14,
                       background:"#fff",
-                      border:"1px solid #ebebeb",
-                      boxShadow:"0 1px 4px rgba(0,0,0,.04),0 6px 20px rgba(0,0,0,.06)",
+                      border:"1px solid #e8e8e8",
+                      boxShadow:"0 1px 4px rgba(0,0,0,.04),0 8px 28px rgba(0,0,0,.07)",
                       padding:"14px 16px",
                       marginTop:14,
+                      position:"relative",
+                      overflow:"visible",
                     }}>
+                      <style>{`
+                        @keyframes sporIn{from{opacity:0;transform:scale(.7) rotate(-15deg)}to{opacity:1;transform:scale(1) rotate(0)}}
+                        @keyframes sporSpk{0%,100%{opacity:0;transform:scale(.3)}40%,60%{opacity:.85;transform:scale(1)}}
+                        .ssg{transition:stroke-width .18s,opacity .18s,filter .18s;cursor:default}.ssg:hover{stroke-width:12!important;filter:brightness(1.15)}
+                      `}</style>
+
+                      {/* DONUT — absolutely positioned, top-right overflow */}
+                      {!sporEditMode && (
+                        <div style={{position:"absolute",top:-12,right:-12,pointerEvents:"none",zIndex:2,animation:"sporIn .55s cubic-bezier(.34,1.56,.64,1) both"}}>
+                          <svg width="96" height="96" viewBox="0 0 96 96" overflow="visible">
+                            {/* soft glow halo */}
+                            <circle cx="48" cy="48" r={R_D+7} fill="none" stroke="rgba(99,102,241,.06)" strokeWidth="14"/>
+                            {/* track */}
+                            <circle cx="48" cy="48" r={R_D} fill="none" stroke="#f0f0f0" strokeWidth="9"/>
+                            {/* segments */}
+                            {donutSegs.map((s,i)=>(
+                              <circle key={i} className="ssg"
+                                cx="48" cy="48" r={R_D}
+                                fill="none" stroke={s.color} strokeWidth="9"
+                                strokeDasharray={`${Math.max(s.pct*CIRC_D-2,0)} ${CIRC_D}`}
+                                transform={`rotate(${s.startPct*360-90} 48 48)`}
+                                strokeLinecap="butt"
+                              ><title>{s.label}: {fmtKc(s.value)}</title></circle>
+                            ))}
+                            {/* center % — clean, no label */}
+                            <text x="48" y="53" textAnchor="middle" fontSize="15" fill="#111827" fontWeight="800" fontFamily="system-ui,sans-serif">{boundPct}%</text>
+                            {/* sparkle stars */}
+                            {[{x:82,y:6,d:"0s"},{x:90,y:34,d:".7s"},{x:76,y:2,d:"1.3s"},{x:88,y:16,d:"1.9s"}].map((sp,i)=>(
+                              <text key={i} x={sp.x} y={sp.y} fontSize={i%2===0?"7":"5"} fill="#6366f1" textAnchor="middle" opacity="0"
+                                style={{animation:`sporSpk 2.8s ease ${sp.d} infinite`}}>✦</text>
+                            ))}
+                          </svg>
+                        </div>
+                      )}
+
                       {/* Header */}
-                      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
+                      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10,paddingRight:sporEditMode?0:68}}>
                         <span style={{fontSize:9.5,letterSpacing:".16em",textTransform:"uppercase",color:"#bbb",fontWeight:700}}>Spořicí účet</span>
-                        <button
-                          onClick={()=>setSporOpen(v=>!v)}
-                          style={{fontSize:10.5,color:"#ccc",background:"none",border:"none",cursor:"pointer",padding:0,lineHeight:1}}
-                        >{sporOpen ? "skrýt ▲" : "detail ▼"}</button>
+                        <button onClick={()=>setSporOpen(v=>!v)} style={{fontSize:10.5,color:"#ccc",background:"none",border:"none",cursor:"pointer",padding:0,lineHeight:1}}>
+                          {sporOpen?"skrýt ▲":"detail ▼"}
+                        </button>
                       </div>
 
-                      {/* Main row: balance left · donut right */}
-                      <div style={{display:"flex",alignItems:"center",gap:14}}>
-                        <div style={{flex:1,minWidth:0}}>
-                          {sporEditMode ? (
-                            <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:4}}>
-                              <input
-                                type="number" autoFocus
-                                value={sporEditVal}
-                                onChange={e=>setSporEditVal(Number(e.target.value))}
-                                onKeyDown={e=>{if(e.key==="Enter")saveSporBal();if(e.key==="Escape")setSporEditMode(false);}}
-                                style={{
-                                  flex:1,fontSize:22,fontWeight:700,
-                                  border:"1.5px solid #e0e7ff",borderRadius:8,
-                                  padding:"6px 10px",outline:"none",
-                                  background:"#f8f9ff",color:"#111827",
-                                  boxShadow:"0 0 0 3px rgba(99,102,241,.1)",
-                                }}
-                              />
-                              <button onClick={saveSporBal} style={{background:"#6366f1",border:"none",borderRadius:8,padding:"7px 13px",color:"#fff",fontWeight:700,cursor:"pointer",fontSize:13,flexShrink:0}}>✓</button>
-                              <button onClick={()=>setSporEditMode(false)} style={{background:"#f5f5f5",border:"1px solid #e5e5e5",borderRadius:8,padding:"7px 11px",cursor:"pointer",color:"#888",fontSize:13,flexShrink:0}}>✕</button>
-                            </div>
-                          ) : (
-                            <div
-                              onClick={()=>{setSporEditVal(sporBalS);setSporEditMode(true);}}
-                              style={{display:"inline-flex",alignItems:"baseline",gap:5,cursor:"pointer",borderRadius:8,padding:"2px 4px",transition:"background .12s"}}
-                              onMouseEnter={e=>e.currentTarget.style.background="#f5f7ff"}
-                              onMouseLeave={e=>e.currentTarget.style.background="transparent"}
-                              title="Klikni pro úpravu zůstatku"
-                            >
-                              <span className="maux-num" style={{fontSize:30,fontWeight:800,color:"#111827",letterSpacing:"-.02em",lineHeight:1}}>{fmtKc(sporBalS)}</span>
-                              <span style={{fontSize:11,color:"#d1d5db",lineHeight:1}}>✎</span>
-                            </div>
-                          )}
-                          <div style={{display:"flex",gap:10,marginTop:6,flexWrap:"wrap"}}>
-                            <span style={{fontSize:10.5,color:"#9ca3af"}}>{fmtKc(sTotalEar)} vázáno</span>
-                            {sFirmaRez > 0 && <span style={{fontSize:10.5,color:"#10b981",fontWeight:600}}>+ {fmtKc(sFirmaRez)} volné</span>}
+                      {/* Balance — full width in edit, padded right in display */}
+                      <div style={{paddingRight:sporEditMode?0:82}}>
+                        {sporEditMode ? (
+                          <div style={{display:"flex",gap:7,alignItems:"center"}}>
+                            <input
+                              type="number" autoFocus
+                              value={sporEditVal}
+                              onChange={e=>setSporEditVal(Number(e.target.value))}
+                              onKeyDown={e=>{if(e.key==="Enter")saveSporBal();if(e.key==="Escape")setSporEditMode(false);}}
+                              style={{flex:1,fontSize:22,fontWeight:700,border:"1.5px solid #e0e7ff",borderRadius:8,padding:"7px 10px",outline:"none",background:"#f8f9ff",color:"#111827",boxShadow:"0 0 0 3px rgba(99,102,241,.1)"}}
+                            />
+                            <button onClick={saveSporBal} style={{background:"#6366f1",border:"none",borderRadius:8,padding:"8px 16px",color:"#fff",fontWeight:700,cursor:"pointer",fontSize:15,flexShrink:0,lineHeight:1}}>✓</button>
+                            <button onClick={()=>setSporEditMode(false)} style={{background:"#f5f5f5",border:"1px solid #e5e5e5",borderRadius:8,padding:"8px 12px",cursor:"pointer",color:"#888",fontSize:15,flexShrink:0,lineHeight:1}}>✕</button>
                           </div>
+                        ) : (
+                          <div
+                            onClick={()=>{setSporEditVal(sporBalS);setSporEditMode(true);}}
+                            style={{display:"inline-flex",alignItems:"baseline",gap:5,cursor:"pointer",borderRadius:8,padding:"2px 5px",transition:"background .12s"}}
+                            onMouseEnter={e=>e.currentTarget.style.background="#f5f7ff"}
+                            onMouseLeave={e=>e.currentTarget.style.background="transparent"}
+                            title="Klikni pro úpravu zůstatku"
+                          >
+                            <span className="maux-num" style={{fontSize:30,fontWeight:800,color:"#111827",letterSpacing:"-.02em",lineHeight:1}}>{fmtKc(sporBalS)}</span>
+                            <span style={{fontSize:11,color:"#d1d5db",lineHeight:1}}>✎</span>
+                          </div>
+                        )}
+                        <div style={{display:"flex",gap:10,marginTop:6,flexWrap:"wrap"}}>
+                          <span style={{fontSize:10.5,color:"#9ca3af"}}>{fmtKc(sTotalEar)} vázáno</span>
+                          {sFirmaRez > 0 && <span style={{fontSize:10.5,color:"#10b981",fontWeight:600}}>+ {fmtKc(sFirmaRez)} volné</span>}
                         </div>
-
-                        {/* SVG multi-color donut */}
-                        <svg width="68" height="68" viewBox="0 0 68 68" style={{flexShrink:0,overflow:"visible"}}>
-                          <circle cx="34" cy="34" r={R_D} fill="none" stroke="#f3f4f6" strokeWidth="7"/>
-                          {donutSegs.map((s,i)=>(
-                            <circle key={i}
-                              cx="34" cy="34" r={R_D}
-                              fill="none"
-                              stroke={s.color}
-                              strokeWidth="7"
-                              strokeDasharray={`${Math.max(s.pct*CIRC_D-1.5,0)} ${CIRC_D}`}
-                              transform={`rotate(${s.startPct*360-90} 34 34)`}
-                              strokeLinecap="butt"
-                            >
-                              <title>{s.label}: {fmtKc(s.value)}</title>
-                            </circle>
-                          ))}
-                          <text x="34" y="30" textAnchor="middle" fontSize="8" fill="#9ca3af" fontWeight="600" fontFamily="system-ui,sans-serif">vázáno</text>
-                          <text x="34" y="43" textAnchor="middle" fontSize="13" fill="#111827" fontWeight="800" fontFamily="system-ui,sans-serif">{boundPct}%</text>
-                        </svg>
                       </div>
 
                       {/* Allocation pills */}
