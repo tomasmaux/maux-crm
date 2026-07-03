@@ -108,10 +108,23 @@ html,body,#root{height:100%;background:#FAFAFA}
 @keyframes mauxDotBlink{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.35;transform:scale(.8)}}
 .maux-glow{animation:mauxNumGlow 3s ease-in-out infinite}
 .maux-dot{display:inline-block;border-radius:50%;animation:mauxDotBlink 1.8s ease-in-out infinite}
-@keyframes mxSlideUp{from{opacity:0;transform:translateY(18px)}to{opacity:1;transform:translateY(0)}}
+@keyframes mxSlideUp{from{opacity:0;transform:translateY(16px)}to{opacity:1;transform:translateY(0)}}
 @keyframes mxGrowX{from{transform:scaleX(0)}to{transform:scaleX(1)}}
-@keyframes mxFadeIn{from{opacity:0}to{opacity:1}}
 .maux-bar-grow{transform-origin:left;animation:mxGrowX .75s cubic-bezier(.34,1.2,.64,1) .35s both}
+#maux-panel-trigrafy{animation:mxSlideUp .5s ease 0ms both}
+#maux-panel-uschovy{animation:mxSlideUp .5s ease 65ms both}
+#maux-panel-firma{animation:mxSlideUp .5s ease 130ms both}
+#maux-panel-josef{animation:mxSlideUp .5s ease 195ms both}
+#maux-panel-pulz{animation:mxSlideUp .5s ease 260ms both}
+#maux-panel-finance{animation:mxSlideUp .5s ease 325ms both}
+#maux-panel-chart{animation:mxSlideUp .5s ease 390ms both}
+#maux-panel-klienti{animation:mxSlideUp .5s ease 455ms both}
+#maux-panel-navstevnost{animation:mxSlideUp .5s ease 520ms both}
+#maux-panel-xtb{animation:mxSlideUp .5s ease 585ms both}
+#maux-panel-ziskovost{animation:mxSlideUp .5s ease 650ms both}
+#maux-panel-claude{animation:mxSlideUp .5s ease 715ms both}
+[id^="maux-panel-"]{transition:transform .2s ease,box-shadow .2s ease}
+[id^="maux-panel-"]:hover{transform:translateY(-2px)}
 .num{font-family:var(--mono);font-variant-numeric:tabular-nums;letter-spacing:.01em}
 .mx table td.r,.mx table th.r{text-align:right;font-family:var(--mono);font-variant-numeric:tabular-nums;letter-spacing:.01em}
 .sb{width:220px;flex:0 0 220px;background:#FFFFFF;border-right:1px solid #EEEDF5;display:flex;flex-direction:column;padding:32px 16px 24px;height:100vh;overflow-y:auto;position:sticky;top:0;scrollbar-width:none}
@@ -7561,13 +7574,11 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
     josef: "#6D28D9", pulz: "#4C1D95", chart: "#2563EB", klienti: "#5B21B6",
     navstevnost: "#4338CA", xtb: "#4F46E5", ziskovost: "#6D28D9", claude: "#3518A5",
   };
-  const _PANEL_STAGGER = ["trigrafy","uschovy","firma","josef","pulz","finance","chart","klienti","navstevnost","xtb","ziskovost","claude"];
   function Panel({ id, children }) {
     const hidden = panelState.hidden.includes(id);
     const isOver = dragOver === id;
     const cssOrder = panelState.order.indexOf(id);
     const accent = PANEL_ACCENTS[id] || "#3518A5";
-    const staggerMs = Math.max(_PANEL_STAGGER.indexOf(id), 0) * 65;
 
     if (hidden && !editLayout) return null;
     return (
@@ -7578,8 +7589,6 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
         onDragOver={e => handleDragOver(e, id)}
         onDrop={e => handleDrop(e, id)}
         onDragLeave={() => setDragOver(null)}
-        onMouseEnter={e => { if(!editLayout){ e.currentTarget.style.transform="translateY(-2px)"; e.currentTarget.style.boxShadow=`0 0 0 1px ${accent}30, 0 6px 24px rgba(53,24,165,.09)`; }}}
-        onMouseLeave={e => { e.currentTarget.style.transform=""; e.currentTarget.style.boxShadow=`0 0 0 1px ${accent}14, 0 1px 10px ${accent}0d`; }}
         style={{
           order: cssOrder >= 0 ? cssOrder : 99,
           outline: isOver ? "2px dashed #3518A5" : editLayout ? "2px dashed rgba(209,213,219,.7)" : "none",
@@ -7590,8 +7599,6 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
           position: "relative",
           cursor: editLayout ? "grab" : "default",
           boxShadow: `0 0 0 1px ${accent}14, 0 1px 10px ${accent}0d`,
-          animation: `mxSlideUp .48s ease ${staggerMs}ms both`,
-          transition: "transform .2s ease, box-shadow .2s ease",
         }}
       >
         {editLayout && (
