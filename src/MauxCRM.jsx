@@ -10358,6 +10358,12 @@ const JUNE_2026_RECEIPTS = [
   { id: "imp_cer26_10", date: "2026-06-25", label: "Alza – (faktura 4023520680)", gross: 3273, rate: 21, vat: 568 },
 ];
 
+// Účtenky a faktury za červenec 2026 — průběžně doplňováno.
+// Stejný dedup-safe import princip jako u předchozích měsíců (pevná ID).
+const JULY_2026_RECEIPTS = [
+  { id: "imp_jul26_01", date: "2026-07-01", label: "VERMONT/GANT – reprezentativní oblečení do práce (14 ks: trika + šortky, fakt. 660426059400)", gross: 20774, rate: 21, vat: 3605 },
+];
+
 function DphKalkulacka({ odpItem, onSaveFinance }) {
   const [open, setOpen] = useState(false);
   const [label, setLabel] = useState("");
@@ -10455,10 +10461,22 @@ function DphKalkulacka({ odpItem, onSaveFinance }) {
     });
   };
 
+  const missingImportJuly = JULY_2026_RECEIPTS.filter(r => !log.some(e => e.id === r.id));
+  const importJuly = () => {
+    if (missingImportJuly.length === 0) return;
+    const addedVat = missingImportJuly.reduce((s, e) => s + (e.vat || 0), 0);
+    onSaveFinance({
+      ...odpItem,
+      amount: (odpItem.amount || 0) + addedVat,
+      notes: JSON.stringify({ log: [...missingImportJuly, ...log] }),
+    });
+  };
+
   const pendingImports = [
     missingImport.length > 0 && { run: importApril, n: missingImport.length, vat: missingImport.reduce((s,e)=>s+(e.vat||0),0), label: "duben 2026" },
     missingImportMay.length > 0 && { run: importMay, n: missingImportMay.length, vat: missingImportMay.reduce((s,e)=>s+(e.vat||0),0), label: "květen 2026" },
     missingImportJune.length > 0 && { run: importJune, n: missingImportJune.length, vat: missingImportJune.reduce((s,e)=>s+(e.vat||0),0), label: "červen 2026" },
+    missingImportJuly.length > 0 && { run: importJuly, n: missingImportJuly.length, vat: missingImportJuly.reduce((s,e)=>s+(e.vat||0),0), label: "červenec 2026" },
   ].filter(Boolean);
 
   return (
