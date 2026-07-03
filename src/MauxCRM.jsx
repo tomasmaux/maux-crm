@@ -324,6 +324,13 @@ async function addDpfoZaloha(year, month, amount) {
   if (error) throw error;
   return fetchDpfoMonths(year);
 }
+// Payment to finančák — negative entry, always is_paid=true (reduces spořák balance)
+async function addDpfoPayment(year, month, amount) {
+  const id = `dpfo_${year}_fu${Date.now()}`;
+  const { error } = await supabase.from("dpfo_months").insert({ id, year, month: Number(month), amount: -Math.abs(Number(amount)), is_paid: true, paid_at: new Date().toISOString() });
+  if (error) throw error;
+  return fetchDpfoMonths(year);
+}
 async function deleteDpfoZaloha(id, year) {
   const { error } = await supabase.from("dpfo_months").delete().eq("id", id);
   if (error) throw error;
@@ -2522,7 +2529,8 @@ function SpořákTile({ financeItems, invoices, dpfoMonths, loanTransactions, on
   // Always exclude fi_sp_02 (Bobnice) from manual — comes from loan tracker
   const manualObálky = sporaci.filter(i => i.id !== "fi_sp_99" && i.id !== "fi_sp_01" && i.id !== "fi_sp_02");
   const dphAuto = invoices.filter(i => i.status === "uhrazena").reduce((s,i) => s+(i.vat_amount||0), 0);
-  const dpfoAcc = (dpfoMonths||[]).filter(m => !m.is_paid).reduce((s,m) => s+(m.amount||0), 0);
+  // Net DPFO balance on spořák = paid monthly savings (+) minus FÚ payments (-)
+  const dpfoAcc = (dpfoMonths||[]).filter(m => m.is_paid).reduce((s,m) => s+(m.amount||0), 0);
   const bobloanBal = (loanTransactions?.loan_bobnice||[]).reduce((s,t) => s+t.amount, 0);
   const bobniceFallback = (financeItems||[]).find(i => i.id === "fi_sp_02")?.amount || 0;
   const bobniceBal = Math.max(bobloanBal > 0 ? bobloanBal : bobniceFallback, 0);
@@ -3243,158 +3251,128 @@ function FinanceSection({ title, items, category, onSave, onDelete, accent, auto
   );
 }
 
-/* ─── DPFO TRACKER — flexibilní zálohy na daň z příjmu (redesign 3.7.2026) ─── */
+/* ─── DPFO TRACKER — dvě sekce: měsíční spoření + platby FÚ (redesign 3.7.2026) ─── */
 function DpfoTracker({ months, onToggle, onAdd, onDelete, year }) {
-  const CZ_MONTHS = ["Leden","Únor","Březen","Duben","Květen","Červen","Červenec","Srpen","Září","Říjen","Listopad","Prosinec"];
+  const CZ_MONTHS_SHORT = ["Led","Úno","Bře","Dub","Kvě","Čer","Čvn","Srp","Zář","Říj","Lis","Pro"];
+  const CZ_MONTHS       = ["Leden","Únor","Březen","Duben","Květen","Červen","Červenec","Srpen","Září","Říjen","Listopad","Prosinec"];
   const now      = new Date();
-  const curMon   = now.getMonth() + 1; // 1-12
+  const curMon   = now.getMonth() + 1;
 
-  // Sort by month number
-  const sorted   = [...months].sort((a,b) => a.month - b.month);
-  const paid     = sorted.filter(m => m.is_paid);
-  const unpaid   = sorted.filter(m => !m.is_paid);
-  const paidSum  = paid.reduce((s,m) => s+(m.amount||0), 0);
-  const unpaidSum= unpaid.reduce((s,m) => s+(m.amount||0), 0);
+  // Separate savings (positive) from FÚ payments (negative)
+  const savings   = months.filter(m => (m.amount||0) >= 0).sort((a,b) => a.month - b.month);
+  const payments  = months.filter(m => (m.amount||0) < 0).sort((a,b) => a.month - b.month);
 
-  // Next upcoming unpaid záloha (smallest month >= current month)
-  const nextZ    = unpaid.find(m => m.month >= curMon) || unpaid[0];
-  const monthsUntil = nextZ ? Math.max(nextZ.month - curMon, 1) : 0;
-  const perMonth = nextZ && monthsUntil > 0 ? Math.round(nextZ.amount / monthsUntil) : 0;
+  // Spořák net = sum of paid savings + sum of FÚ payments (negative)
+  const savedSum   = savings.filter(m => m.is_paid).reduce((s,m) => s+(m.amount||0), 0);
+  const paidToFU   = payments.reduce((s,m) => s+Math.abs(m.amount||0), 0);
+  const netBalance = savedSum - paidToFU;
 
-  const [adding, setAdding] = useState(false);
-  const [newMonth, setNewMonth] = useState(12);
-  const [newAmt, setNewAmt] = useState(34900);
+  const [showPayForm, setShowPayForm] = useState(false);
+  const [payAmt, setPayAmt] = useState(34900);
 
-  const A = "#D97706"; // amber accent
-  const AL = "#FEF3C7";
+  const A  = "#D97706";   // amber
+  const AL = "#FFFBEB";
+  const R  = "#DC2626";   // red for payments
 
-  const handleAdd = () => {
-    if (newAmt > 0) { onAdd(year, newMonth, newAmt); setAdding(false); }
+  const handleAddPayment = () => {
+    if (payAmt > 0) {
+      // Add negative entry (FÚ payment) — month = current month
+      onAdd(year, curMon, -payAmt); // addDpfoZaloha accepts negative → stored as-is
+      setShowPayForm(false);
+    }
   };
 
   return (
     <div style={{ background: "#fff", border: "1px solid rgba(0,0,0,.08)", borderRadius: 16, overflow: "hidden" }}>
 
-      {/* ── Header ── */}
-      <div style={{ padding: "20px 22px 16px", borderBottom: "1px solid rgba(0,0,0,.06)" }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-          <div>
-            <div style={{ fontSize: 8.5, letterSpacing: ".22em", textTransform: "uppercase", fontWeight: 700, color: A, marginBottom: 6 }}>
-              DPFO {year} · zálohy na daň z příjmu
-            </div>
-            <div style={{ display: "flex", gap: 20, alignItems: "baseline" }}>
-              <div>
-                <span className="maux-num" style={{ fontSize: 22, fontWeight: 700, color: "#1c1917" }}>{fmtKc(paidSum)}</span>
-                <span style={{ fontSize: 11, color: "var(--mut)", marginLeft: 5 }}>zaplaceno</span>
-              </div>
-              {unpaidSum > 0 && (
-                <div>
-                  <span className="maux-num" style={{ fontSize: 22, fontWeight: 700, color: A }}>{fmtKc(unpaidSum)}</span>
-                  <span style={{ fontSize: 11, color: "var(--mut)", marginLeft: 5 }}>zbývá rezervovat</span>
-                </div>
-              )}
-            </div>
-          </div>
-          <button
-            onClick={() => setAdding(v => !v)}
-            style={{ fontSize: 11, padding: "6px 12px", borderRadius: 8, border: `1.5px solid ${A}`, background: adding ? AL : "#fff",
-              color: A, fontWeight: 700, cursor: "pointer", whiteSpace: "nowrap", flexShrink: 0 }}>
-            {adding ? "✕ Zrušit" : "+ Přidat zálohu"}
-          </button>
+      {/* ── HEADER: 3 KPI cards ── */}
+      <div style={{ padding: "22px 24px 18px" }}>
+        <div style={{ fontSize: 8.5, letterSpacing: ".22em", textTransform: "uppercase", fontWeight: 700, color: A, marginBottom: 14 }}>
+          DPFO {year} · zálohy na daň z příjmu
         </div>
-
-        {/* "Spořím na příští zálohu" hint */}
-        {nextZ && !nextZ.is_paid && monthsUntil > 0 && (
-          <div style={{ marginTop: 12, padding: "8px 12px", background: "#FFFBEB", borderRadius: 8, border: "1px solid #FDE68A", display: "flex", alignItems: "center", gap: 10 }}>
-            <span style={{ fontSize: 14 }}>📆</span>
-            <div style={{ fontSize: 11, color: "#92400E", lineHeight: 1.45 }}>
-              <strong>Příští záloha:</strong> {CZ_MONTHS[nextZ.month-1]} {year} · {fmtKc(nextZ.amount)}
-              <br />
-              Spořte <strong>{fmtKc(perMonth)}/měsíc</strong> a máte to pokryté za {monthsUntil} {monthsUntil === 1 ? "měsíc" : monthsUntil < 5 ? "měsíce" : "měsíců"}.
+        <div style={{ display: "flex", gap: 0, borderRadius: 12, border: "1px solid rgba(0,0,0,.07)", overflow: "hidden" }}>
+          {[
+            { label: "Naspořeno", value: fmtKc(savedSum), color: "#059669", bg: "#F0FDF4" },
+            { label: "Odvedeno FÚ", value: paidToFU > 0 ? `−${fmtKc(paidToFU)}` : "—", color: R, bg: "#FFF5F5" },
+            { label: "Zůstatek na spořáku", value: fmtKc(netBalance), color: netBalance >= 0 ? "#1c1917" : R, bg: netBalance >= 0 ? "#fff" : "#FFF5F5" },
+          ].map((kpi, i) => (
+            <div key={i} style={{ flex: 1, padding: "12px 16px", background: kpi.bg, borderLeft: i > 0 ? "1px solid rgba(0,0,0,.06)" : "none" }}>
+              <div style={{ fontSize: 9, color: "var(--mut)", letterSpacing: ".05em", marginBottom: 5, textTransform: "uppercase" }}>{kpi.label}</div>
+              <div className="maux-num" style={{ fontSize: 17, fontWeight: 700, color: kpi.color }}>{kpi.value}</div>
             </div>
-          </div>
-        )}
+          ))}
+        </div>
       </div>
 
-      {/* ── Add form ── */}
-      {adding && (
-        <div style={{ padding: "14px 22px", background: "#FFFBEB", borderBottom: "1px solid #FDE68A", display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
-          <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
-            <label style={{ fontSize: 9.5, color: "var(--mut)", letterSpacing: ".06em" }}>Měsíc splatnosti</label>
-            <select value={newMonth} onChange={e => setNewMonth(Number(e.target.value))}
-              style={{ fontSize: 13, padding: "6px 8px", border: `1.5px solid ${A}`, borderRadius: 8, outline: "none", fontFamily: "inherit", background: "#fff", cursor: "pointer" }}>
-              {CZ_MONTHS.map((mn, i) => <option key={i+1} value={i+1}>{mn}</option>)}
-            </select>
+      {/* ── SECTION 1: Měsíční spoření ── */}
+      <div style={{ padding: "0 24px 18px" }}>
+        <div style={{ fontSize: 10, fontWeight: 700, color: "var(--mut)", letterSpacing: ".06em", textTransform: "uppercase", marginBottom: 10 }}>
+          Měsíční spoření
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(6,1fr)", gap: 5 }}>
+          {savings.length === 0 ? (
+            <div style={{ gridColumn: "1/-1", fontSize: 11.5, color: "var(--mut)", padding: "10px 0" }}>Žádné měsíční záznamy.</div>
+          ) : savings.map(m => (
+            <button key={m.id} onClick={() => onToggle(m)}
+              title={m.is_paid ? "Klikni pro odznačení" : "Klikni pro označení jako uloženo"}
+              style={{
+                padding: "9px 4px", borderRadius: 10,
+                border: `1.5px solid ${m.is_paid ? A : "rgba(0,0,0,.1)"}`,
+                background: m.is_paid ? AL : "#FAFAF9",
+                cursor: "pointer", transition: ".12s",
+                display: "flex", flexDirection: "column", alignItems: "center", gap: 3,
+              }}>
+              <span style={{ fontSize: 10, fontWeight: 700, color: m.is_paid ? "#92400E" : "var(--mut)" }}>{CZ_MONTHS_SHORT[m.month-1]}</span>
+              <span style={{ fontSize: 9.5, color: m.is_paid ? A : "#ccc" }}>{m.is_paid ? "✓" : "○"}</span>
+              <span style={{ fontSize: 8, color: m.is_paid ? "#B45309" : "var(--mut)", opacity: .8 }}>{m.amount ? Math.round(m.amount/1000)+"k" : ""}</span>
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* ── SECTION 2: Platby finančáku ── */}
+      <div style={{ borderTop: "1px solid rgba(0,0,0,.06)", padding: "16px 24px 20px" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+          <div style={{ fontSize: 10, fontWeight: 700, color: "var(--mut)", letterSpacing: ".06em", textTransform: "uppercase" }}>
+            Platby finančáku
           </div>
-          <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
-            <label style={{ fontSize: 9.5, color: "var(--mut)", letterSpacing: ".06em" }}>Výše zálohy (Kč)</label>
-            <input type="number" value={newAmt} onChange={e => setNewAmt(Number(e.target.value))}
-              onKeyDown={e => { if (e.key === "Enter") handleAdd(); if (e.key === "Escape") setAdding(false); }}
-              style={{ fontSize: 13, padding: "6px 10px", border: `1.5px solid ${A}`, borderRadius: 8, outline: "none", fontFamily: "inherit", width: 120, background: "#fff" }} />
-          </div>
-          <button onClick={handleAdd}
-            style={{ alignSelf: "flex-end", padding: "7px 16px", background: A, color: "#fff", border: "none", borderRadius: 8, fontWeight: 700, cursor: "pointer", fontSize: 13 }}>
-            Přidat
+          <button onClick={() => setShowPayForm(v => !v)}
+            style={{ fontSize: 11, padding: "5px 11px", borderRadius: 7, border: `1.5px solid ${R}`, background: showPayForm ? "#FFF5F5" : "#fff", color: R, fontWeight: 700, cursor: "pointer" }}>
+            {showPayForm ? "✕ Zrušit" : "+ Odvedl jsem zálohu FÚ"}
           </button>
         </div>
-      )}
 
-      {/* ── Zálohy list ── */}
-      {sorted.length === 0 ? (
-        <div style={{ padding: "28px 22px", textAlign: "center", color: "var(--mut)", fontSize: 12 }}>
-          Zatím žádné zálohy. Přidej první kliknutím na "+ Přidat zálohu".
-        </div>
-      ) : (
-        <div>
-          {sorted.map((m, idx) => {
-            const isPast = m.month < curMon && !m.is_paid;
-            const isNext = m === nextZ && !m.is_paid;
-            return (
-              <div key={m.id} style={{
-                display: "flex", alignItems: "center", gap: 12, padding: "14px 22px",
-                borderBottom: idx < sorted.length - 1 ? "1px solid rgba(0,0,0,.05)" : "none",
-                background: m.is_paid ? "#FAFAF9" : isPast ? "#FFF7F0" : "#fff",
-                transition: "background .15s",
-              }}>
-                {/* Status toggle */}
-                <button onClick={() => onToggle(m)} title={m.is_paid ? "Označit jako nezaplaceno" : "Označit jako zaplaceno"}
-                  style={{ width: 32, height: 32, borderRadius: "50%", flexShrink: 0, cursor: "pointer", transition: ".15s",
-                    border: m.is_paid ? `2px solid ${A}` : "2px solid var(--line)",
-                    background: m.is_paid ? AL : "#fff",
-                    display: "flex", alignItems: "center", justifyContent: "center",
-                    fontSize: 13, color: m.is_paid ? A : "var(--mut)",
-                  }}>
-                  {m.is_paid ? "✓" : "○"}
-                </button>
+        {showPayForm && (
+          <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 12, padding: "10px 12px", background: "#FFF5F5", borderRadius: 8, border: "1px solid #FECACA" }}>
+            <span style={{ fontSize: 12, color: R, fontWeight: 600 }}>Odvedeno FÚ:</span>
+            <input type="number" value={payAmt} autoFocus onChange={e => setPayAmt(Number(e.target.value))}
+              onKeyDown={e => { if (e.key === "Enter") handleAddPayment(); if (e.key === "Escape") setShowPayForm(false); }}
+              style={{ width: 110, fontSize: 13, padding: "5px 9px", border: `1.5px solid ${R}`, borderRadius: 7, outline: "none", fontFamily: "inherit", background: "#fff" }} />
+            <span style={{ fontSize: 12, color: "var(--mut)" }}>Kč dnes {now.toLocaleDateString("cs-CZ", { day: "numeric", month: "long" })}</span>
+            <button onClick={handleAddPayment}
+              style={{ padding: "6px 14px", background: R, color: "#fff", border: "none", borderRadius: 7, fontWeight: 700, cursor: "pointer", fontSize: 12 }}>
+              Uložit
+            </button>
+          </div>
+        )}
 
-                {/* Month + year */}
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontSize: 13, fontWeight: 600, color: m.is_paid ? "var(--mut)" : "#1c1917", display: "flex", alignItems: "center", gap: 6 }}>
-                    {CZ_MONTHS[m.month-1]} {m.year}
-                    {isNext && <span style={{ fontSize: 9, background: A, color: "#fff", padding: "1px 6px", borderRadius: 20, fontWeight: 700, letterSpacing: ".05em" }}>PŘÍŠTÍ</span>}
-                    {isPast && <span style={{ fontSize: 9, background: "#FCA5A5", color: "#7F1D1D", padding: "1px 6px", borderRadius: 20, fontWeight: 700, letterSpacing: ".05em" }}>PO SPLATNOSTI</span>}
-                  </div>
-                  {m.is_paid && m.paid_at && (
-                    <div style={{ fontSize: 10, color: "var(--mut)", marginTop: 1 }}>
-                      uhrazeno {new Date(m.paid_at).toLocaleDateString("cs-CZ", { day: "numeric", month: "long" })}
-                    </div>
-                  )}
-                </div>
-
-                {/* Amount */}
-                <span className="maux-num" style={{ fontSize: 15, fontWeight: 700, color: m.is_paid ? "var(--mut)" : "#1c1917", flexShrink: 0, textDecoration: m.is_paid ? "line-through" : "none", opacity: m.is_paid ? 0.55 : 1 }}>
-                  {fmtKc(m.amount||0)}
-                </span>
-
-                {/* Delete */}
-                <button onClick={() => { if (confirm(`Smazat zálohu ${CZ_MONTHS[m.month-1]}?`)) onDelete(m.id, m.year); }}
-                  style={{ width: 26, height: 26, borderRadius: 6, border: "1px solid var(--line)", background: "none", cursor: "pointer", color: "var(--mut)", fontSize: 11, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center" }}
-                  title="Smazat zálohu">✕</button>
-              </div>
-            );
-          })}
-        </div>
-      )}
+        {payments.length === 0 ? (
+          <div style={{ fontSize: 11.5, color: "var(--mut)", padding: "4px 0" }}>Zatím žádné platby finančáku.</div>
+        ) : payments.map((m, idx) => (
+          <div key={m.id} style={{
+            display: "flex", alignItems: "center", gap: 10, padding: "8px 0",
+            borderTop: idx > 0 ? "1px solid rgba(0,0,0,.05)" : "none",
+          }}>
+            <span style={{ width: 8, height: 8, borderRadius: "50%", background: R, flexShrink: 0 }} />
+            <span style={{ flex: 1, fontSize: 12.5, color: "#1c1917", fontWeight: 500 }}>
+              {m.paid_at ? new Date(m.paid_at).toLocaleDateString("cs-CZ", { day: "numeric", month: "long", year: "numeric" }) : `${CZ_MONTHS[m.month-1]} ${m.year}`}
+            </span>
+            <span className="maux-num" style={{ fontSize: 13, fontWeight: 700, color: R }}>−{fmtKc(Math.abs(m.amount||0))}</span>
+            <button onClick={() => { if (confirm("Smazat platbu FÚ?")) onDelete(m.id, m.year); }}
+              style={{ width: 24, height: 24, borderRadius: 5, border: "1px solid var(--line)", background: "none", cursor: "pointer", color: "var(--mut)", fontSize: 10, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>✕</button>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
@@ -3867,7 +3845,7 @@ function escrowTotalTax(escrows) {
 function computeFirmaRezerva(financeItems, invoices, dpfoMonths, loanTransactions, escrows) {
   const sporBal  = (financeItems||[]).find(i => i.id === "fi_sp_99")?.amount || 0;
   const dphF     = (invoices||[]).filter(i => i.status === "uhrazena").reduce((s,i) => s+(i.vat_amount||0), 0);
-  const dpfoF    = (dpfoMonths||[]).filter(m => !m.is_paid).reduce((s,m) => s+(m.amount||0), 0);
+  const dpfoF    = (dpfoMonths||[]).filter(m => m.is_paid).reduce((s,m) => s+(m.amount||0), 0);
   const boblF    = (loanTransactions?.loan_bobnice||[]).reduce((s,t) => s+t.amount, 0);
   const bobFbF   = (financeItems||[]).find(i => i.id === "fi_sp_02")?.amount || 0;
   const bobBalF  = Math.max(boblF > 0 ? boblF : bobFbF, 0);
@@ -4897,7 +4875,8 @@ function MiniSpořák({ financeItems, invoices, dpfoMonths, loanTransactions, es
   const sporaci = (financeItems||[]).filter(i => i.category === "sporaci" && i.notes !== "SKIP_DISPLAY");
   const zItem = sporaci.find(i => i.id === "fi_sp_99");
   const dphAuto = invoices.filter(i => i.status === "uhrazena").reduce((s,i) => s+(i.vat_amount||0), 0);
-  const dpfoAcc = (dpfoMonths||[]).filter(m => !m.is_paid).reduce((s,m) => s+(m.amount||0), 0);
+  // Net DPFO balance on spořák = paid monthly savings (+) minus FÚ payments (-)
+  const dpfoAcc = (dpfoMonths||[]).filter(m => m.is_paid).reduce((s,m) => s+(m.amount||0), 0);
   const bobloanBal = (loanTransactions?.loan_bobnice||[]).reduce((s,t) => s+t.amount, 0);
   const bobFb = (financeItems||[]).find(i => i.id === "fi_sp_02")?.amount || 0;
   const bobBal = Math.max(bobloanBal > 0 ? bobloanBal : bobFb, 0);
@@ -8295,7 +8274,7 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
                   const zItemS     = sporaciItems.find(i => i.id === "fi_sp_99");
                   const sporBalS   = zItemS?.amount || 0;
                   const dphAutoS   = (invoices||[]).filter(i => i.status === "uhrazena").reduce((s,i) => s+(i.vat_amount||0), 0);
-                  const dpfoAccS   = (dpfoMonths||[]).filter(m => !m.is_paid).reduce((s,m) => s+(m.amount||0), 0);
+                  const dpfoAccS   = (dpfoMonths||[]).filter(m => m.is_paid).reduce((s,m) => s+(m.amount||0), 0);
                   const bobloanS   = (loanTransactions?.loan_bobnice||[]).reduce((s,t) => s+t.amount, 0);
                   const bobFbS     = (financeItems||[]).find(i => i.id === "fi_sp_02")?.amount || 0;
                   const bobBalS    = Math.max(bobloanS > 0 ? bobloanS : bobFbS, 0);
@@ -12779,8 +12758,11 @@ export default function MauxCRM() {
     setDpfoMonths(p => p.map(m => m.id === row.id ? updated : m));
   };
   const handleDpfoAdd = async (year, month, amount) => {
-    try { setDpfoMonths(await addDpfoZaloha(year, month, amount)); }
-    catch(e) { alert("Chyba: " + e.message); }
+    try {
+      // Negative amount = FÚ payment (always paid), positive = savings entry
+      const fn = amount < 0 ? addDpfoPayment : addDpfoZaloha;
+      setDpfoMonths(await fn(year, month, amount));
+    } catch(e) { alert("Chyba: " + e.message); }
   };
   const handleDpfoDelete = async (id, year) => {
     try { setDpfoMonths(await deleteDpfoZaloha(id, year)); }
