@@ -8024,6 +8024,8 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
         const toggleHeroKpi = (k) => setHeroKpiOpen(v => v===k?null:k);
         const [prijmyOpen, setPrijmyOpen] = useState(true);
         const [sporOpen, setSporOpen] = useState(false);
+        const [sporEditMode, setSporEditMode] = useState(false);
+        const [sporEditVal, setSporEditVal] = useState(0);
         // Editovatelný checklist nákladů (checkboxy, AddExpenseRow, mzda Josefa) se 29.6.2026 přesunul
         // do dlaždice "Měsíční výdaje" (FirmaBar, Panel id="firma") — Tom: "ta roletka u nákladů je
         // zcela zbytečná" (dělala tuhle dlaždici zbytečně vysokou). Tady zůstal jen souhrnný řádek
@@ -8169,11 +8171,7 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
                   </div>
                 </div>
 
-                {/* Spořicí účet — Tom 30.6.2026: bývalý samostatný velký čtverec (vlevo nahoře
-                    vedle kalendáře) byl "naprosto hnusně graficky nebrandově" — přestěhováno
-                    sem pod Firemní rezervu, do stejného vizuálního jazyka jako Příjmy/Výdaje
-                    výš (uppercase label + číslo vpravo, rozbalovací detail obálek). Je to jeden
-                    zdroj pravdy se SporakRingTile, jen kompaktní a integrované do Bilance. */}
+                {/* ── SPOŘICÍ ÚČET — KALRÍN TECH HYPE redesign (2.7.2026) ── */}
                 {(() => {
                   const sporaciItems = (financeItems||[]).filter(i => i.category === "sporaci" && i.notes !== "SKIP_DISPLAY");
                   const zItemS     = sporaciItems.find(i => i.id === "fi_sp_99");
@@ -8190,41 +8188,116 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
                     && !autoLblsS.has((i.label||"").toLowerCase().trim())
                   );
                   const sEnvSegs = [
-                    { label: "DPH",          value: dphAutoS,   color: "#3518A5" },
-                    { label: "DPFO 2026",    value: dpfoAccS,   color: "#5B4FCF" },
-                    ...(bobBalS > 0 ? [{ label: "Bobnice", value: bobBalS, color: "#7C6FE0" }] : []),
-                    { label: "Daň z úschov", value: danUschovS, color: "#9D93DD" },
-                    ...manObalkyS.map((o,idx) => ({ label: o.label, value: o.amount||0, color: ["#B8ACEF","#D6CFF5"][idx%2] })),
+                    { label: "DPH",          value: dphAutoS,   color: "#6366f1" },
+                    { label: "DPFO 2026",    value: dpfoAccS,   color: "#8b5cf6" },
+                    ...(bobBalS > 0 ? [{ label: "Bobnice", value: bobBalS, color: "#a78bfa" }] : []),
+                    { label: "Daň z úschov", value: danUschovS, color: "#c4b5fd" },
+                    ...manObalkyS.map((o,idx) => ({ label: o.label, value: o.amount||0, color: ["#ddd6fe","#ede9fe"][idx%2] })),
                   ].filter(e => e.value > 0);
                   const sTotalEar = sEnvSegs.reduce((s,e) => s+e.value, 0);
                   const sFirmaRez = sporBalS - sTotalEar;
-                  const sFullSegs = [...sEnvSegs, ...(sFirmaRez > 0 ? [{ label: "Volné (rezerva)", value: sFirmaRez, color: "#8B5CF6" }] : [])];
+                  const sFullSegs = [...sEnvSegs, ...(sFirmaRez > 0 ? [{ label: "Volné (rezerva)", value: sFirmaRez, color: "#22d3ee" }] : [])];
                   const sTotalAll = sFullSegs.reduce((s,e)=>s+e.value,0) || 1;
+                  const volnePct  = sFirmaRez > 0 ? Math.round((sFirmaRez/sTotalAll)*100) : 0;
+                  const saveSporBal = () => {
+                    onSaveFinance({ ...(zItemS||{category:"sporaci",label:"Zůstatek",id:"fi_sp_99"}), id:"fi_sp_99", amount: sporEditVal });
+                    setSporEditMode(false);
+                  };
                   return (
-                    <div style={{borderTop:"1px solid rgba(53,24,165,.14)",paddingTop:12}}>
-                      <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",cursor:"pointer"}} onClick={()=>setSporOpen(v=>!v)}>
-                        <span style={{fontSize:12,letterSpacing:".1em",textTransform:"uppercase",color:"var(--ink)",fontWeight:700}}>Spořicí účet {sporOpen?"▲":"▾"}</span>
-                        <span className="maux-num" style={{fontSize:21,fontWeight:600,color:"#3518A5"}}>{fmtKc(sporBalS)}</span>
+                    <div style={{
+                      borderRadius:12, overflow:"hidden", marginTop:14,
+                      background:"linear-gradient(135deg,#0f0b2d 0%,#1e1554 55%,#0b0a1e 100%)",
+                      boxShadow:"0 0 0 1px rgba(99,102,241,.25), 0 8px 32px rgba(99,102,241,.18)",
+                      position:"relative",
+                    }}>
+                      {/* corner brackets — sci-fi aesthetic */}
+                      {[{t:0,l:0,bt:"2px",bl:"2px"},{t:0,r:0,bt:"2px",br:"2px"},{b:0,l:0,bb:"2px",bl:"2px"},{b:0,r:0,bb:"2px",br:"2px"}].map((s,i)=>(
+                        <span key={i} style={{position:"absolute",width:10,height:10,borderTop:s.bt,borderLeft:s.bl,borderBottom:s.bb,borderRight:s.br,borderColor:"#818cf8",top:s.t,left:s.l,right:s.r,bottom:s.b,pointerEvents:"none"}} />
+                      ))}
+
+                      {/* header row */}
+                      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"12px 14px 0"}}>
+                        <div style={{display:"flex",alignItems:"center",gap:6}}>
+                          <span style={{display:"inline-block",width:5,height:5,borderRadius:"50%",background:"#22d3ee",boxShadow:"0 0 6px #22d3ee",animation:"pulse 2s infinite"}} />
+                          <span style={{fontSize:9,letterSpacing:".22em",textTransform:"uppercase",color:"#818cf8",fontWeight:800}}>Spořicí účet</span>
+                        </div>
+                        <button
+                          onClick={()=>setSporOpen(v=>!v)}
+                          style={{background:"none",border:"none",cursor:"pointer",color:"#818cf8",fontSize:10,letterSpacing:".05em",padding:0,lineHeight:1}}
+                        >{sporOpen?"skrýt ▲":"detail ▾"}</button>
                       </div>
-                      <div style={{display:"flex",gap:2,marginTop:9,height:8,borderRadius:99,background:"rgba(53,24,165,.06)",padding:1,boxSizing:"border-box"}}>
-                        {sFullSegs.map((s,i)=>(
-                          <div key={i} title={`${s.label}: ${fmtKc(s.value)}`} style={{
-                            width:`${Math.max((s.value/sTotalAll)*100,1.5)}%`, minWidth:3, borderRadius:99,
-                            background:s.color, boxShadow:`0 0 6px ${s.color}55`,
-                          }} />
-                        ))}
+
+                      {/* BIG NUMBER — kliknutí = edit */}
+                      <div style={{padding:"8px 14px 12px"}}>
+                        {sporEditMode ? (
+                          <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:2}}>
+                            <input
+                              type="number"
+                              autoFocus
+                              value={sporEditVal}
+                              onChange={e=>setSporEditVal(Number(e.target.value))}
+                              onKeyDown={e=>{if(e.key==="Enter")saveSporBal();if(e.key==="Escape")setSporEditMode(false);}}
+                              style={{
+                                flex:1,fontSize:24,fontWeight:700,fontFamily:"'JetBrains Mono','Fira Mono',monospace",
+                                color:"#e0e7ff",background:"rgba(99,102,241,.15)",
+                                border:"2px solid #6366f1",borderRadius:8,padding:"6px 10px",
+                                outline:"none",boxShadow:"0 0 12px rgba(99,102,241,.4)",
+                              }}
+                            />
+                            <button onClick={saveSporBal} style={{background:"#6366f1",border:"none",borderRadius:7,padding:"7px 12px",cursor:"pointer",color:"#fff",fontWeight:700,fontSize:13,boxShadow:"0 0 10px rgba(99,102,241,.5)"}}>✓</button>
+                            <button onClick={()=>setSporEditMode(false)} style={{background:"rgba(255,255,255,.08)",border:"1px solid rgba(255,255,255,.15)",borderRadius:7,padding:"7px 10px",cursor:"pointer",color:"#818cf8",fontSize:13}}>✕</button>
+                          </div>
+                        ) : (
+                          <div
+                            style={{display:"flex",alignItems:"baseline",gap:8,cursor:"pointer"}}
+                            onClick={()=>{setSporEditVal(sporBalS);setSporEditMode(true);}}
+                            title="Klikni pro editaci zůstatku"
+                          >
+                            <span className="maux-num" style={{
+                              fontSize:34,fontWeight:700,
+                              color:"#e0e7ff",
+                              fontFamily:"'JetBrains Mono','Fira Mono',monospace",
+                              lineHeight:1,letterSpacing:"-.02em",
+                              textShadow:"0 0 24px rgba(99,102,241,.8),0 0 48px rgba(99,102,241,.4)",
+                              transition:"opacity .15s",
+                            }}>{fmtKc(sporBalS)}</span>
+                            <span style={{fontSize:10,color:"#6366f1",letterSpacing:".05em",marginBottom:2}}>✎ editovat</span>
+                          </div>
+                        )}
+
+                        {/* sub-info row */}
+                        <div style={{display:"flex",gap:12,alignItems:"center",marginTop:4}}>
+                          <span style={{fontSize:9.5,color:"#818cf8"}}>{fmtKc(sTotalEar)} vázáno</span>
+                          {sFirmaRez > 0 && <span style={{fontSize:9.5,color:"#22d3ee",fontWeight:600}}>{fmtKc(sFirmaRez)} volné · {volnePct} %</span>}
+                        </div>
+
+                        {/* segmented glow bar */}
+                        <div style={{display:"flex",gap:2,marginTop:10,height:10,borderRadius:99,background:"rgba(99,102,241,.12)",padding:2,boxSizing:"border-box"}}>
+                          {sFullSegs.map((s,i)=>(
+                            <div key={i} title={`${s.label}: ${fmtKc(s.value)}`} style={{
+                              width:`${Math.max((s.value/sTotalAll)*100,1.5)}%`,minWidth:3,borderRadius:99,
+                              background:s.color,
+                              boxShadow:`0 0 8px ${s.color}99`,
+                              transition:"width .6s ease",
+                              position:"relative",overflow:"hidden",
+                            }}>
+                              <div style={{position:"absolute",inset:0,background:"linear-gradient(180deg,rgba(255,255,255,.35),rgba(255,255,255,0) 60%)"}} />
+                            </div>
+                          ))}
+                        </div>
                       </div>
-                      <div style={{fontSize:9.5,color:"var(--mut)",marginTop:6}}>{fmtKc(sTotalEar)} v obálkách</div>
+
+                      {/* expandable detail */}
                       {sporOpen && (
-                        <div style={{marginTop:9,display:"flex",flexDirection:"column",gap:5}}>
+                        <div style={{padding:"0 14px 14px",display:"flex",flexDirection:"column",gap:6,borderTop:"1px solid rgba(99,102,241,.15)",paddingTop:10,marginTop:0}}>
                           {sFullSegs.map((s,i) => {
                             const pct = Math.round((s.value/sTotalAll)*100);
                             return (
                               <div key={i} style={{display:"flex",alignItems:"center",gap:8}}>
-                                <span style={{width:7,height:7,borderRadius:"50%",background:s.color,flexShrink:0,boxShadow:`0 0 4px ${s.color}88`}} />
-                                <span style={{flex:1,fontSize:10.5,color:"var(--mut)",letterSpacing:".02em",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{s.label}</span>
-                                <span className="maux-num" style={{fontSize:11,fontWeight:500,color:"var(--ink)",flexShrink:0}}>{fmtKc(s.value)}</span>
-                                <span style={{fontSize:9.5,color:"var(--mut)",width:28,textAlign:"right",flexShrink:0}}>{pct}%</span>
+                                <span style={{width:7,height:7,borderRadius:"50%",background:s.color,flexShrink:0,boxShadow:`0 0 5px ${s.color}`}} />
+                                <span style={{flex:1,fontSize:10.5,color:"#a5b4fc",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{s.label}</span>
+                                <span className="maux-num" style={{fontSize:11,fontWeight:600,color:"#e0e7ff",flexShrink:0}}>{fmtKc(s.value)}</span>
+                                <span style={{fontSize:9,color:"#6366f1",width:28,textAlign:"right",flexShrink:0}}>{pct}%</span>
                               </div>
                             );
                           })}
