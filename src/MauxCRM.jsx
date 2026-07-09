@@ -4560,177 +4560,302 @@ function EscrowCard({ escrow, onEdit, onDelete, onMarkPaid, onPayment }) {
 }
 
 function EscrowForm({ init, onSave, onCancel, saving }) {
-  const [d, setD] = useState(() => init || {
+  const [d, setD] = useState(() => init ? { ...init } : {
     id: uid(), escrow_number: "", status: "aktivní", banka: false, spis_aml: false,
     interest_rate: 0.035, date_received: "", date_navrh_podan: "", date_plomba_end: "", date_paid: "", notes: ""
   });
-  const set = (k,v) => setD(p=>({...p,[k]:v}));
-  // Sleduje, jestli je "Konec plomby" právě teď auto-dopočtená hodnota (vs. ručně přepsaná) —
-  // řídí zobrazení decentní "auto" značky u pole.
+  const set = (k, v) => setD(p => ({ ...p, [k]: v }));
+
   const [plombaAuto, setPlombaAuto] = useState(() => {
     if (!init) return false;
     return !!(init.date_navrh_podan && init.date_plomba_end === addDays(init.date_navrh_podan, 20));
   });
-  // Podání návrhu na vklad → automaticky dopočítej odhad konce plomby (+20 dní).
-  // Konec plomby pak jde i ručně přepsat (např. když katastr odhad upraví).
   const setNavrhPodan = (v) => {
     setD(p => ({ ...p, date_navrh_podan: v, date_plomba_end: v ? addDays(v, 20) : p.date_plomba_end }));
     setPlombaAuto(!!v);
   };
   const setPlombaEndManual = (v) => { set("date_plomba_end", v); setPlombaAuto(false); };
-  // Tranche management
+
+  // Tranše — indexované, stabilní (žádná tabulka → žádné remount při psaní)
   const [tranches, setTranches] = useState(() => (init?.escrow_tranches || []));
-  const [newT, setNewT] = useState({ party_type:"složitel", party_name:"", amount:0, received_date:"", notes:"" });
+  const [newT, setNewT] = useState({ party_type: "složitel", party_name: "", amount: "", received_date: "" });
   const addTranche = () => {
     if (!newT.party_name.trim()) return;
-    const t = { ...newT, id: uid(), escrow_id: d.id, sort_order: tranches.length };
-    setTranches(p => [...p, t]);
-    setNewT({ party_type:"složitel", party_name:"", amount:0, received_date:"", notes:"" });
+    setTranches(p => [...p, { ...newT, amount: Number(newT.amount) || 0, id: uid(), escrow_id: d.id, sort_order: p.length }]);
+    setNewT({ party_type: "složitel", party_name: "", amount: "", received_date: "" });
   };
   const removeTranche = (id) => setTranches(p => p.filter(t => t.id !== id));
-  // Oprava omylem zaškrtnuté/odškrtnuté výplaty i ručně upravená částka/strana/datum přímo
-  // v detailu úschovy (např. po dodatku ke smlouvě) — vše jde přepsat zpět, uloží se s formulářem.
   const updateTranche = (id, patch) => setTranches(p => p.map(t => t.id === id ? { ...t, ...patch } : t));
+
   const save = async () => {
-    if(!d.escrow_number.trim()) return;
-    // Pojistka: pokud je rozepsaná nová tranše (jméno vyplněné) a uživatel zapomněl
-    // kliknout "+ Přidat", při uložení se přidá automaticky — ať se nic neztratí.
+    if (!d.escrow_number.trim()) return;
     const pendingDraft = newT.party_name.trim()
-      ? [{ ...newT, id: uid(), escrow_id: d.id, sort_order: tranches.length }]
+      ? [{ ...newT, amount: Number(newT.amount) || 0, id: uid(), escrow_id: d.id, sort_order: tranches.length }]
       : [];
     const finalTranches = [...tranches, ...pendingDraft];
-    // Save escrow first, then sync tranches
     await upsertEscrow(d);
-    // Delete removed tranches and upsert current ones
     const existing = init?.escrow_tranches || [];
-    const removedIds = existing.filter(e => !finalTranches.find(t=>t.id===e.id)).map(e=>e.id);
+    const removedIds = existing.filter(e => !finalTranches.find(t => t.id === e.id)).map(e => e.id);
     await Promise.all([
       ...removedIds.map(id => deleteEscrowTranche(id)),
       ...finalTranches.map(t => upsertEscrowTranche({ ...t, escrow_id: d.id }))
     ]);
     onSave({ ...d, escrow_tranches: finalTranches });
   };
+
+  // Styly — inline, aby forma fungovala i bez globálního .form CSS
+  const S = {
+    card: { background: "#fff", border: "1px solid #E5E7EB", borderRadius: 12, padding: "18px 22px", marginBottom: 12 },
+    label: { fontSize: 10, letterSpacing: ".12em", textTransform: "uppercase", color: "#6B7280", fontWeight: 600, display: "block", marginBottom: 5 },
+    input: { width: "100%", fontSize: 13, padding: "8px 11px", borderRadius: 8, border: "1.5px solid #E5E7EB", color: "#111827", background: "#fff", boxSizing: "border-box", outline: "none", fontFamily: "inherit" },
+    sectionTitle: { fontSize: 9, letterSpacing: ".18em", textTransform: "uppercase", color: "#9CA3AF", fontWeight: 700, marginBottom: 12 },
+    trancheCard: (type) => ({
+      background: type === 'složitel' ? "#EEF2FF" : "#F0FDF4",
+      border: `1.5px solid ${type === 'složitel' ? "#C7D2FE" : "#BBF7D0"}`,
+      borderRadius: 10, padding: "12px 14px", marginBottom: 8, position: "relative",
+    }),
+    typeTag: (type) => ({
+      fontSize: 9, fontWeight: 700, letterSpacing: ".1em", textTransform: "uppercase",
+      color: type === 'složitel' ? "#3730A3" : "#065F46",
+      background: type === 'složitel' ? "#E0E7FF" : "#DCFCE7",
+      border: `1px solid ${type === 'složitel' ? "#C7D2FE" : "#BBF7D0"}`,
+      borderRadius: 20, padding: "2px 8px",
+    }),
+  };
+
+  const sloz = tranches.filter(t => t.party_type === 'složitel');
+  const opr  = tranches.filter(t => t.party_type === 'oprávněný');
+
   return (
-    <div className="form" style={{maxWidth:660}}>
-      <h2>{init?"Upravit úschovu":"Nová úschova"}</h2>
-      <div className="two">
-        <div className="frow"><label>Číslo úschovy *</label><input value={d.escrow_number} onChange={e=>set("escrow_number",e.target.value)} placeholder="010_2026"/></div>
-        <div className="frow"><label>Stav</label>
-          <select value={d.status} onChange={e=>set("status",e.target.value)}>
-            {['aktivní','čeká_na_plombu','čeká_na_přijetí','částečně_vyplaceno','ukončeno'].map(s=><option key={s} value={s}>{s.replace(/_/g,' ')}</option>)}
-          </select>
+    <div style={{ maxWidth: 680 }} onKeyDown={e => { if (e.key === 'Enter' && e.target.tagName !== 'TEXTAREA') e.stopPropagation(); }}>
+      {/* Hlavička */}
+      <div style={{ marginBottom: 20 }}>
+        <div style={{ fontSize: 9, letterSpacing: ".18em", textTransform: "uppercase", color: "#7C3AED", fontWeight: 700, marginBottom: 4 }}>
+          {init ? "Upravit úschovu" : "Nová úschova"}
+        </div>
+        <div style={{ fontFamily: "Fraunces,serif", fontSize: 26, fontWeight: 300, color: "#1E1B4B" }}>
+          {d.escrow_number || "—"}
         </div>
       </div>
-      <div className="three">
-        <div className="frow"><label>Sazba (%)</label><input type="number" step="0.001" value={d.interest_rate} onChange={e=>set("interest_rate",Number(e.target.value))}/></div>
-        <div className="frow"><label>Datum přijetí</label><input type="date" value={d.date_received||""} onChange={e=>set("date_received",e.target.value)}/></div>
-        <div className="frow"><label>Datum vyplacení (finalizuje)</label><input type="date" value={d.date_paid||""} onChange={e=>set("date_paid",e.target.value)}/></div>
-      </div>
-      <div className="two">
-        <div className="frow">
-          <label>Podán návrh na vklad dne</label>
-          <input type="date" value={d.date_navrh_podan||""} onChange={e=>setNavrhPodan(e.target.value)}/>
-        </div>
-        <div className="frow">
-          <label>Konec plomby (odhad) {plombaAuto && <AutoTag title="Dopočteno automaticky: podání návrhu + 20 dní. Můžeš ručně přepsat." />}</label>
-          <input type="date" value={d.date_plomba_end||""} onChange={e=>setPlombaEndManual(e.target.value)}/>
-          <div style={{fontSize:10.5,color:"var(--mut)",marginTop:4}}>
-            {d.date_navrh_podan ? "Dopočteno: podání + 20 dní. Jde i ručně upravit." : "Bez podaného návrhu se počítá min. 20 dní od přijetí."}
+
+      {/* Karta 1: Základní info */}
+      <div style={S.card}>
+        <div style={S.sectionTitle}>Základní informace</div>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
+          <div>
+            <label style={S.label}>Číslo úschovy *</label>
+            <input style={S.input} value={d.escrow_number} onChange={e => set("escrow_number", e.target.value)} placeholder="010_2026" />
+          </div>
+          <div>
+            <label style={S.label}>Stav</label>
+            <select style={{ ...S.input }} value={d.status} onChange={e => set("status", e.target.value)}>
+              {['aktivní','čeká_na_plombu','čeká_na_přijetí','částečně_vyplaceno','ukončeno'].map(s =>
+                <option key={s} value={s}>{s.replace(/_/g, ' ')}</option>
+              )}
+            </select>
+          </div>
+          <div>
+            <label style={S.label}>Úroková sazba (p.a.)</label>
+            <div style={{ position: "relative" }}>
+              <input style={{ ...S.input, paddingRight: 28 }} type="number" step="0.001" value={d.interest_rate} onChange={e => set("interest_rate", Number(e.target.value))} />
+              <span style={{ position: "absolute", right: 10, top: "50%", transform: "translateY(-50%)", fontSize: 11, color: "#9CA3AF" }}>%×100</span>
+            </div>
+            <div style={{ fontSize: 10, color: "#7C3AED", marginTop: 3 }}>= {(d.interest_rate * 100).toFixed(1)} % ročně</div>
           </div>
         </div>
       </div>
-      <div className="two">
-        <div className="frow" style={{display:"flex",alignItems:"center",gap:16,paddingTop:0}}>
-          <label style={{display:"flex",alignItems:"center",gap:6,fontSize:13,textTransform:"none",letterSpacing:0,cursor:"pointer"}}>
-            <input type="checkbox" checked={!!d.banka} onChange={e=>set("banka",e.target.checked)} style={{width:"auto"}}/>Banka
-          </label>
-          <label style={{display:"flex",alignItems:"center",gap:6,fontSize:13,textTransform:"none",letterSpacing:0,cursor:"pointer"}}>
-            <input type="checkbox" checked={!!d.spis_aml} onChange={e=>set("spis_aml",e.target.checked)} style={{width:"auto"}}/>AML ✓
-          </label>
+
+      {/* Karta 2: Datumy */}
+      <div style={S.card}>
+        <div style={S.sectionTitle}>Časová osa</div>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 12 }}>
+          <div>
+            <label style={S.label}>Datum přijetí peněz</label>
+            <input style={S.input} type="date" value={d.date_received || ""} onChange={e => set("date_received", e.target.value)} />
+          </div>
+          <div>
+            <label style={S.label}>Datum finálního vyplacení</label>
+            <input style={S.input} type="date" value={d.date_paid || ""} onChange={e => set("date_paid", e.target.value)} />
+            <div style={{ fontSize: 10, color: "#6B7280", marginTop: 3 }}>Vyplň až po skutečném uzavření úschovy</div>
+          </div>
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+          <div>
+            <label style={S.label}>Podán návrh na vklad</label>
+            <input style={S.input} type="date" value={d.date_navrh_podan || ""} onChange={e => setNavrhPodan(e.target.value)} />
+          </div>
+          <div>
+            <label style={S.label}>
+              Konec plomby (odhad)
+              {plombaAuto && <AutoTag title="Dopočteno: podání návrhu + 20 dní. Jde ručně přepsat." />}
+            </label>
+            <input style={S.input} type="date" value={d.date_plomba_end || ""} onChange={e => setPlombaEndManual(e.target.value)} />
+            <div style={{ fontSize: 10, color: "#6B7280", marginTop: 3 }}>
+              {d.date_navrh_podan ? "Auto: podání + 20 dní" : "Min. 20 dní od přijetí (bez podaného návrhu)"}
+            </div>
+          </div>
         </div>
       </div>
-      <div className="frow"><label>Poznámka</label><textarea value={d.notes||""} onChange={e=>set("notes",e.target.value)}/></div>
 
-      {/* Tranše */}
-      <div style={{marginTop:16}}>
-        <div style={{fontSize:9,letterSpacing:".2em",textTransform:"uppercase",color:"var(--mut)",fontWeight:600,marginBottom:8}}>Tranše</div>
-        {tranches.length > 0 && (
-          <table style={{width:"100%",borderCollapse:"collapse",fontSize:12,marginBottom:10}}>
-            <thead><tr style={{background:"#F5F3FF"}}>
-              <th style={{padding:"5px 8px",textAlign:"left",fontWeight:500,color:"var(--mut)"}}>Typ</th>
-              <th style={{padding:"5px 8px",textAlign:"left",fontWeight:500,color:"var(--mut)"}}>Strana</th>
-              <th style={{padding:"5px 8px",textAlign:"right",fontWeight:500,color:"var(--mut)"}}>Částka</th>
-              <th style={{padding:"5px 8px",textAlign:"left",fontWeight:500,color:"var(--mut)"}}>Datum přijetí</th>
-              <th style={{padding:"5px 8px",textAlign:"center",fontWeight:500,color:"var(--mut)"}}>Vyplaceno</th>
-              <th style={{padding:"5px 8px"}}></th>
-            </tr></thead>
-            <tbody>
-              {tranches.map((t,i) => (
-                <tr key={t.id} style={{borderTop:"1px solid var(--line)"}}>
-                  <td style={{padding:"6px 8px"}}>
-                    <select value={t.party_type} onChange={e=>updateTranche(t.id,{party_type:e.target.value})}
-                      style={{fontSize:10,padding:"2px 4px",borderRadius:3,border:"1px solid var(--line)",background:t.party_type==='složitel'?"#EEF2FF":"#F0FDF4",color:t.party_type==='složitel'?"#3730A3":"#065F46"}}>
-                      <option value="složitel">složitel</option>
-                      <option value="oprávněný">oprávněný</option>
-                    </select>
-                  </td>
-                  <td style={{padding:"6px 8px"}}>
-                    <input value={t.party_name} onChange={e=>updateTranche(t.id,{party_name:e.target.value})}
-                      style={{fontSize:12,padding:"4px 6px",borderRadius:4,border:"1px solid var(--line)",width:"100%",color:"var(--txt)"}}/>
-                  </td>
-                  <td style={{padding:"6px 8px",textAlign:"right"}}>
-                    <input type="number" value={t.amount}
-                      title="Upravit částku — např. po dodatku ke smlouvě"
-                      onChange={e=>updateTranche(t.id,{amount:Number(e.target.value)||0})}
-                      style={{fontSize:12,padding:"4px 6px",borderRadius:4,border:"1px solid var(--line)",width:110,textAlign:"right",fontFamily:"Fraunces,serif"}}/>
-                  </td>
-                  <td style={{padding:"6px 8px"}}>
-                    {t.party_type === 'složitel' ? (
-                      <input type="date" value={t.received_date||""} onChange={e=>updateTranche(t.id,{received_date:e.target.value||null})}
-                        style={{fontSize:11,padding:"3px 5px",borderRadius:4,border:"1px solid var(--line)",width:120}}/>
-                    ) : <span style={{color:"var(--mut)",opacity:.4}}>—</span>}
-                  </td>
-                  <td style={{padding:"6px 8px",textAlign:"center"}}>
-                    {t.party_type === 'oprávněný' ? (
-                      <div style={{display:"flex",alignItems:"center",justifyContent:"center",gap:5,flexWrap:"wrap"}}>
-                        <input type="checkbox" checked={!!t.is_paid}
-                          onChange={e => updateTranche(t.id, e.target.checked
-                            ? { is_paid:true, paid_date: t.paid_date || new Date().toISOString().slice(0,10) }
-                            : { is_paid:false, paid_date:null })}
-                          style={{width:"auto",cursor:"pointer"}}
-                          title="Oprav zde, pokud bylo zaškrtnuto omylem — uložením se to promítne i do úroků"/>
-                        {t.is_paid && (
-                          <input type="date" value={t.paid_date||""} onChange={e=>updateTranche(t.id,{paid_date:e.target.value||null})}
-                            style={{fontSize:11,padding:"2px 5px",borderRadius:4,border:"1px solid var(--line)",width:120}}/>
-                        )}
-                      </div>
-                    ) : <span style={{color:"var(--mut)",opacity:.4}}>—</span>}
-                  </td>
-                  <td style={{padding:"6px 8px",textAlign:"center"}}><button className="btn dng" style={{fontSize:10,padding:"2px 8px"}} onClick={()=>removeTranche(t.id)}>✕</button></td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+      {/* Karta 3: Volby + poznámka */}
+      <div style={S.card}>
+        <div style={S.sectionTitle}>Dokumentace</div>
+        <div style={{ display: "flex", gap: 24, marginBottom: 14 }}>
+          <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", fontSize: 13, color: "#374151" }}>
+            <input type="checkbox" checked={!!d.banka} onChange={e => set("banka", e.target.checked)} style={{ width: "auto", accentColor: "#7C3AED" }} />
+            <span>Bankovní úschova</span>
+          </label>
+          <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", fontSize: 13, color: !!d.spis_aml ? "#065F46" : "#991B1B", fontWeight: !!d.spis_aml ? 600 : 400 }}>
+            <input type="checkbox" checked={!!d.spis_aml} onChange={e => set("spis_aml", e.target.checked)} style={{ width: "auto", accentColor: "#059669" }} />
+            <span>{!!d.spis_aml ? "✓ AML spis hotový" : "⚠ AML spis chybí — nutné pro ČAK"}</span>
+          </label>
+        </div>
+        <div>
+          <label style={S.label}>Poznámka</label>
+          <textarea value={d.notes || ""} onChange={e => set("notes", e.target.value)}
+            style={{ ...S.input, minHeight: 60, resize: "vertical", lineHeight: 1.5 }} />
+        </div>
+      </div>
+
+      {/* Karta 4: Tranše — redesign bez tabulky */}
+      <div style={S.card}>
+        <div style={S.sectionTitle}>Strany úschovy</div>
+
+        {/* Složitelé */}
+        {sloz.length > 0 && (
+          <div style={{ marginBottom: 14 }}>
+            <div style={{ fontSize: 10, fontWeight: 700, color: "#3730A3", marginBottom: 7 }}>Složitelé — vkládají peníze</div>
+            {sloz.map(t => (
+              <div key={t.id} style={S.trancheCard('složitel')}>
+                <div style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
+                  <div style={{ flex: 1 }}>
+                    <label style={{ ...S.label, color: "#3730A3" }}>Jméno složitele</label>
+                    <input style={S.input} value={t.party_name}
+                      onChange={e => updateTranche(t.id, { party_name: e.target.value })} />
+                  </div>
+                  <div style={{ width: 130 }}>
+                    <label style={{ ...S.label, color: "#3730A3" }}>Částka (Kč)</label>
+                    <input style={{ ...S.input, fontFamily: "Fraunces,serif", textAlign: "right" }}
+                      type="number" value={t.amount || ""}
+                      onChange={e => updateTranche(t.id, { amount: Number(e.target.value) || 0 })} />
+                  </div>
+                  <div style={{ width: 130 }}>
+                    <label style={{ ...S.label, color: "#3730A3" }}>Datum přijetí</label>
+                    <input style={S.input} type="date" value={t.received_date || ""}
+                      onChange={e => updateTranche(t.id, { received_date: e.target.value || null })} />
+                  </div>
+                  <button onClick={() => removeTranche(t.id)}
+                    style={{ marginTop: 20, background: "none", border: "none", fontSize: 16, color: "#9CA3AF", cursor: "pointer", padding: "4px 6px", flexShrink: 0 }}
+                    title="Odebrat tranši">×</button>
+                </div>
+              </div>
+            ))}
+          </div>
         )}
-        <div style={{fontSize:10.5,color:"var(--mut)",marginBottom:8}}>Změny v tabulce (částka, strana, datum…) se uloží spolu s tlačítkem "Uložit" dole.</div>
-        <div style={{display:"grid",gridTemplateColumns:"auto 1fr auto auto auto",gap:6,alignItems:"center",background:"#F9FAFB",borderRadius:8,padding:"10px 12px"}}>
-          <select value={newT.party_type} onChange={e=>setNewT(p=>({...p,party_type:e.target.value}))} style={{fontSize:12,padding:"5px 8px",borderRadius:4,border:"1px solid var(--line)"}}>
-            <option value="složitel">složitel</option>
-            <option value="oprávněný">oprávněný</option>
-          </select>
-          <input placeholder="Jméno strany" value={newT.party_name} onChange={e=>setNewT(p=>({...p,party_name:e.target.value}))} style={{fontSize:12,padding:"5px 8px",borderRadius:4,border:"1px solid var(--line)"}}/>
-          <input type="number" placeholder="Částka" value={newT.amount||""} onChange={e=>setNewT(p=>({...p,amount:Number(e.target.value)}))} style={{fontSize:12,padding:"5px 8px",borderRadius:4,border:"1px solid var(--line)",width:120,textAlign:"right"}}/>
-          {newT.party_type === 'složitel' && (
-            <input type="date" title="Datum přijetí vkladu (jen pro složitele s více vklady)" value={newT.received_date||""} onChange={e=>setNewT(p=>({...p,received_date:e.target.value||null}))} style={{fontSize:12,padding:"5px 8px",borderRadius:4,border:"1px solid var(--line)",width:130,color:newT.received_date?"inherit":"var(--mut)"}}/>
-          )}
-          {newT.party_type !== 'složitel' && <span/>}
-          <button className="btn" style={{fontSize:11}} onClick={addTranche}>+ Přidat</button>
+
+        {/* Oprávnění */}
+        {opr.length > 0 && (
+          <div style={{ marginBottom: 14 }}>
+            <div style={{ fontSize: 10, fontWeight: 700, color: "#065F46", marginBottom: 7 }}>Oprávnění — dostanou peníze</div>
+            {opr.map(t => (
+              <div key={t.id} style={S.trancheCard('oprávněný')}>
+                <div style={{ display: "flex", gap: 10, alignItems: "flex-start", flexWrap: "wrap" }}>
+                  <div style={{ flex: 1, minWidth: 140 }}>
+                    <label style={{ ...S.label, color: "#065F46" }}>Jméno oprávněného</label>
+                    <input style={S.input} value={t.party_name}
+                      onChange={e => updateTranche(t.id, { party_name: e.target.value })} />
+                  </div>
+                  <div style={{ width: 130 }}>
+                    <label style={{ ...S.label, color: "#065F46" }}>Nárok (Kč)</label>
+                    <input style={{ ...S.input, fontFamily: "Fraunces,serif", textAlign: "right" }}
+                      type="number" value={t.amount || ""}
+                      onChange={e => updateTranche(t.id, { amount: Number(e.target.value) || 0 })} />
+                  </div>
+                  <div style={{ width: 80 }}>
+                    <label style={{ ...S.label, color: "#065F46" }}>Vyplaceno</label>
+                    <div style={{ paddingTop: 10 }}>
+                      <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", fontSize: 12 }}>
+                        <input type="checkbox" checked={!!t.is_paid} style={{ width: "auto", accentColor: "#059669" }}
+                          onChange={e => updateTranche(t.id, e.target.checked
+                            ? { is_paid: true, paid_date: t.paid_date || today() }
+                            : { is_paid: false, paid_date: null })} />
+                        <span style={{ color: t.is_paid ? "#059669" : "#6B7280", fontWeight: t.is_paid ? 600 : 400 }}>
+                          {t.is_paid ? "Ano ✓" : "Ne"}
+                        </span>
+                      </label>
+                    </div>
+                  </div>
+                  {t.is_paid && (
+                    <div style={{ width: 130 }}>
+                      <label style={{ ...S.label, color: "#065F46" }}>Datum výplaty</label>
+                      <input style={S.input} type="date" value={t.paid_date || ""}
+                        onChange={e => updateTranche(t.id, { paid_date: e.target.value || null })} />
+                    </div>
+                  )}
+                  <button onClick={() => removeTranche(t.id)}
+                    style={{ marginTop: 20, background: "none", border: "none", fontSize: 16, color: "#9CA3AF", cursor: "pointer", padding: "4px 6px", flexShrink: 0 }}
+                    title="Odebrat tranši">×</button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {tranches.length === 0 && (
+          <div style={{ textAlign: "center", padding: "16px", color: "#9CA3AF", fontSize: 13, marginBottom: 12 }}>
+            Zatím žádné strany — přidej složitele nebo oprávněného níže.
+          </div>
+        )}
+
+        {/* Přidat novou tranši */}
+        <div style={{ background: "#F9FAFB", border: "1.5px dashed #D1D5DB", borderRadius: 10, padding: "14px 16px" }}>
+          <div style={{ fontSize: 10, fontWeight: 700, color: "#6B7280", marginBottom: 10 }}>+ Přidat stranu</div>
+          <div style={{ display: "flex", gap: 8, alignItems: "flex-end", flexWrap: "wrap" }}>
+            <div>
+              <label style={S.label}>Typ</label>
+              <select style={{ ...S.input, width: 130 }} value={newT.party_type} onChange={e => setNewT(p => ({ ...p, party_type: e.target.value }))}>
+                <option value="složitel">Složitel</option>
+                <option value="oprávněný">Oprávněný</option>
+              </select>
+            </div>
+            <div style={{ flex: 1, minWidth: 140 }}>
+              <label style={S.label}>Jméno strany</label>
+              <input style={S.input} placeholder="Např. Filipčík" value={newT.party_name}
+                onChange={e => setNewT(p => ({ ...p, party_name: e.target.value }))}
+                onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addTranche(); }}} />
+            </div>
+            <div style={{ width: 140 }}>
+              <label style={S.label}>Částka (Kč)</label>
+              <input style={{ ...S.input, fontFamily: "Fraunces,serif", textAlign: "right" }}
+                type="number" placeholder="0" value={newT.amount}
+                onChange={e => setNewT(p => ({ ...p, amount: e.target.value }))}
+                onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addTranche(); }}} />
+            </div>
+            {newT.party_type === 'složitel' && (
+              <div style={{ width: 140 }}>
+                <label style={S.label}>Datum přijetí</label>
+                <input style={S.input} type="date" value={newT.received_date}
+                  onChange={e => setNewT(p => ({ ...p, received_date: e.target.value }))} />
+              </div>
+            )}
+            <button onClick={addTranche}
+              style={{ padding: "8px 18px", borderRadius: 8, background: "#4F46E5", color: "#fff", border: "none", fontSize: 12, fontWeight: 600, cursor: "pointer", whiteSpace: "nowrap", flexShrink: 0 }}>
+              + Přidat
+            </button>
+          </div>
         </div>
       </div>
 
-      <div className="actions" style={{borderTop:"none",paddingTop:0,marginTop:8}}>
-        <button className="btn gho" onClick={onCancel}>Zrušit</button>
-        <button className="btn pri" onClick={save} disabled={saving} style={{marginLeft:"auto"}}>{saving?"Ukládám…":"Uložit"}</button>
+      {/* Akce */}
+      <div style={{ display: "flex", gap: 10, justifyContent: "flex-end", paddingTop: 4 }}>
+        <button onClick={onCancel}
+          style={{ padding: "9px 20px", borderRadius: 8, background: "transparent", border: "1.5px solid #E5E7EB", fontSize: 13, color: "#6B7280", cursor: "pointer" }}>
+          Zrušit
+        </button>
+        <button onClick={save} disabled={saving}
+          style={{ padding: "9px 28px", borderRadius: 8, background: saving ? "#A78BFA" : "#5B21B6", color: "#fff", border: "none", fontSize: 13, fontWeight: 600, cursor: saving ? "default" : "pointer" }}>
+          {saving ? "Ukládám…" : "Uložit změny"}
+        </button>
       </div>
     </div>
   );
