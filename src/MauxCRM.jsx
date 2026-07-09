@@ -4181,6 +4181,182 @@ function KpiBreakdown({ rows, colSet, onClose, earnLabel, incLabel, onMarkPaid }
   );
 }
 
+/* ─── PAYMENT WIZARD — průvodce výplatou z úschovy (plná i částečná) ─── */
+// Umí zadat výplatu konkrétní straně (oprávněnému), včetně částečné výplaty — v tom případě
+// automaticky rozdělí tranši na vyplacenou část a zbývající nevyplacenou.
+function PaymentWizard({ escrow, onClose, onSuccess }) {
+  const tranches = (escrow.escrow_tranches || []).filter(t => t.party_type === 'oprávněný');
+  const unpaid   = tranches.filter(t => !t.is_paid);
+
+  const [selId,   setSelId]   = useState(() => unpaid.length === 1 ? unpaid[0].id : "");
+  const [amount,  setAmount]  = useState(() => {
+    const t = unpaid.length === 1 ? unpaid[0] : null;
+    return t ? t.amount : "";
+  });
+  const [date,    setDate]    = useState(today());
+  const [saving,  setSaving]  = useState(false);
+  const [err,     setErr]     = useState("");
+
+  const selTranche = unpaid.find(t => t.id === selId);
+
+  // Aktuální zůstatek úschovy v den výplaty — pro přehled
+  const depositTotal = (escrow.escrow_tranches || [])
+    .filter(t => t.party_type === 'složitel')
+    .reduce((s,t) => s + (t.amount || 0), 0);
+  const alreadyPaid = tranches
+    .filter(t => t.is_paid)
+    .reduce((s,t) => s + (t.amount || 0), 0);
+  const balance = depositTotal - alreadyPaid;
+
+  const handleSelectTranche = (id) => {
+    setSelId(id);
+    const t = unpaid.find(x => x.id === id);
+    if (t) setAmount(t.amount);
+    setErr("");
+  };
+
+  const handleSubmit = async () => {
+    setErr("");
+    const t = selTranche;
+    if (!t) { setErr("Vyber příjemce výplaty."); return; }
+    const amt = parseFloat(amount);
+    if (!amt || amt <= 0) { setErr("Zadej platnou částku."); return; }
+    if (amt > t.amount + 0.01) { setErr(`Částka přesahuje zbývající nárok (${fmtKc(t.amount)}). Zadej nižší.`); return; }
+    if (!date) { setErr("Zadej datum výplaty."); return; }
+    setSaving(true);
+    try {
+      const isPartial = amt < t.amount - 0.5;
+      if (isPartial) {
+        // Rozdělíme tranši: vyplacená část + zbytek
+        await upsertEscrowTranche({ ...t, amount: Math.round(amt), is_paid: true, paid_date: date });
+        const remainder = Math.round(t.amount - amt);
+        await upsertEscrowTranche({
+          id: uid(), escrow_id: escrow.id,
+          party_type: 'oprávněný', party_name: t.party_name,
+          amount: remainder, is_paid: false, paid_date: null,
+          sort_order: (t.sort_order || 0) + 0.5, notes: t.notes || null,
+        });
+        // Stav úschovy → částečně vyplaceno (pokud ještě byly nějaké nevyplacené)
+        if (unpaid.length >= 1) {
+          await upsertEscrow({ ...escrow, status: 'částečně_vyplaceno', escrow_tranches: undefined });
+        }
+      } else {
+        // Plná výplata tranše
+        await upsertEscrowTranche({ ...t, is_paid: true, paid_date: date });
+      }
+      await onSuccess();
+      onClose();
+    } catch(e) {
+      setErr("Chyba při ukládání: " + e.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // Backdrop + modal
+  return (
+    <div style={{position:"fixed",inset:0,zIndex:9999,display:"flex",alignItems:"center",justifyContent:"center",background:"rgba(15,10,40,.55)",backdropFilter:"blur(3px)"}}
+         onClick={e => { if (e.target === e.currentTarget) onClose(); }}>
+      <div style={{background:"#fff",borderRadius:16,padding:"28px 32px",maxWidth:480,width:"90%",boxShadow:"0 24px 80px rgba(53,24,165,.22),0 2px 16px rgba(53,24,165,.12)",border:"1px solid #EDE9FE"}}>
+        {/* Header */}
+        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:20}}>
+          <div>
+            <div style={{fontSize:9,letterSpacing:".18em",textTransform:"uppercase",color:"#7C3AED",fontWeight:700,marginBottom:4}}>Výplata z úschovy</div>
+            <div style={{fontFamily:"Fraunces,serif",fontSize:20,fontWeight:400,color:"#1E1B4B"}}>{escrow.escrow_number}</div>
+          </div>
+          <button onClick={onClose} style={{background:"none",border:"none",fontSize:20,color:"var(--mut)",cursor:"pointer",padding:"4px 8px",lineHeight:1}}>×</button>
+        </div>
+
+        {/* Zůstatek info */}
+        <div style={{background:"#F5F3FF",borderRadius:8,padding:"10px 14px",marginBottom:18,display:"flex",gap:20}}>
+          <div>
+            <div style={{fontSize:10,color:"#5B21B6",marginBottom:2}}>Celkem v úschově</div>
+            <div style={{fontFamily:"Fraunces,serif",fontWeight:300,fontSize:16,color:"#3518A5"}}>{fmtKc(depositTotal)}</div>
+          </div>
+          <div>
+            <div style={{fontSize:10,color:"#5B21B6",marginBottom:2}}>Zbývá k výplatě</div>
+            <div style={{fontFamily:"Fraunces,serif",fontWeight:300,fontSize:16,color:"#3518A5"}}>{fmtKc(balance)}</div>
+          </div>
+          {alreadyPaid > 0 && (
+            <div>
+              <div style={{fontSize:10,color:"#5B21B6",marginBottom:2}}>Již vyplaceno</div>
+              <div style={{fontFamily:"Fraunces,serif",fontWeight:300,fontSize:16,color:"#059669"}}>{fmtKc(alreadyPaid)}</div>
+            </div>
+          )}
+        </div>
+
+        {/* Výběr příjemce */}
+        {unpaid.length === 0 ? (
+          <div style={{padding:"14px",background:"#F0FDF4",borderRadius:8,color:"#065F46",fontSize:13,textAlign:"center"}}>
+            Všechny výplaty z této úschovy jsou evidovány jako provedené ✅
+          </div>
+        ) : (
+          <>
+            <div style={{marginBottom:12}}>
+              <label style={{fontSize:10.5,letterSpacing:".1em",textTransform:"uppercase",color:"var(--mut)",fontWeight:600,display:"block",marginBottom:6}}>Příjemce výplaty (oprávněný)</label>
+              <div style={{display:"flex",flexDirection:"column",gap:6}}>
+                {unpaid.map(t => (
+                  <label key={t.id} style={{display:"flex",alignItems:"center",gap:10,padding:"8px 12px",borderRadius:8,border:`1.5px solid ${selId===t.id?"#7C3AED":"var(--line)"}`,background:selId===t.id?"#F5F3FF":"#FAFAFA",cursor:"pointer",transition:"all .15s"}}>
+                    <input type="radio" name="tranche" value={t.id} checked={selId===t.id} onChange={()=>handleSelectTranche(t.id)} style={{accentColor:"#7C3AED"}}/>
+                    <div style={{flex:1}}>
+                      <div style={{fontSize:13,fontWeight:500,color:"var(--ink)"}}>{t.party_name}</div>
+                      <div style={{fontSize:11,color:"var(--mut)"}}>nárok: <span style={{fontFamily:"Fraunces,serif",fontWeight:300,fontSize:13}}>{fmtKc(t.amount)}</span></div>
+                    </div>
+                  </label>
+                ))}
+              </div>
+            </div>
+
+            {/* Částka + datum */}
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:16}}>
+              <div>
+                <label style={{fontSize:10.5,letterSpacing:".1em",textTransform:"uppercase",color:"var(--mut)",fontWeight:600,display:"block",marginBottom:5}}>Vyplacená částka (Kč)</label>
+                <input
+                  type="number"
+                  value={amount}
+                  onChange={e=>{ setAmount(e.target.value); setErr(""); }}
+                  style={{width:"100%",fontSize:15,padding:"8px 10px",borderRadius:7,border:"1.5px solid var(--line)",fontFamily:"Fraunces,serif",fontWeight:300,color:"var(--ink)",boxSizing:"border-box"}}
+                  placeholder="Zadej částku"
+                />
+                {selTranche && parseFloat(amount) < selTranche.amount - 0.5 && (
+                  <div style={{fontSize:10,color:"#7C3AED",marginTop:4}}>
+                    Zbyde: {fmtKc(selTranche.amount - parseFloat(amount || 0))} → automaticky vytvoří novou nevyplacenou tranši
+                  </div>
+                )}
+              </div>
+              <div>
+                <label style={{fontSize:10.5,letterSpacing:".1em",textTransform:"uppercase",color:"var(--mut)",fontWeight:600,display:"block",marginBottom:5}}>Datum výplaty</label>
+                <input
+                  type="date"
+                  value={date}
+                  onChange={e=>{ setDate(e.target.value); setErr(""); }}
+                  style={{width:"100%",fontSize:13,padding:"8px 10px",borderRadius:7,border:"1.5px solid var(--line)",color:"var(--ink)",boxSizing:"border-box"}}
+                />
+              </div>
+            </div>
+
+            {err && (
+              <div style={{background:"#FEF2F2",border:"1px solid #FECACA",borderRadius:7,padding:"8px 12px",fontSize:12,color:"#991B1B",marginBottom:12}}>{err}</div>
+            )}
+
+            <div style={{display:"flex",gap:10,justifyContent:"flex-end"}}>
+              <button className="btn gho" onClick={onClose} style={{fontSize:12}}>Zrušit</button>
+              <button
+                className="btn pri"
+                onClick={handleSubmit}
+                disabled={saving || !selId}
+                style={{fontSize:12,background:"#5B21B6",borderColor:"#5B21B6"}}
+              >
+                {saving ? "Ukládám…" : `✓ Potvrdit výplatu ${amount ? fmtKc(parseFloat(amount)||0) : ""}`}
+              </button>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // Malé zelené tlačítko "provedl jsem výplatu" — zapíše is_paid + paid_date (dnes),
 // promítne se okamžitě do úroků v celé appce (interest engine bere paid_date jako mezník).
 function MarkPaidBtn({ escrowId, tranche, onMarkPaid }) {
@@ -4196,8 +4372,9 @@ function MarkPaidBtn({ escrowId, tranche, onMarkPaid }) {
   );
 }
 
-function EscrowCard({ escrow, onEdit, onDelete, onMarkPaid }) {
+function EscrowCard({ escrow, onEdit, onDelete, onMarkPaid, onPayment }) {
   const [showTranches, setShowTranches] = useState(false);
+  const [showWizard, setShowWizard] = useState(false);
   const tranches = escrow.escrow_tranches || [];
   const total = tranches.reduce((s,t) => s + (t.amount||0), 0);
   const depositTotal = tranches.filter(t=>t.party_type==='složitel').reduce((s,t)=>s+(t.amount||0),0);
@@ -4283,13 +4460,29 @@ function EscrowCard({ escrow, onEdit, onDelete, onMarkPaid }) {
           </div>
         );
       })()}
-      <div style={{padding:"8px 14px",display:"flex",gap:8,background:"#FAFAFA"}}>
+      <div style={{padding:"8px 14px",display:"flex",gap:8,background:"#FAFAFA",flexWrap:"wrap"}}>
         <button className="btn gho" style={{fontSize:11}} onClick={()=>setShowTranches(p=>!p)}>
-          {showTranches?"Skrýt detail":"Zobrazit detail + úroky"}
+          {showTranches?"Skrýt detail":"Detail + úroky"}
         </button>
         <button className="btn" style={{fontSize:11}} onClick={()=>onEdit(escrow)}>Upravit</button>
+        {isActive && tranches.some(t => t.party_type === 'oprávněný' && !t.is_paid) && (
+          <button
+            className="btn pri"
+            style={{fontSize:11,background:"#5B21B6",borderColor:"#5B21B6",marginLeft:"auto"}}
+            onClick={() => setShowWizard(true)}
+          >
+            💸 Zadat výplatu
+          </button>
+        )}
         {!isActive && <button className="btn dng" style={{fontSize:11}} onClick={()=>onDelete(escrow.id)}>Smazat</button>}
       </div>
+      {showWizard && (
+        <PaymentWizard
+          escrow={escrow}
+          onClose={() => setShowWizard(false)}
+          onSuccess={async () => { if (onPayment) await onPayment(); }}
+        />
+      )}
       {showTranches && (
         <div style={{padding:"12px 18px",borderTop:"1px solid var(--line)"}}>
           <div style={{fontSize:9,letterSpacing:".2em",textTransform:"uppercase",color:"var(--mut)",fontWeight:600,marginBottom:8}}>Tranše</div>
@@ -4710,7 +4903,7 @@ function EscrowInsights({ escrows }) {
   );
 }
 
-function EscrowList({ escrows, onNew, onEdit, onDelete, onMarkPaid, loading }) {
+function EscrowList({ escrows, onNew, onEdit, onDelete, onMarkPaid, onPayment, loading }) {
   const [filter, setFilter] = useState("probíhající");
   const [openDetail, setOpenDetail] = useState(null); // klíč otevřeného rozpisu
   const toggleDetail = (key) => setOpenDetail(prev => prev === key ? null : key);
@@ -4878,7 +5071,7 @@ function EscrowList({ escrows, onNew, onEdit, onDelete, onMarkPaid, loading }) {
             return shown.length === 0 ? (
               <div className="ph"><h2 className="serif">Žádné úschovy</h2><p>Přidej první úschovu tlačítkem výše.</p></div>
             ) : (
-              shown.map(e => <EscrowCard key={e.id} escrow={e} onEdit={onEdit} onDelete={onDelete} onMarkPaid={onMarkPaid} />)
+              shown.map(e => <EscrowCard key={e.id} escrow={e} onEdit={onEdit} onDelete={onDelete} onMarkPaid={onMarkPaid} onPayment={onPayment} />)
             );
           })()}
         </div>
@@ -5213,8 +5406,36 @@ function EscrowLiveTile({ escrows, onNav }) {
   const Kd = (n) => maskNum(n.toLocaleString('cs-CZ', {minimumFractionDigits:2,maximumFractionDigits:2})) + ' Kč';
   const DNY = ["Ne","Po","Út","St","Čt","Pá","So"];
 
+  // AML varování — všechny úschovy (i historické) bez spis_aml
+  const amlMissing = (escrows || []).filter(e => !e.spis_aml);
+
   return (
-    <div style={{background:"var(--card)",border:"1px solid var(--line)",borderRadius:3,padding:"24px 28px",display:"flex",alignItems:"center",gap:30,flexWrap:"wrap"}}>
+    <div style={{display:"flex",flexDirection:"column",gap:0}}>
+    {amlMissing.length > 0 && (
+      <div style={{
+        background:"linear-gradient(135deg,#7C2D12 0%,#991B1B 100%)",
+        borderRadius:"3px 3px 0 0",
+        padding:"10px 18px",
+        display:"flex",alignItems:"center",gap:12,
+        boxShadow:"0 2px 8px rgba(153,27,27,.25)"
+      }}>
+        <span style={{fontSize:18,flexShrink:0}}>⚠️</span>
+        <div style={{flex:1}}>
+          <div style={{fontSize:11,fontWeight:700,color:"#FEF2F2",letterSpacing:".04em"}}>
+            AML spis chybí u {amlMissing.length} {amlMissing.length===1?"úschovy":"úschov"} — ČAK kontrola!
+          </div>
+          <div style={{fontSize:10,color:"#FECACA",marginTop:2}}>
+            {amlMissing.map(e=>e.escrow_number).join(", ")} · Doplň AML dokumentaci teď — inspekce může přijít kdykoliv
+          </div>
+        </div>
+        {onNav && (
+          <button onClick={()=>onNav("uschovy")} style={{fontSize:10,fontWeight:700,color:"#fff",background:"rgba(255,255,255,.15)",border:"1px solid rgba(255,255,255,.3)",borderRadius:6,padding:"4px 10px",cursor:"pointer",whiteSpace:"nowrap",flexShrink:0}}>
+            Doplnit AML →
+          </button>
+        )}
+      </div>
+    )}
+    <div style={{background:"var(--card)",border:"1px solid var(--line)",borderRadius:amlMissing.length>0?"0 0 3px 3px":"3px",padding:"24px 28px",display:"flex",alignItems:"center",gap:30,flexWrap:"wrap"}}>
       <div style={{minWidth:230}}>
         <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,marginBottom:10}}>
           <div style={{display:"flex",alignItems:"center",gap:6}}>
@@ -5254,6 +5475,7 @@ function EscrowLiveTile({ escrows, onNav }) {
           </div>
         ))}
       </div>
+    </div>
     </div>
   );
 }
@@ -12834,6 +13056,11 @@ export default function MauxCRM() {
       setEscrows(await fetchEscrows());
     } catch(e) { alert("Chyba: " + e.message); }
   };
+  // Refresh po výplatě z PaymentWizard (Wizard sám dělá upserty, my jen refreshneme)
+  const handleEscrowPaymentRefresh = async () => {
+    try { setEscrows(await fetchEscrows()); }
+    catch(e) { alert("Chyba při načítání úschov: " + e.message); }
+  };
   const saveTaxRecord = async (rec) => {
     try { await upsertTaxRecord(rec); setTaxRecords(await fetchTaxRecords(rec.year)); }
     catch(e) { alert("Chyba: " + e.message); }
@@ -13446,6 +13673,7 @@ export default function MauxCRM() {
               onEdit={e => { setSelEscrow(e); setEscrowMode("edit"); }}
               onDelete={doDeleteEscrow}
               onMarkPaid={markTranchePaid}
+              onPayment={handleEscrowPaymentRefresh}
             />
           )}
           {mod === "uschovy" && (escrowMode === "new" || escrowMode === "edit") && (
