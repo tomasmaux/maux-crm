@@ -4592,15 +4592,45 @@ function EscrowForm({ init, onSave, onCancel, saving }) {
     const pendingDraft = newT.party_name.trim()
       ? [{ ...newT, amount: Number(newT.amount) || 0, id: uid(), escrow_id: d.id, sort_order: tranches.length }]
       : [];
-    const finalTranches = [...tranches, ...pendingDraft];
-    await upsertEscrow(d);
+    const base = [...tranches, ...pendingDraft];
+
+    // Zpracovat částečné výplaty: pokud _paid_amount < amount → rozděl tranši
+    const expanded = [];
+    for (const t of base) {
+      const { _paid_amount, ...clean } = t;
+      if (t.party_type === 'oprávněný' && t.is_paid && _paid_amount !== undefined) {
+        const paidAmt = Math.round(parseFloat(_paid_amount) || 0);
+        const remainder = Math.round(t.amount - paidAmt);
+        if (remainder > 0) {
+          // Vyplacená část
+          expanded.push({ ...clean, amount: paidAmt, is_paid: true });
+          // Zbývající nevyplacená část — nová tranše
+          expanded.push({
+            id: uid(), escrow_id: d.id, party_type: 'oprávněný',
+            party_name: t.party_name, amount: remainder,
+            is_paid: false, paid_date: null,
+            sort_order: (t.sort_order || 0) + 0.5,
+          });
+          continue;
+        }
+      }
+      expanded.push(clean);
+    }
+
+    // Stav → částečně vyplaceno, pokud jsou nevyplacené oprávněné tranše
+    const hasUnpaidOpr = expanded.some(t => t.party_type === 'oprávněný' && !t.is_paid);
+    const hasAnyPaidOpr = expanded.some(t => t.party_type === 'oprávněný' && t.is_paid);
+    let finalStatus = d.status;
+    if (hasAnyPaidOpr && hasUnpaidOpr && d.status === 'aktivní') finalStatus = 'částečně_vyplaceno';
+
+    await upsertEscrow({ ...d, status: finalStatus });
     const existing = init?.escrow_tranches || [];
-    const removedIds = existing.filter(e => !finalTranches.find(t => t.id === e.id)).map(e => e.id);
+    const removedIds = existing.filter(e => !expanded.find(t => t.id === e.id)).map(e => e.id);
     await Promise.all([
       ...removedIds.map(id => deleteEscrowTranche(id)),
-      ...finalTranches.map(t => upsertEscrowTranche({ ...t, escrow_id: d.id }))
+      ...expanded.map(t => upsertEscrowTranche({ ...t, escrow_id: d.id }))
     ]);
-    onSave({ ...d, escrow_tranches: finalTranches });
+    onSave({ ...d, status: finalStatus, escrow_tranches: expanded });
   };
 
   // Styly — inline, aby forma fungovala i bez globálního .form CSS
@@ -4757,47 +4787,71 @@ function EscrowForm({ init, onSave, onCancel, saving }) {
         {opr.length > 0 && (
           <div style={{ marginBottom: 14 }}>
             <div style={{ fontSize: 10, fontWeight: 700, color: "#065F46", marginBottom: 7 }}>Oprávnění — dostanou peníze</div>
-            {opr.map(t => (
-              <div key={t.id} style={S.trancheCard('oprávněný')}>
-                <div style={{ display: "flex", gap: 10, alignItems: "flex-start", flexWrap: "wrap" }}>
-                  <div style={{ flex: 1, minWidth: 140 }}>
-                    <label style={{ ...S.label, color: "#065F46" }}>Jméno oprávněného</label>
-                    <input style={S.input} value={t.party_name}
-                      onChange={e => updateTranche(t.id, { party_name: e.target.value })} />
-                  </div>
-                  <div style={{ width: 130 }}>
-                    <label style={{ ...S.label, color: "#065F46" }}>Nárok (Kč)</label>
-                    <input style={{ ...S.input, fontFamily: "Fraunces,serif", textAlign: "right" }}
-                      type="number" value={t.amount || ""}
-                      onChange={e => updateTranche(t.id, { amount: Number(e.target.value) || 0 })} />
-                  </div>
-                  <div style={{ width: 80 }}>
-                    <label style={{ ...S.label, color: "#065F46" }}>Vyplaceno</label>
-                    <div style={{ paddingTop: 10 }}>
-                      <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", fontSize: 12 }}>
-                        <input type="checkbox" checked={!!t.is_paid} style={{ width: "auto", accentColor: "#059669" }}
-                          onChange={e => updateTranche(t.id, e.target.checked
-                            ? { is_paid: true, paid_date: t.paid_date || today() }
-                            : { is_paid: false, paid_date: null })} />
-                        <span style={{ color: t.is_paid ? "#059669" : "#6B7280", fontWeight: t.is_paid ? 600 : 400 }}>
-                          {t.is_paid ? "Ano ✓" : "Ne"}
-                        </span>
-                      </label>
+            {opr.map(t => {
+              const paidAmt = t._paid_amount !== undefined ? t._paid_amount : t.amount;
+              const isPartial = t.is_paid && paidAmt < t.amount - 0.5;
+              const remainder = t.amount - (parseFloat(paidAmt) || 0);
+              return (
+                <div key={t.id} style={S.trancheCard('oprávněný')}>
+                  {/* Řádek 1: Jméno + Nárok + odebrat */}
+                  <div style={{ display: "flex", gap: 10, alignItems: "flex-start", marginBottom: t.is_paid ? 10 : 0 }}>
+                    <div style={{ flex: 1 }}>
+                      <label style={{ ...S.label, color: "#065F46" }}>Jméno oprávněného</label>
+                      <input style={S.input} value={t.party_name}
+                        onChange={e => updateTranche(t.id, { party_name: e.target.value })} />
                     </div>
-                  </div>
-                  {t.is_paid && (
-                    <div style={{ width: 130 }}>
-                      <label style={{ ...S.label, color: "#065F46" }}>Datum výplaty</label>
-                      <input style={S.input} type="date" value={t.paid_date || ""}
-                        onChange={e => updateTranche(t.id, { paid_date: e.target.value || null })} />
+                    <div style={{ width: 140 }}>
+                      <label style={{ ...S.label, color: "#065F46" }}>Celkový nárok (Kč)</label>
+                      <input style={{ ...S.input, fontFamily: "Fraunces,serif", textAlign: "right" }}
+                        type="number" value={t.amount || ""}
+                        onChange={e => updateTranche(t.id, { amount: Number(e.target.value) || 0, _paid_amount: undefined })} />
                     </div>
-                  )}
-                  <button onClick={() => removeTranche(t.id)}
-                    style={{ marginTop: 20, background: "none", border: "none", fontSize: 16, color: "#9CA3AF", cursor: "pointer", padding: "4px 6px", flexShrink: 0 }}
-                    title="Odebrat tranši">×</button>
+                    <button onClick={() => removeTranche(t.id)}
+                      style={{ marginTop: 20, background: "none", border: "none", fontSize: 16, color: "#9CA3AF", cursor: "pointer", padding: "4px 6px", flexShrink: 0 }}
+                      title="Odebrat tranši">×</button>
+                  </div>
+
+                  {/* Výplata — checkbox + inline zadání */}
+                  <div style={{ borderTop: "1px solid #BBF7D0", paddingTop: 10 }}>
+                    <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", fontSize: 12, marginBottom: t.is_paid ? 10 : 0 }}>
+                      <input type="checkbox" checked={!!t.is_paid} style={{ width: "auto", accentColor: "#059669" }}
+                        onChange={e => updateTranche(t.id, e.target.checked
+                          ? { is_paid: true, paid_date: t.paid_date || today(), _paid_amount: t.amount }
+                          : { is_paid: false, paid_date: null, _paid_amount: undefined })} />
+                      <span style={{ fontWeight: 600, color: t.is_paid ? "#059669" : "#6B7280" }}>
+                        {t.is_paid ? "✓ Výplata provedena" : "Výplata ještě neproběhla"}
+                      </span>
+                    </label>
+
+                    {t.is_paid && (
+                      <div style={{ display: "flex", gap: 10, alignItems: "flex-end", flexWrap: "wrap" }}>
+                        <div style={{ width: 160 }}>
+                          <label style={{ ...S.label, color: "#059669" }}>Vyplacená částka (Kč)</label>
+                          <input
+                            style={{ ...S.input, fontFamily: "Fraunces,serif", textAlign: "right", borderColor: isPartial ? "#F59E0B" : "#BBF7D0" }}
+                            type="number"
+                            value={paidAmt !== undefined ? paidAmt : ""}
+                            onChange={e => updateTranche(t.id, { _paid_amount: e.target.value === "" ? t.amount : Number(e.target.value) })}
+                          />
+                        </div>
+                        <div style={{ width: 140 }}>
+                          <label style={{ ...S.label, color: "#059669" }}>Datum výplaty</label>
+                          <input style={S.input} type="date" value={t.paid_date || ""}
+                            onChange={e => updateTranche(t.id, { paid_date: e.target.value || null })} />
+                        </div>
+                        {isPartial && remainder > 0.5 && (
+                          <div style={{ flex: 1, minWidth: 160, background: "#FFFBEB", border: "1px solid #FDE68A", borderRadius: 7, padding: "8px 11px", fontSize: 11, color: "#92400E" }}>
+                            <div style={{ fontWeight: 700, marginBottom: 2 }}>Částečná výplata</div>
+                            <div>Vyplaceno: <strong>{fmtKc(parseFloat(paidAmt) || 0)}</strong></div>
+                            <div>Zbyde: <strong>{fmtKc(remainder)}</strong> → nová nevyplacená tranše</div>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
 
