@@ -4377,7 +4377,9 @@ function EscrowCard({ escrow, onEdit, onDelete, onMarkPaid, onPayment }) {
   const [showWizard, setShowWizard] = useState(false);
   const tranches = escrow.escrow_tranches || [];
   const total = tranches.reduce((s,t) => s + (t.amount||0), 0);
-  const depositTotal = tranches.filter(t=>t.party_type==='složitel').reduce((s,t)=>s+(t.amount||0),0);
+  const slozTotal = tranches.filter(t=>t.party_type==='složitel').reduce((s,t)=>s+(t.amount||0),0);
+  const paidOprTotal = tranches.filter(t=>t.party_type==='oprávněný'&&t.is_paid).reduce((s,t)=>s+(t.amount||0),0);
+  const depositTotal = slozTotal - paidOprTotal; // aktuální zůstatek v úschově
   const interest = calcEscrowInterest(escrow); // per-tranšový výpočet, sedí s ČSOB
   const isActive = !['ukončeno'].includes(escrow.status);
   const needsAlert = escrow.date_plomba_end && (() => {
@@ -4559,12 +4561,26 @@ function EscrowCard({ escrow, onEdit, onDelete, onMarkPaid, onPayment }) {
   );
 }
 
+const ESCROW_DRAFT_KEY = "escrow_form_draft";
+
 function EscrowForm({ init, onSave, onCancel, saving }) {
-  const [d, setD] = useState(() => init ? { ...init } : {
-    id: uid(), escrow_number: "", status: "aktivní", banka: false, spis_aml: false,
-    interest_rate: 0.035, date_received: "", date_navrh_podan: "", date_plomba_end: "", date_paid: "", notes: ""
+  const [d, setD] = useState(() => {
+    if (init) return { ...init };
+    // Restore draft for new escrow
+    try {
+      const draft = localStorage.getItem(ESCROW_DRAFT_KEY);
+      if (draft) {
+        const parsed = JSON.parse(draft);
+        if (parsed._d) return parsed._d;
+      }
+    } catch (_) {}
+    return { id: uid(), escrow_number: "", status: "aktivní", banka: false, spis_aml: false,
+      interest_rate: 0.035, date_received: "", date_navrh_podan: "", date_plomba_end: "", date_paid: "", notes: "" };
   });
   const set = (k, v) => setD(p => ({ ...p, [k]: v }));
+
+  const [attempted, setAttempted] = useState(false);
+  const canSave = !!d.escrow_number.trim();
 
   const [plombaAuto, setPlombaAuto] = useState(() => {
     if (!init) return false;
@@ -4576,9 +4592,20 @@ function EscrowForm({ init, onSave, onCancel, saving }) {
   };
   const setPlombaEndManual = (v) => { set("date_plomba_end", v); setPlombaAuto(false); };
 
-  // Tranše — indexované, stabilní (žádná tabulka → žádné remount při psaní)
-  const [tranches, setTranches] = useState(() => (init?.escrow_tranches || []));
+  const [tranches, setTranches] = useState(() => {
+    if (init) return init.escrow_tranches || [];
+    try {
+      const draft = localStorage.getItem(ESCROW_DRAFT_KEY);
+      if (draft) {
+        const parsed = JSON.parse(draft);
+        if (parsed._tranches) return parsed._tranches;
+      }
+    } catch (_) {}
+    return [];
+  });
   const [newT, setNewT] = useState({ party_type: "složitel", party_name: "", amount: "", received_date: "" });
+  const [editingNames, setEditingNames] = useState({});
+
   const addTranche = () => {
     if (!newT.party_name.trim()) return;
     setTranches(p => [...p, { ...newT, amount: Number(newT.amount) || 0, id: uid(), escrow_id: d.id, sort_order: p.length }]);
@@ -4587,7 +4614,31 @@ function EscrowForm({ init, onSave, onCancel, saving }) {
   const removeTranche = (id) => setTranches(p => p.filter(t => t.id !== id));
   const updateTranche = (id, patch) => setTranches(p => p.map(t => t.id === id ? { ...t, ...patch } : t));
 
+  // Přidat nový řádek výplaty pro existující osobu
+  const addPaymentRow = (personName) => {
+    setTranches(prev => [...prev, {
+      id: uid(), escrow_id: d.id, party_type: 'oprávněný', party_name: personName,
+      amount: 0, is_paid: false, paid_date: null, received_date: null, sort_order: prev.length,
+    }]);
+  };
+
+  // Přejmenovat všechny tranše osoby najednou
+  const renameOprPerson = (oldName, newName) => {
+    if (!newName.trim() || newName === oldName) return;
+    setTranches(prev => prev.map(t =>
+      t.party_type === 'oprávněný' && t.party_name === oldName ? { ...t, party_name: newName } : t
+    ));
+  };
+
+  const saveDraft = () => {
+    try {
+      localStorage.setItem(ESCROW_DRAFT_KEY, JSON.stringify({ _d: d, _tranches: tranches }));
+    } catch (_) {}
+  };
+  const clearDraft = () => { try { localStorage.removeItem(ESCROW_DRAFT_KEY); } catch (_) {} };
+
   const save = async () => {
+    setAttempted(true);
     if (!d.escrow_number.trim()) return;
     const pendingDraft = newT.party_name.trim()
       ? [{ ...newT, amount: Number(newT.amount) || 0, id: uid(), escrow_id: d.id, sort_order: tranches.length }]
@@ -4630,293 +4681,340 @@ function EscrowForm({ init, onSave, onCancel, saving }) {
       ...removedIds.map(id => deleteEscrowTranche(id)),
       ...expanded.map(t => upsertEscrowTranche({ ...t, escrow_id: d.id }))
     ]);
+    clearDraft();
     onSave({ ...d, status: finalStatus, escrow_tranches: expanded });
   };
 
-  // Styly — inline, aby forma fungovala i bez globálního .form CSS
+  // Styles — Legal Tech command-center
   const S = {
-    card: { background: "#fff", border: "1px solid #E5E7EB", borderRadius: 12, padding: "18px 22px", marginBottom: 12 },
-    label: { fontSize: 10, letterSpacing: ".12em", textTransform: "uppercase", color: "#6B7280", fontWeight: 600, display: "block", marginBottom: 5 },
-    input: { width: "100%", fontSize: 13, padding: "8px 11px", borderRadius: 8, border: "1.5px solid #E5E7EB", color: "#111827", background: "#fff", boxSizing: "border-box", outline: "none", fontFamily: "inherit" },
-    sectionTitle: { fontSize: 9, letterSpacing: ".18em", textTransform: "uppercase", color: "#9CA3AF", fontWeight: 700, marginBottom: 12 },
-    trancheCard: (type) => ({
-      background: type === 'složitel' ? "#EEF2FF" : "#F0FDF4",
-      border: `1.5px solid ${type === 'složitel' ? "#C7D2FE" : "#BBF7D0"}`,
-      borderRadius: 10, padding: "12px 14px", marginBottom: 8, position: "relative",
-    }),
-    typeTag: (type) => ({
-      fontSize: 9, fontWeight: 700, letterSpacing: ".1em", textTransform: "uppercase",
-      color: type === 'složitel' ? "#3730A3" : "#065F46",
-      background: type === 'složitel' ? "#E0E7FF" : "#DCFCE7",
-      border: `1px solid ${type === 'složitel' ? "#C7D2FE" : "#BBF7D0"}`,
-      borderRadius: 20, padding: "2px 8px",
-    }),
+    card: { background: "#fff", borderRadius: 12, marginBottom: 10, overflow: "hidden", boxShadow: "0 1px 6px rgba(30,27,75,.07)", border: "1px solid #EDE9FE" },
+    cardHead: (c) => ({ background: c || "#1E1B4B", padding: "9px 16px", display: "flex", alignItems: "center", gap: 8 }),
+    cht: { fontSize: 9, letterSpacing: ".18em", textTransform: "uppercase", color: "rgba(255,255,255,.7)", fontWeight: 700 },
+    cardBody: { padding: "14px 16px" },
+    label: { fontSize: 9, letterSpacing: ".12em", textTransform: "uppercase", color: "#9CA3AF", fontWeight: 700, display: "block", marginBottom: 4 },
+    input: { width: "100%", fontSize: 13, padding: "7px 10px", borderRadius: 7, border: "1.5px solid #E5E7EB", color: "#111827", background: "#fff", boxSizing: "border-box", outline: "none", fontFamily: "inherit" },
+    tbl: { width: "100%", borderCollapse: "collapse", fontSize: 13 },
+    th: { fontSize: 9, letterSpacing: ".12em", textTransform: "uppercase", color: "#9CA3AF", fontWeight: 700, padding: "7px 10px", textAlign: "left", background: "#FAFAFA", borderBottom: "1px solid #F0F0F0" },
+    td: { padding: "8px 10px", borderBottom: "1px solid #F9FAFB", verticalAlign: "middle" },
   };
 
   const sloz = tranches.filter(t => t.party_type === 'složitel');
   const opr  = tranches.filter(t => t.party_type === 'oprávněný');
 
+  // Seskupit oprávněné po osobách
+  const oprGroups = {};
+  opr.forEach(t => {
+    const k = t.party_name || '(bez jména)';
+    if (!oprGroups[k]) oprGroups[k] = [];
+    oprGroups[k].push(t);
+  });
+
   return (
-    <div style={{ maxWidth: 680 }} onKeyDown={e => { if (e.key === 'Enter' && e.target.tagName !== 'TEXTAREA') e.stopPropagation(); }}>
+    <div style={{ maxWidth: 720 }} onKeyDown={e => { if (e.key === 'Enter' && e.target.tagName !== 'TEXTAREA') e.stopPropagation(); }}>
       {/* Hlavička */}
-      <div style={{ marginBottom: 20 }}>
-        <div style={{ fontSize: 9, letterSpacing: ".18em", textTransform: "uppercase", color: "#7C3AED", fontWeight: 700, marginBottom: 4 }}>
+      <div style={{ marginBottom: 16 }}>
+        <div style={{ fontSize: 9, letterSpacing: ".18em", textTransform: "uppercase", color: "#7C3AED", fontWeight: 700, marginBottom: 3 }}>
           {init ? "Upravit úschovu" : "Nová úschova"}
         </div>
-        <div style={{ fontFamily: "Fraunces,serif", fontSize: 26, fontWeight: 300, color: "#1E1B4B" }}>
+        <div style={{ fontFamily: "Fraunces,serif", fontSize: 28, fontWeight: 300, color: "#1E1B4B", lineHeight: 1 }}>
           {d.escrow_number || "—"}
         </div>
       </div>
 
       {/* Karta 1: Základní info */}
       <div style={S.card}>
-        <div style={S.sectionTitle}>Základní informace</div>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
+        <div style={S.cardHead()}>
+          <span style={S.cht}>Základní informace</span>
+        </div>
+        <div style={{ ...S.cardBody, display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
           <div>
             <label style={S.label}>Číslo úschovy *</label>
-            <input style={S.input} value={d.escrow_number} onChange={e => set("escrow_number", e.target.value)} placeholder="010_2026" />
+            <input
+              style={{ ...S.input, borderColor: attempted && !d.escrow_number.trim() ? "#EF4444" : "#E5E7EB" }}
+              value={d.escrow_number}
+              onChange={e => set("escrow_number", e.target.value)}
+              placeholder="010_2026"
+            />
+            {attempted && !d.escrow_number.trim() && (
+              <div style={{ fontSize: 11, color: "#EF4444", marginTop: 4, fontWeight: 600 }}>⚠ Číslo úschovy je povinné</div>
+            )}
           </div>
           <div>
             <label style={S.label}>Stav</label>
-            <select style={{ ...S.input }} value={d.status} onChange={e => set("status", e.target.value)}>
+            <select style={{ ...S.input, cursor: "pointer" }} value={d.status} onChange={e => set("status", e.target.value)}>
               {['aktivní','čeká_na_plombu','čeká_na_přijetí','částečně_vyplaceno','ukončeno'].map(s =>
                 <option key={s} value={s}>{s.replace(/_/g, ' ')}</option>
               )}
             </select>
           </div>
           <div>
-            <label style={S.label}>Úroková sazba (p.a.)</label>
+            <label style={S.label}>Úroková sazba p.a.</label>
             <div style={{ position: "relative" }}>
-              <input style={{ ...S.input, paddingRight: 28 }} type="number" step="0.001" value={d.interest_rate} onChange={e => set("interest_rate", Number(e.target.value))} />
-              <span style={{ position: "absolute", right: 10, top: "50%", transform: "translateY(-50%)", fontSize: 11, color: "#9CA3AF" }}>%×100</span>
+              <input style={{ ...S.input, paddingRight: 40 }} type="number" step="0.001" value={d.interest_rate}
+                onChange={e => set("interest_rate", Number(e.target.value))} />
+              <span style={{ position: "absolute", right: 10, top: "50%", transform: "translateY(-50%)", fontSize: 10, color: "#A78BFA", fontWeight: 700 }}>
+                {(d.interest_rate * 100).toFixed(1)}%
+              </span>
             </div>
-            <div style={{ fontSize: 10, color: "#7C3AED", marginTop: 3 }}>= {(d.interest_rate * 100).toFixed(1)} % ročně</div>
           </div>
         </div>
       </div>
 
-      {/* Karta 2: Datumy */}
+      {/* Karta 2: Časová osa */}
       <div style={S.card}>
-        <div style={S.sectionTitle}>Časová osa</div>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 12 }}>
+        <div style={S.cardHead("#2D1B8E")}>
+          <span style={S.cht}>Časová osa</span>
+        </div>
+        <div style={{ ...S.cardBody, display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 12 }}>
           <div>
-            <label style={S.label}>Datum přijetí peněz</label>
+            <label style={S.label}>Přijato</label>
             <input style={S.input} type="date" value={d.date_received || ""} onChange={e => set("date_received", e.target.value)} />
           </div>
           <div>
-            <label style={S.label}>Datum finálního vyplacení</label>
-            <input style={S.input} type="date" value={d.date_paid || ""} onChange={e => set("date_paid", e.target.value)} />
-            <div style={{ fontSize: 10, color: "#6B7280", marginTop: 3 }}>Vyplň až po skutečném uzavření úschovy</div>
-          </div>
-        </div>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-          <div>
-            <label style={S.label}>Podán návrh na vklad</label>
+            <label style={S.label}>Návrh podán</label>
             <input style={S.input} type="date" value={d.date_navrh_podan || ""} onChange={e => setNavrhPodan(e.target.value)} />
           </div>
           <div>
-            <label style={S.label}>
-              Konec plomby (odhad)
-              {plombaAuto && <AutoTag title="Dopočteno: podání návrhu + 20 dní. Jde ručně přepsat." />}
-            </label>
+            <label style={S.label}>Konec plomby {plombaAuto && <AutoTag title="Podání + 20 dní" />}</label>
             <input style={S.input} type="date" value={d.date_plomba_end || ""} onChange={e => setPlombaEndManual(e.target.value)} />
-            <div style={{ fontSize: 10, color: "#6B7280", marginTop: 3 }}>
-              {d.date_navrh_podan ? "Auto: podání + 20 dní" : "Min. 20 dní od přijetí (bez podaného návrhu)"}
-            </div>
+          </div>
+          <div>
+            <label style={S.label}>Vyplaceno (datum)</label>
+            <input style={S.input} type="date" value={d.date_paid || ""} onChange={e => set("date_paid", e.target.value)} />
           </div>
         </div>
       </div>
 
-      {/* Karta 3: Volby + poznámka */}
+      {/* Karta 3: AML */}
       <div style={S.card}>
-        <div style={S.sectionTitle}>Dokumentace</div>
-        <div style={{ display: "flex", gap: 24, marginBottom: 14 }}>
-          <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", fontSize: 13, color: "#374151" }}>
-            <input type="checkbox" checked={!!d.banka} onChange={e => set("banka", e.target.checked)} style={{ width: "auto", accentColor: "#7C3AED" }} />
-            <span>Bankovní úschova</span>
-          </label>
-          <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", fontSize: 13, color: !!d.spis_aml ? "#065F46" : "#991B1B", fontWeight: !!d.spis_aml ? 600 : 400 }}>
-            <input type="checkbox" checked={!!d.spis_aml} onChange={e => set("spis_aml", e.target.checked)} style={{ width: "auto", accentColor: "#059669" }} />
-            <span>{!!d.spis_aml ? "✓ AML spis hotový" : "⚠ AML spis chybí — nutné pro ČAK"}</span>
-          </label>
+        <div style={S.cardHead("#374151")}>
+          <span style={S.cht}>Dokumentace & AML</span>
         </div>
-        <div>
-          <label style={S.label}>Poznámka</label>
-          <textarea value={d.notes || ""} onChange={e => set("notes", e.target.value)}
-            style={{ ...S.input, minHeight: 60, resize: "vertical", lineHeight: 1.5 }} />
+        <div style={S.cardBody}>
+          <div style={{ display: "flex", gap: 20, marginBottom: 12 }}>
+            <label style={{ display: "flex", alignItems: "center", gap: 7, cursor: "pointer", fontSize: 12 }}>
+              <input type="checkbox" checked={!!d.banka} onChange={e => set("banka", e.target.checked)} style={{ width: "auto", accentColor: "#7C3AED" }} />
+              <span style={{ color: "#374151" }}>Bankovní úschova</span>
+            </label>
+            <label style={{ display: "flex", alignItems: "center", gap: 7, cursor: "pointer", fontSize: 12 }}>
+              <input type="checkbox" checked={!!d.spis_aml} onChange={e => set("spis_aml", e.target.checked)} style={{ width: "auto", accentColor: "#059669" }} />
+              <span style={{ color: !!d.spis_aml ? "#059669" : "#DC2626", fontWeight: 600 }}>
+                {!!d.spis_aml ? "✓ AML spis hotový" : "⚠ AML spis chybí — nutné pro ČAK"}
+              </span>
+            </label>
+          </div>
+          <div>
+            <label style={S.label}>Poznámka</label>
+            <textarea value={d.notes || ""} onChange={e => set("notes", e.target.value)}
+              style={{ ...S.input, minHeight: 54, resize: "vertical", lineHeight: 1.5 }} />
+          </div>
         </div>
       </div>
 
-      {/* Karta 4: Tranše — redesign bez tabulky */}
+      {/* Karta 4: Strany + platební evidence */}
       <div style={S.card}>
-        <div style={S.sectionTitle}>Strany úschovy</div>
+        <div style={S.cardHead("#1E1B4B")}>
+          <span style={S.cht}>Strany úschovy — platební evidence</span>
+        </div>
+        <div style={S.cardBody}>
 
-        {/* Složitelé */}
-        {sloz.length > 0 && (
-          <div style={{ marginBottom: 14 }}>
-            <div style={{ fontSize: 10, fontWeight: 700, color: "#3730A3", marginBottom: 7 }}>Složitelé — vkládají peníze</div>
-            {sloz.map(t => (
-              <div key={t.id} style={S.trancheCard('složitel')}>
-                <div style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
-                  <div style={{ flex: 1 }}>
-                    <label style={{ ...S.label, color: "#3730A3" }}>Jméno složitele</label>
-                    <input style={S.input} value={t.party_name}
-                      onChange={e => updateTranche(t.id, { party_name: e.target.value })} />
-                  </div>
-                  <div style={{ width: 130 }}>
-                    <label style={{ ...S.label, color: "#3730A3" }}>Částka (Kč)</label>
-                    <input style={{ ...S.input, fontFamily: "Fraunces,serif", textAlign: "right" }}
-                      type="number" value={t.amount || ""}
-                      onChange={e => updateTranche(t.id, { amount: Number(e.target.value) || 0 })} />
-                  </div>
-                  <div style={{ width: 130 }}>
-                    <label style={{ ...S.label, color: "#3730A3" }}>Datum přijetí</label>
-                    <input style={S.input} type="date" value={t.received_date || ""}
-                      onChange={e => updateTranche(t.id, { received_date: e.target.value || null })} />
-                  </div>
-                  <button onClick={() => removeTranche(t.id)}
-                    style={{ marginTop: 20, background: "none", border: "none", fontSize: 16, color: "#9CA3AF", cursor: "pointer", padding: "4px 6px", flexShrink: 0 }}
-                    title="Odebrat tranši">×</button>
-                </div>
+          {/* SLOŽITELÉ — tabulka */}
+          {sloz.length > 0 && (
+            <div style={{ marginBottom: 20 }}>
+              <div style={{ fontSize: 9, letterSpacing: ".15em", textTransform: "uppercase", fontWeight: 700, color: "#3730A3", marginBottom: 8 }}>Složitelé</div>
+              <table style={S.tbl}>
+                <thead>
+                  <tr>
+                    <th style={S.th}>Jméno</th>
+                    <th style={{ ...S.th, textAlign: "right" }}>Vloženo (Kč)</th>
+                    <th style={S.th}>Datum přijetí</th>
+                    <th style={{ ...S.th, width: 32 }}></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {sloz.map(t => (
+                    <tr key={t.id}>
+                      <td style={S.td}>
+                        <input style={S.input} value={t.party_name}
+                          onChange={e => updateTranche(t.id, { party_name: e.target.value })} />
+                      </td>
+                      <td style={S.td}>
+                        <input type="number" style={{ ...S.input, textAlign: "right", fontFamily: "Fraunces,serif" }}
+                          value={t.amount || ""} onChange={e => updateTranche(t.id, { amount: Number(e.target.value) || 0 })} />
+                      </td>
+                      <td style={S.td}>
+                        <input type="date" style={S.input} value={t.received_date || ""}
+                          onChange={e => updateTranche(t.id, { received_date: e.target.value || null })} />
+                      </td>
+                      <td style={S.td}>
+                        <button onClick={() => removeTranche(t.id)}
+                          style={{ background: "none", border: "none", color: "#D1D5DB", cursor: "pointer", fontSize: 16, padding: "2px 6px" }}>×</button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {/* OPRÁVNĚNÍ — platební log groupovaný per osoba */}
+          {Object.keys(oprGroups).length > 0 && (
+            <div style={{ marginBottom: 14 }}>
+              <div style={{ fontSize: 9, letterSpacing: ".15em", textTransform: "uppercase", fontWeight: 700, color: "#065F46", marginBottom: 10 }}>
+                Oprávnění — platební log
               </div>
-            ))}
-          </div>
-        )}
+              {Object.entries(oprGroups).map(([personName, rows]) => {
+                const totalNarok = rows.reduce((s, t) => s + (t.amount || 0), 0);
+                const totalPaid  = rows.filter(t => t.is_paid).reduce((s, t) => s + (t.amount || 0), 0);
+                const remaining  = totalNarok - totalPaid;
+                const draftName  = editingNames[personName];
 
-        {/* Oprávnění */}
-        {opr.length > 0 && (
-          <div style={{ marginBottom: 14 }}>
-            <div style={{ fontSize: 10, fontWeight: 700, color: "#065F46", marginBottom: 7 }}>Oprávnění — dostanou peníze</div>
-            {opr.map(t => {
-              const paidAmt = t._paid_amount !== undefined ? t._paid_amount : (t.is_paid ? t.amount : "");
-              const paidNum = parseFloat(paidAmt) || 0;
-              const isPartial = paidNum > 0 && paidNum < t.amount - 0.5;
-              const remainder = Math.round(t.amount - paidNum);
-              return (
-                <div key={t.id} style={S.trancheCard('oprávněný')}>
-                  {/* Řádek 1: Jméno + Nárok */}
-                  <div style={{ display: "flex", gap: 10, alignItems: "flex-start", marginBottom: 12 }}>
-                    <div style={{ flex: 1 }}>
-                      <label style={{ ...S.label, color: "#065F46" }}>Jméno oprávněného</label>
-                      <input style={S.input} value={t.party_name}
-                        onChange={e => updateTranche(t.id, { party_name: e.target.value })} />
-                    </div>
-                    <div style={{ width: 150 }}>
-                      <label style={{ ...S.label, color: "#065F46" }}>Celkový nárok (Kč)</label>
-                      <input style={{ ...S.input, fontFamily: "Fraunces,serif", textAlign: "right" }}
-                        type="number" value={t.amount || ""}
-                        onChange={e => updateTranche(t.id, { amount: Number(e.target.value) || 0, _paid_amount: undefined })} />
-                    </div>
-                    <button onClick={() => removeTranche(t.id)}
-                      style={{ marginTop: 20, background: "none", border: "none", fontSize: 16, color: "#9CA3AF", cursor: "pointer", padding: "4px 6px", flexShrink: 0 }}>×</button>
-                  </div>
-
-                  {/* Řádek 2: Výplata — VŽDY viditelná sekce */}
-                  <div style={{ background: t.is_paid ? "#F0FDF4" : "#F9FAFB", borderRadius: 8, padding: "10px 12px", border: `1px solid ${t.is_paid ? "#BBF7D0" : "#E5E7EB"}` }}>
-                    <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: ".12em", textTransform: "uppercase", color: t.is_paid ? "#059669" : "#6B7280", marginBottom: 8 }}>
-                      Výplata
-                    </div>
-                    <div style={{ display: "flex", gap: 10, alignItems: "flex-end", flexWrap: "wrap" }}>
-                      <div style={{ width: 160 }}>
-                        <label style={{ ...S.label, color: "#065F46" }}>Vyplacená částka (Kč)</label>
-                        <input
-                          style={{ ...S.input, fontFamily: "Fraunces,serif", textAlign: "right", borderColor: isPartial ? "#F59E0B" : t.is_paid ? "#6EE7B7" : "#E5E7EB" }}
-                          type="number"
-                          placeholder={`max ${fmtKc(t.amount)}`}
-                          value={paidAmt}
-                          onChange={e => {
-                            const v = e.target.value;
-                            const n = parseFloat(v) || 0;
-                            updateTranche(t.id, {
-                              _paid_amount: v,
-                              is_paid: n > 0,
-                              paid_date: n > 0 ? (t.paid_date || today()) : null,
-                            });
-                          }}
-                        />
+                return (
+                  <div key={personName} style={{ marginBottom: 14, border: "1.5px solid #A7F3D0", borderRadius: 10, overflow: "hidden" }}>
+                    {/* Hlavička osoby */}
+                    <div style={{ background: "#ECFDF5", padding: "10px 14px", display: "flex", alignItems: "center", gap: 14, borderBottom: "1px solid #D1FAE5" }}>
+                      <input
+                        style={{ ...S.input, width: 210, fontSize: 14, fontWeight: 600, background: "transparent", border: "1px solid #6EE7B7", borderRadius: 6 }}
+                        value={draftName !== undefined ? draftName : personName}
+                        onChange={e => setEditingNames(p => ({ ...p, [personName]: e.target.value }))}
+                        onBlur={e => {
+                          const v = e.target.value.trim();
+                          if (v && v !== personName) renameOprPerson(personName, v);
+                          setEditingNames(p => { const n = { ...p }; delete n[personName]; return n; });
+                        }}
+                      />
+                      <div style={{ flex: 1, display: "flex", gap: 18, fontSize: 11, flexWrap: "wrap" }}>
+                        <span style={{ color: "#374151" }}>Nárok: <strong style={{ fontFamily: "Fraunces,serif", fontSize: 13 }}>{fmtKc(totalNarok)}</strong></span>
+                        {totalPaid > 0 && <span style={{ color: "#059669" }}>Vyplaceno: <strong style={{ fontFamily: "Fraunces,serif", fontSize: 13 }}>{fmtKc(totalPaid)}</strong></span>}
+                        {remaining > 0.5 && <span style={{ color: "#B45309" }}>Zbývá: <strong style={{ fontFamily: "Fraunces,serif", fontSize: 13 }}>{fmtKc(remaining)}</strong></span>}
                       </div>
-                      <div style={{ width: 140 }}>
-                        <label style={{ ...S.label, color: "#065F46" }}>Datum výplaty</label>
-                        <input style={{ ...S.input, borderColor: t.is_paid ? "#6EE7B7" : "#E5E7EB" }}
-                          type="date" value={t.paid_date || ""}
-                          onChange={e => updateTranche(t.id, { paid_date: e.target.value || null })} />
-                      </div>
-                      {/* Info o zbytku u částečné výplaty */}
-                      {isPartial && remainder > 0 && (
-                        <div style={{ flex: 1, minWidth: 160, background: "#FFFBEB", border: "1px solid #FDE68A", borderRadius: 7, padding: "8px 10px", fontSize: 11, color: "#92400E", lineHeight: 1.5 }}>
-                          <strong>Částečná výplata</strong><br/>
-                          Vyplaceno: <strong>{fmtKc(paidNum)}</strong><br/>
-                          Zbyde: <strong>{fmtKc(remainder)}</strong><br/>
-                          <span style={{ opacity: .8 }}>→ po uložení vznikne nová nevyplacená tranše</span>
-                        </div>
-                      )}
-                      {!t.is_paid && paidNum === 0 && (
-                        <div style={{ fontSize: 11, color: "#9CA3AF", paddingBottom: 8 }}>
-                          Zadej částku pro evidenci výplaty. Plnou i částečnou.
-                        </div>
-                      )}
+                    </div>
+
+                    {/* Tabulka plateb */}
+                    <table style={S.tbl}>
+                      <thead>
+                        <tr>
+                          <th style={{ ...S.th, width: 32 }}>#</th>
+                          <th style={S.th}>Datum výplaty</th>
+                          <th style={{ ...S.th, textAlign: "right" }}>Částka (Kč)</th>
+                          <th style={S.th}>Status</th>
+                          <th style={{ ...S.th, width: 32 }}></th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {rows.map((t, idx) => (
+                          <tr key={t.id} style={{ background: t.is_paid ? "#F0FDF4" : "#fff" }}>
+                            <td style={{ ...S.td, color: "#9CA3AF", fontSize: 11 }}>{idx + 1}</td>
+                            <td style={S.td}>
+                              <input type="date" style={{ ...S.input, width: 150 }}
+                                value={t.paid_date || ""}
+                                onChange={e => updateTranche(t.id, { paid_date: e.target.value || null })} />
+                            </td>
+                            <td style={{ ...S.td, textAlign: "right" }}>
+                              <input type="number"
+                                style={{ ...S.input, width: 160, textAlign: "right", fontFamily: "Fraunces,serif", fontSize: 15, fontWeight: 400 }}
+                                value={t.amount || ""}
+                                onChange={e => updateTranche(t.id, { amount: Number(e.target.value) || 0 })} />
+                            </td>
+                            <td style={S.td}>
+                              <label style={{ display: "flex", alignItems: "center", gap: 7, cursor: "pointer", userSelect: "none" }}>
+                                <input type="checkbox" checked={!!t.is_paid} style={{ width: "auto", accentColor: "#059669" }}
+                                  onChange={e => updateTranche(t.id, {
+                                    is_paid: e.target.checked,
+                                    paid_date: e.target.checked ? (t.paid_date || today()) : null,
+                                  })} />
+                                <span style={{
+                                  fontSize: 9, fontWeight: 700, letterSpacing: ".1em",
+                                  color: t.is_paid ? "#059669" : "#B45309",
+                                  background: t.is_paid ? "#DCFCE7" : "#FEF3C7",
+                                  border: `1px solid ${t.is_paid ? "#A7F3D0" : "#FDE68A"}`,
+                                  borderRadius: 4, padding: "2px 8px",
+                                }}>
+                                  {t.is_paid ? "VYPLACENO" : "NESPLACENO"}
+                                </span>
+                              </label>
+                            </td>
+                            <td style={S.td}>
+                              <button onClick={() => removeTranche(t.id)}
+                                style={{ background: "none", border: "none", color: "#D1D5DB", cursor: "pointer", fontSize: 16, padding: "2px 6px" }}>×</button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                    <div style={{ padding: "10px 14px", background: "#F9FAFB", borderTop: "1px solid #E5E7EB" }}>
+                      <button onClick={() => addPaymentRow(personName)}
+                        style={{ fontSize: 11, fontWeight: 700, color: "#059669", background: "#F0FDF4", border: "1px solid #A7F3D0", borderRadius: 6, padding: "5px 14px", cursor: "pointer", letterSpacing: ".04em" }}>
+                        + Přidat výplatu
+                      </button>
                     </div>
                   </div>
-                </div>
-              );
-            })}
-          </div>
-        )}
+                );
+              })}
+            </div>
+          )}
 
-        {tranches.length === 0 && (
-          <div style={{ textAlign: "center", padding: "16px", color: "#9CA3AF", fontSize: 13, marginBottom: 12 }}>
-            Zatím žádné strany — přidej složitele nebo oprávněného níže.
-          </div>
-        )}
+          {tranches.length === 0 && (
+            <div style={{ textAlign: "center", padding: "20px", color: "#9CA3AF", fontSize: 13, marginBottom: 12 }}>
+              Žádné strany — přidej složitele nebo oprávněného níže.
+            </div>
+          )}
 
-        {/* Přidat novou tranši */}
-        <div style={{ background: "#F9FAFB", border: "1.5px dashed #D1D5DB", borderRadius: 10, padding: "14px 16px" }}>
-          <div style={{ fontSize: 10, fontWeight: 700, color: "#6B7280", marginBottom: 10 }}>+ Přidat stranu</div>
-          <div style={{ display: "flex", gap: 8, alignItems: "flex-end", flexWrap: "wrap" }}>
-            <div>
-              <label style={S.label}>Typ</label>
-              <select style={{ ...S.input, width: 130 }} value={newT.party_type} onChange={e => setNewT(p => ({ ...p, party_type: e.target.value }))}>
-                <option value="složitel">Složitel</option>
-                <option value="oprávněný">Oprávněný</option>
-              </select>
-            </div>
-            <div style={{ flex: 1, minWidth: 140 }}>
-              <label style={S.label}>Jméno strany</label>
-              <input style={S.input} placeholder="Např. Filipčík" value={newT.party_name}
-                onChange={e => setNewT(p => ({ ...p, party_name: e.target.value }))}
-                onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addTranche(); }}} />
-            </div>
-            <div style={{ width: 140 }}>
-              <label style={S.label}>Částka (Kč)</label>
-              <input style={{ ...S.input, fontFamily: "Fraunces,serif", textAlign: "right" }}
-                type="number" placeholder="0" value={newT.amount}
-                onChange={e => setNewT(p => ({ ...p, amount: e.target.value }))}
-                onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addTranche(); }}} />
-            </div>
-            {newT.party_type === 'složitel' && (
-              <div style={{ width: 140 }}>
-                <label style={S.label}>Datum přijetí</label>
-                <input style={S.input} type="date" value={newT.received_date}
-                  onChange={e => setNewT(p => ({ ...p, received_date: e.target.value }))} />
+          {/* Přidat novou stranu */}
+          <div style={{ background: "#F9FAFB", border: "1.5px dashed #D1D5DB", borderRadius: 8, padding: "12px 14px" }}>
+            <div style={{ fontSize: 9, fontWeight: 700, color: "#6B7280", marginBottom: 8, letterSpacing: ".12em", textTransform: "uppercase" }}>Přidat stranu</div>
+            <div style={{ display: "flex", gap: 8, alignItems: "flex-end", flexWrap: "wrap" }}>
+              <div>
+                <label style={S.label}>Typ</label>
+                <select style={{ ...S.input, width: 130 }} value={newT.party_type} onChange={e => setNewT(p => ({ ...p, party_type: e.target.value }))}>
+                  <option value="složitel">Složitel</option>
+                  <option value="oprávněný">Oprávněný</option>
+                </select>
               </div>
-            )}
-            <button onClick={addTranche}
-              style={{ padding: "8px 18px", borderRadius: 8, background: "#4F46E5", color: "#fff", border: "none", fontSize: 12, fontWeight: 600, cursor: "pointer", whiteSpace: "nowrap", flexShrink: 0 }}>
-              + Přidat
-            </button>
+              <div style={{ flex: 1, minWidth: 140 }}>
+                <label style={S.label}>Jméno</label>
+                <input style={S.input} placeholder="Např. Filipčík" value={newT.party_name}
+                  onChange={e => setNewT(p => ({ ...p, party_name: e.target.value }))}
+                  onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addTranche(); }}} />
+              </div>
+              <div style={{ width: 150 }}>
+                <label style={S.label}>Částka (Kč)</label>
+                <input style={{ ...S.input, textAlign: "right", fontFamily: "Fraunces,serif" }}
+                  type="number" placeholder="0" value={newT.amount}
+                  onChange={e => setNewT(p => ({ ...p, amount: e.target.value }))}
+                  onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addTranche(); }}} />
+              </div>
+              {newT.party_type === 'složitel' && (
+                <div style={{ width: 150 }}>
+                  <label style={S.label}>Datum přijetí</label>
+                  <input style={S.input} type="date" value={newT.received_date}
+                    onChange={e => setNewT(p => ({ ...p, received_date: e.target.value }))} />
+                </div>
+              )}
+              <button onClick={addTranche}
+                style={{ padding: "8px 18px", borderRadius: 8, background: "#4F46E5", color: "#fff", border: "none", fontSize: 12, fontWeight: 700, cursor: "pointer", whiteSpace: "nowrap" }}>
+                + Přidat
+              </button>
+            </div>
           </div>
         </div>
       </div>
 
       {/* Akce */}
-      <div style={{ display: "flex", gap: 10, justifyContent: "flex-end", paddingTop: 4 }}>
+      <div style={{ display: "flex", gap: 10, justifyContent: "flex-end", paddingTop: 4, flexWrap: "wrap" }}>
+        {!init && (
+          <button onClick={saveDraft}
+            style={{ padding: "9px 18px", borderRadius: 8, background: "transparent", border: "1.5px dashed #A78BFA", fontSize: 12, color: "#7C3AED", cursor: "pointer", fontWeight: 600 }}>
+            💾 Uložit koncept
+          </button>
+        )}
         <button onClick={onCancel}
           style={{ padding: "9px 20px", borderRadius: 8, background: "transparent", border: "1.5px solid #E5E7EB", fontSize: 13, color: "#6B7280", cursor: "pointer" }}>
           Zrušit
         </button>
         <button onClick={save} disabled={saving}
-          style={{ padding: "9px 28px", borderRadius: 8, background: saving ? "#A78BFA" : "#5B21B6", color: "#fff", border: "none", fontSize: 13, fontWeight: 600, cursor: saving ? "default" : "pointer" }}>
-          {saving ? "Ukládám…" : "Uložit změny"}
+          style={{ padding: "9px 32px", borderRadius: 8, background: saving ? "#A78BFA" : "#4F46E5", color: "#fff", border: "none", fontSize: 13, fontWeight: 700, cursor: saving ? "default" : "pointer", letterSpacing: ".03em" }}>
+          {saving ? "Ukládám…" : init ? "Uložit změny" : "Uložit úschovu"}
         </button>
       </div>
     </div>
@@ -5112,7 +5210,10 @@ function EscrowList({ escrows, onNew, onEdit, onDelete, onMarkPaid, onPayment, l
   const incLabel2   = MESICE_NOM[(cm + 2) % 12];       // "Srpen"
   const active = escrows.filter(e => e.status !== 'ukončeno');
   const totalInEscrow = active.reduce((s,e) => {
-    return s + (e.escrow_tranches||[]).filter(t=>t.party_type==='složitel').reduce((ss,t)=>ss+(t.amount||0),0);
+    const tr = e.escrow_tranches || [];
+    const sloz = tr.filter(t=>t.party_type==='složitel').reduce((ss,t)=>ss+(t.amount||0),0);
+    const paidOpr = tr.filter(t=>t.party_type==='oprávněný'&&t.is_paid).reduce((ss,t)=>ss+(t.amount||0),0);
+    return s + sloz - paidOpr;
   }, 0);
   // Historický celkový tok (všechny úschovy, složitelé)
   const totalFlowed = escrows.reduce((s,e) => {
@@ -8114,6 +8215,28 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
   // pro měsíce před zavedením docházky v appce (viz JOSEF_WAGE_MANUAL_OVERRIDES) použij ruční částku
   const josefWage = JOSEF_WAGE_MANUAL_OVERRIDES[_josefYm] ?? _josefWageAuto;
   const totalVydaje = totalNutne + totalLuxus - josefWage;
+  // josefWageNext = Pepova mzda pro BILANCI PŘÍŠTÍHO MĚSÍCE.
+  // Logika: v srpnu platím červencovou docházku → pro projekci příštího měsíce
+  // musím použít hodiny z AKTUÁLNÍHO měsíce (thisMonth), ne z minulého (_josefYm).
+  const _josefNextYm = thisMonth; // aktuální měsíc = práce, která se zaplatí příští měsíc
+  const _josefNextAttByDate = {};
+  (assistantAttendance||[]).forEach(a => { if ((a.date||"").startsWith(_josefNextYm)) _josefNextAttByDate[a.date] = a; });
+  const _josefNextPlannedSet = new Set((assistantAvailability && assistantAvailability.year_month === _josefNextYm ? assistantAvailability.planned_dates : null) || []);
+  const _josefNextDaysInMonth = new Date(_josefNow.getFullYear(), _josefNow.getMonth()+1, 0).getDate();
+  let _josefNextHoursSum = 0;
+  for (let d=1; d<=_josefNextDaysInMonth; d++) {
+    const dateStr = `${_josefNextYm}-${String(d).padStart(2,"0")}`;
+    if (dateStr <= _josefTodayStr) {
+      const a = _josefNextAttByDate[dateStr];
+      if (a && a.check_in && a.check_out) {
+        const h = netAttHours(a.check_in, a.check_out);
+        if (isFinite(h) && h>0) _josefNextHoursSum += h;
+      }
+    } else if (_josefNextPlannedSet.has(dateStr)) {
+      _josefNextHoursSum += 8; // presumpce — den ještě nenastal
+    }
+  }
+  const josefWageNext = JOSEF_WAGE_MANUAL_OVERRIDES[_josefNextYm] ?? Math.round(_josefNextHoursSum * ASSISTANT_HOURLY_RATE);
   const cashflow = mRev + totalVydaje;
   // DPH — nadměrný odpočet (na žádost): kolik mi reálně ZŮSTANE díky účtenkám, které posílám Čechmanové
   // jako odpočet proti DPH z vystavených faktur. Nemění se tím "to číslo shrnující daň" v modulu Daně —
@@ -8139,7 +8262,9 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
   // Záporný výsledek je v pořádku — říká, kolik je potřeba dovydělat na nulu.
   const projectedIncome = (financeItems||[]).filter(i=>i.category==="prijem"&&i.notes!=="TBD").reduce((s,i)=>s+(i.amount||0),0)
     + unbilledAmt + Math.round(escrowNetThisMonth) + nadmernyOdpocet;
-  const nextMonthBalance = projectedIncome + totalVydaje;
+  // nextMonthBalance: pro projekci příštího měsíce nahradíme josefWage (minulý měsíc)
+  // za josefWageNext (aktuální měsíc) — v příštím měsíci se platí za práci tohoto měsíce
+  const nextMonthBalance = projectedIncome + (totalNutne + totalLuxus - josefWageNext);
   // Runway — kolik měsíců firma "ujede" ze zůstatku na spořáku při současných výdajích (V.03 — pro Pulz firmy)
   const sporBalPulz = (financeItems||[]).find(i => i.id === "fi_sp_99")?.amount || 0;
   const runwayPulz  = Math.abs(totalVydaje) > 0 ? sporBalPulz / Math.abs(totalVydaje) : 0;
@@ -10765,12 +10890,34 @@ const JUNE_2026_RECEIPTS = [
   { id: "imp_cer26_08", date: "2026-06-19", label: "T-Mobile – vyúčtování služeb (20.5.–19.6.)", gross: 398, rate: 21, vat: 69 },
   { id: "imp_cer26_09", date: "2026-06-24", label: "Alza – (faktura 4023497743)", gross: 2499, rate: 21, vat: 434 },
   { id: "imp_cer26_10", date: "2026-06-25", label: "Alza – (faktura 4023520680)", gross: 3273, rate: 21, vat: 568 },
+  // — doplněno 14.7.2026 z nové dávky dokladů —
+  // fakt. 660426055583: VERMONT/GANT oblečení (košile, kalhoty, polokošile, polobotky, tenisky — 11 ks), DPH základ 25 346,27 Kč
+  { id: "imp_cer26_11", date: "2026-06-18", label: "VERMONT/GANT – representativní oblečení (11 ks, fakt. 660426055583)", gross: 25346, rate: 21, vat: 5323 },
+  // SI-0313254: ECCO GRUUV M (vel. 43) + shoe care sada, základ 3 208,96 Kč
+  { id: "imp_cer26_12", date: "2026-06-18", label: "ECCO – boty GRUUV M + shoe care (SI-0313254)", gross: 3209, rate: 21, vat: 674 },
+  // fakt. 1260048470: PODA telefon 775938765 (DUZP 30.6., vystavena 3.7.), základ 333,50 Kč
+  { id: "imp_cer26_13", date: "2026-06-30", label: "PODA – telefon 775938765 (červen, fakt. 1260048470)", gross: 334, rate: 21, vat: 70 },
+  // fakt. 4024073878: Alza silikonový kryt MagSafe iPhone 16 Pro skálově šedý, základ 990,91 Kč
+  { id: "imp_cer26_14", date: "2026-06-30", label: "Alza – kryt iPhone 16 Pro MagSafe (fakt. 4024073878)", gross: 991, rate: 21, vat: 208 },
 ];
 
 // Účtenky a faktury za červenec 2026 — průběžně doplňováno.
 // Stejný dedup-safe import princip jako u předchozích měsíců (pevná ID).
 const JULY_2026_RECEIPTS = [
   { id: "imp_jul26_01", date: "2026-07-01", label: "VERMONT/GANT – reprezentativní oblečení do práce (14 ks: trika + šortky, fakt. 660426059400)", gross: 20774, rate: 21, vat: 3605 },
+  // — doplněno 14.7.2026 z nové dávky dokladů —
+  // fakt. 9261104170: PODA internet JON 1000 GPON + pronájem WiFi (červenec), základ 412,41 Kč
+  { id: "imp_jul26_02", date: "2026-07-01", label: "PODA – internet a WiFi (červenec, fakt. 9261104170)", gross: 412, rate: 21, vat: 87 },
+  // OPRAVNÝ daňový doklad 660426062119 (DUZP 12.7.): vrácení 7 ks obuvi a oblečení z červnové GANT objednávky
+  // Základ: −15 828,92 Kč, DPH: −3 324,08 Kč → snižuje odpočet!
+  { id: "imp_jul26_03", date: "2026-07-12", label: "VERMONT/GANT – opravný doklad: vrácení obuvi+oblečení (fakt. 660426062119)", gross: -15829, rate: 21, vat: -3324 },
+  // fakt. 4025097437: Alza skartovač Eternico EasyShred PSH1001, základ 610,74 Kč
+  { id: "imp_jul26_04", date: "2026-07-10", label: "Alza – skartovač Eternico EasyShred PSH1001 (fakt. 4025097437)", gross: 611, rate: 21, vat: 128 },
+  // STYLTEX 202600441 (9.7.): stínění okna kanceláře — záclona Pera + závěs Meli + kolejničky + montáž
+  // POZOR: přenesená daňová povinnost §92a — Tom sám přiznává DPH 21 % ze základu 15 383 Kč (= 3 230 Kč),
+  // současně si stejnou částku nárokuje jako odpočet → čistý cashový efekt = 0 Kč.
+  // Zahrnuto pro úplnost evidence; nesnižuje fakticky DPH k odvodu Čechmanové.
+  { id: "imp_jul26_05", date: "2026-07-09", label: "STYLTEX – záclona+závěs+montáž kanceláře, přenesená DPH §92a (fakt. 202600441)", gross: 15383, rate: 21, vat: 3230 },
 ];
 
 function DphKalkulacka({ odpItem, onSaveFinance }) {
