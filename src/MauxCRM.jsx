@@ -510,6 +510,7 @@ async function deleteEscrowDb(id) {
   if (error) throw error;
 }
 async function upsertEscrowTranche(t) {
+  // Strip unknown columns and convert empty date strings to null
   const { aml_done: _a, ...clean } = t;
   ["received_date","paid_date"].forEach(k => { if (clean[k] === "") clean[k] = null; });
   const { error } = await supabase.from("escrow_tranches").upsert(clean);
@@ -4910,13 +4911,15 @@ function EscrowForm({ init, onSave, onCancel, saving }) {
                         {totalPaid > 0 && <span style={{ color: "#059669" }}>Vyplaceno: <strong style={{ fontFamily: "Fraunces,serif", fontSize: 13 }}>{fmtKc(totalPaid)}</strong></span>}
                         {remaining > 0.5 && <span style={{ color: "#B45309" }}>Zbývá: <strong style={{ fontFamily: "Fraunces,serif", fontSize: 13 }}>{fmtKc(remaining)}</strong></span>}
                       </div>
-                      {/* AML per osoba */}
+                      {/* AML per osoba — sdílené pro všechny tranše téhož jména */}
                       {(() => {
                         const amlDone = rows.every(t => !!t.aml_done);
                         return (
                           <label style={{ display: "flex", alignItems: "center", gap: 5, cursor: "pointer", flexShrink: 0 }}>
                             <input type="checkbox" checked={amlDone}
-                              onChange={e => { rows.forEach(t => updateTranche(t.id, { aml_done: e.target.checked })); }}
+                              onChange={e => {
+                                rows.forEach(t => updateTranche(t.id, { aml_done: e.target.checked }));
+                              }}
                               style={{ width: "auto", accentColor: "#059669" }} />
                             <span style={{
                               fontSize: 9, fontWeight: 700, letterSpacing: ".08em",
@@ -5757,6 +5760,7 @@ function EscrowLiveTile({ escrows, onNav }) {
       amlMissingItems.push({ escrow: e.escrow_number, name: t.party_name || "?", type: t.party_type });
     });
   });
+  // Deduplikovat po jménu+úschově
   const amlMissingEscrows = [...new Set(amlMissingItems.map(x => x.escrow))];
 
   return (
@@ -8110,33 +8114,45 @@ function Panel({ id, children }) {
   const isOver = dragOver === id;
   const cssOrder = panelState.order.indexOf(id);
   const accent = PANEL_ACCENTS[id] || "#3518A5";
+  const [isDragging, setIsDragging] = useState(false);
   if (hidden && !editLayout) return null;
   return (
     <div
       id={`maux-panel-${id}`}
       draggable={editLayout}
-      onDragStart={() => handleDragStart(id)}
+      onDragStart={(e) => { handleDragStart(id); setIsDragging(true); e.dataTransfer.effectAllowed="move"; }}
+      onDragEnd={() => setIsDragging(false)}
       onDragOver={e => handleDragOver(e, id)}
-      onDrop={e => handleDrop(e, id)}
+      onDrop={e => { handleDrop(e, id); setIsDragging(false); }}
       onDragLeave={() => setDragOver(null)}
       style={{
         order: cssOrder >= 0 ? cssOrder : 99,
-        outline: isOver ? "2px dashed #3518A5" : editLayout ? "2px dashed rgba(209,213,219,.7)" : "none",
-        outlineOffset: 4,
-        borderRadius: 3,
+        outline: isOver ? "2px solid #6366F1" : editLayout ? "2px dashed rgba(99,102,241,.3)" : "none",
+        outlineOffset: isOver ? 0 : 4,
+        borderRadius: 8,
         border: `1px solid ${accent}22`,
-        opacity: hidden ? 0.4 : 1,
+        opacity: isDragging ? 0.5 : hidden ? 0.4 : 1,
         position: "relative",
         cursor: editLayout ? "grab" : "default",
-        boxShadow: `0 0 0 1px ${accent}14, 0 1px 10px ${accent}0d`,
+        boxShadow: isOver ? "0 0 20px rgba(99,102,241,.2), inset 0 0 0 1px rgba(99,102,241,.3)" : `0 0 0 1px ${accent}14, 0 1px 10px ${accent}0d`,
+        transition: "outline .2s, outline-offset .2s, box-shadow .3s, opacity .2s, transform .2s",
+        transform: isOver ? "scale(1.01)" : isDragging ? "scale(0.98)" : "scale(1)",
       }}
     >
       {editLayout && (
-        <button
-          onClick={() => toggleHide(id)}
-          style={{position:"absolute",top:6,right:6,zIndex:10,background:hidden?"#059669":"#DC2626",color:"#fff",border:"none",borderRadius:"50%",width:22,height:22,fontSize:13,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",fontWeight:700,boxShadow:"0 1px 4px rgba(0,0,0,.25)"}}
-          title={hidden ? "Zobrazit" : "Skrýt"}
-        >{hidden ? "+" : "×"}</button>
+        <>
+          {/* Drag handle */}
+          <div style={{position:"absolute",top:8,left:8,zIndex:10,display:"flex",flexDirection:"column",gap:1.5,opacity:.4,cursor:"grab"}}>
+            {[0,1,2].map(r=><div key={r} style={{display:"flex",gap:1.5}}>{[0,1].map(c=><div key={c} style={{width:3,height:3,borderRadius:"50%",background:"var(--mut)"}} />)}</div>)}
+          </div>
+          <button
+            onClick={() => toggleHide(id)}
+            style={{position:"absolute",top:6,right:6,zIndex:10,background:hidden?"#059669":"#DC2626",color:"#fff",border:"none",borderRadius:"50%",width:22,height:22,fontSize:13,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",fontWeight:700,boxShadow:"0 1px 4px rgba(0,0,0,.25)",transition:"transform .15s"}}
+            title={hidden ? "Zobrazit" : "Skrýt"}
+            onMouseEnter={e=>e.currentTarget.style.transform="scale(1.15)"}
+            onMouseLeave={e=>e.currentTarget.style.transform="scale(1)"}
+          >{hidden ? "+" : "×"}</button>
+        </>
       )}
       {children}
     </div>
@@ -8398,11 +8414,34 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
   });
   const maxV = Math.max(...chartData.map(d=>d.v), 1);
 
-  // Top clients
+  // Top clients — enriched with monthly breakdown for leaderboard
   const cRev = {};
   invoices.forEach(i => { if(i.client_id) cRev[i.client_id]=(cRev[i.client_id]||0)+(i.subtotal||0); });
-  const topC = Object.entries(cRev).sort(([,a],[,b])=>b-a).slice(0,5).map(([id,rev])=>({c:clients.find(x=>x.id===id),rev})).filter(x=>x.c);
+  // Monthly revenue per client (last 6 months for sparklines)
+  const cMonthly = {};
+  const last6 = Array.from({length:6},(_,i)=>{const d=new Date(now.getFullYear(),now.getMonth()-5+i,1);return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`;});
+  invoices.forEach(inv => {
+    if(!inv.client_id||!inv.issue_date) return;
+    const mk = inv.issue_date.slice(0,7);
+    if(!cMonthly[inv.client_id]) cMonthly[inv.client_id] = {};
+    cMonthly[inv.client_id][mk] = (cMonthly[inv.client_id][mk]||0) + (inv.subtotal||0);
+  });
+  const topC = Object.entries(cRev).sort(([,a],[,b])=>b-a).slice(0,10).map(([id,rev])=>{
+    const c = clients.find(x=>x.id===id);
+    if(!c) return null;
+    const monthly = cMonthly[id]||{};
+    const spark = last6.map(mk => monthly[mk]||0);
+    const thisM = monthly[thisMonth]||0;
+    const prevM = monthly[prevMonth]||0;
+    const delta = prevM > 0 ? ((thisM - prevM) / prevM * 100) : (thisM > 0 ? 100 : 0);
+    const growth = thisM - prevM;
+    return { c, rev, spark, thisM, prevM, delta, growth };
+  }).filter(Boolean);
   const maxC = topC[0]?.rev||1;
+  // Rising stars — biggest month-over-month growth (absolute)
+  const risingStars = [...topC].filter(x=>x.growth>0).sort((a,b)=>b.growth-a.growth).slice(0,3);
+  // Falling — lost revenue this month vs last
+  const falling = [...topC].filter(x=>x.growth<0).sort((a,b)=>a.growth-b.growth).slice(0,3);
 
   const greeting = H<12?"Dobré ráno, Tomáši.":H<18?"Dobré odpoledne, Tomáši.":"Dobrý večer, Tomáši.";
 
@@ -8629,8 +8668,11 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
       })()}
 
       {editLayout && (
-        <div style={{background:"#EEF2FF",border:"1px dashed #3518A5",borderRadius:10,padding:"10px 16px",fontSize:12,color:"#3730A3"}}>
-          🖱 Přetáhni karty pro změnu pořadí · ✕ skryje kartu · + ji znovu zobrazí · klikni <strong>Hotovo</strong> pro uložení
+        <div style={{background:"linear-gradient(135deg,#EEF2FF,#E0E7FF)",border:"1px solid rgba(99,102,241,.25)",borderRadius:10,padding:"12px 18px",fontSize:12,color:"#3730A3",display:"flex",alignItems:"center",gap:10}}>
+          <span style={{fontSize:18}}>✨</span>
+          <div>
+            <strong>Režim úprav</strong> — přetáhni karty pro změnu pořadí · <span style={{color:"#DC2626"}}>✕</span> skryje · <span style={{color:"#059669"}}>+</span> zobrazí · pořadí se automaticky ukládá
+          </div>
         </div>
       )}
 
@@ -9338,19 +9380,141 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
       </Card>
       </Panel>
 
-      {/* TOP KLIENTI */}
+      {/* TOP KLIENTI — Leaderboard + Trendy + Hvězdy */}
       <Panel id="klienti">
-      <Card style={{padding:"14px 18px"}}>
-        <div style={{fontSize:9,letterSpacing:".2em",textTransform:"uppercase",color:"var(--mut)",fontWeight:600,marginBottom:10}}>Top klienti</div>
-        <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
-          {topC.slice(0,8).map(({c,rev},i)=>(
-            <div key={i} style={{display:"flex",alignItems:"center",gap:7,padding:"6px 12px",borderRadius:3,background:i===0?"var(--ink)":"var(--bg2)",border:`1px solid ${i===0?"var(--ink)":"var(--line)"}`,flexShrink:0}}>
-              <span style={{fontSize:9,color:i===0?"rgba(255,255,255,.5)":"var(--mut)",fontWeight:600}}>{i+1}</span>
-              <span style={{fontSize:11,fontWeight:500,color:i===0?"#fff":"var(--txt)",maxWidth:130,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{c.name}</span>
-              <span className="maux-num" style={{fontSize:11,fontWeight:600,color:i===0?"rgba(255,255,255,.8)":"var(--gold)"}}>{fmtKc(rev)}</span>
-            </div>
-          ))}
-        </div>
+      <Card style={{padding:"18px 22px"}}>
+        {(() => {
+          const sparkW = 64, sparkH = 22;
+          const MiniSparkline = ({data,color}) => {
+            const max = Math.max(...data,1);
+            const pts = data.map((v,i)=>`${(i/(data.length-1))*sparkW},${sparkH - (v/max)*sparkH}`).join(" ");
+            return (
+              <svg width={sparkW} height={sparkH} style={{display:"block"}}>
+                <polyline points={pts} fill="none" stroke={color||"#6366F1"} strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" />
+                <circle cx={(data.length-1)/(data.length-1)*sparkW} cy={sparkH-(data[data.length-1]/max)*sparkH} r={2.5} fill={color||"#6366F1"} />
+              </svg>
+            );
+          };
+          const DeltaBadge = ({delta}) => {
+            if(delta===0) return <span style={{fontSize:9,color:"var(--mut)",fontWeight:500}}>—</span>;
+            const up = delta > 0;
+            return (
+              <span style={{
+                display:"inline-flex",alignItems:"center",gap:2,fontSize:9,fontWeight:600,
+                color:up?"#059669":"#DC2626",
+                background:up?"rgba(5,150,105,.08)":"rgba(220,38,38,.08)",
+                padding:"2px 6px",borderRadius:99,
+              }}>
+                <span style={{fontSize:7}}>{up?"▲":"▼"}</span>
+                {Math.abs(Math.round(delta))}%
+              </span>
+            );
+          };
+          const ConfettiIcon = () => (
+            <span style={{fontSize:14,animation:"confettiPulse 2s ease-in-out infinite",display:"inline-block"}}>🏆</span>
+          );
+
+          return (
+            <>
+              <style>{`
+                @keyframes confettiPulse { 0%,100%{transform:scale(1) rotate(0deg)} 25%{transform:scale(1.15) rotate(-5deg)} 50%{transform:scale(1.05) rotate(3deg)} 75%{transform:scale(1.12) rotate(-2deg)} }
+                @keyframes slideInLeader { from{opacity:0;transform:translateX(-12px)} to{opacity:1;transform:translateX(0)} }
+                @keyframes barGrow { from{width:0} }
+                @keyframes starGlow { 0%,100%{box-shadow:0 0 0 rgba(250,204,21,0)} 50%{box-shadow:0 0 12px rgba(250,204,21,.35)} }
+              `}</style>
+
+              {/* HEADER */}
+              <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:14}}>
+                <div style={{display:"flex",alignItems:"center",gap:8}}>
+                  <div style={{fontSize:9,letterSpacing:".2em",textTransform:"uppercase",color:"var(--mut)",fontWeight:600}}>Top klienti</div>
+                  <span style={{fontSize:8,color:"var(--mut)",opacity:.6}}>{year}</span>
+                </div>
+              </div>
+
+              {/* LEADERBOARD */}
+              <div style={{display:"flex",flexDirection:"column",gap:2,marginBottom:16}}>
+                {topC.slice(0,8).map(({c,rev,spark,delta,thisM},i)=>{
+                  const barPct = Math.max((rev/maxC)*100, 8);
+                  const isChamp = i === 0;
+                  return (
+                    <div key={c.id} style={{
+                      display:"grid",gridTemplateColumns:"18px 1fr auto auto auto",alignItems:"center",gap:8,
+                      padding:"7px 10px",borderRadius:6,
+                      background:isChamp?"linear-gradient(135deg,#1E1B4B,#312E81)":"transparent",
+                      animation:`slideInLeader .4s ease-out ${i*0.06}s both`,
+                      transition:"background .3s",
+                    }}
+                    onMouseEnter={e=>{if(!isChamp)e.currentTarget.style.background="var(--bg2)"}}
+                    onMouseLeave={e=>{if(!isChamp)e.currentTarget.style.background="transparent"}}
+                    >
+                      {/* Rank */}
+                      <div style={{display:"flex",alignItems:"center",justifyContent:"center"}}>
+                        {isChamp ? <ConfettiIcon /> : (
+                          <span style={{fontSize:10,fontWeight:700,color:"var(--mut)",opacity:.6}}>{i+1}</span>
+                        )}
+                      </div>
+
+                      {/* Name + bar */}
+                      <div style={{minWidth:0}}>
+                        <div style={{fontSize:11,fontWeight:isChamp?600:500,color:isChamp?"#fff":"var(--txt)",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",marginBottom:2}}>{c.name}</div>
+                        <div style={{height:3,borderRadius:2,background:isChamp?"rgba(255,255,255,.15)":"var(--bg2)",overflow:"hidden"}}>
+                          <div style={{height:"100%",borderRadius:2,width:`${barPct}%`,background:isChamp?"linear-gradient(90deg,#818CF8,#C084FC)":"linear-gradient(90deg,#6366F1,#818CF8)",animation:"barGrow .6s ease-out"}} />
+                        </div>
+                      </div>
+
+                      {/* Sparkline */}
+                      <MiniSparkline data={spark} color={isChamp?"#A5B4FC":"#6366F1"} />
+
+                      {/* Delta */}
+                      <DeltaBadge delta={delta} />
+
+                      {/* Revenue */}
+                      <div className="maux-num" style={{fontSize:11,fontWeight:600,color:isChamp?"#C4B5FD":"var(--gold)",textAlign:"right",whiteSpace:"nowrap"}}>{fmtKc(rev)}</div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* VYCHÁZEJÍCÍ HVĚZDY + KDO MIZÍ */}
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
+                {/* Rising Stars */}
+                {risingStars.length > 0 && (
+                  <div style={{padding:"10px 12px",borderRadius:8,background:"linear-gradient(135deg,rgba(5,150,105,.06),rgba(16,185,129,.04))",border:"1px solid rgba(5,150,105,.15)"}}>
+                    <div style={{fontSize:8,letterSpacing:".15em",textTransform:"uppercase",color:"#059669",fontWeight:700,marginBottom:8,display:"flex",alignItems:"center",gap:4}}>
+                      <span style={{fontSize:11}}>🌟</span> Hvězdy měsíce
+                    </div>
+                    {risingStars.map(({c,growth,delta},i) => (
+                      <div key={c.id} style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"3px 0",animation:`starGlow 3s ease-in-out ${i*.5}s infinite`,borderRadius:4}}>
+                        <span style={{fontSize:10,fontWeight:500,color:"var(--txt)"}}>{c.name}</span>
+                        <span style={{fontSize:9,fontWeight:600,color:"#059669"}}>+{fmtKc(growth)}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {/* Falling */}
+                {falling.length > 0 && (
+                  <div style={{padding:"10px 12px",borderRadius:8,background:"rgba(220,38,38,.03)",border:"1px solid rgba(220,38,38,.1)"}}>
+                    <div style={{fontSize:8,letterSpacing:".15em",textTransform:"uppercase",color:"#DC2626",fontWeight:700,marginBottom:8,opacity:.7}}>
+                      📉 Tišší tento měsíc
+                    </div>
+                    {falling.map(({c,growth}) => (
+                      <div key={c.id} style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"3px 0"}}>
+                        <span style={{fontSize:10,fontWeight:500,color:"var(--txt)",opacity:.7}}>{c.name}</span>
+                        <span style={{fontSize:9,fontWeight:500,color:"#DC2626"}}>{fmtKc(growth)}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Footer — sparkline legend */}
+              <div style={{fontSize:8,color:"var(--mut)",opacity:.5,marginTop:10,textAlign:"right",fontFamily:"'JetBrains Mono','SF Mono',Menlo,monospace"}}>
+                sparkline = posledních 6 měsíců · ▲▼ = změna oproti minulému měsíci
+              </div>
+            </>
+          );
+        })()}
       </Card>
       </Panel>
 
