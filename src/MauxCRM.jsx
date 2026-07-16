@@ -45,6 +45,7 @@ const MODULES = [
   { key: "uschovy",    label: "Úschovy",        live: true },
   { key: "akcie",      label: "Akcie",          live: true },
   { key: "dane",       label: "Daně",           live: true },
+  { key: "rejstriky",  label: "Rejstříky",      live: true },
   { key: "ostatni",    label: "Ostatní",        live: true },
   { key: "asistent",   label: "Josef · Asistent", live: true },
 ];
@@ -89,6 +90,35 @@ const fmtDate = (d) => d ? new Date(d).toLocaleDateString("cs-CZ", { day: "numer
 const uid = () => "id_" + Math.random().toString(36).slice(2, 10);
 const today = () => new Date().toISOString().slice(0, 10);
 const addDays = (d, n) => { const dt = new Date(d); dt.setDate(dt.getDate() + n); return dt.toISOString().slice(0, 10); };
+
+/* ─── ARES (Administrativní registr ekonomických subjektů) ─── */
+const ARES_API = "https://ares.gov.cz/ekonomicke-subjekty-v-be/rest/ekonomicke-subjekty";
+const PRAVNI_FORMY = {"101":"OSVČ","111":"v.o.s.","112":"k.s.","121":"a.s.","141":"s.r.o.","205":"družstvo","301":"stát. podnik","331":"přísp. org.","421":"zahraniční FO","422":"zahraniční PO","701":"sdružení","706":"spolek","736":"nadace","751":"zájmové sdruž.","804":"kraj","805":"obec","přísp":"přísp. org."};
+async function aresLookup(ico) {
+  const clean = String(ico).replace(/\s/g, "");
+  if (!/^\d{6,8}$/.test(clean)) throw new Error("Neplatné IČO — zadejte 6–8 číslic");
+  const r = await fetch(`${ARES_API}/${clean.padStart(8, "0")}`);
+  if (r.status === 404) throw new Error("Subjekt nenalezen v ARES");
+  if (!r.ok) throw new Error(`ARES chyba ${r.status}`);
+  const d = await r.json();
+  const reg = d.seznamRegistraci || {};
+  return {
+    ico: d.ico,
+    name: d.obchodniJmeno || "",
+    address: d.sidlo?.textovaAdresa || "",
+    city: d.sidlo?.nazevObce || "",
+    psc: d.sidlo?.psc || "",
+    pravniForma: PRAVNI_FORMY[d.pravniForma] || d.pravniForma || "—",
+    pravniFormaKod: d.pravniForma || "",
+    datumVzniku: d.datumVzniku || "",
+    dic: reg.stavZdrojeDph === "AKTIVNI" ? `CZ${d.ico}` : "",
+    dphStatus: reg.stavZdrojeDph || "NEEXISTUJICI",
+    insolvence: reg.stavZdrojeIr === "AKTIVNI" ? "ANO" : "NE",
+    czNace: (d.czNace || d.czNace2008 || []).join(", "),
+    stavRos: reg.stavZdrojeRos || "",
+    raw: d,
+  };
+}
 
 /* ─── CSS ─── */
 const CSS = `
@@ -7923,6 +7953,152 @@ function ClaudeTracker() {
   );
 }
 
+/* ═══════════════════════════════════════════════════════════════════════════
+   REJSTŘÍKY — ARES lookup + katastr quick-link
+   Přímé volání ARES REST API (CORS OK, žádný proxy) + odkaz na nahlížení do KN.
+   ═══════════════════════════════════════════════════════════════════════════ */
+function RejstrikyModule({ onNav, clients }) {
+  const [query, setQuery] = useState("");
+  const [result, setResult] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [history, setHistory] = useState(() => {
+    try { return JSON.parse(localStorage.getItem("maux_ares_history") || "[]"); } catch { return []; }
+  });
+
+  const doSearch = async (ico) => {
+    const q = (ico || query).trim();
+    if (!q) return;
+    setLoading(true); setError(""); setResult(null);
+    try {
+      const data = await aresLookup(q);
+      setResult(data);
+      // Přidat do historie (max 20)
+      const newH = [{ ico: data.ico, name: data.name, ts: Date.now() }, ...history.filter(h => h.ico !== data.ico)].slice(0, 20);
+      setHistory(newH);
+      try { localStorage.setItem("maux_ares_history", JSON.stringify(newH)); } catch {}
+    } catch (e) { setError(e.message); }
+    setLoading(false);
+  };
+
+  const isClient = result && clients?.some(c => (c.ico || "").replace(/\s/g, "") === result.ico);
+
+  const ROW = { display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 0", borderBottom: "1px solid rgba(0,0,0,0.05)" };
+  const LBL = { fontSize: 11, color: "var(--mut)", letterSpacing: ".06em", textTransform: "uppercase", fontWeight: 600 };
+  const VAL = { fontSize: 14, fontWeight: 500, color: "var(--ink)" };
+  const BADGE = (bg, col) => ({ display: "inline-block", padding: "3px 10px", borderRadius: 99, fontSize: 10, fontWeight: 700, letterSpacing: ".06em", background: bg, color: col });
+
+  return (
+    <div className="content">
+      <div style={{ maxWidth: 800, margin: "0 auto" }}>
+        {/* ── VYHLEDÁVÁNÍ ── */}
+        <div style={{ background: "#fff", borderRadius: 14, border: "1px solid rgba(0,0,0,0.08)", padding: "32px 36px", marginBottom: 20 }}>
+          <div style={{ fontSize: 9, letterSpacing: ".22em", textTransform: "uppercase", color: "#4F46E5", fontWeight: 700, opacity: 0.55, marginBottom: 12 }}>ARES — Administrativní registr ekonomických subjektů</div>
+          <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
+            <input
+              value={query} onChange={e => setQuery(e.target.value)}
+              onKeyDown={e => { if (e.key === "Enter") doSearch(); }}
+              placeholder="Zadejte IČO (např. 27082440)"
+              style={{ flex: 1, padding: "12px 16px", borderRadius: 10, border: "2px solid #E0E7FF", fontSize: 15, fontFamily: "var(--mono)", outline: "none", background: "#FAFAFE", transition: "border .2s" }}
+              onFocus={e => e.target.style.borderColor = "#4F46E5"}
+              onBlur={e => e.target.style.borderColor = "#E0E7FF"}
+            />
+            <button onClick={() => doSearch()} disabled={loading}
+              style={{ padding: "12px 28px", borderRadius: 10, border: "none", background: loading ? "#C7D2FE" : "#4F46E5", color: "#fff", fontSize: 14, fontWeight: 600, cursor: "pointer", letterSpacing: ".03em", transition: "background .15s" }}>
+              {loading ? "Hledám…" : "Vyhledat"}
+            </button>
+          </div>
+          {error && <div style={{ color: "#DC2626", fontSize: 12, marginTop: 4 }}>{error}</div>}
+        </div>
+
+        {/* ── VÝSLEDEK ── */}
+        {result && (
+          <div style={{ background: "#fff", borderRadius: 14, border: "1px solid rgba(0,0,0,0.08)", padding: "28px 36px", marginBottom: 20 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 18 }}>
+              <div>
+                <div style={{ fontSize: 22, fontFamily: "Fraunces,serif", fontWeight: 400, color: "var(--ink)", marginBottom: 4 }}>{result.name}</div>
+                <div style={{ fontSize: 12, color: "var(--mut)" }}>IČO {result.ico} · {result.pravniForma} · vznik {fmtDate(result.datumVzniku)}</div>
+              </div>
+              <div style={{ display: "flex", gap: 6 }}>
+                {result.dphStatus === "AKTIVNI" && <span style={BADGE("#ECFDF5","#059669")}>Plátce DPH</span>}
+                {result.dphStatus !== "AKTIVNI" && <span style={BADGE("#FEF2F2","#DC2626")}>Neplátce DPH</span>}
+                {result.insolvence === "ANO" && <span style={BADGE("#FEF2F2","#DC2626")}>⚠ INSOLVENCE</span>}
+                {result.stavRos === "AKTIVNI" && <span style={BADGE("#F0FDF4","#16A34A")}>Aktivní</span>}
+                {result.stavRos === "ZANIKLÝ" && <span style={BADGE("#FEF2F2","#DC2626")}>Zaniklý</span>}
+              </div>
+            </div>
+
+            <div style={ROW}><span style={LBL}>Sídlo</span><span style={VAL}>{result.address || "—"}</span></div>
+            <div style={ROW}><span style={LBL}>DIČ</span><span style={VAL}>{result.dic || "Nemá"}</span></div>
+            <div style={ROW}><span style={LBL}>Právní forma</span><span style={VAL}>{result.pravniForma} (kód {result.pravniFormaKod})</span></div>
+            <div style={ROW}><span style={LBL}>CZ-NACE</span><span style={VAL}>{result.czNace || "—"}</span></div>
+            <div style={ROW}><span style={LBL}>Insolvence</span><span style={{...VAL, color: result.insolvence === "ANO" ? "#DC2626" : "#059669"}}>{result.insolvence === "ANO" ? "⚠ Zapsán v insolvenčním rejstříku" : "Není v insolvenci"}</span></div>
+
+            <div style={{ display: "flex", gap: 8, marginTop: 20 }}>
+              {!isClient && (
+                <button onClick={() => {
+                  onNav("klienti", { prefill: { name: result.name, ico: result.ico, dic: result.dic, reg: result.address, type: result.pravniFormaKod === "101" ? "osoba" : "firma" }});
+                }} style={{ padding: "10px 20px", borderRadius: 9, border: "1px solid #4F46E5", background: "#EEF2FF", color: "#4F46E5", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>
+                  + Přidat do klientů
+                </button>
+              )}
+              {isClient && <span style={{ ...BADGE("#EEF2FF","#4F46E5"), padding: "10px 20px", fontSize: 12 }}>✓ Už je v klientech</span>}
+              <a href={`https://or.justice.cz/ias/ui/rejstrik-$firma?ico=${result.ico}`} target="_blank" rel="noopener noreferrer"
+                style={{ padding: "10px 20px", borderRadius: 9, border: "1px solid rgba(0,0,0,0.12)", background: "#fff", color: "var(--ink)", fontSize: 12, fontWeight: 500, cursor: "pointer", textDecoration: "none" }}>
+                Obchodní rejstřík ↗
+              </a>
+              <a href={`https://apl.czso.cz/irsw/detail.jsp?pession=1&pid=ICO&pkraj=0&ico=${result.ico}`} target="_blank" rel="noopener noreferrer"
+                style={{ padding: "10px 20px", borderRadius: 9, border: "1px solid rgba(0,0,0,0.12)", background: "#fff", color: "var(--ink)", fontSize: 12, fontWeight: 500, cursor: "pointer", textDecoration: "none" }}>
+                ČSÚ (RES) ↗
+              </a>
+            </div>
+          </div>
+        )}
+
+        {/* ── KATASTR QUICK-LINK ── */}
+        <div style={{ background: "#fff", borderRadius: 14, border: "1px solid rgba(0,0,0,0.08)", padding: "28px 36px", marginBottom: 20 }}>
+          <div style={{ fontSize: 9, letterSpacing: ".22em", textTransform: "uppercase", color: "#4F46E5", fontWeight: 700, opacity: 0.55, marginBottom: 12 }}>Katastr nemovitostí — nahlížení (ČÚZK)</div>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <a href="https://nahlizenidokn.cuzk.cz/vyhledej-vlastnika" target="_blank" rel="noopener noreferrer"
+              style={{ padding: "10px 20px", borderRadius: 9, border: "1px solid #4F46E5", background: "#EEF2FF", color: "#4F46E5", fontSize: 12, fontWeight: 600, cursor: "pointer", textDecoration: "none" }}>
+              Vyhledat vlastníka ↗
+            </a>
+            <a href="https://nahlizenidokn.cuzk.cz/vyhledej-parcelu" target="_blank" rel="noopener noreferrer"
+              style={{ padding: "10px 20px", borderRadius: 9, border: "1px solid rgba(0,0,0,0.12)", background: "#fff", color: "var(--ink)", fontSize: 12, fontWeight: 500, cursor: "pointer", textDecoration: "none" }}>
+              Vyhledat parcelu ↗
+            </a>
+            <a href="https://nahlizenidokn.cuzk.cz/vyhledej-budovu" target="_blank" rel="noopener noreferrer"
+              style={{ padding: "10px 20px", borderRadius: 9, border: "1px solid rgba(0,0,0,0.12)", background: "#fff", color: "var(--ink)", fontSize: 12, fontWeight: 500, cursor: "pointer", textDecoration: "none" }}>
+              Vyhledat budovu ↗
+            </a>
+            <a href="https://nahlizenidokn.cuzk.cz/vyhledej-jednotku" target="_blank" rel="noopener noreferrer"
+              style={{ padding: "10px 20px", borderRadius: 9, border: "1px solid rgba(0,0,0,0.12)", background: "#fff", color: "var(--ink)", fontSize: 12, fontWeight: 500, cursor: "pointer", textDecoration: "none" }}>
+              Vyhledat jednotku ↗
+            </a>
+          </div>
+          <div style={{ fontSize: 11, color: "var(--mut)", marginTop: 10, fontStyle: "italic" }}>Nahlížení do KN je zdarma. Pro plný výpis LV je potřeba placený přístup WSDP (cca 500 Kč/měs).</div>
+        </div>
+
+        {/* ── HISTORIE HLEDÁNÍ ── */}
+        {history.length > 0 && (
+          <div style={{ background: "#fff", borderRadius: 14, border: "1px solid rgba(0,0,0,0.08)", padding: "24px 36px" }}>
+            <div style={{ fontSize: 9, letterSpacing: ".22em", textTransform: "uppercase", color: "var(--mut)", fontWeight: 700, opacity: 0.55, marginBottom: 12 }}>Poslední vyhledávání</div>
+            {history.map((h, i) => (
+              <div key={i} onClick={() => { setQuery(h.ico); doSearch(h.ico); }}
+                style={{ display: "flex", justifyContent: "space-between", padding: "8px 0", borderBottom: i < history.length-1 ? "1px solid rgba(0,0,0,0.04)" : "none", cursor: "pointer", transition: "background .1s" }}
+                onMouseEnter={e => e.currentTarget.style.background = "#FAFAFE"}
+                onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
+                <span style={{ fontSize: 13, color: "var(--ink)" }}>{h.name}</span>
+                <span style={{ fontSize: 12, fontFamily: "var(--mono)", color: "var(--mut)" }}>{h.ico}</span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function OstatniModule({ dpfoMonths, loanTrackers, loanTransactions, financeItems, onDpfoToggle, onDpfoAdd, onDpfoDelete, onLoanTxAdd, onLoanTxToggle, onLoanTxDelete, onLoanUpdate, onSaveFinance, onDeleteFinance }) {
   // Jednorázové založení pohledávky — půjčka kamarádovi 22 000 Kč, splatnost 16. 6. 2026, z firemní rezervy
   const seeded = useRef(false);
@@ -12094,6 +12270,25 @@ function ClientForm({ init, onSave, onCancel, saving }) {
   const toggleSv = (s) => setD(p => ({
     ...p, services: (p.services || []).includes(s) ? (p.services || []).filter(x => x !== s) : [...(p.services || []), s]
   }));
+  const [aresLoading, setAresLoading] = useState(false);
+  const [aresMsg, setAresMsg] = useState("");
+  const fillFromAres = async () => {
+    const ico = (d.ico || "").trim();
+    if (!ico) { setAresMsg("Zadejte IČO"); return; }
+    setAresLoading(true); setAresMsg("");
+    try {
+      const a = await aresLookup(ico);
+      setD(p => ({
+        ...p,
+        name: a.name || p.name,
+        ico: a.ico || p.ico,
+        dic: a.dic || p.dic,
+        reg: a.address || p.reg,
+      }));
+      setAresMsg(`✓ ${a.name}`);
+    } catch (e) { setAresMsg(`✕ ${e.message}`); }
+    setAresLoading(false);
+  };
   const isOsoba = d.type === "osoba";
   const save = () => {
     const composedName = isOsoba
@@ -12139,14 +12334,15 @@ function ClientForm({ init, onSave, onCancel, saving }) {
         </select></div>
         {isOsoba
           ? <div className="frow"><label>Narozen</label><input type="date" value={d.birth_date || ""} onChange={e => set("birth_date", e.target.value)} /></div>
-          : <div className="frow"><label>IČO</label><input value={d.ico || ""} onChange={e => set("ico", e.target.value)} /></div>}
+          : <div className="frow"><label>IČO</label><div style={{display:"flex",gap:4}}><input value={d.ico || ""} onChange={e => set("ico", e.target.value)} style={{flex:1}} /><button type="button" onClick={fillFromAres} disabled={aresLoading} style={{padding:"5px 10px",borderRadius:7,border:"1px solid #4F46E5",background:aresLoading?"#e0e7ff":"#EEF2FF",color:"#4F46E5",fontSize:10,fontWeight:700,cursor:"pointer",whiteSpace:"nowrap",letterSpacing:".04em"}}>{aresLoading?"···":"ARES ↓"}</button></div></div>}
       </div>
+      {aresMsg && <div style={{fontSize:11,color:aresMsg.startsWith("✓")?"#059669":"#DC2626",marginTop:-4,marginBottom:6,paddingLeft:2}}>{aresMsg}</div>}
       {/* Fyzická osoba podnikající (OSVČ) může mít IČO i DIČ stejně jako firma —
           na faktuře se pak datum narození NEZOBRAZUJE, použije se IČO (viz InvoicePrintPreview).
           Pokud osoba IČO nemá (nepodnikající spotřebitel), na faktuře se místo IČO ukáže datum narození + adresa. */}
       {isOsoba ? (
         <div className="two">
-          <div className="frow"><label>IČO <span style={{ fontWeight: 400, textTransform: "none", letterSpacing: 0, color: "var(--mut)" }}>(jen pokud OSVČ)</span></label><input value={d.ico || ""} onChange={e => set("ico", e.target.value)} /></div>
+          <div className="frow"><label>IČO <span style={{ fontWeight: 400, textTransform: "none", letterSpacing: 0, color: "var(--mut)" }}>(jen pokud OSVČ)</span></label><div style={{display:"flex",gap:4}}><input value={d.ico || ""} onChange={e => set("ico", e.target.value)} style={{flex:1}} /><button type="button" onClick={fillFromAres} disabled={aresLoading} style={{padding:"5px 10px",borderRadius:7,border:"1px solid #4F46E5",background:aresLoading?"#e0e7ff":"#EEF2FF",color:"#4F46E5",fontSize:10,fontWeight:700,cursor:"pointer",whiteSpace:"nowrap",letterSpacing:".04em"}}>{aresLoading?"···":"ARES ↓"}</button></div></div>
           <div className="frow"><label>DIČ</label><input value={d.dic || ""} onChange={e => set("dic", e.target.value)} placeholder="CZ12345678" /></div>
         </div>
       ) : (
@@ -14192,6 +14388,15 @@ export default function MauxCRM() {
           const _goal = monthlyGoal || 0;
           const _rem = Math.max(0, _goal - _monthAmt);
           const _pct = _goal > 0 ? Math.min(1, _monthAmt / _goal) : 0;
+          // Denní billing target — kolik ideálně dnes, aby tempo sedělo
+          const _daysInM = new Date(_now.getFullYear(), _now.getMonth()+1, 0).getDate();
+          let _wdLeft = 0;
+          for (let _d = _now.getDate(); _d <= _daysInM; _d++) {
+            const _dow = new Date(_now.getFullYear(), _now.getMonth(), _d).getDay();
+            if (_dow > 0 && _dow < 6) _wdLeft++;
+          }
+          const _dailyTarget = _goal > 0 && _wdLeft > 0 && _rem > 0 ? Math.round(_rem / _wdLeft) : 0;
+          const _dailyDone = _todayAmt >= _dailyTarget && _dailyTarget > 0;
           const _h = _now.getHours();
           const _gr = _h < 12 ? "Dobré ráno" : _h < 18 ? "Dobré odpoledne" : "Dobrý večer";
           const _fmt = v => privacyMode ? "·····" : v.toLocaleString("cs-CZ") + " Kč";
@@ -14251,6 +14456,14 @@ export default function MauxCRM() {
                       </div>
                       <span style={{fontSize:10,color:"rgba(253,230,138,.85)",fontWeight:600}}>{Math.round(_pct*100)}% cíle</span>
                     </div>
+                    {_dailyTarget > 0 && <>
+                      <div style={{width:1,height:14,background:"rgba(255,255,255,.2)",flexShrink:0}} />
+                      <div style={{display:"flex",alignItems:"baseline",gap:6,whiteSpace:"nowrap"}}>
+                        <span style={{fontSize:9.5,color:"rgba(255,255,255,.45)",letterSpacing:".1em",textTransform:"uppercase"}}>{_dailyDone ? "Dnešní tempo" : "Dnes ideálně"}</span>
+                        <span style={{fontSize:15,fontFamily:"Fraunces,serif",fontWeight:300,color:_dailyDone?"#4ade80":"rgba(253,230,138,.85)"}}>{_dailyDone ? "✓ na tahu" : _fmt(_dailyTarget)}</span>
+                        {!_dailyDone && <span style={{fontSize:9,color:"rgba(255,255,255,.3)"}}>({_wdLeft} dní)</span>}
+                      </div>
+                    </>}
                   </>}
                 </div>
 
@@ -14469,6 +14682,10 @@ export default function MauxCRM() {
               onSaveFinance={saveFinanceItem}
               onNav={navTo}
             />
+          )}
+
+          {mod === "rejstriky" && (
+            <RejstrikyModule onNav={navTo} clients={clients} />
           )}
 
           {/* OSTATNÍ — DPFO, úvěry, pohledávky (přesunuto z Přehledu) */}
