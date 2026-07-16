@@ -2466,6 +2466,251 @@ function ServiceDots({ list, max = 3 }) {
   );
 }
 
+/* ═══════════════════════════════════════════════════════════════════════════
+   PIXEL KOČIČKA TAMAGOTCHI — walks sidebar & header, sleeps, drinks milk,
+   climbs ladders, surprises Tom. Full autonomous behavior state machine.
+   ═══════════════════════════════════════════════════════════════════════════ */
+function PixelNeko() {
+  const posRef = useRef({ x: 100, y: 460 });
+  const [render, setRender] = useState({ x: 100, y: 460, state: "sit", facing: 1, frame: 0, bubble: "", extra: "" });
+  const timerRef = useRef(null);
+  const frameRef = useRef(null);
+  const stateRef = useRef("sit");
+
+  // Walk animation frame ticker
+  useEffect(() => {
+    frameRef.current = setInterval(() => {
+      setRender(r => ({ ...r, frame: (r.frame + 1) % 4 }));
+    }, 200);
+    return () => clearInterval(frameRef.current);
+  }, []);
+
+  // Behavior state machine
+  useEffect(() => {
+    const ZONES = [
+      { x: 100, y: 460, area: "sb" },   // sidebar bottom
+      { x: 100, y: 340, area: "sb" },   // sidebar mid
+      { x: 100, y: 220, area: "sb" },   // sidebar upper
+      { x: 100, y: 130, area: "sb" },   // sidebar top
+      { x: 320, y: 6, area: "hdr" },    // header left
+      { x: 550, y: 6, area: "hdr" },    // header mid-left
+      { x: 780, y: 6, area: "hdr" },    // header center
+      { x: 1000, y: 6, area: "hdr" },   // header right
+      { x: 1180, y: 6, area: "hdr" },   // header far-right
+    ];
+    const BUBBLES = {
+      sit: ["", "", "Mňau!", "Pracuj!", "", "§ 14", ""],
+      walk: ["", "", "Dup dup…", "", ""],
+      sleep: ["💤", "Zzz…", "💤"],
+      milk: ["*chlemtá*", "Mňam!", "🥛"],
+      climb: ["Hop!", "Žebřík!", "Lezuuu…"],
+      peek: ["!", "Bú!", "Kuk!", "👀"],
+      wash: ["*myje se*", "*mňau*", "🐾"],
+      stretch: ["*potáhne se*", "Áááá…", ""],
+    };
+
+    const pick = (arr) => arr[Math.floor(Math.random() * arr.length)];
+    const randRange = (a, b) => a + Math.random() * (b - a);
+    const curArea = () => posRef.current.y < 50 ? "hdr" : "sb";
+
+    const act = () => {
+      const from = { ...posRef.current };
+      const fromArea = curArea();
+      const roll = Math.random();
+      let next, target, dur, bubble, extra = "";
+
+      if (roll < 0.30) {
+        // WALK to a random zone
+        next = "walk";
+        target = pick(ZONES.filter(z => z.area === fromArea));
+        dur = randRange(3000, 5500);
+        bubble = pick(BUBBLES.walk);
+      } else if (roll < 0.42) {
+        // CLIMB between sidebar top and header (or back)
+        next = "climb";
+        extra = "ladder";
+        if (fromArea === "sb") {
+          target = { x: 240, y: 6 };
+          dur = randRange(2500, 4000);
+        } else {
+          target = { x: 100, y: 130 };
+          dur = randRange(2500, 4000);
+        }
+        bubble = pick(BUBBLES.climb);
+      } else if (roll < 0.55) {
+        // SIT & look around
+        next = "sit";
+        target = from;
+        dur = randRange(3000, 7000);
+        bubble = pick(BUBBLES.sit);
+      } else if (roll < 0.66) {
+        // SLEEP
+        next = "sleep";
+        target = from;
+        dur = randRange(8000, 16000);
+        bubble = pick(BUBBLES.sleep);
+      } else if (roll < 0.76) {
+        // DRINK MILK
+        next = "milk";
+        extra = "bowl";
+        target = fromArea === "sb" ? { x: from.x, y: from.y } : from;
+        dur = randRange(4000, 7000);
+        bubble = pick(BUBBLES.milk);
+      } else if (roll < 0.84) {
+        // PEEK (jump to random spot)
+        next = "peek";
+        target = pick(ZONES);
+        dur = randRange(2000, 4000);
+        bubble = pick(BUBBLES.peek);
+      } else if (roll < 0.92) {
+        // WASH face
+        next = "wash";
+        target = from;
+        dur = randRange(3000, 5000);
+        bubble = pick(BUBBLES.wash);
+      } else {
+        // STRETCH
+        next = "stretch";
+        target = from;
+        dur = randRange(2000, 4000);
+        bubble = pick(BUBBLES.stretch);
+      }
+
+      const facing = target.x > from.x ? 1 : target.x < from.x ? -1 : (Math.random() > 0.5 ? 1 : -1);
+      posRef.current = { x: target.x, y: target.y };
+      stateRef.current = next;
+      setRender(r => ({ ...r, x: target.x, y: target.y, state: next, facing, bubble, extra }));
+
+      timerRef.current = setTimeout(act, dur);
+    };
+
+    timerRef.current = setTimeout(act, 1500);
+    return () => { if (timerRef.current) clearTimeout(timerRef.current); };
+  }, []);
+
+  const { x, y, state, facing, frame, bubble, extra } = render;
+  const isWalking = state === "walk" || state === "climb" || state === "peek";
+  const legOffset = isWalking ? (frame % 2 === 0 ? 0 : 1) : 0;
+
+  // Transition speed based on behavior
+  const speed = state === "peek" ? "0.3s" : state === "climb" ? "2s" : state === "walk" ? "1.8s" : "0.5s";
+
+  return (
+    <div style={{
+      position: "fixed", left: x - 16, top: y - (state === "sleep" ? 8 : 16),
+      zIndex: 9999, pointerEvents: "none",
+      transition: `left ${speed} ease-in-out, top ${speed} ease-in-out`,
+      filter: "drop-shadow(0 2px 4px rgba(79,70,229,.15))",
+    }}>
+      {/* Ladder (when climbing) */}
+      {extra === "ladder" && (
+        <div style={{ position: "absolute", left: 12, top: 16, width: 8, height: 40 }}>
+          <svg viewBox="0 0 8 40" width="8" height="40" style={{ imageRendering: "pixelated" }}>
+            <rect x="0" y="0" width="2" height="40" fill="#D97706" opacity=".7"/>
+            <rect x="6" y="0" width="2" height="40" fill="#D97706" opacity=".7"/>
+            <rect x="0" y="5" width="8" height="2" fill="#F59E0B" opacity=".6"/>
+            <rect x="0" y="15" width="8" height="2" fill="#F59E0B" opacity=".6"/>
+            <rect x="0" y="25" width="8" height="2" fill="#F59E0B" opacity=".6"/>
+            <rect x="0" y="35" width="8" height="2" fill="#F59E0B" opacity=".6"/>
+          </svg>
+        </div>
+      )}
+
+      {/* Milk bowl (when drinking) */}
+      {extra === "bowl" && (
+        <div style={{ position: "absolute", left: facing > 0 ? 28 : -14, bottom: state === "sleep" ? 2 : -2 }}>
+          <svg viewBox="0 0 12 6" width="16" height="8" style={{ imageRendering: "pixelated" }}>
+            <rect x="1" y="0" width="10" height="2" fill="#E0E7FF"/>
+            <rect x="0" y="2" width="12" height="3" fill="#C7D2FE"/>
+            <rect x="2" y="1" width="8" height="1" fill="#fff"/>
+            <rect x="1" y="5" width="10" height="1" fill="#A5B4FC"/>
+          </svg>
+        </div>
+      )}
+
+      {/* Cat sprite */}
+      <svg viewBox="0 0 16 16" width="32" height="32" style={{
+        imageRendering: "pixelated",
+        transform: `scaleX(${facing}) ${state === "sleep" ? "rotate(90deg)" : state === "stretch" ? "scaleY(0.8) translateY(3px)" : ""}`,
+        transition: "transform 0.3s",
+      }}>
+        {/* ears */}
+        <rect x="2" y="1" width="2" height="2" fill="#6366F1"/>
+        <rect x="10" y="1" width="2" height="2" fill="#6366F1"/>
+        {/* head */}
+        <rect x="2" y="3" width="10" height="4" fill="#818CF8"/>
+        <rect x="3" y="3" width="8" height="4" fill="#A5B4FC"/>
+        {/* eyes — different per state */}
+        {state === "sleep" ? (
+          <>
+            <rect x="4" y="5" width="2" height="1" fill="#312E81"/>
+            <rect x="8" y="5" width="2" height="1" fill="#312E81"/>
+          </>
+        ) : state === "peek" ? (
+          <>
+            <rect x="4" y="4" width="2" height="2" fill="#312E81"/>
+            <rect x="5" y="4" width="1" height="1" fill="#fff"/>
+            <rect x="8" y="4" width="2" height="2" fill="#312E81"/>
+            <rect x="9" y="4" width="1" height="1" fill="#fff"/>
+          </>
+        ) : state === "milk" ? (
+          <>
+            <rect x="4" y="4" width="1" height="1" fill="#312E81"/>
+            <rect x="9" y="4" width="1" height="1" fill="#312E81"/>
+            <rect x="6" y="6" width="2" height="1" fill="#F472B6" opacity=".5"/>
+          </>
+        ) : state === "wash" ? (
+          <>
+            <rect x="4" y="4" width="1" height="1" fill="#312E81"/>
+            <rect x="9" y="4" width="1" height="1" fill="#312E81"/>
+            <rect x="3" y="4" width="1" height="3" fill="#C7D2FE"/>
+          </>
+        ) : (
+          <>
+            <rect x="4" y="4" width="1" height="2" fill="#312E81"/>
+            <rect x="5" y="4" width="1" height="1" fill="#fff"/>
+            <rect x="9" y="4" width="1" height="2" fill="#312E81"/>
+            <rect x="10" y="4" width="1" height="1" fill="#fff"/>
+          </>
+        )}
+        {/* nose */}
+        <rect x="7" y="5" width="1" height="1" fill="#C084FC"/>
+        {/* body */}
+        <rect x="3" y="7" width="8" height="5" fill="#A5B4FC"/>
+        <rect x="4" y="7" width="6" height="5" fill="#C7D2FE"/>
+        {/* paws — animate for walking */}
+        <rect x={3} y={12 - legOffset} width="2" height={1 + legOffset} fill="#818CF8"/>
+        <rect x={9} y={12 - (1-legOffset)} width="2" height={1 + (1-legOffset)} fill="#818CF8"/>
+        {/* tail — wagging */}
+        <rect x="11" y={9 - (frame % 2)} width="1" height="1" fill="#A5B4FC"/>
+        <rect x="12" y={8 - (frame % 2)} width="1" height="2" fill="#818CF8"/>
+        <rect x="13" y={7 - (frame % 2)} width="1" height="2" fill="#6366F1"/>
+      </svg>
+
+      {/* Speech bubble */}
+      {bubble && (
+        <div style={{
+          position: "absolute", top: -22, left: facing > 0 ? 20 : -60,
+          background: "rgba(255,255,255,.92)", borderRadius: 8, padding: "3px 8px",
+          fontSize: 9, color: "#4338CA", fontWeight: 600, whiteSpace: "nowrap",
+          border: "1px solid rgba(99,102,241,.15)",
+          animation: state === "peek" ? "josefPulse 0.5s ease-in-out" : "none",
+          boxShadow: "0 2px 6px rgba(0,0,0,.08)",
+        }}>
+          {bubble}
+        </div>
+      )}
+
+      {/* Sleep Zzz floating */}
+      {state === "sleep" && (
+        <div style={{ position: "absolute", top: -18, right: -8 }}>
+          <span style={{ fontSize: 10, animation: "josefPulse 2s ease-in-out infinite", display: "block" }}>💤</span>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function Sidebar({ mod, setMod, onLogout, privacyMode, onTogglePrivacy }) {
   // — Zápisníček: lokální poznámkový blok, vidět napříč všemi listy (sidebar se nikdy neodmountuje) —
   const [note, setNote] = useState(loadZapisnicek);
@@ -2501,73 +2746,6 @@ function Sidebar({ mod, setMod, onLogout, privacyMode, onTogglePrivacy }) {
   };
   const toggleNote = () => {
     setNoteOpen(o => { const n = !o; saveZapisnicekOpen(n); return n; });
-  };
-
-  /* ── Pixel kočička — companion SVG (8-bit cat, idle animation via CSS) ── */
-  const PixelCat = () => {
-    const h = new Date().getHours();
-    const isNight = h < 6 || h >= 22;
-    const isMorning = h >= 6 && h < 10;
-    const isAfternoon = h >= 12 && h < 14;
-    const mood = isNight ? "sleep" : isMorning ? "coffee" : isAfternoon ? "yawn" : "idle";
-    const phrases = {
-      sleep: ["Zzz… mňau…", "Spím, neruš…", "💤"],
-      coffee: ["Dobré ráno!", "Kafe? Mňau!", "Na práci!"],
-      yawn: ["*zívá*", "Po obědě…", "Siesta?"],
-      idle: ["Mňau!", "Pracuj, Tome!", "Jsem tu.", "Fakturuj!", "Jsi borec!", "§ 14 mňau", "Ares? Mňau!", "Go go go!"],
-    };
-    const phrase = phrases[mood][Math.floor(Date.now() / 60000) % phrases[mood].length];
-
-    return (
-      <div style={{ display: "flex", alignItems: "flex-end", gap: 8, padding: "0 4px" }}>
-        {/* Pixel cat body — pure CSS pixel art */}
-        <div style={{ position: "relative", width: 32, height: 32, flexShrink: 0 }}>
-          <svg viewBox="0 0 16 16" width="32" height="32" style={{ imageRendering: "pixelated" }}>
-            {/* ears */}
-            <rect x="2" y="1" width="2" height="2" fill="#6366F1"/>
-            <rect x="10" y="1" width="2" height="2" fill="#6366F1"/>
-            {/* head */}
-            <rect x="2" y="3" width="10" height="4" fill="#818CF8"/>
-            <rect x="3" y="3" width="8" height="4" fill="#A5B4FC"/>
-            {/* eyes */}
-            {mood === "sleep" ? (
-              <>
-                <rect x="4" y="4" width="2" height="1" fill="#312E81"/>
-                <rect x="8" y="4" width="2" height="1" fill="#312E81"/>
-              </>
-            ) : (
-              <>
-                <rect x="4" y="4" width="1" height="2" fill="#312E81"/>
-                <rect x="5" y="4" width="1" height="1" fill="#fff"/>
-                <rect x="9" y="4" width="1" height="2" fill="#312E81"/>
-                <rect x="10" y="4" width="1" height="1" fill="#fff"/>
-              </>
-            )}
-            {/* nose */}
-            <rect x="7" y="5" width="1" height="1" fill="#C084FC"/>
-            {/* mouth / whiskers */}
-            <rect x="6" y="6" width="3" height="1" fill="#818CF8" opacity=".5"/>
-            {/* body */}
-            <rect x="3" y="7" width="8" height="5" fill="#A5B4FC"/>
-            <rect x="4" y="7" width="6" height="5" fill="#C7D2FE"/>
-            {/* paws */}
-            <rect x="3" y="12" width="2" height="1" fill="#818CF8"/>
-            <rect x="9" y="12" width="2" height="1" fill="#818CF8"/>
-            {/* tail */}
-            <rect x="11" y="9" width="1" height="1" fill="#A5B4FC"/>
-            <rect x="12" y="8" width="1" height="2" fill="#818CF8"/>
-            <rect x="13" y="7" width="1" height="2" fill="#6366F1"/>
-          </svg>
-          {mood === "sleep" && (
-            <span style={{ position: "absolute", top: -4, right: -6, fontSize: 10, animation: "josefPulse 2s ease-in-out infinite" }}>💤</span>
-          )}
-        </div>
-        {/* Speech bubble */}
-        <div style={{ position: "relative", background: "rgba(255,255,255,.8)", borderRadius: "10px 10px 10px 2px", padding: "5px 10px", fontSize: 10, color: "#4338CA", fontWeight: 500, maxWidth: 130, lineHeight: 1.3, backdropFilter: "blur(4px)", border: "1px solid rgba(99,102,241,.12)" }}>
-          {phrase}
-        </div>
-      </div>
-    );
   };
 
   return (
@@ -2646,11 +2824,6 @@ function Sidebar({ mod, setMod, onLogout, privacyMode, onTogglePrivacy }) {
             </div>
           </div>
         )}
-      </div>
-
-      {/* ── Pixel kočička companion ── */}
-      <div style={{ margin: "16px 2px 0", flexShrink: 0 }}>
-        <PixelCat />
       </div>
 
       <div className="sbfoot">
@@ -14548,6 +14721,7 @@ export default function MauxCRM() {
       <style>{CSS}</style>
       <Sidebar mod={mod} setMod={navTo} onLogout={handleLogout}
         privacyMode={privacyMode} onTogglePrivacy={togglePrivacy} />
+      <PixelNeko />
       <div className="main">
         {(() => {
           const _now = new Date();
