@@ -5785,7 +5785,7 @@ function EscrowLiveTile({ escrows, onNav }) {
         )}
       </div>
     )}
-    <div style={{background:"var(--card)",border:"1px solid var(--line)",borderRadius:amlMissing.length>0?"0 0 3px 3px":"3px",padding:"24px 28px",display:"flex",alignItems:"center",gap:30,flexWrap:"wrap"}}>
+    <div style={{background:"var(--card)",border:"1px solid var(--line)",borderRadius:amlMissingItems.length>0?"0 0 3px 3px":"3px",padding:"24px 28px",display:"flex",alignItems:"center",gap:30,flexWrap:"wrap"}}>
       <div style={{minWidth:230}}>
         <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,marginBottom:10}}>
           <div style={{display:"flex",alignItems:"center",gap:6}}>
