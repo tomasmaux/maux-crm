@@ -499,6 +499,9 @@ async function fetchEscrows() {
 }
 async function upsertEscrow(e) {
   const { escrow_tranches: _t, banka: _b, spis_aml: _s, ...rest } = e;
+  // Convert empty strings to null for date columns (Postgres rejects "")
+  const DATE_COLS = ["date_received","date_navrh_podan","date_plomba_end","date_paid"];
+  DATE_COLS.forEach(k => { if (rest[k] === "") rest[k] = null; });
   const { error } = await supabase.from("escrows").upsert({ ...rest, updated_at: new Date().toISOString() });
   if (error) throw error;
 }
