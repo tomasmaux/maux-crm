@@ -5881,13 +5881,13 @@ function InteractiveRing({ segments, size = 190, thickness = 20, glowColor, cent
           {active ? (
             <>
               <div style={{ fontSize: 10, letterSpacing: ".12em", color: active.color, fontWeight: 800, textTransform: "uppercase", opacity: 0.8, marginBottom: 6, maxWidth: size - 50, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{active.label}</div>
-              <div className="maux-num" style={{ fontSize: size > 160 ? 26 : 19, fontWeight: 600, color: active.color, lineHeight: 1 }}>{fmtKc(active.value)}</div>
+              <div className="maux-num" style={{ fontSize: size > 160 ? 26 : 19, fontWeight: 600, color: active.color, lineHeight: 1, whiteSpace: "nowrap" }}>{fmtKc(active.value)}</div>
               <div style={{ fontSize: 11.5, color: active.color, opacity: 0.65, marginTop: 6, fontWeight: 600 }}>{Math.round(active.frac * 100)} %</div>
             </>
           ) : (
             <>
               {centerTop && <div style={{ fontSize: 9.5, letterSpacing: ".14em", color: glowColor, fontWeight: 800, textTransform: "uppercase", opacity: 0.62, marginBottom: 6 }}>{centerTop}</div>}
-              <div className="maux-num" style={{ fontSize: size > 160 ? 28 : 20, fontWeight: 600, color: glowColor, lineHeight: 1 }}>{centerMain}</div>
+              <div className="maux-num" style={{ fontSize: size > 160 ? 28 : 20, fontWeight: 600, color: glowColor, lineHeight: 1, whiteSpace: "nowrap" }}>{centerMain}</div>
               {centerSub && <div style={{ fontSize: 11, color: glowColor, opacity: 0.55, marginTop: 6 }}>{centerSub}</div>}
             </>
           )}
@@ -6634,7 +6634,7 @@ function BackupReminderBanner({ onDone }) {
 // Verze: zvýšit pokud chceme vynutit reset uloženého pořadí u všech uživatelů
 const PANEL_LAYOUT_VERSION = 9;
 const DEFAULT_PANELS = [
-  "finance","uschovy","trigrafy","firma","josef","pulz",
+  "finance","trigrafy","firma","josef","pulz",
   "chart","klienti","navstevnost","xtb","ziskovost","claude"
 ];
 function loadPanelState() {
@@ -8027,75 +8027,95 @@ function JosefPanel({ logs, attendance: attendanceProp }) {
   const isIn       = !!(todayAtt?.check_in && !todayAtt?.check_out);
   const isOut      = !!(todayAtt?.check_in && todayAtt?.check_out);
   const statusLabel = isIn ? "Přítomen" : isOut ? "Odhlášen" : "Nezaznamenán";
-  const statusColor = isIn ? "#059669" : isOut ? "var(--mut)" : "#D97706";
+  const statusColor = isIn ? "#059669" : isOut ? "#6B7280" : "#D97706";
+  const statusBg    = isIn ? "rgba(5,150,105,.08)" : isOut ? "rgba(107,114,128,.06)" : "rgba(217,119,6,.06)";
 
   // mini bar chart — last days with logs
   const dayMap = {};
   monthLogs.forEach(l => { if (l.entry_date) dayMap[l.entry_date] = (dayMap[l.entry_date]||0) + (Number(l.hours)||0); });
-  const recentKeys = Object.keys(dayMap).sort().slice(-5);
+  const recentKeys = Object.keys(dayMap).sort().slice(-7);
   const maxH = recentKeys.length > 0 ? Math.max(...recentKeys.map(k => dayMap[k]), 1) : 1;
 
+  const CZM_JP = ["ledna","února","března","dubna","května","června","července","srpna","září","října","listopadu","prosince"];
+  const monthNameJP = CZM_JP[now.getMonth()];
+
   return (
-    <div style={{ background:"#fff", borderRadius:16, border:"1px solid var(--line)", overflow:"hidden" }}>
-      <div style={{ background:"linear-gradient(135deg, #1A0E5C 0%, #3518A5 100%)", padding:"16px 20px", display:"flex", alignItems:"center", justifyContent:"space-between" }}>
+    <div style={{
+      background:"#fff", borderRadius:3, overflow:"hidden",
+      borderTop:"4px solid #3518A5",
+      boxShadow:"0 0 0 1px rgba(0,0,0,.08)",
+    }}>
+      {/* Header — clean legal-tech brand */}
+      <div style={{ padding:"18px 22px 14px", display:"flex", alignItems:"flex-start", justifyContent:"space-between" }}>
         <div>
-          <div style={{ fontFamily:"Fraunces, serif", fontWeight:300, fontSize:17, color:"#fff", letterSpacing:".01em" }}>Josef · Asistent</div>
-          <div style={{ fontSize:11, color:"rgba(255,255,255,.5)", marginTop:2 }}>Tento měsíc · {ASSISTANT_HOURLY_RATE} Kč/h</div>
+          <div style={{ display:"flex", alignItems:"center", gap:7, marginBottom:4 }}>
+            <span className="maux-dot" style={{ width:6, height:6, background:"#3518A5", boxShadow:"0 0 4px rgba(53,24,165,.5)" }} />
+            <span style={{ fontSize:10, letterSpacing:".22em", textTransform:"uppercase", color:"#3518A5", fontWeight:800 }}>Josef Řehák</span>
+          </div>
+          <div style={{ fontSize:10, color:"var(--mut)", letterSpacing:".02em" }}>Asistent · {ASSISTANT_HOURLY_RATE} Kč/h · {monthNameJP} {now.getFullYear()}</div>
         </div>
-        <div style={{ display:"flex", alignItems:"center", gap:6, background:"rgba(255,255,255,.12)", borderRadius:20, padding:"4px 12px" }}>
-          <div style={{ width:7, height:7, borderRadius:"50%", background:statusColor, flexShrink:0 }} />
-          <span style={{ fontSize:11.5, color:"#fff", fontWeight:500 }}>{statusLabel}</span>
+        <div style={{ display:"flex", alignItems:"center", gap:5, background:statusBg, borderRadius:4, padding:"5px 10px" }}>
+          <div style={{ width:6, height:6, borderRadius:"50%", background:statusColor, flexShrink:0, boxShadow: isIn ? `0 0 6px ${statusColor}` : "none" }} />
+          <span style={{ fontSize:10, color:statusColor, fontWeight:600, letterSpacing:".02em" }}>{statusLabel}</span>
         </div>
       </div>
 
-      <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", borderBottom:"1px solid var(--line)" }}>
+      {/* KPI row */}
+      <div style={{ display:"flex", borderTop:"1px solid rgba(53,24,165,.08)", borderBottom:"1px solid rgba(53,24,165,.08)" }}>
         {[
-          { label:"Hodiny v kanceláři", value: totalHours > 0 ? (totalHours % 1 === 0 ? `${totalHours} h` : `${totalHours.toFixed(1)} h`) : (missingCheckout ? "⚠ chybí odchod" : "0 h"), sub: `${daysWorked} dní · po obědové pauze` },
-          { label:"Mzda k dnešku", value: `${wageToDate.toLocaleString("cs-CZ")} Kč`, sub: `ze ${wdPassed} prac. dní` },
-          { label:"Projekce měsíc", value: projectedWage > 0 ? `${projectedWage.toLocaleString("cs-CZ")} Kč` : (missingCheckout ? "⚠" : "—"), sub: `z ${wdTotal} dní celkem` },
+          { label:"Odpracováno", value: totalHours > 0 ? `${totalHours % 1 === 0 ? totalHours : totalHours.toFixed(1)} h` : (missingCheckout ? "—" : "0 h"), sub: `${daysWorked} dní`, accent: "#3518A5" },
+          { label:"Mzda k dnešku", value: fmtKc(wageToDate), sub: `${wdPassed} prac. dní`, accent: "#059669" },
+          { label:"Projekce", value: projectedWage > 0 ? fmtKc(projectedWage) : "—", sub: `${wdTotal} dní celkem`, accent: "#3518A5" },
         ].map((m,i) => (
-          <div key={i} style={{ padding:"14px 16px", borderRight: i < 2 ? "1px solid var(--line)" : "none" }}>
-            <div style={{ fontSize:9.5, letterSpacing:".1em", textTransform:"uppercase", color:"var(--mut)", fontWeight:500, marginBottom:5 }}>{m.label}</div>
-            <div style={{ fontFamily:"Fraunces, serif", fontWeight:300, fontSize:18, color:"var(--ink)", lineHeight:1 }}>{m.value}</div>
-            <div style={{ fontSize:10.5, color:"var(--mut)", marginTop:4 }}>{m.sub}</div>
+          <div key={i} style={{ flex:1, padding:"14px 16px", borderRight: i < 2 ? "1px solid rgba(53,24,165,.08)" : "none", textAlign:"center" }}>
+            <div style={{ fontSize:8.5, letterSpacing:".12em", textTransform:"uppercase", color:"var(--mut)", fontWeight:600, marginBottom:6 }}>{m.label}</div>
+            <div className="maux-num" style={{ fontSize:17, fontWeight:600, color:m.accent, lineHeight:1, whiteSpace:"nowrap" }}>{m.value}</div>
+            <div style={{ fontSize:9.5, color:"var(--mut)", marginTop:5 }}>{m.sub}</div>
           </div>
         ))}
       </div>
 
-      <div style={{ padding:"12px 20px 10px" }}>
-        <div style={{ display:"flex", justifyContent:"space-between", marginBottom:6 }}>
-          <span style={{ fontSize:10.5, color:"var(--mut)" }}>Docházka tento měsíc</span>
-          <span style={{ fontSize:10.5, color:"var(--ink)", fontWeight:500 }}>{daysWorked} / {wdTotal} dní</span>
+      {/* Progress + mini chart */}
+      <div style={{ padding:"14px 22px 16px" }}>
+        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:6 }}>
+          <span style={{ fontSize:9.5, color:"var(--mut)", letterSpacing:".04em", fontWeight:500 }}>Docházka</span>
+          <span style={{ fontSize:9.5, color:"var(--ink)", fontWeight:600 }}>{daysWorked}/{wdTotal} dní · {Math.round(progress*100)} %</span>
         </div>
-        <div style={{ height:6, background:"var(--line)", borderRadius:99, overflow:"hidden" }}>
-          <div style={{ height:"100%", width:`${progress*100}%`, background:"linear-gradient(90deg,#3518A5,#7C3AED)", borderRadius:99, transition:"width .5s ease" }} />
+        <div style={{ height:4, background:"rgba(53,24,165,.06)", borderRadius:99, overflow:"hidden" }}>
+          <div style={{ height:"100%", width:`${progress*100}%`, background:"#3518A5", borderRadius:99, transition:"width .5s ease" }} />
         </div>
+
+        {recentKeys.length > 0 && (
+          <div style={{ marginTop:14 }}>
+            <div style={{ fontSize:9, color:"var(--mut)", marginBottom:8, letterSpacing:".04em" }}>Posledních {recentKeys.length} dní</div>
+            <div style={{ display:"flex", gap:4, alignItems:"flex-end", height:36 }}>
+              {recentKeys.map(d => {
+                const h = dayMap[d];
+                const pctH = h / maxH;
+                const date = new Date(d + "T12:00:00");
+                const label = `${date.getDate()}.${date.getMonth()+1}.`;
+                const isToday = d === todayStr;
+                return (
+                  <div key={d} style={{ flex:1, display:"flex", flexDirection:"column", alignItems:"center", gap:2 }}>
+                    <div style={{ fontSize:7.5, color: isToday ? "#3518A5" : "var(--mut)", fontWeight: isToday ? 700 : 400 }}>{h % 1 === 0 ? h : h.toFixed(1)}</div>
+                    <div title={`${h} h`} style={{
+                      width:"100%", maxWidth:22,
+                      height: Math.max(3, pctH*24),
+                      background: isToday ? "#3518A5" : "rgba(53,24,165,.12)",
+                      borderRadius:"2px 2px 0 0",
+                      transition:"height .3s ease",
+                    }} />
+                    <div style={{ fontSize:7.5, color:"var(--mut)", whiteSpace:"nowrap" }}>{label}</div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
       </div>
 
-      {recentKeys.length > 0 && (
-        <div style={{ padding:"0 20px 14px" }}>
-          <div style={{ fontSize:10.5, color:"var(--mut)", marginBottom:8 }}>Posledních {recentKeys.length} dní s výkazy</div>
-          <div style={{ display:"flex", gap:5, alignItems:"flex-end", height:48, justifyContent:"flex-start" }}>
-            {recentKeys.map(d => {
-              const h = dayMap[d];
-              const pct = h / maxH;
-              const date = new Date(d + "T12:00:00");
-              const label = `${date.getDate()}.${date.getMonth()+1}.`;
-              const isToday = d === todayStr;
-              return (
-                <div key={d} style={{ width:28, flexShrink:0, display:"flex", flexDirection:"column", alignItems:"center", gap:3 }}>
-                  <div style={{ fontSize:8, color: isToday?"#7C3AED":"var(--mut)", fontWeight: isToday?600:400 }}>{h % 1 === 0 ? h : h.toFixed(1)}</div>
-                  <div title={`${h} h`} style={{ width:18, height: Math.max(4, pct*28), background: isToday?"#7C3AED":"var(--ink)", borderRadius:"3px 3px 0 0", opacity:isToday?1:0.45, transition:"height .3s ease" }} />
-                  <div style={{ fontSize:8.5, color:"var(--mut)", whiteSpace:"nowrap" }}>{label}</div>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
-
       {monthLogs.length === 0 && monthAtt.length === 0 && (
-        <div style={{ padding:"14px 20px", fontSize:12.5, color:"var(--mut)" }}>Josef zatím tento měsíc nemá záznamy.</div>
+        <div style={{ padding:"10px 22px 16px", fontSize:11, color:"var(--mut)" }}>Zatím žádné záznamy za {monthNameJP}.</div>
       )}
     </div>
   );
@@ -8834,11 +8854,6 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
         loanTransactions={loanTransactions} escrows={escrows} />
       </Panel>
 
-      {/* ÚSCHOVY — vlastní prominentní dlaždice, stejná váha jako Fakturace */}
-      <Panel id="uschovy">
-        <EscrowLiveTile escrows={escrows} onNav={onNav} />
-      </Panel>
-
       {/* FIRMA METRIKY — měsíční výdaje (vč. checklistu, přesunutého sem z Bilance 29.6.2026) */}
       <Panel id="firma">
       <FirmaBar financeItems={financeItems} invoices={invoices} dpfoMonths={dpfoMonths}
@@ -9045,18 +9060,23 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
                     se 29.6.2026 přestěhoval do dlaždice "Měsíční výdaje" (Panel id="firma") — Tom:
                     "ta roletka u nákladů je zcela zbytečná" (dělala tuhle dlaždici zbytečně vysokou).
                     Klikni pro skok na detail/úpravu. */}
-                <div style={{borderTop:"1px solid rgba(53,24,165,.14)",paddingTop:12,cursor:"pointer"}}
-                  onClick={()=>{ const el=document.getElementById("maux-panel-firma"); if(el) el.scrollIntoView({behavior:"smooth",block:"center"}); }}
-                  title="Klikni pro detail a úpravu nákladů (dlaždice Měsíční výdaje)">
+                {/* Výdaje — Bilance příštího měsíce: náklady + Pepa průběžný.
+                    Tom 16.7.2026: "zelený progress bar je pro Měsíční výdaje, ne pro Bilanci.
+                    Tady chci: náklady nutné+luxus jedním číslem + Pepův průběžný výpočet." */}
+                <div style={{borderTop:"1px solid rgba(53,24,165,.14)",paddingTop:12}}>
                   <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline"}}>
                     <span style={{fontSize:12,letterSpacing:".1em",textTransform:"uppercase",color:"var(--ink)",fontWeight:700}}>Výdaje</span>
-                    <span className="maux-num" style={{fontSize:21,fontWeight:600,color:"#3518A5"}}>{fmtKc(Math.abs(totalNutne)+josefWage+Math.abs(totalLuxus))}</span>
+                    <span className="maux-num" style={{fontSize:21,fontWeight:600,color:"#3518A5"}}>{fmtKc(Math.abs(totalNutne)+Math.abs(totalLuxus)+josefWageNext)}</span>
                   </div>
-                  <div style={{height:5,borderRadius:3,background:"rgba(53,24,165,.08)",overflow:"hidden",marginTop:8}}>
-                    <div style={{height:"100%",width:`${pct}%`,borderRadius:3,background:pct===100?"#16A34A":"#3518A5",transition:"width .7s ease"}} />
-                  </div>
-                  <div style={{fontSize:10,color:"var(--mut)",letterSpacing:".01em",marginTop:5,fontWeight:600}}>
-                    {pct===100?"✓ vše zaplaceno":`zaplaceno ${paidCount}/${allExpItems.length}`} · detail ↓ v dlaždici Měsíční výdaje
+                  <div style={{marginTop:8,display:"flex",flexDirection:"column",gap:2}}>
+                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"4px 0"}}>
+                      <span style={{fontSize:10,color:"var(--mut)",letterSpacing:".02em"}}>Náklady nutné + luxus</span>
+                      <span className="maux-num" style={{fontSize:11.5,fontWeight:500,color:"var(--ink)"}}>{fmtKc(Math.abs(totalNutne)+Math.abs(totalLuxus))}</span>
+                    </div>
+                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"4px 0"}}>
+                      <span style={{fontSize:10,color:"var(--mut)",letterSpacing:".02em"}}>Pepa — průběžný ({Math.round(_josefNextHoursSum)} h × {ASSISTANT_HOURLY_RATE} Kč)</span>
+                      <span className="maux-num" style={{fontSize:11.5,fontWeight:500,color:"#3518A5"}}>{fmtKc(josefWageNext)}</span>
+                    </div>
                   </div>
                 </div>
 
@@ -9258,7 +9278,7 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
           // díky tomu jsou rozdíly mezi měsíci (i řádu 10k) na první pohled vidět.
           const positiveTotals = barData.map(d=>d.total).filter(v=>v>0);
           const minTotal = positiveTotals.length ? Math.min(...positiveTotals) : 0;
-          const baseline = Math.max(0, Math.floor(minTotal*0.7/5000)*5000);
+          const baseline = 0;
           const range = Math.max(maxBarV - baseline, 1);
           const toBarH = (v) => v <= 0 ? 0 : ((v - baseline) / range) * BAR_AREA_H;
           const baseY = padT + BAR_AREA_H;
@@ -9522,9 +9542,7 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
                   );
                 })()}
               </svg>
-              <div style={{fontSize:8,color:"var(--ink)",opacity:.5,marginTop:2,textAlign:"right",fontFamily:"'JetBrains Mono','SF Mono',Menlo,monospace",letterSpacing:".03em"}}>
-                osa zvýrazněna od {Math.round(baseline/1000)}k Kč — pro lepší srovnání měsíců
-              </div>
+              {/* osa od nuly — Tom: "okrádá mě to o potěšení zbytečně" */}
             </>
           );
         })()}
@@ -14377,6 +14395,9 @@ export default function MauxCRM() {
 
           {/* ÚSCHOVY */}
           {mod === "uschovy" && escrowMode === "list" && (
+            <>
+            <EscrowLiveTile escrows={escrows} />
+            <div style={{height:16}} />
             <EscrowList
               escrows={escrows}
               loading={dataLoading}
@@ -14386,6 +14407,7 @@ export default function MauxCRM() {
               onMarkPaid={markTranchePaid}
               onPayment={handleEscrowPaymentRefresh}
             />
+            </>
           )}
           {mod === "uschovy" && (escrowMode === "new" || escrowMode === "edit") && (
             <EscrowForm
