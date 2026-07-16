@@ -5877,7 +5877,7 @@ function InteractiveRing({ segments, size = 190, thickness = 20, glowColor, cent
               }} />
           ))}
         </svg>
-        <div style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", textAlign: "center", padding: "0 16px", pointerEvents: "none" }}>
+        <div style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", textAlign: "center", padding: "0 8px", pointerEvents: "none", overflow: "visible" }}>
           {active ? (
             <>
               <div style={{ fontSize: 10, letterSpacing: ".12em", color: active.color, fontWeight: 800, textTransform: "uppercase", opacity: 0.8, marginBottom: 6, maxWidth: size - 50, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{active.label}</div>
@@ -7977,7 +7977,7 @@ function OstatniModule({ dpfoMonths, loanTrackers, loanTransactions, financeItem
 }
 
 /* ─── JOSEF PANEL — Dashboard widget ─── */
-function JosefPanel({ logs, attendance: attendanceProp }) {
+function JosefPanel({ logs, attendance: attendanceProp, availability }) {
   const now      = new Date();
   // Use local date string (not UTC) to avoid timezone mismatch with stored dates
   const ym       = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,"0")}`;
@@ -8019,9 +8019,34 @@ function JosefPanel({ logs, attendance: attendanceProp }) {
   const wageToDate = Math.round(totalHours * ASSISTANT_HOURLY_RATE);
   const wdTotal    = workingDaysInMonth();
   const wdPassed   = workingDaysPassed();
-  const progress   = wdTotal > 0 ? Math.min(1, daysWorked / wdTotal) : 0;
-  const projectedWage = wdPassed > 0 ? Math.round((wageToDate / wdPassed) * wdTotal) : 0;
   const missingCheckout = daysWorked > 0 && totalHours === 0;
+
+  // Projekce na základě Pepových plánovaných směn (ne průměr z odpracovaných dnů).
+  // Minulé dny: skutečná docházka. Budoucí plánované dny: presumpce 8h × sazba.
+  const plannedDatesSet = new Set((availability && availability.year_month === ym ? availability.planned_dates : null) || []);
+  const daysInMonth = new Date(now.getFullYear(), now.getMonth()+1, 0).getDate();
+  let projectedHours = 0;
+  let projectedPlannedDays = 0;
+  const attByDate = {};
+  (attendance||[]).forEach(a => { if ((a.date||"").startsWith(ym)) attByDate[a.date] = a; });
+  for (let d = 1; d <= daysInMonth; d++) {
+    const dateStr = `${ym}-${String(d).padStart(2,"0")}`;
+    if (dateStr <= todayStr) {
+      // past/today: use actual attendance
+      const a = attByDate[dateStr];
+      if (a && a.check_in && a.check_out) {
+        const h = netAttHours(a.check_in, a.check_out);
+        if (isFinite(h) && h > 0) projectedHours += h;
+      }
+    } else if (plannedDatesSet.has(dateStr)) {
+      // future planned day: presume 8h
+      projectedHours += 8;
+      projectedPlannedDays++;
+    }
+  }
+  const projectedWage = Math.round(projectedHours * ASSISTANT_HOURLY_RATE);
+  const totalPlannedDays = daysWorked + projectedPlannedDays;
+  const progress = totalPlannedDays > 0 && wdTotal > 0 ? Math.min(1, daysWorked / totalPlannedDays) : (wdTotal > 0 ? Math.min(1, daysWorked / wdTotal) : 0);
 
   const todayAtt   = (attendance||[]).find(a => a.date === todayStr);
   const isIn       = !!(todayAtt?.check_in && !todayAtt?.check_out);
@@ -8064,8 +8089,8 @@ function JosefPanel({ logs, attendance: attendanceProp }) {
       <div style={{ display:"flex", borderTop:"1px solid rgba(53,24,165,.08)", borderBottom:"1px solid rgba(53,24,165,.08)" }}>
         {[
           { label:"Odpracováno", value: totalHours > 0 ? `${totalHours % 1 === 0 ? totalHours : totalHours.toFixed(1)} h` : (missingCheckout ? "—" : "0 h"), sub: `${daysWorked} dní`, accent: "#3518A5" },
-          { label:"Mzda k dnešku", value: fmtKc(wageToDate), sub: `${wdPassed} prac. dní`, accent: "#059669" },
-          { label:"Projekce", value: projectedWage > 0 ? fmtKc(projectedWage) : "—", sub: `${wdTotal} dní celkem`, accent: "#3518A5" },
+          { label:"Mzda k dnešku", value: fmtKc(wageToDate), sub: `${daysWorked} z ${wdPassed} prac. dní`, accent: "#059669" },
+          { label:"Projekce", value: projectedWage > 0 ? fmtKc(projectedWage) : "—", sub: projectedPlannedDays > 0 ? `${Math.round(projectedHours)} h (${projectedPlannedDays} plán. dní)` : `${Math.round(projectedHours)} h`, accent: "#3518A5" },
         ].map((m,i) => (
           <div key={i} style={{ flex:1, padding:"14px 16px", borderRight: i < 2 ? "1px solid rgba(53,24,165,.08)" : "none", textAlign:"center" }}>
             <div style={{ fontSize:8.5, letterSpacing:".12em", textTransform:"uppercase", color:"var(--mut)", fontWeight:600, marginBottom:6 }}>{m.label}</div>
@@ -8079,7 +8104,7 @@ function JosefPanel({ logs, attendance: attendanceProp }) {
       <div style={{ padding:"14px 22px 16px" }}>
         <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:6 }}>
           <span style={{ fontSize:9.5, color:"var(--mut)", letterSpacing:".04em", fontWeight:500 }}>Docházka</span>
-          <span style={{ fontSize:9.5, color:"var(--ink)", fontWeight:600 }}>{daysWorked}/{wdTotal} dní · {Math.round(progress*100)} %</span>
+          <span style={{ fontSize:9.5, color:"var(--ink)", fontWeight:600 }}>{daysWorked}/{totalPlannedDays > 0 ? totalPlannedDays : wdTotal} dní · {Math.round(progress*100)} %</span>
         </div>
         <div style={{ height:4, background:"rgba(53,24,165,.06)", borderRadius:99, overflow:"hidden" }}>
           <div style={{ height:"100%", width:`${progress*100}%`, background:"#3518A5", borderRadius:99, transition:"width .5s ease" }} />
@@ -8863,7 +8888,7 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
       </Panel>
 
       <Panel id="josef">
-        <JosefPanel logs={assistantLogs} attendance={assistantAttendance} />
+        <JosefPanel logs={assistantLogs} attendance={assistantAttendance} availability={assistantAvailability} />
       </Panel>
 
       {/* ─── PULZ FIRMY — překvapivá novinka V.03: jeden pohled, který spojí vše dohromady ─── */}
