@@ -5881,13 +5881,13 @@ function InteractiveRing({ segments, size = 190, thickness = 20, glowColor, cent
           {active ? (
             <>
               <div style={{ fontSize: 10, letterSpacing: ".12em", color: active.color, fontWeight: 800, textTransform: "uppercase", opacity: 0.8, marginBottom: 6, maxWidth: size - 50, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{active.label}</div>
-              <div className="maux-num" style={{ fontSize: size > 160 ? 26 : 19, fontWeight: 600, color: active.color, lineHeight: 1, whiteSpace: "nowrap" }}>{fmtKc(active.value)}</div>
+              <div className="maux-num" style={{ fontSize: Math.min(size > 160 ? 26 : 19, size * 0.135, String(fmtKc(active.value)||"").length > 10 ? (size > 160 ? 20 : 15) : (size > 160 ? 26 : 19)), fontWeight: 600, color: active.color, lineHeight: 1, whiteSpace: "nowrap" }}>{fmtKc(active.value)}</div>
               <div style={{ fontSize: 11.5, color: active.color, opacity: 0.65, marginTop: 6, fontWeight: 600 }}>{Math.round(active.frac * 100)} %</div>
             </>
           ) : (
             <>
               {centerTop && <div style={{ fontSize: 9.5, letterSpacing: ".14em", color: glowColor, fontWeight: 800, textTransform: "uppercase", opacity: 0.62, marginBottom: 6 }}>{centerTop}</div>}
-              <div className="maux-num" style={{ fontSize: size > 160 ? 28 : 20, fontWeight: 600, color: glowColor, lineHeight: 1, whiteSpace: "nowrap" }}>{centerMain}</div>
+              <div className="maux-num" style={{ fontSize: Math.min(size > 160 ? 28 : 20, size * 0.135, String(centerMain||"").length > 10 ? (size > 160 ? 21 : 16) : (size > 160 ? 28 : 20)), fontWeight: 600, color: glowColor, lineHeight: 1, whiteSpace: "nowrap" }}>{centerMain}</div>
               {centerSub && <div style={{ fontSize: 11, color: glowColor, opacity: 0.55, marginTop: 6 }}>{centerSub}</div>}
             </>
           )}
