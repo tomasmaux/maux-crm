@@ -38,16 +38,16 @@ const SIGNATURE_DECL_NOTE =
   "Odměna stanovena advokátním tarifem (vyhláška č. 177/1996 Sb., ve znění novely účinné od 15. 1. 2026) — 70 Kč za prohlášení o pravosti podpisu jedné osoby na jedné listině. Nejde o smluvní cenu advokáta.";
 
 const MODULES = [
-  { key: "dashboard",  label: "Přehled",        live: true },
-  { key: "vykaz",      label: "Výkaz práce",    live: true },
-  { key: "fakturace",  label: "Fakturace",      live: true },
-  { key: "klienti",    label: "Klienti",        live: true },
-  { key: "uschovy",    label: "Úschovy",        live: true },
-  { key: "akcie",      label: "Akcie",          live: true },
-  { key: "dane",       label: "Daně",           live: true },
-  { key: "rejstriky",  label: "Rejstříky",      live: true },
-  { key: "ostatni",    label: "Ostatní",        live: true },
-  { key: "asistent",   label: "Josef · Asistent", live: true },
+  { key: "dashboard",  label: "Přehled",        live: true, icon: "◎" },
+  { key: "vykaz",      label: "Výkaz práce",    live: true, icon: "⏱" },
+  { key: "fakturace",  label: "Fakturace",      live: true, icon: "◈" },
+  { key: "klienti",    label: "Klienti",        live: true, icon: "◉" },
+  { key: "uschovy",    label: "Úschovy",        live: true, icon: "◇" },
+  { key: "akcie",      label: "Akcie",          live: true, icon: "△" },
+  { key: "dane",       label: "Daně",           live: true, icon: "§" },
+  { key: "rejstriky",  label: "Rejstříky",      live: true, icon: "⬡" },
+  { key: "ostatni",    label: "Ostatní",        live: true, icon: "⋯" },
+  { key: "asistent",   label: "Josef · Asistent", live: true, icon: "●" },
 ];
 
 // ── Asistentský portál — přístup přes vlastní Supabase Auth účet ──
@@ -173,18 +173,21 @@ html,body,#root{height:100%;background:#FAFAFA}
 [id^="maux-panel-"]{transition:box-shadow .2s ease}
 .num{font-family:var(--mono);font-variant-numeric:tabular-nums;letter-spacing:.01em}
 .mx table td.r,.mx table th.r{text-align:right;font-family:var(--mono);font-variant-numeric:tabular-nums;letter-spacing:.01em}
-.sb{width:220px;flex:0 0 220px;background:#FFFFFF;border-right:1px solid #EEEDF5;display:flex;flex-direction:column;padding:32px 16px 24px;height:100vh;overflow-y:auto;position:sticky;top:0;scrollbar-width:none}
-.brand{padding:0 8px 36px}
-.brand .wm{font-family:'Fraunces',serif;font-size:22px;font-weight:400;color:var(--ink);letter-spacing:.06em;line-height:1}
+.sb{width:240px;flex:0 0 240px;background:linear-gradient(180deg,#FAFAFF 0%,#F5F3FF 40%,#EDE9FD 100%);border-right:1px solid #E0DDEF;display:flex;flex-direction:column;padding:28px 16px 20px;height:100vh;overflow-y:auto;position:sticky;top:0;scrollbar-width:none}
+.brand{padding:0 8px 28px}
+.brand .wm{font-family:'Fraunces',serif;font-size:24px;font-weight:400;color:var(--ink);letter-spacing:.06em;line-height:1}
 .brand .sub{font-size:7.5px;letter-spacing:.42em;text-transform:uppercase;color:var(--gold);margin-top:5px;font-weight:600;opacity:.85}
 .brand .sub2{font-size:8.5px;color:var(--mut);margin-top:2px;letter-spacing:.01em;font-weight:400;opacity:.7}
-.nav{display:flex;flex-direction:column;gap:1px}
-.ni{display:flex;align-items:center;justify-content:space-between;padding:9px 12px;border-radius:8px;cursor:pointer;font-size:13px;font-weight:400;color:#9896B8;border:none;background:none;text-align:left;width:100%;transition:all .12s;letter-spacing:0}
-.ni:hover{color:var(--ink);background:#F5F3FF}
-.ni.on{color:var(--ink);background:#EDE9FD;font-weight:500}
+.nav{display:flex;flex-direction:column;gap:2px}
+.ni{display:flex;align-items:center;gap:10px;padding:10px 14px;border-radius:11px;cursor:pointer;font-size:13px;font-weight:450;color:#7C7A9A;border:none;background:none;text-align:left;width:100%;transition:all .15s;letter-spacing:.01em}
+.ni .ni-icon{width:20px;text-align:center;font-size:12px;opacity:.55;transition:opacity .15s}
+.ni:hover{color:var(--ink);background:rgba(255,255,255,.65);box-shadow:0 1px 3px rgba(79,70,229,.06)}
+.ni:hover .ni-icon{opacity:1}
+.ni.on{color:#4338CA;background:rgba(255,255,255,.85);font-weight:600;box-shadow:0 2px 8px rgba(79,70,229,.1),inset 0 0 0 1px rgba(79,70,229,.12)}
+.ni.on .ni-icon{opacity:1;color:#4338CA}
 .ni .soon{font-size:8px;color:#CCC;letter-spacing:.04em;font-weight:400;background:#F5F5F8;border-radius:4px;padding:2px 7px}
-.sbfoot{margin-top:auto;font-size:10.5px;color:#C8C6D8;line-height:1.8;padding:18px 8px 0;border-top:1px solid #F0EEF8}
-.sbfoot button{background:none;border:none;color:#C8C6D8;font:inherit;font-size:10.5px;cursor:pointer;padding:0;text-decoration:underline;transition:.12s}
+.sbfoot{margin-top:auto;font-size:10px;color:#A8A6C0;line-height:1.8;padding:12px 8px 0;border-top:1px solid rgba(79,70,229,.08)}
+.sbfoot button{background:none;border:none;color:#A8A6C0;font:inherit;font-size:10px;cursor:pointer;padding:0;text-decoration:underline;transition:.12s}
 .sbfoot button:hover{color:var(--mut)}
 .main{flex:1;display:flex;flex-direction:column;min-width:0;background:var(--bg)}
 .top{padding:32px 40px 0;display:flex;align-items:flex-end;justify-content:space-between;gap:16px}
@@ -2500,12 +2503,79 @@ function Sidebar({ mod, setMod, onLogout, privacyMode, onTogglePrivacy }) {
     setNoteOpen(o => { const n = !o; saveZapisnicekOpen(n); return n; });
   };
 
+  /* ── Pixel kočička — companion SVG (8-bit cat, idle animation via CSS) ── */
+  const PixelCat = () => {
+    const h = new Date().getHours();
+    const isNight = h < 6 || h >= 22;
+    const isMorning = h >= 6 && h < 10;
+    const isAfternoon = h >= 12 && h < 14;
+    const mood = isNight ? "sleep" : isMorning ? "coffee" : isAfternoon ? "yawn" : "idle";
+    const phrases = {
+      sleep: ["Zzz… mňau…", "Spím, neruš…", "💤"],
+      coffee: ["Dobré ráno!", "Kafe? Mňau!", "Na práci!"],
+      yawn: ["*zívá*", "Po obědě…", "Siesta?"],
+      idle: ["Mňau!", "Pracuj, Tome!", "Jsem tu.", "Fakturuj!", "Jsi borec!", "§ 14 mňau", "Ares? Mňau!", "Go go go!"],
+    };
+    const phrase = phrases[mood][Math.floor(Date.now() / 60000) % phrases[mood].length];
+
+    return (
+      <div style={{ display: "flex", alignItems: "flex-end", gap: 8, padding: "0 4px" }}>
+        {/* Pixel cat body — pure CSS pixel art */}
+        <div style={{ position: "relative", width: 32, height: 32, flexShrink: 0 }}>
+          <svg viewBox="0 0 16 16" width="32" height="32" style={{ imageRendering: "pixelated" }}>
+            {/* ears */}
+            <rect x="2" y="1" width="2" height="2" fill="#6366F1"/>
+            <rect x="10" y="1" width="2" height="2" fill="#6366F1"/>
+            {/* head */}
+            <rect x="2" y="3" width="10" height="4" fill="#818CF8"/>
+            <rect x="3" y="3" width="8" height="4" fill="#A5B4FC"/>
+            {/* eyes */}
+            {mood === "sleep" ? (
+              <>
+                <rect x="4" y="4" width="2" height="1" fill="#312E81"/>
+                <rect x="8" y="4" width="2" height="1" fill="#312E81"/>
+              </>
+            ) : (
+              <>
+                <rect x="4" y="4" width="1" height="2" fill="#312E81"/>
+                <rect x="5" y="4" width="1" height="1" fill="#fff"/>
+                <rect x="9" y="4" width="1" height="2" fill="#312E81"/>
+                <rect x="10" y="4" width="1" height="1" fill="#fff"/>
+              </>
+            )}
+            {/* nose */}
+            <rect x="7" y="5" width="1" height="1" fill="#C084FC"/>
+            {/* mouth / whiskers */}
+            <rect x="6" y="6" width="3" height="1" fill="#818CF8" opacity=".5"/>
+            {/* body */}
+            <rect x="3" y="7" width="8" height="5" fill="#A5B4FC"/>
+            <rect x="4" y="7" width="6" height="5" fill="#C7D2FE"/>
+            {/* paws */}
+            <rect x="3" y="12" width="2" height="1" fill="#818CF8"/>
+            <rect x="9" y="12" width="2" height="1" fill="#818CF8"/>
+            {/* tail */}
+            <rect x="11" y="9" width="1" height="1" fill="#A5B4FC"/>
+            <rect x="12" y="8" width="1" height="2" fill="#818CF8"/>
+            <rect x="13" y="7" width="1" height="2" fill="#6366F1"/>
+          </svg>
+          {mood === "sleep" && (
+            <span style={{ position: "absolute", top: -4, right: -6, fontSize: 10, animation: "josefPulse 2s ease-in-out infinite" }}>💤</span>
+          )}
+        </div>
+        {/* Speech bubble */}
+        <div style={{ position: "relative", background: "rgba(255,255,255,.8)", borderRadius: "10px 10px 10px 2px", padding: "5px 10px", fontSize: 10, color: "#4338CA", fontWeight: 500, maxWidth: 130, lineHeight: 1.3, backdropFilter: "blur(4px)", border: "1px solid rgba(99,102,241,.12)" }}>
+          {phrase}
+        </div>
+      </div>
+    );
+  };
+
   return (
     <aside className="sb">
       <div className="brand">
-        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6 }}>
-          <div style={{ width: 32, height: 32, borderRadius: "50%", border: "1.5px solid var(--ink)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-            <span style={{ fontFamily: "Fraunces, serif", fontSize: 14, color: "var(--ink)", fontWeight: 400 }}>M</span>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8 }}>
+          <div style={{ width: 36, height: 36, borderRadius: 10, background: "linear-gradient(135deg, #4338CA, #6366F1)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, boxShadow: "0 2px 8px rgba(67,56,202,.25)" }}>
+            <span style={{ fontFamily: "Fraunces, serif", fontSize: 16, color: "#fff", fontWeight: 400 }}>M</span>
           </div>
           <div>
             <div className="wm serif">MAUX</div>
@@ -2514,14 +2584,14 @@ function Sidebar({ mod, setMod, onLogout, privacyMode, onTogglePrivacy }) {
         <div className="sub">Legal · CRM</div>
         <div className="sub2">Poděbrady · advokat@maux.cz</div>
       </div>
+
       {/* Josef status — přítomnost v kanceláři */}
       {josefInOffice !== null && (
-        <div style={{margin:"0 0 10px",padding:"9px 11px",background: josefInOffice?"rgba(22,163,74,.07)":"rgba(0,0,0,.03)",borderRadius:9,border:`1px solid ${josefInOffice?"rgba(22,163,74,.2)":"var(--line)"}`,display:"flex",alignItems:"center",gap:8}}>
-          {/* Blikající tečka */}
+        <div style={{margin:"0 0 10px",padding:"9px 12px",background: josefInOffice?"rgba(22,163,74,.07)":"rgba(255,255,255,.5)",borderRadius:11,border:`1px solid ${josefInOffice?"rgba(22,163,74,.15)":"rgba(79,70,229,.06)"}`,display:"flex",alignItems:"center",gap:8}}>
           <span style={{position:"relative",flexShrink:0,width:8,height:8}}>
             <span style={{
               display:"block",width:8,height:8,borderRadius:"50%",
-              background: josefInOffice?"#16a34a":"#9CA3AF",
+              background: josefInOffice?"#16a34a":"#B8B6D0",
               animation: josefInOffice?"josefPulse 2s ease-in-out infinite":"none"
             }}/>
             {josefInOffice && (
@@ -2533,47 +2603,54 @@ function Sidebar({ mod, setMod, onLogout, privacyMode, onTogglePrivacy }) {
             )}
           </span>
           <div style={{flex:1,minWidth:0}}>
-            <div style={{fontSize:10.5,fontWeight:600,color:josefInOffice?"#15803D":"var(--mut)",lineHeight:1.2}}>
+            <div style={{fontSize:10.5,fontWeight:600,color:josefInOffice?"#15803D":"#7C7A9A",lineHeight:1.2}}>
               {josefInOffice?"Josef je v kanceláři":"Josef není v kanceláři"}
             </div>
-            <div style={{fontSize:9.5,color:"var(--mut)",marginTop:1}}>
-              Zítra: {josefTomorrow===null?"…":josefTomorrow?"přijde ✓":"neplánuje"}
+            <div style={{fontSize:9.5,color:"#A8A6C0",marginTop:1}}>
+              Zítra: {josefTomorrow===null?"…":josefTomorrow?"přijde":"neplánuje"}
             </div>
           </div>
         </div>
       )}
+
       <nav className="nav">
         {MODULES.map(m => (
           <button key={m.key} className={"ni" + (mod === m.key ? " on" : "")} onClick={() => setMod(m.key)}>
+            <span className="ni-icon">{m.icon}</span>
             {m.label}
             {!m.live && <span className="soon">brzy</span>}
           </button>
         ))}
       </nav>
 
-      {/* Zápisníček — interaktivní poznámkový blok, vidět napříč všemi listy aplikace */}
-      <div style={{ margin: "14px 2px 0", border: "1px solid var(--line)", borderRadius: 10, background: "#FAFAFE", overflow: "hidden", flexShrink: 0 }}>
+      {/* Zápisníček */}
+      <div style={{ margin: "14px 2px 0", borderRadius: 12, background: "rgba(255,255,255,.55)", overflow: "hidden", flexShrink: 0, border: "1px solid rgba(79,70,229,.06)", backdropFilter: "blur(4px)" }}>
         <button onClick={toggleNote}
-          style={{ width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between", padding: "9px 11px", background: "none", border: "none", cursor: "pointer" }}>
-          <span style={{ fontSize: 10, fontWeight: 600, letterSpacing: ".14em", textTransform: "uppercase", color: "var(--ink)", opacity: .72, display: "flex", alignItems: "center", gap: 6 }}>
-            📝 Zápisníček
+          style={{ width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 12px", background: "none", border: "none", cursor: "pointer" }}>
+          <span style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: ".18em", textTransform: "uppercase", color: "#6366F1", opacity: .65, display: "flex", alignItems: "center", gap: 6 }}>
+            Zápisníček
           </span>
-          <span style={{ fontSize: 13, color: "var(--mut)", lineHeight: 1 }}>{noteOpen ? "–" : "+"}</span>
+          <span style={{ fontSize: 13, color: "#A8A6C0", lineHeight: 1 }}>{noteOpen ? "–" : "+"}</span>
         </button>
         {noteOpen && (
           <div style={{ padding: "0 10px 10px" }}>
             <textarea
               value={note}
               onChange={e => onNoteChange(e.target.value)}
-              placeholder="Rychlá poznámka, nápad, co nezapomenout…"
-              rows={6}
-              style={{ width: "100%", resize: "vertical", fontSize: 11.5, lineHeight: 1.55, padding: "8px 9px", border: "1px solid var(--line2)", borderRadius: 7, outline: "none", fontFamily: "inherit", color: "var(--txt)", background: "#fff" }}
+              placeholder="Rychlá poznámka…"
+              rows={5}
+              style={{ width: "100%", resize: "vertical", fontSize: 11.5, lineHeight: 1.55, padding: "8px 10px", border: "1px solid rgba(79,70,229,.1)", borderRadius: 8, outline: "none", fontFamily: "inherit", color: "var(--txt)", background: "rgba(255,255,255,.7)" }}
             />
-            <div style={{ fontSize: 9, color: "var(--mut)", marginTop: 4, textAlign: "right", opacity: .8 }}>
-              {noteSavedAt ? `uloženo ${noteSavedAt.toLocaleTimeString("cs-CZ", { hour: "2-digit", minute: "2-digit" })} · jen v tomto prohlížeči` : "ukládá se automaticky · jen v tomto prohlížeči"}
+            <div style={{ fontSize: 9, color: "#A8A6C0", marginTop: 4, textAlign: "right" }}>
+              {noteSavedAt ? `uloženo ${noteSavedAt.toLocaleTimeString("cs-CZ", { hour: "2-digit", minute: "2-digit" })}` : "automaticky"}
             </div>
           </div>
         )}
+      </div>
+
+      {/* ── Pixel kočička companion ── */}
+      <div style={{ margin: "16px 2px 0", flexShrink: 0 }}>
+        <PixelCat />
       </div>
 
       <div className="sbfoot">
