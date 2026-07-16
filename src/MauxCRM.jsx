@@ -6281,23 +6281,39 @@ function TriGrafyPanel({ financeItems, onSaveFinance, invoices, dpfoMonths, loan
 function FirmaBar({ financeItems, invoices, dpfoMonths, loanTransactions, escrows, onSaveFinance, onDeleteFinance, expenseChecks, onToggleExpenseCheck, josefWage, josefYm, onNav }) {
   const nutne      = (financeItems||[]).filter(i => i.category === "nutne");
   const luxus      = (financeItems||[]).filter(i => i.category === "luxus");
-  const totalVyd   = Math.abs(nutne.reduce((s,i)=>s+(i.amount||0),0)) + (josefWage||0) + Math.abs(luxus.reduce((s,i)=>s+(i.amount||0),0));
+  const totalNutne = Math.abs(nutne.reduce((s,i)=>s+(i.amount||0),0)) + (josefWage||0);
+  const totalLuxus = Math.abs(luxus.reduce((s,i)=>s+(i.amount||0),0));
+  const totalVyd   = totalNutne + totalLuxus;
 
   const isPaid = (id) => !!(expenseChecks||[]).find(c => c.item_id === id && c.paid);
-  const all = [...nutne, ...luxus];
+  // Josef is counted in "all" for progress tracking
+  const josefPseudo = { id: "josef_wage" };
+  const all = [...nutne, josefPseudo, ...luxus];
   const paidCount = all.filter(i => isPaid(i.id)).length;
   const pct = all.length > 0 ? Math.round((paidCount/all.length)*100) : 0;
+  const allDone = pct === 100;
 
-  const [vydajeOpen, setVydajeOpen] = useState(true);
+  const [showDetail, setShowDetail] = useState(true);
+  const [confettiShown, setConfettiShown] = useState(false);
+
+  // Trigger confetti once when allDone
+  React.useEffect(() => {
+    if (allDone && !confettiShown) setConfettiShown(true);
+  }, [allDone]);
+  // Reset confetti when not allDone
+  React.useEffect(() => {
+    if (!allDone) setConfettiShown(false);
+  }, [allDone]);
 
   const Check = ({item, color}) => {
     const p = isPaid(item.id);
     return (
       <span onClick={() => onToggleExpenseCheck && onToggleExpenseCheck(item.id, !p)}
         title={p ? "Zaplaceno — klikni pro zrušení" : "Označit jako zaplacené"}
-        style={{width:14,height:14,borderRadius:3,border:`1.5px solid ${p?color:"var(--line)"}`,background:p?color:"transparent",
+        style={{width:15,height:15,borderRadius:4,border:`1.5px solid ${p?color:"rgba(53,24,165,.25)"}`,background:p?color:"transparent",
           display:"inline-flex",alignItems:"center",justifyContent:"center",cursor:"pointer",
-          flexShrink:0,marginRight:6,transition:"all .15s",fontSize:9,color:"#fff"}}>
+          flexShrink:0,marginRight:7,transition:"all .2s ease",fontSize:9,color:"#fff",
+          boxShadow:p?`0 0 6px ${color}44`:"none"}}>
         {p ? "✓" : ""}
       </span>
     );
@@ -6311,64 +6327,199 @@ function FirmaBar({ financeItems, invoices, dpfoMonths, loanTransactions, escrow
     onToggleExpenseCheck && onToggleExpenseCheck("josef_wage", !josefPaid);
   };
 
-  return (
-    <div style={{background:"var(--card)",border:"1px solid var(--line)",borderRadius:3,padding:"20px 28px"}}>
-      <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",cursor:"pointer"}} onClick={()=>setVydajeOpen(v=>!v)}>
-        <div style={{display:"flex",alignItems:"center",gap:5}}>
-          <span className="maux-dot" style={{width:5,height:5,background:"#3518A5",boxShadow:"0 0 3px rgba(53,24,165,.5)"}} />
-          <div style={{fontSize:10,letterSpacing:".18em",textTransform:"uppercase",color:"var(--mut)",fontWeight:700}}>Měsíční výdaje {vydajeOpen?"▲":"▾"}</div>
-        </div>
-        <span className="maux-num" style={{fontSize:21,fontWeight:600,color:"#3518A5"}}>{fmtKc(totalVyd)}</span>
-      </div>
-      <div style={{height:5,borderRadius:3,background:"rgba(53,24,165,.08)",overflow:"hidden",marginTop:8}}>
-        <div style={{height:"100%",width:`${pct}%`,borderRadius:3,background:pct===100?"#16A34A":"#3518A5",transition:"width .7s ease"}} />
-      </div>
-      <div style={{fontSize:10,color:"var(--mut)",letterSpacing:".01em",marginTop:5,fontWeight:600}}>
-        {pct===100?"✓ vše zaplaceno":`zaplaceno ${paidCount}/${all.length}`}
-      </div>
-      {vydajeOpen && (
-        <div style={{marginTop:10,display:"flex",flexDirection:"column",gap:2,maxHeight:280,overflowY:"auto"}}>
-          <div style={{fontSize:7,letterSpacing:".28em",textTransform:"uppercase",color:"#3518A5",fontWeight:700,marginBottom:6,opacity:.8}}>Nutné</div>
-          {nutne.map((i,idx) => (
-            <div key={idx} style={{display:"flex",justifyContent:"space-between",alignItems:"center",fontSize:11.5,color:isPaid(i.id)?"var(--mut)":"var(--txt)",padding:"3px 0",gap:6}}>
-              <span style={{display:"flex",alignItems:"center",textDecoration:isPaid(i.id)?"line-through":"none",minWidth:0,overflow:"hidden"}}>
-                <Check item={i} color="#3518A5" /><EditableLabel item={i} onSave={onSaveFinance} />
-              </span>
-              <span style={{display:"flex",alignItems:"center",gap:4,flexShrink:0}}>
-                <span style={{opacity:isPaid(i.id)?.4:1}}><EditableMoney item={i} onSave={onSaveFinance} color="#3518A5" abs /></span>
-                <button onClick={()=>onDeleteFinance && onDeleteFinance(i.id)} title="Smazat" style={{background:"none",border:"none",color:"var(--mut)",cursor:"pointer",fontSize:10,padding:"0 2px",opacity:.35,lineHeight:1}}>✕</button>
-              </span>
-            </div>
-          ))}
-          <AddExpenseRow category="nutne" color="#3518A5" onSaveFinance={onSaveFinance} />
-          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",fontSize:11.5,padding:"3px 0",gap:6,opacity:josefPaid?.65:.85,color:josefPaid?"var(--mut)":"var(--txt)",textDecoration:josefPaid?"line-through":"none"}}>
-            <span style={{display:"flex",alignItems:"center",gap:5,cursor:"pointer"}} onClick={handleJosefToggle}>
-              <span style={{display:"inline-flex",alignItems:"center",justifyContent:"center",width:13,height:13,borderRadius:3,border:`1.5px solid ${josefPaid?"#16a34a":"#3518A5"}`,background:josefPaid?"#16a34a":"transparent",flexShrink:0,color:"#fff",fontSize:9}}>
-                {josefPaid?"✓":""}
-              </span>
+  const now = new Date();
+  const monthNames = ["leden","únor","březen","duben","květen","červen","červenec","srpen","září","říjen","listopad","prosinec"];
+  const currentMonth = monthNames[now.getMonth()];
+
+  // Item row component
+  const Row = ({item, color, isJosef}) => {
+    const p = isPaid(item.id);
+    return (
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",fontSize:11.5,
+        color:p?"var(--mut)":"var(--txt)",padding:"4px 0",gap:6,
+        opacity:p?.5:1,transition:"opacity .3s"}}>
+        <span style={{display:"flex",alignItems:"center",textDecoration:p?"line-through":"none",minWidth:0,overflow:"hidden",
+          cursor:isJosef?"pointer":"default"}} onClick={isJosef?handleJosefToggle:undefined}>
+          {isJosef ? (
+            <span style={{width:15,height:15,borderRadius:4,border:`1.5px solid ${p?"#16a34a":"#3518A5"}`,background:p?"#16a34a":"transparent",
+              display:"inline-flex",alignItems:"center",justifyContent:"center",flexShrink:0,marginRight:7,color:"#fff",fontSize:9,
+              transition:"all .2s",boxShadow:p?"0 0 6px rgba(22,163,74,.3)":"none",cursor:"pointer"}}>
+              {p?"✓":""}
+            </span>
+          ) : <Check item={item} color={color} />}
+          {isJosef ? (
+            <span style={{display:"flex",alignItems:"center",gap:5}}>
               <span>Josef Řehák</span>
-              <span style={{fontSize:8.5,background:"rgba(53,24,165,.08)",color:"var(--ink)",borderRadius:4,padding:"1px 5px",fontWeight:600,letterSpacing:".04em"}}>{JOSEF_WAGE_MANUAL_OVERRIDES[josefYm] != null ? "ručně" : "auto"} · {josefYm}</span>
-            </span>
-            <span className="maux-num" style={{color:josefPaid?"var(--mut)":"#3518A5",fontSize:11}}>
-              {josefWage > 0 ? josefWage.toLocaleString("cs-CZ") + " Kč" : "— Kč"}
-            </span>
-          </div>
-          <div style={{fontSize:7,letterSpacing:".28em",textTransform:"uppercase",color:"#8A7FE0",fontWeight:700,marginTop:10,marginBottom:6,opacity:.8}}>Lusus</div>
-          {luxus.map((i,idx) => (
-            <div key={idx} style={{display:"flex",justifyContent:"space-between",alignItems:"center",fontSize:11.5,color:isPaid(i.id)?"var(--mut)":"var(--txt)",padding:"3px 0",gap:6}}>
-              <span style={{display:"flex",alignItems:"center",textDecoration:isPaid(i.id)?"line-through":"none",minWidth:0}}>
-                <Check item={i} color="#8A7FE0" /><EditableLabel item={i} onSave={onSaveFinance} />
+              <span style={{fontSize:7.5,background:"rgba(53,24,165,.07)",color:"var(--mut)",borderRadius:3,padding:"1px 4px",fontWeight:600,letterSpacing:".03em"}}>
+                {JOSEF_WAGE_MANUAL_OVERRIDES[josefYm]!=null?"ručně":"auto"} · {josefYm}
               </span>
-              <span style={{display:"flex",alignItems:"center",gap:4,flexShrink:0}}>
-                <span style={{opacity:isPaid(i.id)?.4:1}}><EditableMoney item={i} onSave={onSaveFinance} color="#8A7FE0" abs /></span>
-                <button onClick={()=>onDeleteFinance && onDeleteFinance(i.id)} title="Smazat" style={{background:"none",border:"none",color:"var(--mut)",cursor:"pointer",fontSize:10,padding:"0 2px",opacity:.35,lineHeight:1}}>✕</button>
-              </span>
+            </span>
+          ) : <EditableLabel item={item} onSave={onSaveFinance} />}
+        </span>
+        <span style={{display:"flex",alignItems:"center",gap:3,flexShrink:0}}>
+          {isJosef ? (
+            <span className="maux-num" style={{color:p?"var(--mut)":"#3518A5",fontSize:11}}>
+              {josefWage>0?josefWage.toLocaleString("cs-CZ")+" Kč":"— Kč"}
+            </span>
+          ) : (
+            <>
+              <span style={{opacity:p?.4:1}}><EditableMoney item={item} onSave={onSaveFinance} color={color} abs /></span>
+              <button onClick={()=>onDeleteFinance&&onDeleteFinance(item.id)} title="Smazat" style={{background:"none",border:"none",color:"var(--mut)",cursor:"pointer",fontSize:9,padding:"0 2px",opacity:.3,lineHeight:1}}>✕</button>
+            </>
+          )}
+        </span>
+      </div>
+    );
+  };
+
+  // Confetti particles
+  const ConfettiParticles = () => {
+    const particles = Array.from({length:24},(_,i)=>i);
+    const colors = ["#16A34A","#22C55E","#4ADE80","#86EFAC","#3518A5","#6366F1","#F59E0B","#EC4899"];
+    return (
+      <div style={{position:"absolute",inset:0,overflow:"hidden",pointerEvents:"none",zIndex:5}}>
+        {particles.map(i => {
+          const c = colors[i%colors.length];
+          const left = 5+Math.random()*90;
+          const delay = Math.random()*1.2;
+          const dur = 1.8+Math.random()*1.2;
+          const size = 4+Math.random()*5;
+          const shape = i%3===0?"50%":"2px";
+          return <span key={i} style={{
+            position:"absolute",left:`${left}%`,top:"-8px",width:size,height:size,borderRadius:shape,
+            background:c,opacity:0,
+            animation:`expenseConfettiFall ${dur}s ${delay}s ease-out forwards`
+          }} />;
+        })}
+        <style>{`@keyframes expenseConfettiFall { 0%{opacity:1;transform:translateY(0) rotate(0deg) scale(1)} 60%{opacity:1} 100%{opacity:0;transform:translateY(180px) rotate(${360+Math.random()*360}deg) scale(.3)} }`}</style>
+      </div>
+    );
+  };
+
+  return (
+    <div style={{
+      background: allDone
+        ? "linear-gradient(135deg, #F0FDF4 0%, #DCFCE7 50%, #F0FDF4 100%)"
+        : "var(--card)",
+      border: allDone ? "1.5px solid rgba(22,163,74,.3)" : "1px solid var(--line)",
+      borderRadius: 12,
+      padding: allDone && !showDetail ? "16px 24px" : "20px 28px",
+      position: "relative",
+      overflow: "hidden",
+      transition: "all .5s ease",
+      boxShadow: allDone ? "0 0 20px rgba(22,163,74,.12), inset 0 0 0 1px rgba(22,163,74,.08)" : "0 1px 4px rgba(53,24,165,.04)",
+    }}>
+      {/* Confetti animation when all done */}
+      {allDone && confettiShown && <ConfettiParticles />}
+
+      {/* Header — prominent month title */}
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",cursor:"pointer",position:"relative",zIndex:6}}
+        onClick={()=>setShowDetail(v=>!v)}>
+        <div style={{display:"flex",alignItems:"center",gap:8}}>
+          {allDone ? (
+            <span style={{fontSize:18,animation:"expensePulse 2s infinite"}}>✅</span>
+          ) : (
+            <span style={{width:7,height:7,borderRadius:"50%",background:"#3518A5",boxShadow:"0 0 6px rgba(53,24,165,.5)"}} />
+          )}
+          <div>
+            <div style={{fontSize:13,fontWeight:800,letterSpacing:".06em",textTransform:"uppercase",
+              color:allDone?"#16A34A":"#3518A5",lineHeight:1}}>
+              {allDone ? "Vše zaplaceno" : `Výdaje ${currentMonth}`}
             </div>
-          ))}
-          <AddExpenseRow category="luxus" color="#8A7FE0" onSaveFinance={onSaveFinance} />
-          {onNav && <button className="btn gho" style={{fontSize:10.5,margin:"8px 0 0",opacity:.65,border:"none",borderTop:"1px solid rgba(0,0,0,.06)",borderRadius:0,paddingTop:10}} onClick={()=>onNav("vykaz")}>+ Nový výkaz práce</button>}
+            <div style={{fontSize:9.5,color:allDone?"#15803D":"var(--mut)",fontWeight:600,marginTop:2,letterSpacing:".02em"}}>
+              {allDone
+                ? `${currentMonth} ${now.getFullYear()} — kompletně uhrazeno`
+                : `${paidCount}/${all.length} zaplaceno`}
+            </div>
+          </div>
+        </div>
+        <div style={{textAlign:"right"}}>
+          <span className="maux-num" style={{fontSize:22,fontWeight:700,color:allDone?"#16A34A":"#3518A5",
+            letterSpacing:"-.02em",lineHeight:1}}>{fmtKc(totalVyd)}</span>
+          {allDone && (
+            <div style={{fontSize:8,fontWeight:700,letterSpacing:".15em",textTransform:"uppercase",
+              color:"#16A34A",background:"rgba(22,163,74,.1)",borderRadius:4,padding:"2px 8px",marginTop:4,
+              display:"inline-block",animation:"expenseGlow 2s infinite"}}>
+              HOTOVO
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Progress bar */}
+      <div style={{height:4,borderRadius:4,background:allDone?"rgba(22,163,74,.15)":"rgba(53,24,165,.08)",overflow:"hidden",marginTop:10}}>
+        <div style={{height:"100%",width:`${pct}%`,borderRadius:4,
+          background:allDone?"linear-gradient(90deg,#16A34A,#22C55E)":"linear-gradient(90deg,#3518A5,#6366F1)",
+          transition:"width .7s ease",
+          boxShadow:allDone?"0 0 8px rgba(22,163,74,.4)":"none"}} />
+      </div>
+
+      {/* Detail — two columns: NUTNÉ | LUSUS */}
+      {showDetail && !allDone && (
+        <div style={{marginTop:14,display:"grid",gridTemplateColumns:"1fr 1fr",gap:20,position:"relative",zIndex:2}}>
+          {/* NUTNÉ column */}
+          <div>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:8,
+              borderBottom:"1px solid rgba(53,24,165,.08)",paddingBottom:4}}>
+              <span style={{fontSize:8,letterSpacing:".25em",textTransform:"uppercase",color:"#3518A5",fontWeight:800}}>Nutné</span>
+              <span style={{fontSize:9,color:"var(--mut)",fontWeight:600}}>{fmtKc(totalNutne)}</span>
+            </div>
+            {nutne.map((i,idx) => <Row key={idx} item={i} color="#3518A5" />)}
+            <Row item={josefPseudo} color="#3518A5" isJosef />
+            <AddExpenseRow category="nutne" color="#3518A5" onSaveFinance={onSaveFinance} />
+          </div>
+          {/* LUSUS column */}
+          <div>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:8,
+              borderBottom:"1px solid rgba(138,127,224,.12)",paddingBottom:4}}>
+              <span style={{fontSize:8,letterSpacing:".25em",textTransform:"uppercase",color:"#8A7FE0",fontWeight:800}}>Luxus</span>
+              <span style={{fontSize:9,color:"var(--mut)",fontWeight:600}}>{fmtKc(totalLuxus)}</span>
+            </div>
+            {luxus.map((i,idx) => <Row key={idx} item={i} color="#8A7FE0" />)}
+            <AddExpenseRow category="luxus" color="#8A7FE0" onSaveFinance={onSaveFinance} />
+          </div>
         </div>
       )}
+
+      {/* Collapsed "allDone" — click to expand */}
+      {allDone && !showDetail && (
+        <div style={{fontSize:10,color:"#15803D",textAlign:"center",marginTop:6,cursor:"pointer",opacity:.7}}
+          onClick={()=>setShowDetail(true)}>
+          klikni pro detail
+        </div>
+      )}
+      {allDone && showDetail && (
+        <div style={{marginTop:14,display:"grid",gridTemplateColumns:"1fr 1fr",gap:20,position:"relative",zIndex:2,
+          opacity:.55,filter:"grayscale(.3)"}}>
+          <div>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:8,
+              borderBottom:"1px solid rgba(22,163,74,.1)",paddingBottom:4}}>
+              <span style={{fontSize:8,letterSpacing:".25em",textTransform:"uppercase",color:"#16A34A",fontWeight:800}}>Nutné</span>
+              <span style={{fontSize:9,color:"var(--mut)",fontWeight:600}}>{fmtKc(totalNutne)}</span>
+            </div>
+            {nutne.map((i,idx) => <Row key={idx} item={i} color="#16A34A" />)}
+            <Row item={josefPseudo} color="#16A34A" isJosef />
+          </div>
+          <div>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:8,
+              borderBottom:"1px solid rgba(22,163,74,.1)",paddingBottom:4}}>
+              <span style={{fontSize:8,letterSpacing:".25em",textTransform:"uppercase",color:"#16A34A",fontWeight:800}}>Luxus</span>
+              <span style={{fontSize:9,color:"var(--mut)",fontWeight:600}}>{fmtKc(totalLuxus)}</span>
+            </div>
+            {luxus.map((i,idx) => <Row key={idx} item={i} color="#16A34A" />)}
+          </div>
+        </div>
+      )}
+
+      {/* Nový výkaz link */}
+      {!allDone && showDetail && onNav && (
+        <button className="btn gho" style={{fontSize:10,margin:"12px auto 0",display:"block",opacity:.5,border:"none",borderTop:"1px solid rgba(0,0,0,.04)",borderRadius:0,paddingTop:8}} onClick={()=>onNav("vykaz")}>+ Nový výkaz práce</button>
+      )}
+
+      <style>{`
+        @keyframes expensePulse { 0%,100%{transform:scale(1)} 50%{transform:scale(1.15)} }
+        @keyframes expenseGlow { 0%,100%{box-shadow:0 0 4px rgba(22,163,74,.2)} 50%{box-shadow:0 0 12px rgba(22,163,74,.4)} }
+      `}</style>
     </div>
   );
 }
@@ -8783,11 +8934,11 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
         // (pct/paidCount níž se počítají dál, jen se nerozbalují do checklistu) a uvolněné místo
         // dole vyplnila Firemní rezerva (viz computeFirmaRezerva níž).
         const isPaid = (id) => !!(expenseChecks||[]).find(c => c.item_id === id && c.paid);
-        const all = [...nutne.map(i=>({...i,_c:"#DC2626"})), ...luxus.map(i=>({...i,_c:"#9333EA"}))];
-        const paidItems = all.filter(i => isPaid(i.id));
+        const allExpItems = [...nutne.map(i=>({...i,_c:"#DC2626"})), {id:"josef_wage",_c:"#3518A5"}, ...luxus.map(i=>({...i,_c:"#9333EA"}))];
+        const paidItems = allExpItems.filter(i => isPaid(i.id));
         const paidCount = paidItems.length;
         const paidSum   = paidItems.reduce((s,i)=>s+Math.abs(i.amount||0),0);
-        const pct = all.length > 0 ? Math.round((paidCount/all.length)*100) : 0;
+        const pct = allExpItems.length > 0 ? Math.round((paidCount/allExpItems.length)*100) : 0;
         const totalPrijmy = (financeItems||[]).filter(i=>i.category==="prijem"&&i.notes!=="TBD").reduce((s,i)=>s+(i.amount||0),0)
           + unbilledAmt + Math.round(escrowNetThisMonth) + nadmernyOdpocet;
         const { firmaRez, planKap, planKapItem } = computeFirmaRezerva(financeItems, invoices, dpfoMonths, loanTransactions, escrows);
