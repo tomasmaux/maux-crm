@@ -498,7 +498,7 @@ async function fetchEscrows() {
   return data || [];
 }
 async function upsertEscrow(e) {
-  const { escrow_tranches: _t, ...rest } = e;
+  const { escrow_tranches: _t, banka: _b, spis_aml: _s, ...rest } = e;
   const { error } = await supabase.from("escrows").upsert({ ...rest, updated_at: new Date().toISOString() });
   if (error) throw error;
 }
@@ -4408,9 +4408,14 @@ function EscrowCard({ escrow, onEdit, onDelete, onMarkPaid, onPayment }) {
           <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:6}}>
             <span style={{fontFamily:"Fraunces,serif",fontSize:17,fontWeight:400,color:"var(--ink)"}}>{escrow.escrow_number}</span>
             <span style={{fontSize:10,padding:"2px 9px",borderRadius:20,background:sc.bg,color:sc.text,border:`1px solid ${sc.border}`,fontWeight:500}}>{statusLabel}</span>
-            {escrow.banka && <span style={{fontSize:9,padding:"2px 7px",borderRadius:4,background:"#EEF2FF",color:"#3730A3",fontWeight:600}}>BANKA</span>}
-            {escrow.spis_aml && <span style={{fontSize:9,padding:"2px 7px",borderRadius:4,background:"#F0FDF4",color:"#065F46",fontWeight:600}}>AML ✓</span>}
-            {!escrow.spis_aml && <span style={{fontSize:9,padding:"2px 7px",borderRadius:4,background:"#FEF2F2",color:"#991B1B",fontWeight:600}}>AML ⚠</span>}
+            {(() => {
+              const tr = escrow.escrow_tranches || [];
+              const allAml = tr.length > 0 && tr.every(t => !!t.aml_done);
+              const missingNames = tr.filter(t => !t.aml_done).map(t => t.party_name).filter(Boolean);
+              return allAml
+                ? <span style={{fontSize:9,padding:"2px 7px",borderRadius:4,background:"#F0FDF4",color:"#065F46",fontWeight:600}}>AML ✓</span>
+                : <span title={missingNames.length ? "Chybí AML: " + missingNames.join(", ") : "AML chybí"} style={{fontSize:9,padding:"2px 7px",borderRadius:4,background:"#FEF2F2",color:"#991B1B",fontWeight:600}}>AML ⚠</span>;
+            })()}
             {needsAlert && <span style={{fontSize:9,padding:"2px 7px",borderRadius:4,background:"#FEF3C7",color:"#92400E",fontWeight:700}}>⚠ Blíží se konec plomby</span>}
           </div>
           <div style={{fontSize:12,color:"var(--mut)",lineHeight:1.6}}>
@@ -4574,7 +4579,7 @@ function EscrowForm({ init, onSave, onCancel, saving }) {
         if (parsed._d) return parsed._d;
       }
     } catch (_) {}
-    return { id: uid(), escrow_number: "", status: "aktivní", banka: false, spis_aml: false,
+    return { id: uid(), escrow_number: "", status: "aktivní",
       interest_rate: 0.035, date_received: "", date_navrh_podan: "", date_plomba_end: "", date_paid: "", notes: "" };
   });
   const set = (k, v) => setD(p => ({ ...p, [k]: v }));
@@ -4674,15 +4679,19 @@ function EscrowForm({ init, onSave, onCancel, saving }) {
     let finalStatus = d.status;
     if (hasAnyPaidOpr && hasUnpaidOpr && d.status === 'aktivní') finalStatus = 'částečně_vyplaceno';
 
-    await upsertEscrow({ ...d, status: finalStatus });
-    const existing = init?.escrow_tranches || [];
-    const removedIds = existing.filter(e => !expanded.find(t => t.id === e.id)).map(e => e.id);
-    await Promise.all([
-      ...removedIds.map(id => deleteEscrowTranche(id)),
-      ...expanded.map(t => upsertEscrowTranche({ ...t, escrow_id: d.id }))
-    ]);
-    clearDraft();
-    onSave({ ...d, status: finalStatus, escrow_tranches: expanded });
+    try {
+      await upsertEscrow({ ...d, status: finalStatus });
+      const existing = init?.escrow_tranches || [];
+      const removedIds = existing.filter(e => !expanded.find(t => t.id === e.id)).map(e => e.id);
+      await Promise.all([
+        ...removedIds.map(id => deleteEscrowTranche(id)),
+        ...expanded.map(t => upsertEscrowTranche({ ...t, escrow_id: d.id }))
+      ]);
+      clearDraft();
+      onSave({ ...d, status: finalStatus, escrow_tranches: expanded });
+    } catch (err) {
+      alert("❌ Chyba při ukládání úschovy:\n\n" + (err?.message || String(err)) + "\n\nData jsou stále ve formuláři — nic jsi neztratil.");
+    }
   };
 
   // Styles — Legal Tech command-center
@@ -4785,28 +4794,16 @@ function EscrowForm({ init, onSave, onCancel, saving }) {
         </div>
       </div>
 
-      {/* Karta 3: AML */}
+      {/* Karta 3: Poznámka */}
       <div style={S.card}>
         <div style={S.cardHead("#374151")}>
-          <span style={S.cht}>Dokumentace & AML</span>
+          <span style={S.cht}>Poznámka</span>
         </div>
         <div style={S.cardBody}>
-          <div style={{ display: "flex", gap: 20, marginBottom: 12 }}>
-            <label style={{ display: "flex", alignItems: "center", gap: 7, cursor: "pointer", fontSize: 12 }}>
-              <input type="checkbox" checked={!!d.banka} onChange={e => set("banka", e.target.checked)} style={{ width: "auto", accentColor: "#7C3AED" }} />
-              <span style={{ color: "#374151" }}>Bankovní úschova</span>
-            </label>
-            <label style={{ display: "flex", alignItems: "center", gap: 7, cursor: "pointer", fontSize: 12 }}>
-              <input type="checkbox" checked={!!d.spis_aml} onChange={e => set("spis_aml", e.target.checked)} style={{ width: "auto", accentColor: "#059669" }} />
-              <span style={{ color: !!d.spis_aml ? "#059669" : "#DC2626", fontWeight: 600 }}>
-                {!!d.spis_aml ? "✓ AML spis hotový" : "⚠ AML spis chybí — nutné pro ČAK"}
-              </span>
-            </label>
-          </div>
-          <div>
-            <label style={S.label}>Poznámka</label>
-            <textarea value={d.notes || ""} onChange={e => set("notes", e.target.value)}
-              style={{ ...S.input, minHeight: 54, resize: "vertical", lineHeight: 1.5 }} />
+          <textarea value={d.notes || ""} onChange={e => set("notes", e.target.value)}
+            style={{ ...S.input, minHeight: 54, resize: "vertical", lineHeight: 1.5 }} />
+          <div style={{ fontSize: 10, color: "#9CA3AF", marginTop: 6 }}>
+            AML stav se zaznamenává u každé osoby v sekci Strany níže.
           </div>
         </div>
       </div>
@@ -4828,6 +4825,7 @@ function EscrowForm({ init, onSave, onCancel, saving }) {
                     <th style={S.th}>Jméno</th>
                     <th style={{ ...S.th, textAlign: "right" }}>Vloženo (Kč)</th>
                     <th style={S.th}>Datum přijetí</th>
+                    <th style={{ ...S.th, textAlign: "center", width: 70 }}>AML</th>
                     <th style={{ ...S.th, width: 32 }}></th>
                   </tr>
                 </thead>
@@ -4845,6 +4843,16 @@ function EscrowForm({ init, onSave, onCancel, saving }) {
                       <td style={S.td}>
                         <input type="date" style={S.input} value={t.received_date || ""}
                           onChange={e => updateTranche(t.id, { received_date: e.target.value || null })} />
+                      </td>
+                      <td style={{ ...S.td, textAlign: "center" }}>
+                        <label style={{ display: "inline-flex", alignItems: "center", gap: 5, cursor: "pointer" }}>
+                          <input type="checkbox" checked={!!t.aml_done}
+                            onChange={e => updateTranche(t.id, { aml_done: e.target.checked })}
+                            style={{ width: "auto", accentColor: "#059669" }} />
+                          <span style={{ fontSize: 9, fontWeight: 700, color: t.aml_done ? "#059669" : "#DC2626" }}>
+                            {t.aml_done ? "✓" : "⚠"}
+                          </span>
+                        </label>
                       </td>
                       <td style={S.td}>
                         <button onClick={() => removeTranche(t.id)}
@@ -4888,6 +4896,26 @@ function EscrowForm({ init, onSave, onCancel, saving }) {
                         {totalPaid > 0 && <span style={{ color: "#059669" }}>Vyplaceno: <strong style={{ fontFamily: "Fraunces,serif", fontSize: 13 }}>{fmtKc(totalPaid)}</strong></span>}
                         {remaining > 0.5 && <span style={{ color: "#B45309" }}>Zbývá: <strong style={{ fontFamily: "Fraunces,serif", fontSize: 13 }}>{fmtKc(remaining)}</strong></span>}
                       </div>
+                      {/* AML per osoba */}
+                      {(() => {
+                        const amlDone = rows.every(t => !!t.aml_done);
+                        return (
+                          <label style={{ display: "flex", alignItems: "center", gap: 5, cursor: "pointer", flexShrink: 0 }}>
+                            <input type="checkbox" checked={amlDone}
+                              onChange={e => { rows.forEach(t => updateTranche(t.id, { aml_done: e.target.checked })); }}
+                              style={{ width: "auto", accentColor: "#059669" }} />
+                            <span style={{
+                              fontSize: 9, fontWeight: 700, letterSpacing: ".08em",
+                              color: amlDone ? "#059669" : "#DC2626",
+                              background: amlDone ? "#DCFCE7" : "#FEF2F2",
+                              border: `1px solid ${amlDone ? "#A7F3D0" : "#FECACA"}`,
+                              borderRadius: 4, padding: "2px 7px",
+                            }}>
+                              {amlDone ? "AML ✓" : "AML ⚠"}
+                            </span>
+                          </label>
+                        );
+                      })()}
                     </div>
 
                     {/* Tabulka plateb */}
@@ -5694,12 +5722,19 @@ function EscrowLiveTile({ escrows, onNav }) {
   const Kd = (n) => maskNum(n.toLocaleString('cs-CZ', {minimumFractionDigits:2,maximumFractionDigits:2})) + ' Kč';
   const DNY = ["Ne","Po","Út","St","Čt","Pá","So"];
 
-  // AML varování — všechny úschovy (i historické) bez spis_aml
-  const amlMissing = (escrows || []).filter(e => !e.spis_aml);
+  // AML varování — konkrétní osoby bez aml_done v tranších
+  const amlMissingItems = [];
+  (escrows || []).forEach(e => {
+    const tr = e.escrow_tranches || [];
+    tr.filter(t => !t.aml_done).forEach(t => {
+      amlMissingItems.push({ escrow: e.escrow_number, name: t.party_name || "?", type: t.party_type });
+    });
+  });
+  const amlMissingEscrows = [...new Set(amlMissingItems.map(x => x.escrow))];
 
   return (
     <div style={{display:"flex",flexDirection:"column",gap:0}}>
-    {amlMissing.length > 0 && (
+    {amlMissingItems.length > 0 && (
       <div style={{
         background:"linear-gradient(135deg,#7C2D12 0%,#991B1B 100%)",
         borderRadius:"3px 3px 0 0",
@@ -5710,10 +5745,10 @@ function EscrowLiveTile({ escrows, onNav }) {
         <span style={{fontSize:18,flexShrink:0}}>⚠️</span>
         <div style={{flex:1}}>
           <div style={{fontSize:11,fontWeight:700,color:"#FEF2F2",letterSpacing:".04em"}}>
-            AML spis chybí u {amlMissing.length} {amlMissing.length===1?"úschovy":"úschov"} — ČAK kontrola!
+            AML chybí u {amlMissingItems.length} {amlMissingItems.length===1?"osoby":"osob"} v {amlMissingEscrows.length} {amlMissingEscrows.length===1?"úschově":"úschovách"} — ČAK!
           </div>
           <div style={{fontSize:10,color:"#FECACA",marginTop:2}}>
-            {amlMissing.map(e=>e.escrow_number).join(", ")} · Doplň AML dokumentaci teď — inspekce může přijít kdykoliv
+            {amlMissingItems.map(x => `${x.escrow}: ${x.name}`).join(" · ")}
           </div>
         </div>
         {onNav && (
