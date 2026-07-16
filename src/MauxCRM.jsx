@@ -94,13 +94,7 @@ const addDays = (d, n) => { const dt = new Date(d); dt.setDate(dt.getDate() + n)
 /* ─── ARES (Administrativní registr ekonomických subjektů) ─── */
 const ARES_API = "https://ares.gov.cz/ekonomicke-subjekty-v-be/rest/ekonomicke-subjekty";
 const PRAVNI_FORMY = {"101":"OSVČ","111":"v.o.s.","112":"k.s.","121":"a.s.","141":"s.r.o.","205":"družstvo","301":"stát. podnik","331":"přísp. org.","421":"zahraniční FO","422":"zahraniční PO","701":"sdružení","706":"spolek","736":"nadace","751":"zájmové sdruž.","804":"kraj","805":"obec","přísp":"přísp. org."};
-async function aresLookup(ico) {
-  const clean = String(ico).replace(/\s/g, "");
-  if (!/^\d{6,8}$/.test(clean)) throw new Error("Neplatné IČO — zadejte 6–8 číslic");
-  const r = await fetch(`${ARES_API}/${clean.padStart(8, "0")}`);
-  if (r.status === 404) throw new Error("Subjekt nenalezen v ARES");
-  if (!r.ok) throw new Error(`ARES chyba ${r.status}`);
-  const d = await r.json();
+function _parseAresSubject(d) {
   const reg = d.seznamRegistraci || {};
   return {
     ico: d.ico,
@@ -118,6 +112,28 @@ async function aresLookup(ico) {
     stavRos: reg.stavZdrojeRos || "",
     raw: d,
   };
+}
+async function aresLookup(ico) {
+  const clean = String(ico).replace(/\s/g, "");
+  if (!/^\d{6,8}$/.test(clean)) throw new Error("Neplatné IČO — zadejte 6–8 číslic");
+  const r = await fetch(`${ARES_API}/${clean.padStart(8, "0")}`);
+  if (r.status === 404) throw new Error("Subjekt nenalezen v ARES");
+  if (!r.ok) throw new Error(`ARES chyba ${r.status}`);
+  return _parseAresSubject(await r.json());
+}
+async function aresSearch(query, maxResults = 10) {
+  const q = String(query).trim();
+  if (q.length < 2) throw new Error("Zadejte alespoň 2 znaky");
+  // Pokud je to číslo, hledej přímo podle IČO
+  if (/^\d{6,8}$/.test(q.replace(/\s/g, ""))) return [await aresLookup(q)];
+  const r = await fetch(`${ARES_API}/vyhledat`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ obchodniJmeno: q, start: 0, pocet: maxResults }),
+  });
+  if (!r.ok) throw new Error(`ARES chyba ${r.status}`);
+  const d = await r.json();
+  return (d.ekonomickeSubjekty || []).map(_parseAresSubject);
 }
 
 /* ─── CSS ─── */
@@ -7959,6 +7975,7 @@ function ClaudeTracker() {
    ═══════════════════════════════════════════════════════════════════════════ */
 function RejstrikyModule({ onNav, clients }) {
   const [query, setQuery] = useState("");
+  const [results, setResults] = useState([]);
   const [result, setResult] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -7966,19 +7983,24 @@ function RejstrikyModule({ onNav, clients }) {
     try { return JSON.parse(localStorage.getItem("maux_ares_history") || "[]"); } catch { return []; }
   });
 
-  const doSearch = async (ico) => {
-    const q = (ico || query).trim();
+  const doSearch = async (q2) => {
+    const q = (q2 || query).trim();
     if (!q) return;
-    setLoading(true); setError(""); setResult(null);
+    setLoading(true); setError(""); setResult(null); setResults([]);
     try {
-      const data = await aresLookup(q);
-      setResult(data);
-      // Přidat do historie (max 20)
-      const newH = [{ ico: data.ico, name: data.name, ts: Date.now() }, ...history.filter(h => h.ico !== data.ico)].slice(0, 20);
-      setHistory(newH);
-      try { localStorage.setItem("maux_ares_history", JSON.stringify(newH)); } catch {}
+      const items = await aresSearch(q, 15);
+      if (items.length === 0) { setError("Žádné výsledky"); }
+      else if (items.length === 1) { selectResult(items[0]); }
+      else { setResults(items); }
     } catch (e) { setError(e.message); }
     setLoading(false);
+  };
+
+  const selectResult = (data) => {
+    setResult(data); setResults([]);
+    const newH = [{ ico: data.ico, name: data.name, ts: Date.now() }, ...history.filter(h => h.ico !== data.ico)].slice(0, 20);
+    setHistory(newH);
+    try { localStorage.setItem("maux_ares_history", JSON.stringify(newH)); } catch {}
   };
 
   const isClient = result && clients?.some(c => (c.ico || "").replace(/\s/g, "") === result.ico);
@@ -7988,108 +8010,192 @@ function RejstrikyModule({ onNav, clients }) {
   const VAL = { fontSize: 14, fontWeight: 500, color: "var(--ink)" };
   const BADGE = (bg, col) => ({ display: "inline-block", padding: "3px 10px", borderRadius: 99, fontSize: 10, fontWeight: 700, letterSpacing: ".06em", background: bg, color: col });
 
+  /* ── KATASTR quick-link cards ── */
+  const katastrLinks = [
+    { href: "https://nahlizenidokn.cuzk.cz/vyhledej-vlastnika", icon: "👤", label: "Vlastník", desc: "Podle jména nebo RČ/IČ" },
+    { href: "https://nahlizenidokn.cuzk.cz/vyhledej-parcelu", icon: "🗺", label: "Parcela", desc: "KÚ + parcelní číslo" },
+    { href: "https://nahlizenidokn.cuzk.cz/vyhledej-budovu", icon: "🏛", label: "Budova", desc: "Číslo popisné / evidenční" },
+    { href: "https://nahlizenidokn.cuzk.cz/vyhledej-jednotku", icon: "🏢", label: "Jednotka", desc: "Bytová nebo nebytová" },
+  ];
+
   return (
     <div className="content">
-      <div style={{ maxWidth: 800, margin: "0 auto" }}>
-        {/* ── VYHLEDÁVÁNÍ ── */}
-        <div style={{ background: "#fff", borderRadius: 14, border: "1px solid rgba(0,0,0,0.08)", padding: "32px 36px", marginBottom: 20 }}>
-          <div style={{ fontSize: 9, letterSpacing: ".22em", textTransform: "uppercase", color: "#4F46E5", fontWeight: 700, opacity: 0.55, marginBottom: 12 }}>ARES — Administrativní registr ekonomických subjektů</div>
-          <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
-            <input
-              value={query} onChange={e => setQuery(e.target.value)}
-              onKeyDown={e => { if (e.key === "Enter") doSearch(); }}
-              placeholder="Zadejte IČO (např. 27082440)"
-              style={{ flex: 1, padding: "12px 16px", borderRadius: 10, border: "2px solid #E0E7FF", fontSize: 15, fontFamily: "var(--mono)", outline: "none", background: "#FAFAFE", transition: "border .2s" }}
-              onFocus={e => e.target.style.borderColor = "#4F46E5"}
-              onBlur={e => e.target.style.borderColor = "#E0E7FF"}
-            />
-            <button onClick={() => doSearch()} disabled={loading}
-              style={{ padding: "12px 28px", borderRadius: 10, border: "none", background: loading ? "#C7D2FE" : "#4F46E5", color: "#fff", fontSize: 14, fontWeight: 600, cursor: "pointer", letterSpacing: ".03em", transition: "background .15s" }}>
-              {loading ? "Hledám…" : "Vyhledat"}
-            </button>
+      <div style={{ maxWidth: 860, margin: "0 auto" }}>
+
+        {/* ═══════════════════ HERO SEARCH ═══════════════════ */}
+        <div style={{ background: "linear-gradient(135deg, #4338CA 0%, #6366F1 50%, #818CF8 100%)", borderRadius: 20, padding: "44px 44px 40px", marginBottom: 24, position: "relative", overflow: "hidden" }}>
+          {/* decorative circles */}
+          <div style={{ position: "absolute", top: -40, right: -30, width: 160, height: 160, borderRadius: "50%", background: "rgba(255,255,255,0.06)" }} />
+          <div style={{ position: "absolute", bottom: -50, left: -20, width: 120, height: 120, borderRadius: "50%", background: "rgba(255,255,255,0.04)" }} />
+
+          <div style={{ position: "relative", zIndex: 1 }}>
+            <div style={{ fontSize: 9, letterSpacing: ".3em", textTransform: "uppercase", color: "rgba(255,255,255,0.55)", fontWeight: 700, marginBottom: 6 }}>MAUX LEGAL · REJSTŘÍKY</div>
+            <div style={{ fontSize: 28, fontFamily: "Fraunces,serif", fontWeight: 300, color: "#fff", marginBottom: 6 }}>Vyhledat subjekt</div>
+            <div style={{ fontSize: 13, color: "rgba(255,255,255,0.6)", marginBottom: 24, maxWidth: 480 }}>ARES, obchodní rejstřík, katastr nemovitostí — vše na jednom místě.</div>
+
+            <div style={{ display: "flex", gap: 10 }}>
+              <div style={{ flex: 1, position: "relative" }}>
+                <div style={{ position: "absolute", left: 16, top: "50%", transform: "translateY(-50%)", fontSize: 16, opacity: 0.4, pointerEvents: "none" }}>⌕</div>
+                <input
+                  value={query} onChange={e => setQuery(e.target.value)}
+                  onKeyDown={e => { if (e.key === "Enter") doSearch(); }}
+                  placeholder="IČO nebo název firmy (např. 27082440 nebo Alza)"
+                  style={{ width: "100%", boxSizing: "border-box", padding: "15px 18px 15px 42px", borderRadius: 14, border: "2px solid rgba(255,255,255,0.2)", fontSize: 15, fontFamily: "var(--mono)", outline: "none", background: "rgba(255,255,255,0.12)", color: "#fff", backdropFilter: "blur(8px)", transition: "border .2s, background .2s" }}
+                  onFocus={e => { e.target.style.borderColor = "rgba(255,255,255,0.5)"; e.target.style.background = "rgba(255,255,255,0.18)"; }}
+                  onBlur={e => { e.target.style.borderColor = "rgba(255,255,255,0.2)"; e.target.style.background = "rgba(255,255,255,0.12)"; }}
+                />
+              </div>
+              <button onClick={() => doSearch()} disabled={loading}
+                style={{ padding: "15px 32px", borderRadius: 14, border: "2px solid rgba(255,255,255,0.3)", background: loading ? "rgba(255,255,255,0.15)" : "rgba(255,255,255,0.2)", color: "#fff", fontSize: 14, fontWeight: 600, cursor: loading ? "wait" : "pointer", letterSpacing: ".04em", backdropFilter: "blur(8px)", transition: "all .15s" }}
+                onMouseEnter={e => { if(!loading) e.target.style.background = "rgba(255,255,255,0.32)"; }}
+                onMouseLeave={e => { e.target.style.background = loading ? "rgba(255,255,255,0.15)" : "rgba(255,255,255,0.2)"; }}>
+                {loading ? "Hledám…" : "Vyhledat"}
+              </button>
+            </div>
+            {error && <div style={{ color: "#FCA5A5", fontSize: 12, marginTop: 8, fontWeight: 500 }}>{error}</div>}
           </div>
-          {error && <div style={{ color: "#DC2626", fontSize: 12, marginTop: 4 }}>{error}</div>}
         </div>
 
-        {/* ── VÝSLEDEK ── */}
-        {result && (
-          <div style={{ background: "#fff", borderRadius: 14, border: "1px solid rgba(0,0,0,0.08)", padding: "28px 36px", marginBottom: 20 }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 18 }}>
-              <div>
-                <div style={{ fontSize: 22, fontFamily: "Fraunces,serif", fontWeight: 400, color: "var(--ink)", marginBottom: 4 }}>{result.name}</div>
-                <div style={{ fontSize: 12, color: "var(--mut)" }}>IČO {result.ico} · {result.pravniForma} · vznik {fmtDate(result.datumVzniku)}</div>
+        {/* ═══════════════════ SEZNAM VÝSLEDKŮ ═══════════════════ */}
+        {results.length > 1 && (
+          <div style={{ background: "#fff", borderRadius: 18, border: "1px solid rgba(0,0,0,0.06)", padding: "28px 36px", marginBottom: 24, boxShadow: "0 1px 3px rgba(0,0,0,0.04)" }}>
+            <div style={{ fontSize: 9, letterSpacing: ".22em", textTransform: "uppercase", color: "#4F46E5", fontWeight: 700, opacity: 0.55, marginBottom: 16 }}>Nalezeno {results.length} subjektů — vyberte</div>
+            {results.map((r, i) => (
+              <div key={r.ico} onClick={() => selectResult(r)}
+                style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "14px 14px", marginBottom: 4, borderRadius: 12, cursor: "pointer", transition: "all .15s", border: "1px solid transparent" }}
+                onMouseEnter={e => { e.currentTarget.style.background = "#F5F3FF"; e.currentTarget.style.borderColor = "#E0E7FF"; }}
+                onMouseLeave={e => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.borderColor = "transparent"; }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+                  <div style={{ width: 40, height: 40, borderRadius: 10, background: "linear-gradient(135deg, #EEF2FF, #E0E7FF)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14, fontWeight: 700, color: "#4F46E5", fontFamily: "var(--mono)", flexShrink: 0 }}>
+                    {(r.pravniFormaKod === "101" || r.pravniFormaKod === "421") ? "FO" : "PO"}
+                  </div>
+                  <div>
+                    <div style={{ fontSize: 14, fontWeight: 600, color: "var(--ink)", marginBottom: 2 }}>{r.name}</div>
+                    <div style={{ fontSize: 11, color: "var(--mut)" }}>{r.address || "—"} · {r.pravniForma}</div>
+                  </div>
+                </div>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
+                  {r.dphStatus === "AKTIVNI" && <span style={{ fontSize: 9, padding: "3px 8px", borderRadius: 99, background: "#ECFDF5", color: "#059669", fontWeight: 700, letterSpacing: ".04em" }}>DPH</span>}
+                  {r.insolvence === "ANO" && <span style={{ fontSize: 9, padding: "3px 8px", borderRadius: 99, background: "#FEF2F2", color: "#DC2626", fontWeight: 700, letterSpacing: ".04em" }}>INS</span>}
+                  <span style={{ fontSize: 12, fontFamily: "var(--mono)", color: "var(--mut)", background: "#F9FAFB", padding: "4px 10px", borderRadius: 8 }}>{r.ico}</span>
+                </div>
               </div>
-              <div style={{ display: "flex", gap: 6 }}>
-                {result.dphStatus === "AKTIVNI" && <span style={BADGE("#ECFDF5","#059669")}>Plátce DPH</span>}
-                {result.dphStatus !== "AKTIVNI" && <span style={BADGE("#FEF2F2","#DC2626")}>Neplátce DPH</span>}
-                {result.insolvence === "ANO" && <span style={BADGE("#FEF2F2","#DC2626")}>⚠ INSOLVENCE</span>}
-                {result.stavRos === "AKTIVNI" && <span style={BADGE("#F0FDF4","#16A34A")}>Aktivní</span>}
-                {result.stavRos === "ZANIKLÝ" && <span style={BADGE("#FEF2F2","#DC2626")}>Zaniklý</span>}
+            ))}
+          </div>
+        )}
+
+        {/* ═══════════════════ DETAIL SUBJEKTU ═══════════════════ */}
+        {result && (
+          <div style={{ background: "#fff", borderRadius: 18, border: "1px solid rgba(0,0,0,0.06)", marginBottom: 24, overflow: "hidden", boxShadow: "0 2px 8px rgba(0,0,0,0.04)" }}>
+            {/* Header bar */}
+            <div style={{ background: "linear-gradient(135deg, #EEF2FF 0%, #F5F3FF 100%)", padding: "28px 36px 24px", borderBottom: "1px solid #E0E7FF" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: 24, fontFamily: "Fraunces,serif", fontWeight: 400, color: "#1E1B4B", marginBottom: 6, lineHeight: 1.2 }}>{result.name}</div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 12, fontSize: 12, color: "#6366F1" }}>
+                    <span style={{ fontFamily: "var(--mono)", fontWeight: 600 }}>IČO {result.ico}</span>
+                    <span style={{ opacity: 0.4 }}>·</span>
+                    <span>{result.pravniForma}</span>
+                    <span style={{ opacity: 0.4 }}>·</span>
+                    <span>vznik {fmtDate(result.datumVzniku)}</span>
+                  </div>
+                </div>
+                <div style={{ display: "flex", gap: 6, flexWrap: "wrap", justifyContent: "flex-end", maxWidth: 280 }}>
+                  {result.stavRos === "AKTIVNI" && <span style={BADGE("#DCFCE7","#15803D")}>Aktivní</span>}
+                  {result.stavRos === "ZANIKLÝ" && <span style={BADGE("#FEE2E2","#B91C1C")}>Zaniklý</span>}
+                  {result.dphStatus === "AKTIVNI" && <span style={BADGE("#DCFCE7","#15803D")}>Plátce DPH</span>}
+                  {result.dphStatus !== "AKTIVNI" && <span style={BADGE("#FEF3C7","#92400E")}>Neplátce</span>}
+                  {result.insolvence === "ANO" && <span style={BADGE("#FEE2E2","#B91C1C")}>INSOLVENCE</span>}
+                </div>
               </div>
             </div>
 
-            <div style={ROW}><span style={LBL}>Sídlo</span><span style={VAL}>{result.address || "—"}</span></div>
-            <div style={ROW}><span style={LBL}>DIČ</span><span style={VAL}>{result.dic || "Nemá"}</span></div>
-            <div style={ROW}><span style={LBL}>Právní forma</span><span style={VAL}>{result.pravniForma} (kód {result.pravniFormaKod})</span></div>
-            <div style={ROW}><span style={LBL}>CZ-NACE</span><span style={VAL}>{result.czNace || "—"}</span></div>
-            <div style={ROW}><span style={LBL}>Insolvence</span><span style={{...VAL, color: result.insolvence === "ANO" ? "#DC2626" : "#059669"}}>{result.insolvence === "ANO" ? "⚠ Zapsán v insolvenčním rejstříku" : "Není v insolvenci"}</span></div>
+            {/* Data grid */}
+            <div style={{ padding: "24px 36px 20px" }}>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0 32px" }}>
+                {[
+                  ["Sídlo", result.address || "—"],
+                  ["DIČ", result.dic || "Nemá"],
+                  ["Právní forma", `${result.pravniForma} (${result.pravniFormaKod})`],
+                  ["CZ-NACE", result.czNace || "—"],
+                ].map(([lab, val], i) => (
+                  <div key={lab} style={{ padding: "14px 0", borderBottom: "1px solid rgba(0,0,0,0.05)" }}>
+                    <div style={{ fontSize: 10, color: "var(--mut)", letterSpacing: ".1em", textTransform: "uppercase", fontWeight: 600, marginBottom: 4 }}>{lab}</div>
+                    <div style={{ fontSize: 14, fontWeight: 500, color: "var(--ink)" }}>{val}</div>
+                  </div>
+                ))}
+              </div>
 
-            <div style={{ display: "flex", gap: 8, marginTop: 20 }}>
-              {!isClient && (
-                <button onClick={() => {
-                  onNav("klienti", { prefill: { name: result.name, ico: result.ico, dic: result.dic, reg: result.address, type: result.pravniFormaKod === "101" ? "osoba" : "firma" }});
-                }} style={{ padding: "10px 20px", borderRadius: 9, border: "1px solid #4F46E5", background: "#EEF2FF", color: "#4F46E5", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>
-                  + Přidat do klientů
-                </button>
-              )}
-              {isClient && <span style={{ ...BADGE("#EEF2FF","#4F46E5"), padding: "10px 20px", fontSize: 12 }}>✓ Už je v klientech</span>}
-              <a href={`https://or.justice.cz/ias/ui/rejstrik-$firma?ico=${result.ico}`} target="_blank" rel="noopener noreferrer"
-                style={{ padding: "10px 20px", borderRadius: 9, border: "1px solid rgba(0,0,0,0.12)", background: "#fff", color: "var(--ink)", fontSize: 12, fontWeight: 500, cursor: "pointer", textDecoration: "none" }}>
-                Obchodní rejstřík ↗
-              </a>
-              <a href={`https://apl.czso.cz/irsw/detail.jsp?pession=1&pid=ICO&pkraj=0&ico=${result.ico}`} target="_blank" rel="noopener noreferrer"
-                style={{ padding: "10px 20px", borderRadius: 9, border: "1px solid rgba(0,0,0,0.12)", background: "#fff", color: "var(--ink)", fontSize: 12, fontWeight: 500, cursor: "pointer", textDecoration: "none" }}>
-                ČSÚ (RES) ↗
-              </a>
+              {/* Insolvence highlight */}
+              <div style={{ marginTop: 16, padding: "12px 16px", borderRadius: 12, background: result.insolvence === "ANO" ? "#FEF2F2" : "#F0FDF4", display: "flex", alignItems: "center", gap: 10 }}>
+                <span style={{ fontSize: 18 }}>{result.insolvence === "ANO" ? "⚠️" : "✅"}</span>
+                <span style={{ fontSize: 13, fontWeight: 500, color: result.insolvence === "ANO" ? "#991B1B" : "#166534" }}>
+                  {result.insolvence === "ANO" ? "Subjekt je zapsán v insolvenčním rejstříku" : "Subjekt není v insolvenčním rejstříku"}
+                </span>
+              </div>
+
+              {/* Actions */}
+              <div style={{ display: "flex", gap: 10, marginTop: 20, flexWrap: "wrap" }}>
+                {!isClient && (
+                  <button onClick={() => {
+                    onNav("klienti", { prefill: { name: result.name, ico: result.ico, dic: result.dic, reg: result.address, type: result.pravniFormaKod === "101" ? "osoba" : "firma" }});
+                  }} style={{ padding: "11px 22px", borderRadius: 12, border: "none", background: "#4F46E5", color: "#fff", fontSize: 12, fontWeight: 600, cursor: "pointer", letterSpacing: ".03em", transition: "background .15s" }}
+                    onMouseEnter={e => e.target.style.background = "#4338CA"}
+                    onMouseLeave={e => e.target.style.background = "#4F46E5"}>
+                    + Přidat do klientů
+                  </button>
+                )}
+                {isClient && <span style={{ padding: "11px 22px", borderRadius: 12, background: "#EEF2FF", color: "#4F46E5", fontSize: 12, fontWeight: 600 }}>✓ Už je v klientech</span>}
+                <a href={`https://or.justice.cz/ias/ui/rejstrik-$firma?ico=${result.ico}`} target="_blank" rel="noopener noreferrer"
+                  style={{ padding: "11px 22px", borderRadius: 12, border: "1px solid rgba(0,0,0,0.1)", background: "#fff", color: "var(--ink)", fontSize: 12, fontWeight: 500, cursor: "pointer", textDecoration: "none", transition: "border .15s" }}>
+                  Obchodní rejstřík ↗
+                </a>
+                <a href={`https://apl.czso.cz/irsw/detail.jsp?pession=1&pid=ICO&pkraj=0&ico=${result.ico}`} target="_blank" rel="noopener noreferrer"
+                  style={{ padding: "11px 22px", borderRadius: 12, border: "1px solid rgba(0,0,0,0.1)", background: "#fff", color: "var(--ink)", fontSize: 12, fontWeight: 500, cursor: "pointer", textDecoration: "none", transition: "border .15s" }}>
+                  ČSÚ (RES) ↗
+                </a>
+              </div>
             </div>
           </div>
         )}
 
-        {/* ── KATASTR QUICK-LINK ── */}
-        <div style={{ background: "#fff", borderRadius: 14, border: "1px solid rgba(0,0,0,0.08)", padding: "28px 36px", marginBottom: 20 }}>
-          <div style={{ fontSize: 9, letterSpacing: ".22em", textTransform: "uppercase", color: "#4F46E5", fontWeight: 700, opacity: 0.55, marginBottom: 12 }}>Katastr nemovitostí — nahlížení (ČÚZK)</div>
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            <a href="https://nahlizenidokn.cuzk.cz/vyhledej-vlastnika" target="_blank" rel="noopener noreferrer"
-              style={{ padding: "10px 20px", borderRadius: 9, border: "1px solid #4F46E5", background: "#EEF2FF", color: "#4F46E5", fontSize: 12, fontWeight: 600, cursor: "pointer", textDecoration: "none" }}>
-              Vyhledat vlastníka ↗
-            </a>
-            <a href="https://nahlizenidokn.cuzk.cz/vyhledej-parcelu" target="_blank" rel="noopener noreferrer"
-              style={{ padding: "10px 20px", borderRadius: 9, border: "1px solid rgba(0,0,0,0.12)", background: "#fff", color: "var(--ink)", fontSize: 12, fontWeight: 500, cursor: "pointer", textDecoration: "none" }}>
-              Vyhledat parcelu ↗
-            </a>
-            <a href="https://nahlizenidokn.cuzk.cz/vyhledej-budovu" target="_blank" rel="noopener noreferrer"
-              style={{ padding: "10px 20px", borderRadius: 9, border: "1px solid rgba(0,0,0,0.12)", background: "#fff", color: "var(--ink)", fontSize: 12, fontWeight: 500, cursor: "pointer", textDecoration: "none" }}>
-              Vyhledat budovu ↗
-            </a>
-            <a href="https://nahlizenidokn.cuzk.cz/vyhledej-jednotku" target="_blank" rel="noopener noreferrer"
-              style={{ padding: "10px 20px", borderRadius: 9, border: "1px solid rgba(0,0,0,0.12)", background: "#fff", color: "var(--ink)", fontSize: 12, fontWeight: 500, cursor: "pointer", textDecoration: "none" }}>
-              Vyhledat jednotku ↗
-            </a>
+        {/* ═══════════════════ KATASTR — CARD GRID ═══════════════════ */}
+        <div style={{ marginBottom: 24 }}>
+          <div style={{ fontSize: 9, letterSpacing: ".22em", textTransform: "uppercase", color: "#4F46E5", fontWeight: 700, opacity: 0.55, marginBottom: 14, paddingLeft: 4 }}>Katastr nemovitostí — nahlížení (ČÚZK)</div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+            {katastrLinks.map(k => (
+              <a key={k.label} href={k.href} target="_blank" rel="noopener noreferrer"
+                style={{ display: "flex", alignItems: "center", gap: 16, padding: "20px 24px", background: "#fff", borderRadius: 16, border: "1px solid rgba(0,0,0,0.06)", textDecoration: "none", transition: "all .15s", boxShadow: "0 1px 3px rgba(0,0,0,0.03)" }}
+                onMouseEnter={e => { e.currentTarget.style.borderColor = "#C7D2FE"; e.currentTarget.style.boxShadow = "0 4px 12px rgba(79,70,229,0.08)"; e.currentTarget.style.transform = "translateY(-1px)"; }}
+                onMouseLeave={e => { e.currentTarget.style.borderColor = "rgba(0,0,0,0.06)"; e.currentTarget.style.boxShadow = "0 1px 3px rgba(0,0,0,0.03)"; e.currentTarget.style.transform = "translateY(0)"; }}>
+                <div style={{ width: 44, height: 44, borderRadius: 12, background: "linear-gradient(135deg, #EEF2FF, #E0E7FF)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 20, flexShrink: 0 }}>{k.icon}</div>
+                <div>
+                  <div style={{ fontSize: 14, fontWeight: 600, color: "var(--ink)", marginBottom: 2 }}>{k.label} <span style={{ fontSize: 11, opacity: 0.4 }}>↗</span></div>
+                  <div style={{ fontSize: 11, color: "var(--mut)" }}>{k.desc}</div>
+                </div>
+              </a>
+            ))}
           </div>
-          <div style={{ fontSize: 11, color: "var(--mut)", marginTop: 10, fontStyle: "italic" }}>Nahlížení do KN je zdarma. Pro plný výpis LV je potřeba placený přístup WSDP (cca 500 Kč/měs).</div>
+          <div style={{ fontSize: 11, color: "var(--mut)", marginTop: 10, paddingLeft: 4, fontStyle: "italic" }}>Nahlížení do KN je zdarma. Plný výpis LV vyžaduje WSDP (cca 500 Kč/měs).</div>
         </div>
 
-        {/* ── HISTORIE HLEDÁNÍ ── */}
+        {/* ═══════════════════ HISTORIE ═══════════════════ */}
         {history.length > 0 && (
-          <div style={{ background: "#fff", borderRadius: 14, border: "1px solid rgba(0,0,0,0.08)", padding: "24px 36px" }}>
-            <div style={{ fontSize: 9, letterSpacing: ".22em", textTransform: "uppercase", color: "var(--mut)", fontWeight: 700, opacity: 0.55, marginBottom: 12 }}>Poslední vyhledávání</div>
+          <div style={{ background: "#fff", borderRadius: 18, border: "1px solid rgba(0,0,0,0.06)", padding: "24px 36px", boxShadow: "0 1px 3px rgba(0,0,0,0.03)" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+              <div style={{ fontSize: 9, letterSpacing: ".22em", textTransform: "uppercase", color: "var(--mut)", fontWeight: 700, opacity: 0.55 }}>Poslední vyhledávání</div>
+              <div style={{ fontSize: 10, color: "var(--mut)", opacity: 0.4 }}>{history.length} záznamů</div>
+            </div>
             {history.map((h, i) => (
               <div key={i} onClick={() => { setQuery(h.ico); doSearch(h.ico); }}
-                style={{ display: "flex", justifyContent: "space-between", padding: "8px 0", borderBottom: i < history.length-1 ? "1px solid rgba(0,0,0,0.04)" : "none", cursor: "pointer", transition: "background .1s" }}
-                onMouseEnter={e => e.currentTarget.style.background = "#FAFAFE"}
-                onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
-                <span style={{ fontSize: 13, color: "var(--ink)" }}>{h.name}</span>
-                <span style={{ fontSize: 12, fontFamily: "var(--mono)", color: "var(--mut)" }}>{h.ico}</span>
+                style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 10px", borderRadius: 10, cursor: "pointer", transition: "all .12s", marginBottom: 2 }}
+                onMouseEnter={e => { e.currentTarget.style.background = "#F5F3FF"; }}
+                onMouseLeave={e => { e.currentTarget.style.background = "transparent"; }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                  <div style={{ width: 6, height: 6, borderRadius: "50%", background: "#C7D2FE", flexShrink: 0 }} />
+                  <span style={{ fontSize: 13, color: "var(--ink)", fontWeight: 500 }}>{h.name}</span>
+                </div>
+                <span style={{ fontSize: 12, fontFamily: "var(--mono)", color: "var(--mut)", background: "#F9FAFB", padding: "3px 10px", borderRadius: 8 }}>{h.ico}</span>
               </div>
             ))}
           </div>
