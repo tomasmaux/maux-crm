@@ -6179,7 +6179,7 @@ function TriGrafyPanel({ financeItems, onSaveFinance, invoices, dpfoMonths, loan
     : [{ label: "Deficit", value: Math.abs(firmaRez), color: R_WARN }, { label: "Do cíle", value: planKap, color: "rgba(220,38,38,0.14)" }];
 
   const secHdr = (col, text) => (
-    <div style={{ fontSize: 8, letterSpacing: ".18em", color: col, fontWeight: 800, textTransform: "uppercase", opacity: 0.65, marginBottom: 3 }}>{text}</div>
+    <div style={{ fontSize: 9, letterSpacing: ".22em", color: col, fontWeight: 700, textTransform: "uppercase", opacity: 0.55, marginBottom: 4 }}>{text}</div>
   );
   const secNum = (col, content) => (
     <div style={{ fontFamily: "Fraunces,serif", fontSize: 28, fontWeight: 300, color: col, lineHeight: 1, marginBottom: 2 }}>{content}</div>
@@ -6193,8 +6193,8 @@ function TriGrafyPanel({ financeItems, onSaveFinance, invoices, dpfoMonths, loan
       <div style={{ display: "flex" }}>
 
         {/* ── MAJETEK ── */}
-        <div style={{ flex: 3, padding: "24px 30px 26px", background: "#fff", borderTop: `3px solid ${M_COL}`, borderRight: "1px solid rgba(0,0,0,0.06)" }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+        <div style={{ flex: 3, padding: "32px 36px 34px", background: "#fff", borderTop: `4px solid ${M_COL}`, borderRight: "1px solid rgba(0,0,0,0.06)" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 22 }}>
             {secHdr(M_COL, "Osobní majetek")}
             {eBtn(() => setEditMaj(e => !e), editMaj, M_COL)}
           </div>
@@ -6241,10 +6241,10 @@ function TriGrafyPanel({ financeItems, onSaveFinance, invoices, dpfoMonths, loan
             </div>
           ) : (
             <>
-              <InteractiveRing segments={majGlassSegs} size={170} thickness={20} glowColor={M_COL}
+              <InteractiveRing segments={majGlassSegs} size={190} thickness={22} glowColor={M_COL}
                 centerTop="Majetek" centerMain={fmtKc(totalMaj)} />
               {firmaRez > 0 && (
-                <div style={{ fontSize: 9.5, color: "var(--mut)", textAlign: "center", marginTop: 10, fontStyle: "italic" }}>
+                <div style={{ fontSize: 9.5, color: "var(--mut)", textAlign: "center", marginTop: 14, fontStyle: "italic" }}>
                   v.č. firemní rezervy {fmtKc(firmaRez)} (volné peníze na spořáku nad rámec obálek)
                 </div>
               )}
@@ -6253,15 +6253,15 @@ function TriGrafyPanel({ financeItems, onSaveFinance, invoices, dpfoMonths, loan
         </div>
 
         {/* ── REZERVA ── */}
-        <div style={{ flex: 2, padding: "24px 30px 26px", background: "#fff", borderTop: `3px solid ${R_COL}` }}>
-          <div style={{ marginBottom: 16 }}>{secHdr(R_COL, "Firemní rezerva")}</div>
+        <div style={{ flex: 2, padding: "32px 36px 34px", background: "#fff", borderTop: `4px solid ${R_COL}` }}>
+          <div style={{ marginBottom: 22 }}>{secHdr(R_COL, "Firemní rezerva")}</div>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "center" }}>
-            <InteractiveRing segments={rezGlassSegs} size={170} thickness={20} glowColor={firmaRez < 0 ? R_WARN : R_COL} legendOnly
+            <InteractiveRing segments={rezGlassSegs} size={180} thickness={22} glowColor={firmaRez < 0 ? R_WARN : R_COL} legendOnly
               centerTop={firmaRez >= 0 ? "Naplněno" : "Schodek"}
               centerMain={firmaRez >= 0 ? fmtKc(firmaRez) : `−${fmtKc(Math.abs(firmaRez))}`}
               centerSub={firmaRez >= 0 ? `${Math.round(rezPct * 100)}% z cíle` : "pod cílem"} />
           </div>
-          <div style={{ fontSize: 11, color: R_COL, opacity: 0.6, textAlign: "center", marginTop: 12 }}>
+          <div style={{ fontSize: 11, color: R_COL, opacity: 0.6, textAlign: "center", marginTop: 16 }}>
             {firmaRez >= 0
               ? `cíl ${fmtKc(planKap)}`
               : `chybí ${fmtKc(planKap + Math.abs(firmaRez))} · cíl ${fmtKc(planKap)}`}
