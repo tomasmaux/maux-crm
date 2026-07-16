@@ -510,7 +510,9 @@ async function deleteEscrowDb(id) {
   if (error) throw error;
 }
 async function upsertEscrowTranche(t) {
-  const { error } = await supabase.from("escrow_tranches").upsert(t);
+  const { aml_done: _a, ...clean } = t;
+  ["received_date","paid_date"].forEach(k => { if (clean[k] === "") clean[k] = null; });
+  const { error } = await supabase.from("escrow_tranches").upsert(clean);
   if (error) throw error;
 }
 async function deleteEscrowTranche(id) {
@@ -4638,9 +4640,17 @@ function EscrowForm({ init, onSave, onCancel, saving }) {
     ));
   };
 
+  const [toast, setToast] = useState(null);
+  const showToast = (msg, ok = true) => {
+    setToast({ msg, ok });
+    setTimeout(() => setToast(null), ok ? 2500 : 5000);
+  };
+
   const saveDraft = () => {
     try {
       localStorage.setItem(ESCROW_DRAFT_KEY, JSON.stringify({ _d: d, _tranches: tranches }));
+      showToast("Koncept uložen do prohlížeče");
+      setTimeout(() => onCancel(), 800);
     } catch (_) {}
   };
   const clearDraft = () => { try { localStorage.removeItem(ESCROW_DRAFT_KEY); } catch (_) {} };
@@ -4691,9 +4701,10 @@ function EscrowForm({ init, onSave, onCancel, saving }) {
         ...expanded.map(t => upsertEscrowTranche({ ...t, escrow_id: d.id }))
       ]);
       clearDraft();
-      onSave({ ...d, status: finalStatus, escrow_tranches: expanded });
+      showToast(init ? "Úschova aktualizována" : "Úschova uložena");
+      setTimeout(() => onSave({ ...d, status: finalStatus, escrow_tranches: expanded }), 600);
     } catch (err) {
-      alert("❌ Chyba při ukládání úschovy:\n\n" + (err?.message || String(err)) + "\n\nData jsou stále ve formuláři — nic jsi neztratil.");
+      showToast("Chyba: " + (err?.message || String(err)), false);
     }
   };
 
@@ -5030,6 +5041,19 @@ function EscrowForm({ init, onSave, onCancel, saving }) {
           </div>
         </div>
       </div>
+
+      {/* Toast notifikace */}
+      {toast && (
+        <div style={{
+          position: "fixed", top: 24, left: "50%", transform: "translateX(-50%)", zIndex: 9999,
+          background: toast.ok ? "#059669" : "#DC2626", color: "#fff",
+          padding: "12px 28px", borderRadius: 10, fontSize: 13, fontWeight: 600,
+          boxShadow: "0 4px 20px rgba(0,0,0,.25)", letterSpacing: ".03em",
+          animation: "fadeIn .3s",
+        }}>
+          {toast.ok ? "✓ " : "✕ "}{toast.msg}
+        </div>
+      )}
 
       {/* Akce */}
       <div style={{ display: "flex", gap: 10, justifyContent: "flex-end", paddingTop: 4, flexWrap: "wrap" }}>
