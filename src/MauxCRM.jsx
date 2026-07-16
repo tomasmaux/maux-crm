@@ -6297,11 +6297,11 @@ function FirmaBar({ financeItems, invoices, dpfoMonths, loanTransactions, escrow
   const [confettiShown, setConfettiShown] = useState(false);
 
   // Trigger confetti once when allDone
-  React.useEffect(() => {
+  useEffect(() => {
     if (allDone && !confettiShown) setConfettiShown(true);
   }, [allDone]);
   // Reset confetti when not allDone
-  React.useEffect(() => {
+  useEffect(() => {
     if (!allDone) setConfettiShown(false);
   }, [allDone]);
 
