@@ -9056,7 +9056,7 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
                     <div style={{height:"100%",width:`${pct}%`,borderRadius:3,background:pct===100?"#16A34A":"#3518A5",transition:"width .7s ease"}} />
                   </div>
                   <div style={{fontSize:10,color:"var(--mut)",letterSpacing:".01em",marginTop:5,fontWeight:600}}>
-                    {pct===100?"✓ vše zaplaceno":`zaplaceno ${paidCount}/${all.length}`} · detail ↓ v dlaždici Měsíční výdaje
+                    {pct===100?"✓ vše zaplaceno":`zaplaceno ${paidCount}/${allExpItems.length}`} · detail ↓ v dlaždici Měsíční výdaje
                   </div>
                 </div>
 
