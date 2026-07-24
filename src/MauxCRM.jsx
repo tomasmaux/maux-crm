@@ -8517,12 +8517,11 @@ function OstatniModule({ dpfoMonths, loanTrackers, loanTransactions, financeItem
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 22, maxWidth: 1060 }}>
       {/* ═══ Page header — Legal Tech ═══ */}
-      <div style={{ padding: "6px 0 2px" }}>
-        <div style={{ fontSize: 9, letterSpacing: ".28em", textTransform: "uppercase", color: "#4F46E5", fontWeight: 700, opacity: .55, marginBottom: 10 }}>
+      <div style={{ padding: "2px 0 0" }}>
+        <div style={{ fontSize: 9, letterSpacing: ".28em", textTransform: "uppercase", color: "#4F46E5", fontWeight: 700, opacity: .55, marginBottom: 6 }}>
           Závazky · Daně · Pohledávky
         </div>
-        <h2 className="serif" style={{ margin: 0, fontSize: 30, fontWeight: 400 }}>Ostatní</h2>
-        <p style={{ fontSize: 12.5, color: "var(--mut)", marginTop: 8, maxWidth: 680, lineHeight: 1.6 }}>
+        <p style={{ fontSize: 12.5, color: "var(--mut)", margin: 0, maxWidth: 680, lineHeight: 1.6 }}>
           Úvěry, zálohy na daň a peníze půjčené ven. Appka loguje a dopočítává sama — ty jen odškrtáváš, co je vyřízené.
         </p>
       </div>
