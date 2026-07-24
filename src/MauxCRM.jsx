@@ -2850,9 +2850,12 @@ function SpořákTile({ financeItems, invoices, dpfoMonths, loanTransactions, on
   const dphAuto = invoices.filter(i => i.status === "uhrazena").reduce((s,i) => s+(i.vat_amount||0), 0);
   // Net DPFO balance on spořák = paid monthly savings (+) minus FÚ payments (-)
   const dpfoAcc = (dpfoMonths||[]).filter(m => m.is_paid).reduce((s,m) => s+(m.amount||0), 0);
-  const bobloanBal = (loanTransactions?.loan_bobnice||[]).reduce((s,t) => s+t.amount, 0);
+  const bobloanTxs = loanTransactions?.loan_bobnice || [];
+  const bobloanBal = bobloanTxs.reduce((s,t) => s+t.amount, 0);
   const bobniceFallback = (financeItems||[]).find(i => i.id === "fi_sp_02")?.amount || 0;
-  const bobniceBal = Math.max(bobloanBal > 0 ? bobloanBal : bobniceFallback, 0);
+  // Fallback na ruční fi_sp_02 JEN když neexistují žádné transakce — jinak živý zůstatek (clamp na 0,
+  // záporný = dotace z vlastních peněz, ta na spořáku žádnou obálku nedrží)
+  const bobniceBal = Math.max(bobloanTxs.length ? bobloanBal : bobniceFallback, 0);
   const planKapitál = (financeItems||[]).find(i => i.id === "fi_plan_kapital")?.amount || 150000;
 
   const allItems = [
@@ -3108,19 +3111,22 @@ function LoanDashTile({ tracker, transactions, onAddTransaction, onToggleTransac
   };
 
   return (
-    <div style={{ background: "#fff", borderRadius: 18, overflow: "hidden",
-      boxShadow: "0 0 0 1px rgba(0,0,0,.055), 0 1px 3px rgba(0,0,0,.03)",
-      borderTop: `2.5px solid ${accent}` }}>
+    <div style={{ background: "#fff", borderRadius: 20, overflow: "hidden",
+      border: "1px solid rgba(0,0,0,.05)",
+      boxShadow: "0 1px 2px rgba(16,12,60,.04), 0 14px 44px -20px rgba(16,12,60,.10)" }}>
       {/* Header */}
-      <div style={{ padding: "20px 24px 18px", background: accentTint }}>
-        <div style={{ fontSize: 8, letterSpacing: ".28em", textTransform: "uppercase", color: accent, fontWeight: 700, marginBottom: 8, opacity: .85 }}>
-          {isInv ? "Investiční úvěr" : "Osobní dluh"}
+      <div style={{ padding: "24px 28px 20px" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 9, marginBottom: 12 }}>
+          <span style={{ width: 7, height: 7, borderRadius: "50%", background: accent, boxShadow: `0 0 0 3px ${accent}1F`, flexShrink: 0 }} />
+          <span style={{ fontSize: 8.5, letterSpacing: ".26em", textTransform: "uppercase", color: "var(--mut)", fontWeight: 700, opacity: .75 }}>
+            {isInv ? "Investiční úvěr" : "Osobní dluh"}
+          </span>
         </div>
-        <div style={{ fontSize: 12.5, color: "var(--mut)", marginBottom: 8 }}>{tracker?.name}</div>
-        <div style={{ fontFamily: "Fraunces,serif", fontSize: 34, fontWeight: 300, color: ownFunds > 0 ? "#B45309" : "var(--txt)", lineHeight: 1 }}>
+        <div style={{ fontSize: 13, color: "var(--mut)", marginBottom: 10 }}>{tracker?.name}</div>
+        <div style={{ fontFamily: "Fraunces,serif", fontSize: 36, fontWeight: 300, color: ownFunds > 0 ? "#B45309" : "var(--txt)", lineHeight: 1 }}>
           {fmtKc(remaining)}
         </div>
-        <div style={{ fontSize: 10.5, color: ownFunds > 0 ? "#92400E" : "var(--mut)", marginTop: 6 }}>
+        <div style={{ fontSize: 10.5, color: ownFunds > 0 ? "#A16207" : "var(--mut)", marginTop: 8, opacity: .85 }}>
           {ownFunds > 0
             ? `dotuješ z vlastních peněz · čerpáno ${fmtKc(totalDrawnInv)}`
             : isInv ? (totalDrawnInv>0 ? `zůstatek k dispozici · čerpáno ${fmtKc(totalDrawnInv)}` : "zůstatek k dispozici") : original>0 ? `zbývá · původně ${fmtKc(original)}` : "nastav původní částku →"}
@@ -3128,12 +3134,12 @@ function LoanDashTile({ tracker, transactions, onAddTransaction, onToggleTransac
       </div>
       {/* Vlastní prostředky ve financování — pohledávka za hypotékou */}
       {ownFunds > 0 && (
-        <div style={{ padding: "12px 24px", background: "#FFFBEB", borderTop: "1px solid #FDE68A", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
+        <div style={{ padding: "13px 28px", background: "#FFFDF6", borderTop: "1px solid rgba(0,0,0,.05)", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
           <div>
-            <div style={{ fontSize: 8, letterSpacing: ".24em", textTransform: "uppercase", color: "#B45309", fontWeight: 700 }}>Vlastní prostředky ve financování</div>
-            <div style={{ fontSize: 10.5, color: "#92400E", marginTop: 3, lineHeight: 1.45 }}>pohledávka — vezmeš si zpět při dalším čerpání hypotéky</div>
+            <div style={{ fontSize: 8, letterSpacing: ".24em", textTransform: "uppercase", color: "#B45309", fontWeight: 700, opacity: .85 }}>Vlastní prostředky ve financování</div>
+            <div style={{ fontSize: 10.5, color: "#A16207", marginTop: 3, lineHeight: 1.45, opacity: .85 }}>pohledávka — vezmeš si zpět při dalším čerpání hypotéky</div>
           </div>
-          <div style={{ fontFamily: "Fraunces,serif", fontSize: 20, fontWeight: 400, color: "#B45309", whiteSpace: "nowrap" }}>{fmtKc(ownFunds)}</div>
+          <div style={{ fontFamily: "Fraunces,serif", fontSize: 19, fontWeight: 400, color: "#B45309", whiteSpace: "nowrap" }}>{fmtKc(ownFunds)}</div>
         </div>
       )}
       {/* Stats row */}
@@ -3618,25 +3624,28 @@ function DpfoTracker({ months, onToggle, onAdd, onDelete, year }) {
   };
 
   return (
-    <div style={{ background: "#fff", border: "1px solid rgba(0,0,0,.06)", borderRadius: 18, overflow: "hidden", boxShadow: "0 1px 3px rgba(0,0,0,.03)" }}>
+    <div style={{ background: "#fff", border: "1px solid rgba(0,0,0,.05)", borderRadius: 20, overflow: "hidden", boxShadow: "0 1px 2px rgba(16,12,60,.04), 0 14px 44px -20px rgba(16,12,60,.10)" }}>
 
-      {/* ── HEADER: 3 KPI cards ── */}
-      <div style={{ padding: "22px 24px 18px" }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 16, flexWrap: "wrap", gap: 6 }}>
-          <div style={{ fontSize: 8.5, letterSpacing: ".26em", textTransform: "uppercase", fontWeight: 700, color: A, opacity: .85 }}>
-            DPFO {year} · zálohy na daň z příjmu
+      {/* ── HEADER: editorial čísla bez barevných boxů ── */}
+      <div style={{ padding: "24px 28px 22px" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 22, flexWrap: "wrap", gap: 6 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
+            <span style={{ width: 7, height: 7, borderRadius: "50%", background: A, boxShadow: `0 0 0 3px ${A}1F`, flexShrink: 0 }} />
+            <span style={{ fontSize: 8.5, letterSpacing: ".26em", textTransform: "uppercase", fontWeight: 700, color: "var(--mut)", opacity: .75 }}>
+              DPFO {year} · zálohy na daň z příjmu
+            </span>
           </div>
-          <div style={{ fontSize: 10.5, color: "var(--mut)", opacity: .7 }}>spoření 8 000 Kč/měs · prosinec 35 000 Kč</div>
+          <div style={{ fontSize: 10.5, color: "var(--mut)", opacity: .6 }}>spoření 8 000 Kč/měs · prosinec 35 000 Kč</div>
         </div>
-        <div style={{ display: "flex", gap: 0, borderRadius: 14, border: "1px solid rgba(0,0,0,.06)", overflow: "hidden" }}>
+        <div style={{ display: "flex", flexWrap: "wrap" }}>
           {[
-            { label: "Naspořeno", value: fmtKc(savedSum), color: "#059669", bg: "#F6FDF9" },
-            { label: "Odvedeno FÚ", value: paidToFU > 0 ? `−${fmtKc(paidToFU)}` : "—", color: R, bg: "#FFF8F8" },
-            { label: "Zůstatek na spořáku", value: fmtKc(netBalance), color: netBalance >= 0 ? "var(--txt)" : R, bg: netBalance >= 0 ? "#FAFAFC" : "#FFF8F8" },
+            { label: "Naspořeno", value: fmtKc(savedSum), color: "var(--txt)" },
+            { label: "Odvedeno finančnímu úřadu", value: paidToFU > 0 ? `−${fmtKc(paidToFU)}` : "0 Kč", color: paidToFU > 0 ? "#B91C1C" : "var(--txt)" },
+            { label: "Zůstatek na spořáku", value: fmtKc(netBalance), color: netBalance >= 0 ? "var(--txt)" : "#B91C1C" },
           ].map((kpi, i) => (
-            <div key={i} style={{ flex: 1, padding: "14px 18px", background: kpi.bg, borderLeft: i > 0 ? "1px solid rgba(0,0,0,.05)" : "none" }}>
-              <div style={{ fontSize: 8, color: "var(--mut)", letterSpacing: ".16em", marginBottom: 6, textTransform: "uppercase", fontWeight: 700 }}>{kpi.label}</div>
-              <div style={{ fontFamily: "Fraunces,serif", fontSize: 21, fontWeight: 300, color: kpi.color, whiteSpace: "nowrap" }}>{kpi.value}</div>
+            <div key={i} style={{ paddingRight: 40, paddingLeft: i > 0 ? 40 : 0, borderLeft: i > 0 ? "1px solid rgba(0,0,0,.06)" : "none", marginBottom: 4 }}>
+              <div style={{ fontSize: 8, color: "var(--mut)", letterSpacing: ".18em", marginBottom: 8, textTransform: "uppercase", fontWeight: 700, opacity: .65 }}>{kpi.label}</div>
+              <div style={{ fontFamily: "Fraunces,serif", fontSize: 25, fontWeight: 300, color: kpi.color, whiteSpace: "nowrap" }}>{kpi.value}</div>
             </div>
           ))}
         </div>
@@ -4238,9 +4247,11 @@ function computeFirmaRezerva(financeItems, invoices, dpfoMonths, loanTransaction
   const sporBal  = (financeItems||[]).find(i => i.id === "fi_sp_99")?.amount || 0;
   const dphF     = (invoices||[]).filter(i => i.status === "uhrazena").reduce((s,i) => s+(i.vat_amount||0), 0);
   const dpfoF    = (dpfoMonths||[]).filter(m => m.is_paid).reduce((s,m) => s+(m.amount||0), 0);
-  const boblF    = (loanTransactions?.loan_bobnice||[]).reduce((s,t) => s+t.amount, 0);
+  const boblTxsF = loanTransactions?.loan_bobnice || [];
+  const boblF    = boblTxsF.reduce((s,t) => s+t.amount, 0);
   const bobFbF   = (financeItems||[]).find(i => i.id === "fi_sp_02")?.amount || 0;
-  const bobBalF  = Math.max(boblF > 0 ? boblF : bobFbF, 0);
+  // Fallback jen bez transakcí — záporný živý zůstatek (vlastní dotace) = žádná obálka na spořáku
+  const bobBalF  = Math.max(boblTxsF.length ? boblF : bobFbF, 0);
   const danUF    = Math.round(escrowTotalTax(escrows||[]));
   const autoLabF = new Set(["dph","dpfo 2026","bobnice","daň z úschov"]);
   const manEnvF  = (financeItems||[]).filter(i =>
@@ -5802,9 +5813,10 @@ function MiniSpořák({ financeItems, invoices, dpfoMonths, loanTransactions, es
   const dphAuto = invoices.filter(i => i.status === "uhrazena").reduce((s,i) => s+(i.vat_amount||0), 0);
   // Net DPFO balance on spořák = paid monthly savings (+) minus FÚ payments (-)
   const dpfoAcc = (dpfoMonths||[]).filter(m => m.is_paid).reduce((s,m) => s+(m.amount||0), 0);
-  const bobloanBal = (loanTransactions?.loan_bobnice||[]).reduce((s,t) => s+t.amount, 0);
+  const bobloanTxs = loanTransactions?.loan_bobnice || [];
+  const bobloanBal = bobloanTxs.reduce((s,t) => s+t.amount, 0);
   const bobFb = (financeItems||[]).find(i => i.id === "fi_sp_02")?.amount || 0;
-  const bobBal = Math.max(bobloanBal > 0 ? bobloanBal : bobFb, 0);
+  const bobBal = Math.max(bobloanTxs.length ? bobloanBal : bobFb, 0);
   const danUschov = Math.round(escrowTotalTax(escrows));
   // Exclude auto-computed envelopes from manual list to avoid duplicates
   const autoEnvLabels = new Set(["dph","dpfo 2026","bobnice","daň z úschov"]);
@@ -6331,9 +6343,10 @@ function SporakRingTile({ financeItems, onSaveFinance, invoices, dpfoMonths, loa
   const actualBal  = zItem?.amount || 0;
   const dphAuto    = (invoices||[]).filter(i => i.status === "uhrazena").reduce((s,i) => s+(i.vat_amount||0), 0);
   const dpfoAcc    = (dpfoMonths||[]).filter(m => m.is_paid).reduce((s,m) => s+(m.amount||8050), 0);
-  const bobloanBal = (loanTransactions?.loan_bobnice||[]).reduce((s,t) => s+t.amount, 0);
+  const bobloanTxs = loanTransactions?.loan_bobnice || [];
+  const bobloanBal = bobloanTxs.reduce((s,t) => s+t.amount, 0);
   const bobFb      = (financeItems||[]).find(i => i.id === "fi_sp_02")?.amount || 0;
-  const bobBal     = Math.max(bobloanBal > 0 ? bobloanBal : bobFb, 0);
+  const bobBal     = Math.max(bobloanTxs.length ? bobloanBal : bobFb, 0);
   const danUschov  = Math.round(escrowTotalTax(escrows||[]));
   const autoLbls   = new Set(["dph","dpfo 2026","bobnice","daň z úschov"]);
   const manObálky  = sporaci.filter(i =>
@@ -6446,9 +6459,10 @@ function TriGrafyPanel({ financeItems, onSaveFinance, invoices, dpfoMonths, loan
   const actualBal  = zItem?.amount || 0;
   const dphAuto    = (invoices||[]).filter(i => i.status === "uhrazena").reduce((s,i) => s+(i.vat_amount||0), 0);
   const dpfoAcc    = (dpfoMonths||[]).filter(m => m.is_paid).reduce((s,m) => s+(m.amount||8050), 0);
-  const bobloanBal = (loanTransactions?.loan_bobnice||[]).reduce((s,t) => s+t.amount, 0);
+  const bobloanTxs = loanTransactions?.loan_bobnice || [];
+  const bobloanBal = bobloanTxs.reduce((s,t) => s+t.amount, 0);
   const bobFb      = (financeItems||[]).find(i => i.id === "fi_sp_02")?.amount || 0;
-  const bobBal     = Math.max(bobloanBal > 0 ? bobloanBal : bobFb, 0);
+  const bobBal     = Math.max(bobloanTxs.length ? bobloanBal : bobFb, 0);
   const danUschov  = Math.round(escrowTotalTax(escrows||[]));
   const autoLbls   = new Set(["dph","dpfo 2026","bobnice","daň z úschov"]);
   const manObálky  = sporaci.filter(i =>
@@ -7283,14 +7297,15 @@ function PohledavkyPanel({ financeItems, onSaveFinance, onDeleteFinance }) {
   const inputSt = { fontSize: 12.5, padding: "9px 12px", border: "1px solid rgba(0,0,0,.1)", borderRadius: 10, outline: "none", fontFamily: "inherit", background: "#fff", transition: "border .15s" };
 
   return (
-    <div style={{ background: "#fff", border: "1px solid rgba(0,0,0,.06)", borderRadius: 18, overflow: "hidden", boxShadow: "0 1px 3px rgba(0,0,0,.03)" }}>
+    <div style={{ background: "#fff", border: "1px solid rgba(0,0,0,.05)", borderRadius: 20, overflow: "hidden", boxShadow: "0 1px 2px rgba(16,12,60,.04), 0 14px 44px -20px rgba(16,12,60,.10)" }}>
       {/* Header */}
-      <div style={{ padding: "20px 24px 16px", display: "flex", justifyContent: "space-between", alignItems: "baseline", flexWrap: "wrap", gap: 8 }}>
+      <div style={{ padding: "24px 28px 16px", display: "flex", justifyContent: "space-between", alignItems: "baseline", flexWrap: "wrap", gap: 8 }}>
         <div>
-          <div style={{ fontSize: 8.5, letterSpacing: ".26em", textTransform: "uppercase", fontWeight: 700, color: "#4F46E5", opacity: .7 }}>
-            Pohledávky
+          <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
+            <span style={{ width: 7, height: 7, borderRadius: "50%", background: "#4F46E5", boxShadow: "0 0 0 3px rgba(79,70,229,.12)", flexShrink: 0 }} />
+            <span style={{ fontSize: 8.5, letterSpacing: ".26em", textTransform: "uppercase", fontWeight: 700, color: "var(--mut)", opacity: .75 }}>Pohledávky</span>
           </div>
-          <div style={{ fontSize: 12, color: "var(--mut)", marginTop: 5 }}>peníze půjčené ven — splatnost a připomínky</div>
+          <div style={{ fontSize: 12, color: "var(--mut)", marginTop: 7, opacity: .8 }}>peníze půjčené ven — splatnost a připomínky</div>
         </div>
         {totalOut > 0 && (
           <div style={{ textAlign: "right" }}>
@@ -8591,43 +8606,38 @@ function OstatniModule({ dpfoMonths, loanTrackers, loanTransactions, financeItem
     return { debt, ownFunds, receivables, dpfoNet: saved - paidFU };
   }, [loanTrackers, loanTransactions, financeItems, dpfoMonths]);
 
+  const SecLabel = ({ children }) => (
+    <div style={{ display: "flex", alignItems: "center", gap: 18, margin: "10px 2px -6px" }}>
+      <span style={{ fontSize: 9, letterSpacing: ".32em", textTransform: "uppercase", color: "var(--mut)", fontWeight: 700, opacity: .55, whiteSpace: "nowrap" }}>{children}</span>
+      <div style={{ flex: 1, height: 1, background: "rgba(0,0,0,.055)" }} />
+    </div>
+  );
+
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 22, maxWidth: 1060 }}>
-      {/* ═══ HERO — souhrn závazků (Legal Tech) ═══ */}
-      <div style={{ background: "linear-gradient(135deg,#4338CA 0%,#6366F1 55%,#818CF8 100%)", borderRadius: 22, padding: "28px 34px 26px", position: "relative", overflow: "hidden", boxShadow: "0 8px 32px rgba(67,56,202,.22)" }}>
-        <div style={{ position: "absolute", right: -70, top: -70, width: 240, height: 240, borderRadius: "50%", background: "rgba(255,255,255,.06)", pointerEvents: "none" }} />
-        <div style={{ position: "absolute", right: 60, bottom: -90, width: 170, height: 170, borderRadius: "50%", background: "rgba(255,255,255,.05)", pointerEvents: "none" }} />
-        <div style={{ position: "relative" }}>
-          <div style={{ fontSize: 9, letterSpacing: ".3em", textTransform: "uppercase", color: "rgba(255,255,255,.6)", fontWeight: 700, marginBottom: 7 }}>
-            Závazky · Daně · Pohledávky
+    <div style={{ display: "flex", flexDirection: "column", gap: 28, maxWidth: 1020 }}>
+      {/* ── Tichý souhrn — editorial řádek, žádná karta ── */}
+      <div style={{ display: "flex", flexWrap: "wrap", padding: "14px 2px 2px" }}>
+        {[
+          { label: "Dluhy celkem", value: fmtKc(hero.debt), sub: "úvěry + osobní" },
+          { label: "Pohledávky venku", value: fmtKc(hero.receivables), sub: "půjčené ven" },
+          { label: "Vlastní peníze v hypotéce", value: hero.ownFunds > 0 ? fmtKc(hero.ownFunds) : "0 Kč", sub: hero.ownFunds > 0 ? "vrátí se dalším čerpáním" : "nic nedotuješ", accent: hero.ownFunds > 0 },
+          { label: "DPFO spořák", value: fmtKc(hero.dpfoNet), sub: "zůstatek na daň" },
+        ].map((k, i) => (
+          <div key={i} style={{ paddingRight: 42, paddingLeft: i > 0 ? 42 : 0, borderLeft: i > 0 ? "1px solid rgba(0,0,0,.07)" : "none", marginBottom: 8 }}>
+            <div style={{ fontSize: 8.5, letterSpacing: ".22em", textTransform: "uppercase", color: "var(--mut)", fontWeight: 700, opacity: .6, marginBottom: 9, whiteSpace: "nowrap" }}>{k.label}</div>
+            <div style={{ fontFamily: "Fraunces,serif", fontSize: 30, fontWeight: 300, color: k.accent ? "#B45309" : "var(--txt)", lineHeight: 1, whiteSpace: "nowrap" }}>{k.value}</div>
+            <div style={{ fontSize: 10, color: "var(--mut)", marginTop: 7, opacity: .65 }}>{k.sub}</div>
           </div>
-          <div style={{ fontFamily: "Fraunces,serif", fontSize: 23, fontWeight: 300, color: "#fff", marginBottom: 4 }}>
-            Finanční závazky pod kontrolou
-          </div>
-          <div style={{ fontSize: 11.5, color: "rgba(255,255,255,.65)", marginBottom: 22, maxWidth: 560, lineHeight: 1.55 }}>
-            Appka loguje a dopočítává sama — ty jen odškrtáváš, co je vyřízené.
-          </div>
-          <div style={{ display: "flex", borderRadius: 14, background: "rgba(255,255,255,.08)", border: "1px solid rgba(255,255,255,.14)", overflow: "hidden", backdropFilter: "blur(4px)" }}>
-            {[
-              { label: "Dluhy celkem", value: fmtKc(hero.debt), sub: "úvěry + osobní" },
-              { label: "Pohledávky venku", value: hero.receivables > 0 ? fmtKc(hero.receivables) : "0 Kč", sub: "půjčené ven" },
-              { label: "Vlastní peníze v hypotéce", value: hero.ownFunds > 0 ? fmtKc(hero.ownFunds) : "—", sub: hero.ownFunds > 0 ? "vrátí se čerpáním" : "nic nedotuješ" },
-              { label: "DPFO spořák", value: fmtKc(hero.dpfoNet), sub: "zůstatek na daň" },
-            ].map((k, i) => (
-              <div key={i} style={{ flex: 1, padding: "14px 20px", borderLeft: i > 0 ? "1px solid rgba(255,255,255,.12)" : "none" }}>
-                <div style={{ fontSize: 7.5, letterSpacing: ".2em", textTransform: "uppercase", color: "rgba(255,255,255,.55)", fontWeight: 700, marginBottom: 6, whiteSpace: "nowrap" }}>{k.label}</div>
-                <div style={{ fontFamily: "Fraunces,serif", fontSize: 21, fontWeight: 300, color: "#fff", whiteSpace: "nowrap" }}>{k.value}</div>
-                <div style={{ fontSize: 9.5, color: "rgba(255,255,255,.5)", marginTop: 3 }}>{k.sub}</div>
-              </div>
-            ))}
-          </div>
-        </div>
+        ))}
       </div>
+
+      <SecLabel>Daň z příjmu</SecLabel>
 
       {/* DPFO — zálohy na daň */}
       <DpfoTracker months={dpfoMonths} onToggle={onDpfoToggle} onAdd={onDpfoAdd} onDelete={onDpfoDelete} year={new Date().getFullYear()} />
 
       {/* Úvěry — Bobnice investiční úvěr, Půjčka od táty */}
+      {(loanTrackers || []).length > 0 && <SecLabel>Úvěry a dluhy</SecLabel>}
       {(loanTrackers || []).length > 0 && (
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(380px, 1fr))", gap: 22, alignItems: "start" }}>
           {(loanTrackers || []).map(tracker => (
@@ -8645,6 +8655,7 @@ function OstatniModule({ dpfoMonths, loanTrackers, loanTransactions, financeItem
       )}
 
       {/* Pohledávky — peníze půjčené ven */}
+      <SecLabel>Pohledávky</SecLabel>
       <PohledavkyPanel financeItems={financeItems} onSaveFinance={onSaveFinance} onDeleteFinance={onDeleteFinance} />
     </div>
   );
@@ -9799,9 +9810,10 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
                   const sporBalS   = zItemS?.amount || 0;
                   const dphAutoS   = (invoices||[]).filter(i => i.status === "uhrazena").reduce((s,i) => s+(i.vat_amount||0), 0);
                   const dpfoAccS   = (dpfoMonths||[]).filter(m => m.is_paid).reduce((s,m) => s+(m.amount||0), 0);
-                  const bobloanS   = (loanTransactions?.loan_bobnice||[]).reduce((s,t) => s+t.amount, 0);
+                  const bobTxsS    = loanTransactions?.loan_bobnice || [];
+                  const bobloanS   = bobTxsS.reduce((s,t) => s+t.amount, 0);
                   const bobFbS     = (financeItems||[]).find(i => i.id === "fi_sp_02")?.amount || 0;
-                  const bobBalS    = Math.max(bobloanS > 0 ? bobloanS : bobFbS, 0);
+                  const bobBalS    = Math.max(bobTxsS.length ? bobloanS : bobFbS, 0);
                   const danUschovS = Math.round(escrowTotalTax(escrows||[]));
                   const autoLblsS  = new Set(["dph","dpfo 2026","bobnice","daň z úschov"]);
                   const manObalkyS = sporaciItems.filter(i =>
