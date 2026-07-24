@@ -3603,6 +3603,7 @@ function DpfoTracker({ months, onToggle, onAdd, onDelete, year }) {
 
   const [showPayForm, setShowPayForm] = useState(false);
   const [payAmt, setPayAmt] = useState(34900);
+  const [editMode, setEditMode] = useState(false); // kalibrace — ruční oprava měsíců (jinak se odškrtává na Přehledu)
 
   const A  = "#D97706";   // amber
   const AL = "#FFFBEB";
@@ -3641,30 +3642,84 @@ function DpfoTracker({ months, onToggle, onAdd, onDelete, year }) {
         </div>
       </div>
 
-      {/* ── SECTION 1: Měsíční spoření ── */}
+      {/* ── SECTION 1: Roční přehled spoření — jen zrcadlo Přehledu (odškrtává se tam) ── */}
       <div style={{ padding: "0 24px 20px" }}>
-        <div style={{ fontSize: 8.5, fontWeight: 700, color: "var(--mut)", letterSpacing: ".2em", textTransform: "uppercase", marginBottom: 12, opacity: .75 }}>
-          Měsíční spoření
-        </div>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(6,1fr)", gap: 8 }}>
-          {savings.length === 0 ? (
-            <div style={{ gridColumn: "1/-1", fontSize: 11.5, color: "var(--mut)", padding: "10px 0" }}>Žádné měsíční záznamy.</div>
-          ) : savings.map(m => (
-            <button key={m.id} onClick={() => onToggle(m)}
-              title={m.is_paid ? "Klikni pro odznačení" : "Klikni pro označení jako uloženo"}
-              style={{
-                padding: "10px 4px", borderRadius: 12,
-                border: `1.5px solid ${m.is_paid ? "#FDE68A" : "rgba(0,0,0,.06)"}`,
-                background: m.is_paid ? AL : "#FAFAFC",
-                cursor: "pointer", transition: ".12s",
-                display: "flex", flexDirection: "column", alignItems: "center", gap: 3,
-              }}>
-              <span style={{ fontSize: 10, fontWeight: 700, color: m.is_paid ? "#92400E" : "var(--mut)" }}>{CZ_MONTHS_SHORT[m.month-1]}</span>
-              <span style={{ fontSize: 9.5, color: m.is_paid ? A : "#D6D3D1" }}>{m.is_paid ? "✓" : "○"}</span>
-              <span style={{ fontSize: 8, color: m.is_paid ? "#B45309" : "var(--mut)", opacity: .8 }}>{m.amount ? Math.round(m.amount/1000)+"k" : ""}</span>
-            </button>
-          ))}
-        </div>
+        {(() => {
+          const planTotal = savings.reduce((s,m) => s+(m.amount||0), 0);
+          const doneCount = savings.filter(m => m.is_paid).length;
+          const pct = planTotal > 0 ? Math.round((savedSum/planTotal)*100) : 0;
+          return (
+            <>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12, flexWrap: "wrap", gap: 8 }}>
+                <div style={{ fontSize: 8.5, fontWeight: 700, color: "var(--mut)", letterSpacing: ".2em", textTransform: "uppercase", opacity: .75 }}>
+                  Roční přehled spoření
+                </div>
+                <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                  <span style={{ fontSize: 10.5, color: "var(--mut)", opacity: .75 }}>odškrtáváš na Přehledu · tady se to jen zrcadlí</span>
+                  <button onClick={() => setEditMode(v => !v)}
+                    style={{ fontSize: 10.5, padding: "5px 12px", borderRadius: 8, border: editMode ? "1.5px solid #4F46E5" : "1px solid rgba(0,0,0,.12)", background: editMode ? "#EEF2FF" : "#fff", color: editMode ? "#4338CA" : "var(--mut)", fontWeight: 600, cursor: "pointer", fontFamily: "inherit", transition: "all .15s" }}>
+                    {editMode ? "✓ Hotovo" : "✎ Kalibrace"}
+                  </button>
+                </div>
+              </div>
+
+              {/* progress souhrn */}
+              <div style={{ marginBottom: 14 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10.5, color: "var(--mut)", marginBottom: 6 }}>
+                  <span><b style={{ color: "#92400E" }}>{doneCount}</b>/{savings.length || 12} měsíců uloženo</span>
+                  <span>naspořeno <b style={{ color: "var(--txt)" }}>{fmtKc(savedSum)}</b> z plánu {fmtKc(planTotal)} · {pct} %</span>
+                </div>
+                <div style={{ height: 6, background: "#F3F4F6", borderRadius: 3, overflow: "hidden" }}>
+                  <div style={{ height: "100%", width: `${Math.min(pct,100)}%`, background: "linear-gradient(90deg,#F59E0B,#D97706)", borderRadius: 3, transition: "width .5s" }} />
+                </div>
+              </div>
+
+              {!editMode ? (
+                /* READ-ONLY timeline — 12 segmentů */
+                <div style={{ display: "flex", gap: 5 }}>
+                  {savings.length === 0 ? (
+                    <div style={{ fontSize: 11.5, color: "var(--mut)", padding: "6px 0" }}>Žádné měsíční záznamy.</div>
+                  ) : savings.map(m => (
+                    <div key={m.id} title={`${CZ_MONTHS[m.month-1]} — ${m.is_paid ? "uloženo" : "zatím ne"} (${fmtKc(m.amount||0)})`} style={{ flex: 1, textAlign: "center" }}>
+                      <div style={{
+                        height: 32, borderRadius: 9, display: "flex", alignItems: "center", justifyContent: "center",
+                        background: m.is_paid ? "linear-gradient(180deg,#FEF3C7,#FDE68A)" : "#F6F6F9",
+                        border: m.is_paid ? "1px solid rgba(217,119,6,.3)" : "1px solid rgba(0,0,0,.04)",
+                        fontSize: 11, fontWeight: 700, color: m.is_paid ? "#92400E" : "#D6D3E1",
+                      }}>{m.is_paid ? "✓" : "·"}</div>
+                      <div style={{ fontSize: 8.5, marginTop: 5, color: m.is_paid ? "#92400E" : "var(--mut)", fontWeight: 600, opacity: m.is_paid ? 1 : .6 }}>{CZ_MONTHS_SHORT[m.month-1]}</div>
+                      <div style={{ fontSize: 7.5, color: "var(--mut)", opacity: .55 }}>{m.amount ? Math.round(m.amount/1000)+"k" : ""}</div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                /* KALIBRACE — klikací opravy (stejná data jako na Přehledu) */
+                <>
+                  <div style={{ fontSize: 10.5, color: "#4338CA", background: "#EEF2FF", border: "1px solid rgba(79,70,229,.15)", borderRadius: 10, padding: "8px 12px", marginBottom: 10, lineHeight: 1.5 }}>
+                    Režim kalibrace — kliknutím přepneš měsíc. Změna se okamžitě propíše i na Přehled (jsou to stejná data).
+                  </div>
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(6,1fr)", gap: 8 }}>
+                    {savings.map(m => (
+                      <button key={m.id} onClick={() => onToggle(m)}
+                        title={m.is_paid ? "Klikni pro odznačení" : "Klikni pro označení jako uloženo"}
+                        style={{
+                          padding: "10px 4px", borderRadius: 12,
+                          border: `1.5px solid ${m.is_paid ? "#FDE68A" : "rgba(0,0,0,.08)"}`,
+                          background: m.is_paid ? AL : "#FAFAFC",
+                          cursor: "pointer", transition: ".12s",
+                          display: "flex", flexDirection: "column", alignItems: "center", gap: 3, fontFamily: "inherit",
+                        }}>
+                        <span style={{ fontSize: 10, fontWeight: 700, color: m.is_paid ? "#92400E" : "var(--mut)" }}>{CZ_MONTHS_SHORT[m.month-1]}</span>
+                        <span style={{ fontSize: 9.5, color: m.is_paid ? A : "#D6D3D1" }}>{m.is_paid ? "✓" : "○"}</span>
+                        <span style={{ fontSize: 8, color: m.is_paid ? "#B45309" : "var(--mut)", opacity: .8 }}>{m.amount ? Math.round(m.amount/1000)+"k" : ""}</span>
+                      </button>
+                    ))}
+                  </div>
+                </>
+              )}
+            </>
+          );
+        })()}
       </div>
 
       {/* ── SECTION 2: Platby finančáku ── */}
@@ -8514,16 +8569,59 @@ function RejstrikyModule({ onNav, clients }) {
 
 function OstatniModule({ dpfoMonths, loanTrackers, loanTransactions, financeItems, onDpfoToggle, onDpfoAdd, onDpfoDelete, onLoanTxAdd, onLoanTxToggle, onLoanTxDelete, onLoanUpdate, onSaveFinance, onDeleteFinance }) {
   // Pozn.: dřívější auto-seed pohledávky odstraněn — mazání musí být trvalé.
+
+  // ── Souhrnné metriky pro hero pás ──
+  const hero = useMemo(() => {
+    let debt = 0, ownFunds = 0;
+    (loanTrackers || []).forEach(t => {
+      const txs = (loanTransactions || {})[t.id] || [];
+      if (t.type === "investment") {
+        const drawn  = txs.filter(x => x.amount > 0 && x.is_done).reduce((s,x) => s + x.amount, 0);
+        const repaid = txs.filter(x => x.amount < 0 && x.is_done).reduce((s,x) => s + Math.abs(x.amount), 0);
+        const rem = drawn - repaid;
+        if (rem >= 0) debt += rem; else ownFunds += -rem;
+      } else {
+        const paid = txs.filter(x => x.amount < 0 && x.is_done).reduce((s,x) => s + Math.abs(x.amount), 0);
+        debt += Math.max((t.original_amount || 0) - paid, 0);
+      }
+    });
+    const receivables = (financeItems || []).filter(i => i.category === "pohledavka").reduce((s,i) => s + Math.abs(i.amount || 0), 0);
+    const saved  = (dpfoMonths || []).filter(m => (m.amount||0) >= 0 && m.is_paid).reduce((s,m) => s + (m.amount||0), 0);
+    const paidFU = (dpfoMonths || []).filter(m => (m.amount||0) < 0).reduce((s,m) => s + Math.abs(m.amount||0), 0);
+    return { debt, ownFunds, receivables, dpfoNet: saved - paidFU };
+  }, [loanTrackers, loanTransactions, financeItems, dpfoMonths]);
+
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 22, maxWidth: 1060 }}>
-      {/* ═══ Page header — Legal Tech ═══ */}
-      <div style={{ padding: "2px 0 0" }}>
-        <div style={{ fontSize: 9, letterSpacing: ".28em", textTransform: "uppercase", color: "#4F46E5", fontWeight: 700, opacity: .55, marginBottom: 6 }}>
-          Závazky · Daně · Pohledávky
+      {/* ═══ HERO — souhrn závazků (Legal Tech) ═══ */}
+      <div style={{ background: "linear-gradient(135deg,#4338CA 0%,#6366F1 55%,#818CF8 100%)", borderRadius: 22, padding: "28px 34px 26px", position: "relative", overflow: "hidden", boxShadow: "0 8px 32px rgba(67,56,202,.22)" }}>
+        <div style={{ position: "absolute", right: -70, top: -70, width: 240, height: 240, borderRadius: "50%", background: "rgba(255,255,255,.06)", pointerEvents: "none" }} />
+        <div style={{ position: "absolute", right: 60, bottom: -90, width: 170, height: 170, borderRadius: "50%", background: "rgba(255,255,255,.05)", pointerEvents: "none" }} />
+        <div style={{ position: "relative" }}>
+          <div style={{ fontSize: 9, letterSpacing: ".3em", textTransform: "uppercase", color: "rgba(255,255,255,.6)", fontWeight: 700, marginBottom: 7 }}>
+            Závazky · Daně · Pohledávky
+          </div>
+          <div style={{ fontFamily: "Fraunces,serif", fontSize: 23, fontWeight: 300, color: "#fff", marginBottom: 4 }}>
+            Finanční závazky pod kontrolou
+          </div>
+          <div style={{ fontSize: 11.5, color: "rgba(255,255,255,.65)", marginBottom: 22, maxWidth: 560, lineHeight: 1.55 }}>
+            Appka loguje a dopočítává sama — ty jen odškrtáváš, co je vyřízené.
+          </div>
+          <div style={{ display: "flex", borderRadius: 14, background: "rgba(255,255,255,.08)", border: "1px solid rgba(255,255,255,.14)", overflow: "hidden", backdropFilter: "blur(4px)" }}>
+            {[
+              { label: "Dluhy celkem", value: fmtKc(hero.debt), sub: "úvěry + osobní" },
+              { label: "Pohledávky venku", value: hero.receivables > 0 ? fmtKc(hero.receivables) : "0 Kč", sub: "půjčené ven" },
+              { label: "Vlastní peníze v hypotéce", value: hero.ownFunds > 0 ? fmtKc(hero.ownFunds) : "—", sub: hero.ownFunds > 0 ? "vrátí se čerpáním" : "nic nedotuješ" },
+              { label: "DPFO spořák", value: fmtKc(hero.dpfoNet), sub: "zůstatek na daň" },
+            ].map((k, i) => (
+              <div key={i} style={{ flex: 1, padding: "14px 20px", borderLeft: i > 0 ? "1px solid rgba(255,255,255,.12)" : "none" }}>
+                <div style={{ fontSize: 7.5, letterSpacing: ".2em", textTransform: "uppercase", color: "rgba(255,255,255,.55)", fontWeight: 700, marginBottom: 6, whiteSpace: "nowrap" }}>{k.label}</div>
+                <div style={{ fontFamily: "Fraunces,serif", fontSize: 21, fontWeight: 300, color: "#fff", whiteSpace: "nowrap" }}>{k.value}</div>
+                <div style={{ fontSize: 9.5, color: "rgba(255,255,255,.5)", marginTop: 3 }}>{k.sub}</div>
+              </div>
+            ))}
+          </div>
         </div>
-        <p style={{ fontSize: 12.5, color: "var(--mut)", margin: 0, maxWidth: 680, lineHeight: 1.6 }}>
-          Úvěry, zálohy na daň a peníze půjčené ven. Appka loguje a dopočítává sama — ty jen odškrtáváš, co je vyřízené.
-        </p>
       </div>
 
       {/* DPFO — zálohy na daň */}
