@@ -2493,10 +2493,10 @@ function PixelNeko() {
       { x: 100, y: 220, area: "sb" },   // sidebar upper
       { x: 100, y: 130, area: "sb" },   // sidebar top
       { x: 320, y: 22, area: "hdr" },    // header left
-      { x: 550, y: 22, area: "hdr" },    // header mid-left
-      { x: 780, y: 22, area: "hdr" },    // header center
-      { x: 1000, y: 22, area: "hdr" },   // header right
-      { x: 1180, y: 22, area: "hdr" },   // header far-right
+      { x: 550, y: 22, area: "hdr" },   // header mid-left
+      { x: 780, y: 22, area: "hdr" },   // header center
+      { x: 1000, y: 22, area: "hdr" },  // header right
+      { x: 1180, y: 22, area: "hdr" },  // header far-right
     ];
     const BUBBLES = {
       sit: ["", "", "Mňau!", "Pracuj!", "", "§ 14", ""],
@@ -2983,7 +2983,10 @@ function LoanDashTile({ tracker, transactions, onAddTransaction, onToggleTransac
   const totalDrawnInv = transactions.filter(t=>t.amount>0&&t.is_done).reduce((s,t)=>s+t.amount,0);
   const totalRepaidInv = transactions.filter(t=>t.amount<0&&t.is_done).reduce((s,t)=>s+Math.abs(t.amount),0);
   const original = tracker?.original_amount || 0;
-  const remaining = isInv ? Math.max(totalDrawnInv-totalRepaidInv,0) : Math.max(original-totalPaid,0);
+  // Investiční úvěr SMÍ jít do minusu — znamená to, že splátky/náklady aktuálně
+  // dotuješ z vlastních peněz. Minus = pohledávka za financováním (vrátí se dalším čerpáním).
+  const remaining = isInv ? (totalDrawnInv - totalRepaidInv) : Math.max(original-totalPaid,0);
+  const ownFunds = isInv && remaining < 0 ? -remaining : 0;
   const monthly = tracker?.monthly_payment || 0;
   const monthsLeft = monthly>0&&remaining>0 ? Math.ceil(remaining/monthly) : 0;
   const finalDate = monthsLeft>0 ? new Date(Date.now()+monthsLeft*30*24*3600*1000).toLocaleDateString("cs-CZ",{month:"long",year:"numeric"}) : "splaceno";
@@ -3053,7 +3056,7 @@ function LoanDashTile({ tracker, transactions, onAddTransaction, onToggleTransac
 </div>
 
 <div class="kpi-grid" style="grid-template-columns:1fr 1fr;">
-  <div class="kpi red"><label>Zbývá k dispozici prostředků</label><div class="val">${fmtKc(remaining)}</div><div class="sub">aktuální zůstatek čerpání</div></div>
+  <div class="kpi red"><label>${remaining < 0 ? "Vlastní prostředky ve financování" : "Zbývá k dispozici prostředků"}</label><div class="val">${fmtKc(remaining)}</div><div class="sub">${remaining < 0 ? "pohledávka — vrátí se dalším čerpáním" : "aktuální zůstatek čerpání"}</div></div>
   <div class="kpi green"><label>Načerpáno celkem</label><div class="val">${fmtKc(totalDrawnInv)}</div><div class="sub">celkem čerpáno z úvěru</div></div>
 </div>
 
@@ -3106,21 +3109,33 @@ function LoanDashTile({ tracker, transactions, onAddTransaction, onToggleTransac
 
   return (
     <div style={{ background: "#fff", borderRadius: 18, overflow: "hidden",
-      boxShadow: "0 0 0 1px rgba(0,0,0,.065), 0 8px 40px rgba(53,24,165,.07)",
+      boxShadow: "0 0 0 1px rgba(0,0,0,.055), 0 1px 3px rgba(0,0,0,.03)",
       borderTop: `2.5px solid ${accent}` }}>
       {/* Header */}
-      <div style={{ padding: "16px 20px 14px", background: accentTint }}>
-        <div style={{ fontSize: 7, letterSpacing: ".30em", textTransform: "uppercase", color: accent, fontWeight: 700, marginBottom: 7 }}>
+      <div style={{ padding: "20px 24px 18px", background: accentTint }}>
+        <div style={{ fontSize: 8, letterSpacing: ".28em", textTransform: "uppercase", color: accent, fontWeight: 700, marginBottom: 8, opacity: .85 }}>
           {isInv ? "Investiční úvěr" : "Osobní dluh"}
         </div>
-        <div style={{ fontSize: 12, color: "var(--mut)", marginBottom: 7 }}>{tracker?.name}</div>
-        <div style={{ fontFamily: "Fraunces,serif", fontSize: 30, fontWeight: 300, color: "var(--txt)", lineHeight: 1 }}>
+        <div style={{ fontSize: 12.5, color: "var(--mut)", marginBottom: 8 }}>{tracker?.name}</div>
+        <div style={{ fontFamily: "Fraunces,serif", fontSize: 34, fontWeight: 300, color: ownFunds > 0 ? "#B45309" : "var(--txt)", lineHeight: 1 }}>
           {fmtKc(remaining)}
         </div>
-        <div style={{ fontSize: 10.5, color: "var(--mut)", marginTop: 5 }}>
-          {isInv ? (totalDrawnInv>0 ? `zůstatek dluhu · čerpáno ${fmtKc(totalDrawnInv)}` : "zůstatek dluhu") : original>0 ? `zbývá · původně ${fmtKc(original)}` : "nastav původní částku →"}
+        <div style={{ fontSize: 10.5, color: ownFunds > 0 ? "#92400E" : "var(--mut)", marginTop: 6 }}>
+          {ownFunds > 0
+            ? `dotuješ z vlastních peněz · čerpáno ${fmtKc(totalDrawnInv)}`
+            : isInv ? (totalDrawnInv>0 ? `zůstatek k dispozici · čerpáno ${fmtKc(totalDrawnInv)}` : "zůstatek k dispozici") : original>0 ? `zbývá · původně ${fmtKc(original)}` : "nastav původní částku →"}
         </div>
       </div>
+      {/* Vlastní prostředky ve financování — pohledávka za hypotékou */}
+      {ownFunds > 0 && (
+        <div style={{ padding: "12px 24px", background: "#FFFBEB", borderTop: "1px solid #FDE68A", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
+          <div>
+            <div style={{ fontSize: 8, letterSpacing: ".24em", textTransform: "uppercase", color: "#B45309", fontWeight: 700 }}>Vlastní prostředky ve financování</div>
+            <div style={{ fontSize: 10.5, color: "#92400E", marginTop: 3, lineHeight: 1.45 }}>pohledávka — vezmeš si zpět při dalším čerpání hypotéky</div>
+          </div>
+          <div style={{ fontFamily: "Fraunces,serif", fontSize: 20, fontWeight: 400, color: "#B45309", whiteSpace: "nowrap" }}>{fmtKc(ownFunds)}</div>
+        </div>
+      )}
       {/* Stats row */}
       <div style={{ display: "flex", gap: 0, borderTop: SEP, borderBottom: SEP }}>
         {[
@@ -3128,9 +3143,9 @@ function LoanDashTile({ tracker, transactions, onAddTransaction, onToggleTransac
           { label: "Splátka/měsíc", value: fmtKc(monthly) },
           { label: isInv?"Splaceno":"Zbývá", value: isInv?fmtKc(totalRepaidInv):monthsLeft>0?`${monthsLeft}×`:finalDate },
         ].map((s,i) => (
-          <div key={i} style={{ flex:1, padding:"9px 12px", borderLeft: i>0?SEP:undefined }}>
-            <div style={{ fontSize: 7, color: "var(--mut)", letterSpacing: ".18em", textTransform: "uppercase", marginBottom: 4, fontWeight: 700 }}>{s.label}</div>
-            <div style={{ fontSize: 13, fontFamily: "Fraunces,serif", fontWeight: 300, color: "var(--txt)" }}>{s.value}</div>
+          <div key={i} style={{ flex:1, padding:"12px 16px", borderLeft: i>0?SEP:undefined }}>
+            <div style={{ fontSize: 7.5, color: "var(--mut)", letterSpacing: ".18em", textTransform: "uppercase", marginBottom: 5, fontWeight: 700 }}>{s.label}</div>
+            <div style={{ fontSize: 14.5, fontFamily: "Fraunces,serif", fontWeight: 300, color: "var(--txt)", whiteSpace: "nowrap" }}>{s.value}</div>
           </div>
         ))}
       </div>
@@ -3144,7 +3159,7 @@ function LoanDashTile({ tracker, transactions, onAddTransaction, onToggleTransac
         </div>
       )}
       {/* Actions */}
-      <div style={{ padding: "10px 14px", display: "flex", gap: 7, borderTop: SEP }}>
+      <div style={{ padding: "12px 16px", display: "flex", gap: 8, borderTop: SEP }}>
         <button className="btn" style={{ fontSize: 11, flex: 1 }}
           onClick={() => { setNewTx({ date: today(), amount: -monthly, description: "Splátka", is_done: false }); setAddForm(!addForm); }}>
           + Pohyb
@@ -3209,7 +3224,7 @@ function LoanDashTile({ tracker, transactions, onAddTransaction, onToggleTransac
                   <td style={{ padding:"8px 10px", textAlign:"right", fontFamily:"Fraunces,serif", fontWeight:300, color:tx.amount<0?"#DC2626":"#059669" }}>
                     {tx.amount>0?"+":""}{fmtKc(tx.amount)}
                   </td>
-                  <td style={{ padding:"8px 10px", textAlign:"right", fontFamily:"Fraunces,serif", fontWeight:300 }}>{fmtKc(tx.balance)}</td>
+                  <td style={{ padding:"8px 10px", textAlign:"right", fontFamily:"Fraunces,serif", fontWeight:300, color: tx.balance < 0 ? "#B45309" : undefined }}>{fmtKc(tx.balance)}</td>
                   <td style={{ textAlign:"center", cursor:"pointer", fontSize:13 }} onClick={() => onToggleTransaction({...tx,is_done:!tx.is_done})}>
                     {tx.is_done?"✅":"⬜"}
                   </td>
@@ -3602,47 +3617,50 @@ function DpfoTracker({ months, onToggle, onAdd, onDelete, year }) {
   };
 
   return (
-    <div style={{ background: "#fff", border: "1px solid rgba(0,0,0,.08)", borderRadius: 16, overflow: "hidden" }}>
+    <div style={{ background: "#fff", border: "1px solid rgba(0,0,0,.06)", borderRadius: 18, overflow: "hidden", boxShadow: "0 1px 3px rgba(0,0,0,.03)" }}>
 
       {/* ── HEADER: 3 KPI cards ── */}
       <div style={{ padding: "22px 24px 18px" }}>
-        <div style={{ fontSize: 8.5, letterSpacing: ".22em", textTransform: "uppercase", fontWeight: 700, color: A, marginBottom: 14 }}>
-          DPFO {year} · zálohy na daň z příjmu
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 16, flexWrap: "wrap", gap: 6 }}>
+          <div style={{ fontSize: 8.5, letterSpacing: ".26em", textTransform: "uppercase", fontWeight: 700, color: A, opacity: .85 }}>
+            DPFO {year} · zálohy na daň z příjmu
+          </div>
+          <div style={{ fontSize: 10.5, color: "var(--mut)", opacity: .7 }}>spoření 8 000 Kč/měs · prosinec 35 000 Kč</div>
         </div>
-        <div style={{ display: "flex", gap: 0, borderRadius: 12, border: "1px solid rgba(0,0,0,.07)", overflow: "hidden" }}>
+        <div style={{ display: "flex", gap: 0, borderRadius: 14, border: "1px solid rgba(0,0,0,.06)", overflow: "hidden" }}>
           {[
-            { label: "Naspořeno", value: fmtKc(savedSum), color: "#059669", bg: "#F0FDF4" },
-            { label: "Odvedeno FÚ", value: paidToFU > 0 ? `−${fmtKc(paidToFU)}` : "—", color: R, bg: "#FFF5F5" },
-            { label: "Zůstatek na spořáku", value: fmtKc(netBalance), color: netBalance >= 0 ? "#1c1917" : R, bg: netBalance >= 0 ? "#fff" : "#FFF5F5" },
+            { label: "Naspořeno", value: fmtKc(savedSum), color: "#059669", bg: "#F6FDF9" },
+            { label: "Odvedeno FÚ", value: paidToFU > 0 ? `−${fmtKc(paidToFU)}` : "—", color: R, bg: "#FFF8F8" },
+            { label: "Zůstatek na spořáku", value: fmtKc(netBalance), color: netBalance >= 0 ? "var(--txt)" : R, bg: netBalance >= 0 ? "#FAFAFC" : "#FFF8F8" },
           ].map((kpi, i) => (
-            <div key={i} style={{ flex: 1, padding: "12px 16px", background: kpi.bg, borderLeft: i > 0 ? "1px solid rgba(0,0,0,.06)" : "none" }}>
-              <div style={{ fontSize: 9, color: "var(--mut)", letterSpacing: ".05em", marginBottom: 5, textTransform: "uppercase" }}>{kpi.label}</div>
-              <div className="maux-num" style={{ fontSize: 17, fontWeight: 700, color: kpi.color }}>{kpi.value}</div>
+            <div key={i} style={{ flex: 1, padding: "14px 18px", background: kpi.bg, borderLeft: i > 0 ? "1px solid rgba(0,0,0,.05)" : "none" }}>
+              <div style={{ fontSize: 8, color: "var(--mut)", letterSpacing: ".16em", marginBottom: 6, textTransform: "uppercase", fontWeight: 700 }}>{kpi.label}</div>
+              <div style={{ fontFamily: "Fraunces,serif", fontSize: 21, fontWeight: 300, color: kpi.color, whiteSpace: "nowrap" }}>{kpi.value}</div>
             </div>
           ))}
         </div>
       </div>
 
       {/* ── SECTION 1: Měsíční spoření ── */}
-      <div style={{ padding: "0 24px 18px" }}>
-        <div style={{ fontSize: 10, fontWeight: 700, color: "var(--mut)", letterSpacing: ".06em", textTransform: "uppercase", marginBottom: 10 }}>
+      <div style={{ padding: "0 24px 20px" }}>
+        <div style={{ fontSize: 8.5, fontWeight: 700, color: "var(--mut)", letterSpacing: ".2em", textTransform: "uppercase", marginBottom: 12, opacity: .75 }}>
           Měsíční spoření
         </div>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(6,1fr)", gap: 5 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(6,1fr)", gap: 8 }}>
           {savings.length === 0 ? (
             <div style={{ gridColumn: "1/-1", fontSize: 11.5, color: "var(--mut)", padding: "10px 0" }}>Žádné měsíční záznamy.</div>
           ) : savings.map(m => (
             <button key={m.id} onClick={() => onToggle(m)}
               title={m.is_paid ? "Klikni pro odznačení" : "Klikni pro označení jako uloženo"}
               style={{
-                padding: "9px 4px", borderRadius: 10,
-                border: `1.5px solid ${m.is_paid ? A : "rgba(0,0,0,.1)"}`,
-                background: m.is_paid ? AL : "#FAFAF9",
+                padding: "10px 4px", borderRadius: 12,
+                border: `1.5px solid ${m.is_paid ? "#FDE68A" : "rgba(0,0,0,.06)"}`,
+                background: m.is_paid ? AL : "#FAFAFC",
                 cursor: "pointer", transition: ".12s",
                 display: "flex", flexDirection: "column", alignItems: "center", gap: 3,
               }}>
               <span style={{ fontSize: 10, fontWeight: 700, color: m.is_paid ? "#92400E" : "var(--mut)" }}>{CZ_MONTHS_SHORT[m.month-1]}</span>
-              <span style={{ fontSize: 9.5, color: m.is_paid ? A : "#ccc" }}>{m.is_paid ? "✓" : "○"}</span>
+              <span style={{ fontSize: 9.5, color: m.is_paid ? A : "#D6D3D1" }}>{m.is_paid ? "✓" : "○"}</span>
               <span style={{ fontSize: 8, color: m.is_paid ? "#B45309" : "var(--mut)", opacity: .8 }}>{m.amount ? Math.round(m.amount/1000)+"k" : ""}</span>
             </button>
           ))}
@@ -3650,9 +3668,9 @@ function DpfoTracker({ months, onToggle, onAdd, onDelete, year }) {
       </div>
 
       {/* ── SECTION 2: Platby finančáku ── */}
-      <div style={{ borderTop: "1px solid rgba(0,0,0,.06)", padding: "16px 24px 20px" }}>
+      <div style={{ borderTop: "1px solid rgba(0,0,0,.05)", padding: "18px 24px 22px", background: "#FDFDFE" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
-          <div style={{ fontSize: 10, fontWeight: 700, color: "var(--mut)", letterSpacing: ".06em", textTransform: "uppercase" }}>
+          <div style={{ fontSize: 8.5, fontWeight: 700, color: "var(--mut)", letterSpacing: ".2em", textTransform: "uppercase", opacity: .75 }}>
             Platby finančáku
           </div>
           <button onClick={() => setShowPayForm(v => !v)}
@@ -7182,14 +7200,17 @@ function ZiskovostPanel({ workEntries, clients }) {
 function PohledavkyPanel({ financeItems, onSaveFinance, onDeleteFinance }) {
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState({ label: "", amount: "", due: "", source: "" });
+  const [formErr, setFormErr] = useState("");
 
   const items = (financeItems || []).filter(i => i.category === "pohledavka");
   const parseMeta = (notes) => { try { return JSON.parse(notes || "{}"); } catch { return {}; } };
 
+  const valid = form.label.trim().length > 0 && Math.abs(Number(form.amount) || 0) > 0;
+
   const save = () => {
     const lbl = form.label.trim();
     const amt = Math.abs(Number(form.amount) || 0);
-    if (!lbl || !amt) return;
+    if (!lbl || !amt) { setFormErr(!lbl ? "Vyplň, komu jsi půjčil." : "Vyplň částku."); return; }
     onSaveFinance({
       id: `fi_pohledavka_${Date.now()}`,
       category: "pohledavka",
@@ -7198,74 +7219,110 @@ function PohledavkyPanel({ financeItems, onSaveFinance, onDeleteFinance }) {
       notes: JSON.stringify({ due: form.due || null, source: form.source.trim() || null }),
     });
     setForm({ label: "", amount: "", due: "", source: "" });
+    setFormErr("");
     setOpen(false);
   };
 
   const totalOut = items.reduce((s, i) => s + Math.abs(i.amount || 0), 0);
 
+  const inputSt = { fontSize: 12.5, padding: "9px 12px", border: "1px solid rgba(0,0,0,.1)", borderRadius: 10, outline: "none", fontFamily: "inherit", background: "#fff", transition: "border .15s" };
+
   return (
-    <div style={{ background: "#fff", border: "1px solid var(--line)", borderRadius: 14, padding: "20px 22px" }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", flexWrap: "wrap", gap: 8 }}>
-        <div style={{ fontSize: 9, letterSpacing: ".28em", textTransform: "uppercase", fontWeight: 600, color: "var(--mut)" }}>
-          Pohledávky · peníze půjčené ven
+    <div style={{ background: "#fff", border: "1px solid rgba(0,0,0,.06)", borderRadius: 18, overflow: "hidden", boxShadow: "0 1px 3px rgba(0,0,0,.03)" }}>
+      {/* Header */}
+      <div style={{ padding: "20px 24px 16px", display: "flex", justifyContent: "space-between", alignItems: "baseline", flexWrap: "wrap", gap: 8 }}>
+        <div>
+          <div style={{ fontSize: 8.5, letterSpacing: ".26em", textTransform: "uppercase", fontWeight: 700, color: "#4F46E5", opacity: .7 }}>
+            Pohledávky
+          </div>
+          <div style={{ fontSize: 12, color: "var(--mut)", marginTop: 5 }}>peníze půjčené ven — splatnost a připomínky</div>
         </div>
         {totalOut > 0 && (
-          <div style={{ fontSize: 12, color: "var(--mut)" }}>
-            Celkem venku: <b style={{ color: "var(--txt)" }}>{fmtKc(totalOut)}</b>
+          <div style={{ textAlign: "right" }}>
+            <div style={{ fontSize: 8.5, letterSpacing: ".18em", textTransform: "uppercase", color: "var(--mut)", fontWeight: 600, marginBottom: 3 }}>Celkem venku</div>
+            <div style={{ fontFamily: "Fraunces,serif", fontSize: 22, fontWeight: 300, color: "var(--txt)" }}>{fmtKc(totalOut)}</div>
           </div>
         )}
       </div>
 
-      {items.length === 0 && (
-        <div style={{ fontSize: 12.5, color: "var(--mut)", marginTop: 10 }}>Zatím žádná evidovaná pohledávka.</div>
-      )}
-
-      <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 14 }}>
-        {items.map(item => {
-          const meta = parseMeta(item.notes);
-          const dueDate = meta.due ? new Date(meta.due) : null;
-          const daysLeft = dueDate ? Math.ceil((dueDate - new Date(today())) / 86400000) : null;
-          const overdue = daysLeft != null && daysLeft < 0;
-          const soon = daysLeft != null && daysLeft >= 0 && daysLeft <= 7;
-          return (
-            <div key={item.id} style={{ display: "flex", alignItems: "center", gap: 14, padding: "12px 14px", borderRadius: 10, background: overdue ? "#FEF2F2" : soon ? "#FFFBEB" : "#FAFAFC", border: `1px solid ${overdue ? "#FECACA" : soon ? "#FDE68A" : "var(--line2)"}` }}>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: 13, color: "var(--txt)", fontWeight: 500 }}>{item.label}</div>
-                {meta.source && <div style={{ fontSize: 10.5, color: "var(--mut)", marginTop: 2 }}>zdroj: {meta.source}</div>}
-              </div>
-              {dueDate && (
-                <div style={{ textAlign: "right" }}>
-                  <div style={{ fontSize: 10.5, color: "var(--mut)" }}>splatnost {fmtDate(meta.due)}</div>
-                  <div style={{ fontSize: 11, fontWeight: 600, color: overdue ? "#DC2626" : soon ? "#B45309" : "var(--mut)", marginTop: 1 }}>
-                    {overdue ? `po splatnosti ${Math.abs(daysLeft)} dní` : daysLeft === 0 ? "splatnost dnes" : `zbývá ${daysLeft} dní`}
-                  </div>
+      {/* List */}
+      <div style={{ padding: "0 24px" }}>
+        {items.length === 0 && (
+          <div style={{ fontSize: 12.5, color: "var(--mut)", padding: "6px 0 14px" }}>Žádná evidovaná pohledávka — všechno máš doma. 🎉</div>
+        )}
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          {items.map(item => {
+            const meta = parseMeta(item.notes);
+            const dueDate = meta.due ? new Date(meta.due) : null;
+            const daysLeft = dueDate ? Math.ceil((dueDate - new Date(today())) / 86400000) : null;
+            const overdue = daysLeft != null && daysLeft < 0;
+            const soon = daysLeft != null && daysLeft >= 0 && daysLeft <= 7;
+            const dotColor = overdue ? "#DC2626" : soon ? "#D97706" : "#059669";
+            return (
+              <div key={item.id} style={{ display: "flex", alignItems: "center", gap: 16, padding: "14px 18px", borderRadius: 14, background: overdue ? "#FFF8F8" : "#FAFAFC", border: `1px solid ${overdue ? "#FECACA" : soon ? "#FDE68A" : "rgba(0,0,0,.05)"}`, transition: "all .15s" }}>
+                <div style={{ width: 8, height: 8, borderRadius: "50%", background: dotColor, flexShrink: 0, boxShadow: `0 0 0 3px ${dotColor}1A` }} />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 13.5, color: "var(--txt)", fontWeight: 600 }}>{item.label}</div>
+                  {meta.source && <div style={{ fontSize: 10.5, color: "var(--mut)", marginTop: 2 }}>zdroj: {meta.source}</div>}
                 </div>
-              )}
-              <div style={{ fontFamily: "Fraunces,serif", fontSize: 18, fontWeight: 400, color: "var(--txt)", minWidth: 90, textAlign: "right" }}>
-                {fmtKc(Math.abs(item.amount || 0))}
+                {dueDate && (
+                  <div style={{ textAlign: "right", flexShrink: 0 }}>
+                    <div style={{ fontSize: 10.5, color: "var(--mut)" }}>splatnost {fmtDate(meta.due)}</div>
+                    <div style={{ fontSize: 11, fontWeight: 600, color: overdue ? "#DC2626" : soon ? "#B45309" : "#059669", marginTop: 2 }}>
+                      {overdue ? `po splatnosti ${Math.abs(daysLeft)} dní` : daysLeft === 0 ? "splatnost dnes" : `zbývá ${daysLeft} dní`}
+                    </div>
+                  </div>
+                )}
+                <div style={{ fontFamily: "Fraunces,serif", fontSize: 19, fontWeight: 400, color: "var(--txt)", minWidth: 96, textAlign: "right", whiteSpace: "nowrap" }}>
+                  {fmtKc(Math.abs(item.amount || 0))}
+                </div>
+                <button onClick={() => { if (confirm(`Smazat pohledávku „${item.label}"? (např. protože byla splacena)`)) onDeleteFinance(item.id); }}
+                  title="Smazat (splaceno)"
+                  style={{ width: 26, height: 26, borderRadius: 8, border: "1px solid rgba(0,0,0,.08)", background: "#fff", color: "var(--mut)", cursor: "pointer", fontSize: 11, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, transition: "all .12s" }}
+                  onMouseEnter={e => { e.currentTarget.style.borderColor = "#FECACA"; e.currentTarget.style.color = "#DC2626"; }}
+                  onMouseLeave={e => { e.currentTarget.style.borderColor = "rgba(0,0,0,.08)"; e.currentTarget.style.color = "var(--mut)"; }}>✕</button>
               </div>
-              <button onClick={() => onDeleteFinance(item.id)} title="Smazat" style={{ background: "none", border: "none", color: "var(--mut)", cursor: "pointer", fontSize: 13, padding: "0 2px" }}>✕</button>
-            </div>
-          );
-        })}
+            );
+          })}
+        </div>
       </div>
 
-      {!open ? (
-        <div onClick={() => setOpen(true)} style={{ fontSize: 11, color: "var(--mut)", cursor: "pointer", marginTop: 12, opacity: .75 }}>+ přidat pohledávku</div>
-      ) : (
-        <div style={{ display: "flex", gap: 6, alignItems: "center", marginTop: 12, flexWrap: "wrap" }}>
-          <input autoFocus value={form.label} onChange={e => setForm(f => ({ ...f, label: e.target.value }))} placeholder="Komu / za co"
-            style={{ fontSize: 11, padding: "5px 8px", border: "1px solid var(--line2)", borderRadius: 6, flex: 1, minWidth: 120 }} />
-          <input type="number" value={form.amount} onChange={e => setForm(f => ({ ...f, amount: e.target.value }))} placeholder="Kč"
-            style={{ fontSize: 11, padding: "5px 8px", border: "1px solid var(--line2)", borderRadius: 6, width: 84 }} />
-          <input type="date" value={form.due} onChange={e => setForm(f => ({ ...f, due: e.target.value }))}
-            style={{ fontSize: 11, padding: "5px 8px", border: "1px solid var(--line2)", borderRadius: 6, width: 130 }} />
-          <input value={form.source} onChange={e => setForm(f => ({ ...f, source: e.target.value }))} placeholder="Zdroj (volitelně)"
-            style={{ fontSize: 11, padding: "5px 8px", border: "1px solid var(--line2)", borderRadius: 6, width: 130 }} />
-          <button onClick={save} title="Uložit" style={{ fontSize: 13, color: "#059669", border: "none", background: "none", cursor: "pointer", padding: "0 2px" }}>✓</button>
-          <button onClick={() => setOpen(false)} title="Zrušit" style={{ fontSize: 12, color: "var(--mut)", border: "none", background: "none", cursor: "pointer", padding: "0 2px" }}>✕</button>
-        </div>
-      )}
+      {/* Add form */}
+      <div style={{ padding: "14px 24px 20px" }}>
+        {!open ? (
+          <button onClick={() => { setOpen(true); setFormErr(""); }}
+            style={{ width: "100%", padding: "11px 0", borderRadius: 12, border: "1.5px dashed rgba(79,70,229,.25)", background: "rgba(79,70,229,.02)", color: "#4F46E5", fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", transition: "all .15s" }}
+            onMouseEnter={e => { e.currentTarget.style.background = "rgba(79,70,229,.05)"; e.currentTarget.style.borderColor = "rgba(79,70,229,.45)"; }}
+            onMouseLeave={e => { e.currentTarget.style.background = "rgba(79,70,229,.02)"; e.currentTarget.style.borderColor = "rgba(79,70,229,.25)"; }}>
+            + Přidat pohledávku
+          </button>
+        ) : (
+          <div style={{ padding: "16px 18px", borderRadius: 14, background: "#F8F7FF", border: "1px solid rgba(79,70,229,.12)" }}>
+            <div style={{ fontSize: 8.5, letterSpacing: ".22em", textTransform: "uppercase", color: "#4F46E5", fontWeight: 700, marginBottom: 12, opacity: .7 }}>Nová pohledávka</div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 130px", gap: 8, marginBottom: 8 }}>
+              <input autoFocus value={form.label} onChange={e => { setForm(f => ({ ...f, label: e.target.value })); setFormErr(""); }} placeholder="Komu / za co *"
+                onKeyDown={e => { if (e.key === "Enter") save(); if (e.key === "Escape") setOpen(false); }}
+                style={{ ...inputSt, borderColor: formErr && !form.label.trim() ? "#FCA5A5" : "rgba(0,0,0,.1)" }} />
+              <input type="number" value={form.amount} onChange={e => { setForm(f => ({ ...f, amount: e.target.value })); setFormErr(""); }} placeholder="Částka Kč *"
+                onKeyDown={e => { if (e.key === "Enter") save(); if (e.key === "Escape") setOpen(false); }}
+                style={{ ...inputSt, borderColor: formErr && !(Math.abs(Number(form.amount)||0) > 0) ? "#FCA5A5" : "rgba(0,0,0,.1)" }} />
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 12 }}>
+              <input type="date" value={form.due} onChange={e => setForm(f => ({ ...f, due: e.target.value }))} title="Splatnost (volitelně)" style={inputSt} />
+              <input value={form.source} onChange={e => setForm(f => ({ ...f, source: e.target.value }))} placeholder="Zdroj peněz (volitelně)" style={inputSt} />
+            </div>
+            {formErr && <div style={{ fontSize: 11, color: "#DC2626", fontWeight: 600, marginBottom: 10 }}>{formErr}</div>}
+            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+              <button onClick={() => { setOpen(false); setFormErr(""); }}
+                style={{ padding: "8px 16px", borderRadius: 10, border: "1px solid rgba(0,0,0,.1)", background: "#fff", color: "var(--mut)", fontSize: 12, cursor: "pointer", fontFamily: "inherit" }}>Zrušit</button>
+              <button onClick={save} disabled={!valid}
+                style={{ padding: "8px 20px", borderRadius: 10, border: "none", background: valid ? "#4F46E5" : "#C7C5D9", color: "#fff", fontSize: 12, fontWeight: 700, cursor: valid ? "pointer" : "not-allowed", fontFamily: "inherit", transition: "background .15s" }}>
+                Uložit pohledávku
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
@@ -8456,38 +8513,26 @@ function RejstrikyModule({ onNav, clients }) {
 }
 
 function OstatniModule({ dpfoMonths, loanTrackers, loanTransactions, financeItems, onDpfoToggle, onDpfoAdd, onDpfoDelete, onLoanTxAdd, onLoanTxToggle, onLoanTxDelete, onLoanUpdate, onSaveFinance, onDeleteFinance }) {
-  // Jednorázové založení pohledávky — půjčka kamarádovi 22 000 Kč, splatnost 16. 6. 2026, z firemní rezervy
-  const seeded = useRef(false);
-  useEffect(() => {
-    if (seeded.current) return;
-    seeded.current = true;
-    const exists = (financeItems || []).some(i => i.id === "fi_pohledavka_kamarad_22k");
-    if (!exists) {
-      onSaveFinance({
-        id: "fi_pohledavka_kamarad_22k",
-        category: "pohledavka",
-        label: "Půjčka kamarádovi",
-        amount: 22000,
-        notes: JSON.stringify({ due: "2026-06-16", source: "Firemní rezerva" }),
-      });
-    }
-  }, [financeItems, onSaveFinance]);
-
+  // Pozn.: dřívější auto-seed pohledávky odstraněn — mazání musí být trvalé.
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-      <div>
-        <h2 className="serif" style={{ margin: 0 }}>Ostatní</h2>
-        <p style={{ fontSize: 12.5, color: "var(--mut)", marginTop: 4, maxWidth: 720, lineHeight: 1.55 }}>
-          Úvěry, zálohy na daň a pohledávky — věci, které appka loguje a dopočítává sama, jakmile jen odškrtneš, že je máš vyřízené.
+    <div style={{ display: "flex", flexDirection: "column", gap: 22, maxWidth: 1060 }}>
+      {/* ═══ Page header — Legal Tech ═══ */}
+      <div style={{ padding: "6px 0 2px" }}>
+        <div style={{ fontSize: 9, letterSpacing: ".28em", textTransform: "uppercase", color: "#4F46E5", fontWeight: 700, opacity: .55, marginBottom: 10 }}>
+          Závazky · Daně · Pohledávky
+        </div>
+        <h2 className="serif" style={{ margin: 0, fontSize: 30, fontWeight: 400 }}>Ostatní</h2>
+        <p style={{ fontSize: 12.5, color: "var(--mut)", marginTop: 8, maxWidth: 680, lineHeight: 1.6 }}>
+          Úvěry, zálohy na daň a peníze půjčené ven. Appka loguje a dopočítává sama — ty jen odškrtáváš, co je vyřízené.
         </p>
       </div>
 
-      {/* DPFO — zálohy na daň (přesunuto z Přehledu) */}
+      {/* DPFO — zálohy na daň */}
       <DpfoTracker months={dpfoMonths} onToggle={onDpfoToggle} onAdd={onDpfoAdd} onDelete={onDpfoDelete} year={new Date().getFullYear()} />
 
-      {/* Úvěry — Půjčka od táty, Bobnice investiční úvěr (přesunuto z Přehledu) */}
+      {/* Úvěry — Bobnice investiční úvěr, Půjčka od táty */}
       {(loanTrackers || []).length > 0 && (
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(360px, 1fr))", gap: 16 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(380px, 1fr))", gap: 22, alignItems: "start" }}>
           {(loanTrackers || []).map(tracker => (
             <LoanDashTile
               key={tracker.id}
@@ -8502,7 +8547,7 @@ function OstatniModule({ dpfoMonths, loanTrackers, loanTransactions, financeItem
         </div>
       )}
 
-      {/* Pohledávky — peníze půjčené ven, splatnost a připomínky */}
+      {/* Pohledávky — peníze půjčené ven */}
       <PohledavkyPanel financeItems={financeItems} onSaveFinance={onSaveFinance} onDeleteFinance={onDeleteFinance} />
     </div>
   );
