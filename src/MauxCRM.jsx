@@ -2847,7 +2847,7 @@ function SpořákTile({ financeItems, invoices, dpfoMonths, loanTransactions, on
   const zůstatekItem = sporaci.find(i => i.id === "fi_sp_99");
   // Always exclude fi_sp_02 (Bobnice) from manual — comes from loan tracker
   const manualObálky = sporaci.filter(i => i.id !== "fi_sp_99" && i.id !== "fi_sp_01" && i.id !== "fi_sp_02");
-  const dphAuto = invoices.filter(i => i.status === "uhrazena").reduce((s,i) => s+(i.vat_amount||0), 0);
+  const dphAuto = dphObalkaUnsettled(invoices, financeItems); // vybrané DPH minus odpočet období — viz red team 24.7.
   // Net DPFO balance on spořák = paid monthly savings (+) minus FÚ payments (-)
   const dpfoAcc = (dpfoMonths||[]).filter(m => m.is_paid).reduce((s,m) => s+(m.amount||0), 0);
   const bobloanTxs = loanTransactions?.loan_bobnice || [];
@@ -4240,12 +4240,40 @@ function escrowTotalTax(escrows) {
   }, 0);
 }
 
+// DPH obálka na spořáku — kolik z vybraného DPH je skutečně POTŘEBA držet pro finančák.
+// (Red team 24.7.2026: dřív se držela CELÁ vybraná DPH z uhrazených faktur a ignoroval se
+// odpočet z účtenek → rezerva byla každý měsíc mezi 1. a 25. podhodnocená o výši odpočtu.)
+// Živý výpočet, samo-posouvající se přes měsíce — žádný ruční krok:
+//   • faktury se statusem "uhrazena" (klient zaplatil, DPH zatím neodvedeno FÚ) se seskupí
+//     podle zdaňovacího období (DUZP; bez DUZP → poslední den měsíce před vystavením),
+//   • od DPH každého období se odečte odpočet z účtenek uplatněný pro totéž období
+//     (log v fi_dph_odpocet — stejný zdroj jako dlaždice v Daních),
+//   • jakmile 25. zaplatíš a faktury se přepnou na "dph_odvedeno", období z obálky samo zmizí,
+//     nové období se s novými uhrazenými fakturami samo objeví.
+function dphObalkaUnsettled(invoices, financeItems) {
+  const periodKey = (i) => ((i.duzp || lastDayPrevMonth(i.issue_date)) + "").slice(0, 7);
+  const vatByPeriod = {};
+  (invoices || []).filter(i => i.status === "uhrazena").forEach(i => {
+    const k = periodKey(i);
+    vatByPeriod[k] = (vatByPeriod[k] || 0) + (i.vat_amount || 0);
+  });
+  let log = [];
+  try {
+    const m = JSON.parse(((financeItems || []).find(x => x.id === "fi_dph_odpocet")?.notes) || "{}");
+    log = Array.isArray(m.log) ? m.log : [];
+  } catch {}
+  return Object.entries(vatByPeriod).reduce((sum, [k, vat]) => {
+    const odp = log.filter(e => (e.date || "").startsWith(k)).reduce((s, e) => s + (e.vat || 0), 0);
+    return sum + Math.max(vat - odp, 0); // přesah odpočtu = nadměrný odpočet (vrací se) — obálku nesnižuje pod nulu
+  }, 0);
+}
+
 // Firemní rezerva = co reálně leží volné na spořicím účtu po odečtení vyhrazených "obálek"
 // (DPH, DPFO, Bobnice, daň z úschov, ruční rezervy). Dřív duplikováno samostatně ve FirmaBar
 // i MajetekBar (riziko, že se čísla časem rozejdou) — od 29.6.2026 jeden zdroj pravdy.
 function computeFirmaRezerva(financeItems, invoices, dpfoMonths, loanTransactions, escrows) {
   const sporBal  = (financeItems||[]).find(i => i.id === "fi_sp_99")?.amount || 0;
-  const dphF     = (invoices||[]).filter(i => i.status === "uhrazena").reduce((s,i) => s+(i.vat_amount||0), 0);
+  const dphF     = dphObalkaUnsettled(invoices, financeItems); // vybrané DPH minus odpočet období
   const dpfoF    = (dpfoMonths||[]).filter(m => m.is_paid).reduce((s,m) => s+(m.amount||0), 0);
   const boblTxsF = loanTransactions?.loan_bobnice || [];
   const boblF    = boblTxsF.reduce((s,t) => s+t.amount, 0);
@@ -5810,7 +5838,7 @@ function EscrowList({ escrows, onNew, onEdit, onDelete, onMarkPaid, onPayment, l
 function MiniSpořák({ financeItems, invoices, dpfoMonths, loanTransactions, escrows, onSaveFinance }) {
   const sporaci = (financeItems||[]).filter(i => i.category === "sporaci" && i.notes !== "SKIP_DISPLAY");
   const zItem = sporaci.find(i => i.id === "fi_sp_99");
-  const dphAuto = invoices.filter(i => i.status === "uhrazena").reduce((s,i) => s+(i.vat_amount||0), 0);
+  const dphAuto = dphObalkaUnsettled(invoices, financeItems); // vybrané DPH minus odpočet období — viz red team 24.7.
   // Net DPFO balance on spořák = paid monthly savings (+) minus FÚ payments (-)
   const dpfoAcc = (dpfoMonths||[]).filter(m => m.is_paid).reduce((s,m) => s+(m.amount||0), 0);
   const bobloanTxs = loanTransactions?.loan_bobnice || [];
@@ -6341,7 +6369,7 @@ function SporakRingTile({ financeItems, onSaveFinance, invoices, dpfoMonths, loa
   const sporaci    = (financeItems||[]).filter(i => i.category === "sporaci" && i.notes !== "SKIP_DISPLAY");
   const zItem      = sporaci.find(i => i.id === "fi_sp_99");
   const actualBal  = zItem?.amount || 0;
-  const dphAuto    = (invoices||[]).filter(i => i.status === "uhrazena").reduce((s,i) => s+(i.vat_amount||0), 0);
+  const dphAuto    = dphObalkaUnsettled(invoices, financeItems); // vybrané DPH minus odpočet období
   const dpfoAcc    = (dpfoMonths||[]).filter(m => m.is_paid).reduce((s,m) => s+(m.amount||8050), 0);
   const bobloanTxs = loanTransactions?.loan_bobnice || [];
   const bobloanBal = bobloanTxs.reduce((s,t) => s+t.amount, 0);
@@ -6457,7 +6485,7 @@ function TriGrafyPanel({ financeItems, onSaveFinance, invoices, dpfoMonths, loan
   const sporaci    = (financeItems||[]).filter(i => i.category === "sporaci" && i.notes !== "SKIP_DISPLAY");
   const zItem      = sporaci.find(i => i.id === "fi_sp_99");
   const actualBal  = zItem?.amount || 0;
-  const dphAuto    = (invoices||[]).filter(i => i.status === "uhrazena").reduce((s,i) => s+(i.vat_amount||0), 0);
+  const dphAuto    = dphObalkaUnsettled(invoices, financeItems); // vybrané DPH minus odpočet období
   const dpfoAcc    = (dpfoMonths||[]).filter(m => m.is_paid).reduce((s,m) => s+(m.amount||8050), 0);
   const bobloanTxs = loanTransactions?.loan_bobnice || [];
   const bobloanBal = bobloanTxs.reduce((s,t) => s+t.amount, 0);
@@ -9122,7 +9150,7 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
   const mRevWithVat = mRev + mRevVatAmt;
 
   // DPH spořák — uhrazené faktury, DPH ještě neodvedeno
-  const dphReserved = invoices.filter(i => i.status === "uhrazena").reduce((s,i) => s+(i.vat_amount||0), 0);
+  const dphReserved = dphObalkaUnsettled(invoices, financeItems); // vybrané DPH minus odpočet období
 
   // Unbilled
   const unbilled = workEntries.filter(e => !e.invoice_id);
@@ -9808,7 +9836,7 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
                   const sporaciItems = (financeItems||[]).filter(i => i.category === "sporaci" && i.notes !== "SKIP_DISPLAY");
                   const zItemS     = sporaciItems.find(i => i.id === "fi_sp_99");
                   const sporBalS   = zItemS?.amount || 0;
-                  const dphAutoS   = (invoices||[]).filter(i => i.status === "uhrazena").reduce((s,i) => s+(i.vat_amount||0), 0);
+                  const dphAutoS   = dphObalkaUnsettled(invoices, financeItems); // vybrané DPH minus odpočet období
                   const dpfoAccS   = (dpfoMonths||[]).filter(m => m.is_paid).reduce((s,m) => s+(m.amount||0), 0);
                   const bobTxsS    = loanTransactions?.loan_bobnice || [];
                   const bobloanS   = bobTxsS.reduce((s,t) => s+t.amount, 0);
