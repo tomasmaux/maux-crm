@@ -4264,9 +4264,10 @@ function dphObalkaUnsettled(invoices, financeItems) {
     refunded = m.refunded || {};
   } catch {}
   return Object.entries(vatByPeriod).reduce((sum, [k, vat]) => {
-    // Období s "vratka obdržena" — FÚ odpočet už proplatil přímo na účet, platba Čechmanové
-    // bude v PLNÉ výši vybraného DPH → odpočet obálku nesnižuje (jinak by rezerva lhala nahoru).
-    const odp = refunded[k] ? 0 : log.filter(e => (e.date || "").startsWith(k)).reduce((s, e) => s + (e.vat || 0), 0);
+    // Doklady s "vratka obdržena" (e.vratka, per doklad) — FÚ jejich DPH už proplatil přímo
+    // na účet, takže NEsnižují platbu → do odpočtu obálky se nepočítají (jinak by rezerva
+    // lhala nahoru). refunded[k] = starší celoobdobní flag, ponechán pro kompatibilitu.
+    const odp = refunded[k] ? 0 : log.filter(e => !e.vratka && (e.date || "").startsWith(k)).reduce((s, e) => s + (e.vat || 0), 0);
     return sum + Math.max(vat - odp, 0); // přesah odpočtu = nadměrný odpočet (vrací se) — obálku nesnižuje pod nulu
   }, 0);
 }
@@ -9246,10 +9247,10 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
     catch { return { log: [], refunded: {} }; }
   })();
   const dphOdpocetLogVse = dphOdpMeta.log;
-  // "Vratka obdržena" za toto období → benefit odpočtu už fyzicky přišel na účet (FÚ proplatil
-  // přímo) — do projekce příštího měsíce se NEsmí počítat znovu, jinak by se počítal dvakrát.
+  // Doklady s "vratka obdržena" (e.vratka) → benefit už fyzicky přišel na účet — do projekce
+  // příštího měsíce se NEsmí počítat znovu, jinak by se počítal dvakrát.
   const dphOdpocet = dphOdpMeta.refunded[thisMonth] ? 0
-    : dphOdpocetLogVse.filter(e => (e.date||"").startsWith(thisMonth)).reduce((s,e)=>s+(e.vat||0),0);
+    : dphOdpocetLogVse.filter(e => !e.vratka && (e.date||"").startsWith(thisMonth)).reduce((s,e)=>s+(e.vat||0),0);
   const nadmernyOdpocet = Math.min(dphOdpocet, dphFakturyMesic);
   // "Finance v následujícím měsíci" — SOUČET položek skutečně zobrazených v "Příjmy měsíční"
   // (manuální příjmy + nevyfakturováno + čistý úrok z úschov + nadměrný odpočet DPH) MÍNUS výdaje zobrazené v Cash flow.
@@ -12080,18 +12081,34 @@ function DphKalkulacka({ odpItem, onSaveFinance }) {
   const log = metaK.log;
   const refundedMap = metaK.refunded;
 
-  // Vratka obdržena — FÚ odpočet za dané období proplatil přímo na účet. Doklady zůstávají
-  // v evidenci, ale od té chvíle se NIKDE nepočítají do peněz (obálka, k úhradě, Bilance).
-  const toggleRefund = (key) => {
-    const next = { ...refundedMap };
-    if (next[key]) {
-      if (!confirm("Zrušit označení 'vratka obdržena'? Odpočet za období se zase začne počítat do plateb a Bilance.")) return;
-      delete next[key];
-    } else {
-      if (!confirm("Označit období jako 'vratka obdržena'? Doklady zůstanou v evidenci, ale jejich DPH už nebude snižovat platbu Čechmanové ani se počítat jako příjem v Bilanci (peníze už máš na účtu).")) return;
-      next[key] = { date: today() };
-    }
-    onSaveFinance({ ...odpItem, notes: JSON.stringify({ ...metaK, refunded: next }) });
+  // Vratka obdržena — PER DOKLAD (Tom 25.7.: "claude je výjimka — ostatní účtenky měsíce
+  // vratku nemají"). FÚ DPH z konkrétního dokladu proplatil přímo na účet → doklad zůstává
+  // v evidenci, ale jeho DPH se NIKDE nepočítá do peněz (obálka, k úhradě, Bilance).
+  // Flag žije přímo na položce logu jako e.vratka = "YYYY-MM-DD".
+  const toggleEntryVratka = (id) => {
+    const nextLog = log.map(e => {
+      if (e.id !== id) return e;
+      if (e.vratka) { const { vratka, ...rest } = e; return rest; }
+      return { ...e, vratka: today() };
+    });
+    onSaveFinance({ ...odpItem, notes: JSON.stringify({ ...metaK, log: nextLog }) });
+  };
+  // Hromadná zkratka pro celý měsíc (kdyby někdy přišla vratka za celé období najednou)
+  const toggleRefundMonth = (key) => {
+    const inMonth = log.filter(e => (e.date || "").startsWith(key));
+    if (inMonth.length === 0) return;
+    const allSet = inMonth.every(e => e.vratka);
+    const msg = allSet
+      ? "Zrušit označení vratky u VŠECH dokladů tohoto měsíce?"
+      : "Označit VŠECHNY doklady měsíce jako 'vratka obdržena'? (Jednotlivé doklady jde označovat i samostatně v rozbaleném detailu měsíce.)";
+    if (!confirm(msg)) return;
+    const d = today();
+    const nextLog = log.map(e => {
+      if (!(e.date || "").startsWith(key)) return e;
+      if (allSet) { const { vratka, ...rest } = e; return rest; }
+      return { ...e, vratka: e.vratka || d };
+    });
+    onSaveFinance({ ...odpItem, notes: JSON.stringify({ ...metaK, log: nextLog }) });
   };
 
   const g = Number(gross) || 0;
@@ -12288,39 +12305,64 @@ function DphKalkulacka({ odpItem, onSaveFinance }) {
             const isOpen = expanded === grp.key || (expanded === null && gi === 0);
             return (
               <div key={grp.key} style={{ border: "1px solid var(--line)", borderRadius: 10, overflow: "hidden" }}>
+                {(() => {
+                  const refItems = grp.items.filter(e => e.vratka);
+                  const refSum = refItems.reduce((s,e)=>s+(e.vat||0),0);
+                  const allRef = refItems.length === grp.items.length && grp.items.length > 0;
+                  return (
                 <div onClick={() => setExpanded(isOpen ? "_zaviti_" : grp.key)}
-                  style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 14px", cursor: "pointer", background: refundedMap[grp.key] ? "#F0FDF4" : isOpen ? "#F5F3FF" : "#FAFAFC" }}>
+                  style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 14px", cursor: "pointer", background: allRef ? "#F0FDF4" : isOpen ? "#F5F3FF" : "#FAFAFC" }}>
                   <span style={{ fontSize: 12, color: "var(--txt)", fontWeight: 600, display:"flex", alignItems:"center", gap:7 }}>
                     <span style={{ color:"#3518A5", fontSize:10 }}>{isOpen ? "▾" : "▸"}</span>
                     {groupLabel(grp.key)}
                     <span style={{ color: "var(--mut)", fontWeight: 400, fontSize:10.5 }}>· {grp.items.length}×</span>
+                    {refItems.length > 0 && !allRef && (
+                      <span style={{ fontSize:9, fontWeight:700, color:"#059669", background:"#ECFDF5", border:"1px solid #A7F3D0", borderRadius:20, padding:"2px 8px", whiteSpace:"nowrap" }}>
+                        💰 {refItems.length}× vráceno · {fmtKc(refSum)}
+                      </span>
+                    )}
                   </span>
                   <span style={{ display:"flex", alignItems:"center", gap:10 }}>
-                    {refundedMap[grp.key] ? (
-                      <button onClick={(ev) => { ev.stopPropagation(); toggleRefund(grp.key); }}
-                        title={`Vratka obdržena ${fmtDate(refundedMap[grp.key].date)} — odpočet za toto období se nepočítá do plateb ani do Bilance. Klikni pro zrušení.`}
+                    {allRef ? (
+                      <button onClick={(ev) => { ev.stopPropagation(); toggleRefundMonth(grp.key); }}
+                        title="Všechny doklady měsíce mají vratku obdrženou — nepočítají se do plateb ani Bilance. Klikni pro hromadné zrušení."
                         style={{ fontSize:9.5, fontWeight:700, color:"#059669", background:"#ECFDF5", border:"1px solid #A7F3D0", borderRadius:20, padding:"3px 10px", cursor:"pointer", whiteSpace:"nowrap" }}>
-                        💰 vratka obdržena
+                        💰 vráceno vše
                       </button>
                     ) : (
-                      <button onClick={(ev) => { ev.stopPropagation(); toggleRefund(grp.key); }}
-                        title="Přišla ti za toto období vratka odpočtu přímo na účet? Označ — doklady zůstanou v evidenci, ale DPH se přestane počítat do plateb a Bilance."
-                        style={{ fontSize:9.5, fontWeight:600, color:"var(--mut)", background:"none", border:"1px dashed rgba(0,0,0,.18)", borderRadius:20, padding:"3px 10px", cursor:"pointer", whiteSpace:"nowrap", opacity:.75 }}>
-                        vratka?
+                      <button onClick={(ev) => { ev.stopPropagation(); toggleRefundMonth(grp.key); }}
+                        title="Hromadně: označit VŠECHNY doklady měsíce jako vratka obdržena. Jednotlivé doklady označíš v rozbaleném detailu."
+                        style={{ fontSize:9.5, fontWeight:600, color:"var(--mut)", background:"none", border:"1px dashed rgba(0,0,0,.18)", borderRadius:20, padding:"3px 10px", cursor:"pointer", whiteSpace:"nowrap", opacity:.7 }}>
+                        vratka (vše)?
                       </button>
                     )}
-                    <b className="maux-num" style={{ fontSize: 13, color: refundedMap[grp.key] ? "#059669" : "#3518A5", textDecoration: refundedMap[grp.key] ? "none" : "none" }}>
-                      {refundedMap[grp.key] ? `✓ ${fmtKc(grp.sum)}` : fmtKc(grp.sum)}
+                    <b className="maux-num" style={{ fontSize: 13, color: allRef ? "#059669" : "#3518A5" }}>
+                      {allRef ? `✓ ${fmtKc(grp.sum)}` : fmtKc(grp.sum)}
                     </b>
                   </span>
                 </div>
+                  );
+                })()}
                 {isOpen && (
                   <div style={{ padding: "8px 14px 12px", display: "flex", flexDirection: "column", gap: 5, background:"#fff" }}>
                     {grp.items.map(e => (
                       <div key={e.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 11, color: "var(--mut)", padding:"3px 0", borderBottom:"1px solid var(--line)" }}>
-                        <span>{fmtDate(e.date)} · {e.label} · {fmtKc(e.gross)} ({e.rate} % DPH)</span>
-                        <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                          <b className="maux-num" style={{ color: "#3518A5" }}>+{fmtKc(e.vat)}</b>
+                        <span style={{ opacity: e.vratka ? .55 : 1 }}>{fmtDate(e.date)} · {e.label} · {fmtKc(e.gross)} ({e.rate} % DPH)</span>
+                        <span style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
+                          {e.vratka ? (
+                            <button onClick={() => toggleEntryVratka(e.id)}
+                              title={`Vratka obdržena ${fmtDate(e.vratka)} — DPH z tohoto dokladu se nepočítá do plateb ani Bilance (peníze už máš). Klikni pro zrušení.`}
+                              style={{ fontSize:8.5, fontWeight:700, color:"#059669", background:"#ECFDF5", border:"1px solid #A7F3D0", borderRadius:20, padding:"2px 8px", cursor:"pointer", whiteSpace:"nowrap" }}>
+                              💰 vráceno
+                            </button>
+                          ) : (
+                            <button onClick={() => toggleEntryVratka(e.id)}
+                              title="FÚ ti DPH z TOHOTO dokladu už proplatil přímo na účet? Označ — doklad zůstane v evidenci, ale přestane se počítat do plateb a Bilance."
+                              style={{ fontSize:8.5, color:"var(--mut)", background:"none", border:"1px dashed rgba(0,0,0,.16)", borderRadius:20, padding:"2px 8px", cursor:"pointer", whiteSpace:"nowrap", opacity:.55 }}>
+                              vratka?
+                            </button>
+                          )}
+                          <b className="maux-num" style={{ color: e.vratka ? "#059669" : "#3518A5", textDecoration: e.vratka ? "line-through" : "none", opacity: e.vratka ? .65 : 1 }}>+{fmtKc(e.vat)}</b>
                           <button onClick={() => removeEntry(e.id)} title="Odebrat z odpočtu i z archivu" style={{ background: "none", border: "none", color: "var(--mut)", cursor: "pointer", fontSize: 10, opacity: .6 }}>✕</button>
                         </span>
                       </div>
@@ -12378,7 +12420,7 @@ function DphOdpocetTile({ invoices, financeItems, onSaveFinance, onNav, dashNadm
 
   // Odhad pro běžící měsíc — počítáme jen z odpočtu uplatněného PRO TENTO měsíc (ne kumulativně přes všechny),
   // jinak by číslo bylo zkreslené součtem starších měsíců (přesně na tohle jsi upozornil).
-  const odpocetThisRaw = log.filter(e => (e.date||"").startsWith(thisMonthKey)).reduce((s,e)=>s+(e.vat||0),0);
+  const odpocetThisRaw = log.filter(e => !e.vratka && (e.date||"").startsWith(thisMonthKey)).reduce((s,e)=>s+(e.vat||0),0);
   const odpocetThis = refundedMap[thisMonthKey] ? 0 : odpocetThisRaw;
   const kUhrade = Math.max(dphFaktury - odpocetThis, 0);
 
@@ -12394,7 +12436,7 @@ function DphOdpocetTile({ invoices, financeItems, onSaveFinance, onNav, dashNadm
   // pošle k úhradě tento měsíc"). Spočítáme to ze stejných dvou věcí, ze kterých vychází i ona:
   // DPH z faktur vystavených v {prevMonthName} a součet odpočtu z účtenek/archivu uplatněných za {prevMonthName}.
   const dphFakturyPrev = (invoices||[]).filter(i => vatPeriodKeyOf(i) === prevMonthKey).reduce((s,i)=>s+(i.vat_amount||0),0);
-  const odpocetPrevRaw = log.filter(e => (e.date||"").startsWith(prevMonthKey)).reduce((s,e)=>s+(e.vat||0),0);
+  const odpocetPrevRaw = log.filter(e => !e.vratka && (e.date||"").startsWith(prevMonthKey)).reduce((s,e)=>s+(e.vat||0),0);
   const odpocetPrev = refundedMap[prevMonthKey] ? 0 : odpocetPrevRaw;
   const kUhradePrev = Math.max(dphFakturyPrev - odpocetPrev, 0);
 
