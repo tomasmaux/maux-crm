@@ -10978,10 +10978,11 @@ function VykazyCalendar({ workEntries, escrows, dense = false, onOpenFull, onAdd
   const [hoverDay, setHoverDay] = useState(null);
 
   // Indigo phosphor — barva čísel z výkazů; ESC — zlatá pro denní úrok z úschov (ať vydělávám i ve dnech bez výkazu)
-  // "Tichý papír": kalendář už nesvítí. Jedno tlumené indigo pro práci, teplá šedo-zlatá
-  // pro úschovy. Žádné textShadow glow — čitelnost dělá typografie, ne záře.
-  const PHOS = "#4F46E5";
-  const ESC  = "#A1834A";
+  // Indigo phosphor — barva čísel z výkazů; ESC — zlatá pro denní úrok z úschov.
+  // Pozn.: kalendář si záměrně DRŽÍ svit i barevné dlaždice, i když zbytek Přehledu je
+  // "tichý papír" — Tom 26.7.2026: "tato část se mi líbila víc předtím".
+  const PHOS = "#5B4FE5";
+  const ESC = "#B8923D";
 
   const base = new Date();
   const viewDate = new Date(base.getFullYear(), base.getMonth() - monthOffset, 1);
@@ -11070,7 +11071,7 @@ function VykazyCalendar({ workEntries, escrows, dense = false, onOpenFull, onAdd
           <div>
             {!dense && <div style={{fontSize:9,letterSpacing:".26em",textTransform:"uppercase",fontWeight:700,color:"var(--mut)",marginBottom:5}}>ZAPSANÁ PRÁCE — DEN PO DNI</div>}
             <div style={{display:"flex",alignItems:"baseline",gap:8}}>
-              <span style={{fontFamily:"Fraunces,serif",fontWeight:400,fontSize:dense?20:26,color:"var(--txt)",lineHeight:1}}>{monthNamesFull[m]} {y}</span>
+              <span style={{fontWeight:600,fontSize:dense?20:26,color:"var(--ink)",lineHeight:1}}>{monthNamesFull[m]} {y}</span>
               {monthOffset !== 0 && (
                 <span style={{fontSize:10.5,color:PHOS,cursor:"pointer",textDecoration:"underline"}} onClick={() => { setMonthOffset(0); setSelectedDay(null); }}>zpět na dnešek</span>
               )}
@@ -11078,7 +11079,7 @@ function VykazyCalendar({ workEntries, escrows, dense = false, onOpenFull, onAdd
           </div>
           <div style={{display:"flex",alignItems:"center",gap:6}}>
             {onOpenFull && (
-              <span style={{fontSize:11,color:"#4F46E5",fontWeight:600,cursor:"pointer",marginRight:4}} onClick={onOpenFull}>Otevřít →</span>
+              <span style={{fontSize:11,color:"#3518A5",fontWeight:700,cursor:"pointer",marginRight:4}} onClick={onOpenFull}>Otevřít →</span>
             )}
             <button onClick={() => { setMonthOffset(o => o + 1); setSelectedDay(null); }}
               style={{background:"none",border:"none",cursor:"pointer",color:"var(--mut)",fontSize:dense?16:19,padding:"3px 8px",lineHeight:1}}
@@ -11090,7 +11091,7 @@ function VykazyCalendar({ workEntries, escrows, dense = false, onOpenFull, onAdd
           </div>
         </div>
         <div style={{marginTop:dense?8:13,display:"flex",alignItems:"baseline",gap:8,flexWrap:"wrap"}}>
-          <span style={{fontFamily:"Fraunces,serif",fontSize:dense?30:44,fontWeight:300,letterSpacing:"-.01em",color:(monthTotal+escMonthTotal)>0?"var(--txt)":"var(--mut)",lineHeight:1}}>{(monthTotal+escMonthTotal)>0?"+":""}{fmtKc(monthTotal+escMonthTotal)}</span>
+          <span className="maux-num" style={{fontSize:dense?32:46,fontWeight:800,letterSpacing:"-.01em",color:(monthTotal+escMonthTotal)>0?PHOS:"var(--mut)",lineHeight:1,textShadow:(monthTotal+escMonthTotal)>0?`0 0 20px ${PHOS}40`:"none"}}>{(monthTotal+escMonthTotal)>0?"+":""}{fmtKc(monthTotal+escMonthTotal)}</span>
           {!dense && <span style={{fontSize:12,color:"var(--mut)"}}>za měsíc, bez DPH</span>}
         </div>
         {!dense && (monthTotal > 0 || escMonthTotal > 0) && (
@@ -11098,13 +11099,13 @@ function VykazyCalendar({ workEntries, escrows, dense = false, onOpenFull, onAdd
             {monthTotal > 0 && (
               <div style={{display:"flex",alignItems:"center",gap:5}}>
                 <span style={{width:7,height:7,borderRadius:"50%",background:PHOS}} />
-                <span style={{fontSize:11.5,color:"var(--mut)"}}>{fmtKc(monthTotal)} práce</span>
+                <span style={{fontSize:11.5,color:PHOS,fontWeight:600}}>{fmtKc(monthTotal)} práce</span>
               </div>
             )}
             {escMonthTotal > 0 && (
               <div style={{display:"flex",alignItems:"center",gap:5}}>
                 <span style={{width:7,height:7,borderRadius:"50%",background:ESC}} />
-                <span style={{fontSize:11.5,color:"var(--mut)"}}>{fmtKc(Math.round(escMonthTotal))} úschovy</span>
+                <span style={{fontSize:11.5,color:ESC,fontWeight:600}}>{fmtKc(Math.round(escMonthTotal))} úschovy</span>
               </div>
             )}
           </div>
@@ -11115,7 +11116,7 @@ function VykazyCalendar({ workEntries, escrows, dense = false, onOpenFull, onAdd
       <div style={{padding: dense ? "12px 14px 12px" : "20px 26px 24px", flex: 1, display: "flex", flexDirection: "column", minHeight: 0}}>
         <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:dense?2:8,marginBottom:dense?6:12}}>
           {["Po","Út","St","Čt","Pá","So","Ne"].map(n => (
-            <div key={n} style={{textAlign:"center",fontSize:dense?9.5:10,color:"var(--mut)",fontWeight:600,letterSpacing:".12em",textTransform:"uppercase",opacity:.65}}>{n}</div>
+            <div key={n} style={{textAlign:"center",fontSize:dense?9.5:11,color:"var(--mut)",fontWeight:700,letterSpacing:".03em"}}>{n}</div>
           ))}
         </div>
         <div style={{flex:1, display:"flex", flexDirection:"column", gap:dense?2:8, minHeight:0}}>
@@ -11139,7 +11140,7 @@ function VykazyCalendar({ workEntries, escrows, dense = false, onOpenFull, onAdd
                     title={cellTitle}
                     style={{
                       border: "none",
-                      background: isHov ? "rgba(79,70,229,.05)" : amt > 0 ? "rgba(79,70,229,.035)" : "none",
+                      background: amt > 0 ? "rgba(91,79,229,.09)" : (escAmt > 0 ? "rgba(184,146,61,.08)" : (isHov ? "rgba(91,79,229,.06)" : "none")),
                       borderRadius: dense ? 8 : 14, position:"relative",
                       display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:dense?1:3,
                       cursor: canAct ? "pointer" : "default",
@@ -11153,17 +11154,18 @@ function VykazyCalendar({ workEntries, escrows, dense = false, onOpenFull, onAdd
                       }}/>
                     )}
                     <span style={{
-                      minHeight: dense?11:17, fontSize:dense?9.5:13.5, fontWeight:600, letterSpacing:"-.01em",
+                      minHeight: dense?11:17, fontSize:dense?9.5:15.5, fontWeight:800, letterSpacing:"-.01em",
                       fontVariantNumeric:"tabular-nums", lineHeight:1, whiteSpace:"nowrap",
                       color: amt>0 ? PHOS : "transparent",
+                      textShadow: amt>0 ? `0 0 9px ${PHOS}55` : "none",
                     }}>
                       {amt>0 ? `+${fmtKc(amt)}` : "0"}
                     </span>
                     {!dense && (
                       <span style={{
-                        minHeight: 11, fontSize:9, fontWeight:500, letterSpacing:"-.01em",
+                        minHeight: 11, fontSize:9.5, fontWeight:700, letterSpacing:"-.01em",
                         fontVariantNumeric:"tabular-nums", lineHeight:1, whiteSpace:"nowrap",
-                        color: escAmt>0 ? ESC : "transparent", opacity:.75,
+                        color: escAmt>0 ? ESC : "transparent",
                       }}>
                         {escAmt>0 ? `+${fmtKc(Math.round(escAmt))}` : "0"}
                       </span>
@@ -11171,9 +11173,9 @@ function VykazyCalendar({ workEntries, escrows, dense = false, onOpenFull, onAdd
                     <span style={{
                       width: circleSize, height: circleSize, borderRadius:"50%",
                       display:"flex", alignItems:"center", justifyContent:"center",
-                      fontSize: dense?11.5:15, fontWeight: isToday?600:400, lineHeight:1,
-                      background: isToday ? "#4F46E5" : "transparent",
-                      color: isToday ? "#fff" : "var(--txt)",
+                      fontSize: dense?11.5:16, fontWeight: isToday?700:500, lineHeight:1,
+                      background: isToday ? "#3518A5" : "transparent",
+                      color: isToday ? "#fff" : "var(--ink)",
                       boxShadow: isSel && !isToday ? "inset 0 0 0 1.5px " + PHOS : "none",
                     }}>{d}</span>
                   </button>
@@ -11186,7 +11188,7 @@ function VykazyCalendar({ workEntries, escrows, dense = false, onOpenFull, onAdd
 
       {/* Detail vybraného dne — jen plná verze */}
       {!dense && selectedDay && (
-        <div style={{borderTop:"1px solid rgba(0,0,0,.05)",padding:"14px 26px 20px",background:"#FBFBFD",flexShrink:0,maxHeight:200,overflowY:"auto"}}>
+        <div style={{borderTop:"1px solid rgba(0,0,0,.05)",padding:"14px 26px 20px",background:"#F8F7FF",flexShrink:0,maxHeight:200,overflowY:"auto"}}>
           <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:10}}>
             <div style={{fontSize:11,letterSpacing:".08em",color:PHOS,fontWeight:700,textTransform:"uppercase"}}>
               {fmtDate(selectedDay)}{selEntries.length > 0 ? ` · ${selEntries.length}× výkaz` : ""}
