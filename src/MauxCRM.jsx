@@ -2861,7 +2861,7 @@ function SpořákTile({ financeItems, invoices, dpfoMonths, loanTransactions, on
   const allItems = [
     { label: "DPH", amount: dphAuto, color: "#3518A5", auto: true },
     { label: "DPFO", amount: dpfoAcc, color: "#F59E0B", auto: true },
-    ...(bobniceBal > 0 ? [{ label: "Bobnice", amount: bobniceBal, color: "#059669", auto: true }] : []),
+    ...(bobniceBal > 0 ? [{ label: "Bobnice", amount: bobniceBal, color: "#818CF8", auto: true }] : []),
     ...manualObálky.map((o,i) => ({ id:o.id, label: o.label, amount: o.amount||0, color: ["#7C3AED","#0EA5E9","#DC2626","#6B7280"][i%4], auto: false })),
   ].filter(i => i.amount > 0);
 
@@ -5857,7 +5857,7 @@ function MiniSpořák({ financeItems, invoices, dpfoMonths, loanTransactions, es
   const allEnvelopes = [
     { label: "DPH",          amount: dphAuto,   color: "#3518A5", auto: true },
     { label: "DPFO 2026",    amount: dpfoAcc,   color: "#F59E0B", auto: true },
-    ...(bobBal > 0 ? [{ label: "Bobnice", amount: bobBal, color: "#059669", auto: true }] : []),
+    ...(bobBal > 0 ? [{ label: "Bobnice", amount: bobBal, color: "#818CF8", auto: true }] : []),
     { label: "Daň z úschov", amount: danUschov, color: "#A8A29E", auto: true },
     ...manualObálky.map((o,i) => ({ label: o.label, amount: o.amount||0, color: ["#7C3AED","#0EA5E9","#DC2626","#6B7280"][i%4], auto: false })),
   ].filter(e => e.amount > 0);
@@ -6274,8 +6274,8 @@ function InteractiveRing({ segments, size = 190, thickness = 20, glowColor, cent
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 32 }}>
       <div style={{ position: "relative", width: size, height: size, flexShrink: 0 }}>
-        <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} style={{ filter: `drop-shadow(0 10px 28px ${glowColor}40)`, transform: "rotate(-90deg)", overflow: "visible" }}>
-          <circle cx={size/2} cy={size/2} r={r} fill="none" stroke="rgba(0,0,0,0.055)" strokeWidth={thickness} />
+        <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} style={{ transform: "rotate(-90deg)", overflow: "visible" }}>
+          <circle cx={size/2} cy={size/2} r={r} fill="none" stroke="rgba(0,0,0,0.04)" strokeWidth={thickness} />
           {arcs.map((a, i) => (
             <circle key={i} cx={size/2} cy={size/2} r={r} fill="none"
               stroke={a.color} strokeWidth={hover === i ? thickness + 6 : thickness} strokeLinecap="butt"
@@ -6291,15 +6291,15 @@ function InteractiveRing({ segments, size = 190, thickness = 20, glowColor, cent
         <div style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", textAlign: "center", padding: "0 8px", pointerEvents: "none", overflow: "visible" }}>
           {active ? (
             <>
-              <div style={{ fontSize: 10, letterSpacing: ".12em", color: active.color, fontWeight: 800, textTransform: "uppercase", opacity: 0.8, marginBottom: 6, maxWidth: size - 50, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{active.label}</div>
-              <div className="maux-num" style={{ fontSize: Math.min(size > 160 ? 26 : 19, size * 0.135, String(fmtKc(active.value)||"").length > 10 ? (size > 160 ? 20 : 15) : (size > 160 ? 26 : 19)), fontWeight: 600, color: active.color, lineHeight: 1, whiteSpace: "nowrap" }}>{fmtKc(active.value)}</div>
-              <div style={{ fontSize: 11.5, color: active.color, opacity: 0.65, marginTop: 6, fontWeight: 600 }}>{Math.round(active.frac * 100)} %</div>
+              <div style={{ fontSize: 8.5, letterSpacing: ".2em", color: "var(--mut)", fontWeight: 700, textTransform: "uppercase", opacity: 0.7, marginBottom: 7, maxWidth: size - 50, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{active.label}</div>
+              <div style={{ fontFamily: "Fraunces,serif", fontSize: Math.min(size > 160 ? 26 : 19, size * 0.135, String(fmtKc(active.value)||"").length > 10 ? (size > 160 ? 20 : 15) : (size > 160 ? 26 : 19)), fontWeight: 300, color: "var(--txt)", lineHeight: 1, whiteSpace: "nowrap" }}>{fmtKc(active.value)}</div>
+              <div style={{ fontSize: 10.5, color: "var(--mut)", opacity: 0.75, marginTop: 7 }}>{Math.round(active.frac * 100)} %</div>
             </>
           ) : (
             <>
-              {centerTop && <div style={{ fontSize: 9.5, letterSpacing: ".14em", color: glowColor, fontWeight: 800, textTransform: "uppercase", opacity: 0.62, marginBottom: 6 }}>{centerTop}</div>}
-              <div className="maux-num" style={{ fontSize: Math.min(size > 160 ? 28 : 20, size * 0.135, String(centerMain||"").length > 10 ? (size > 160 ? 21 : 16) : (size > 160 ? 28 : 20)), fontWeight: 600, color: glowColor, lineHeight: 1, whiteSpace: "nowrap" }}>{centerMain}</div>
-              {centerSub && <div style={{ fontSize: 11, color: glowColor, opacity: 0.55, marginTop: 6 }}>{centerSub}</div>}
+              {centerTop && <div style={{ fontSize: 8.5, letterSpacing: ".2em", color: "var(--mut)", fontWeight: 700, textTransform: "uppercase", opacity: 0.7, marginBottom: 7 }}>{centerTop}</div>}
+              <div style={{ fontFamily: "Fraunces,serif", fontSize: Math.min(size > 160 ? 29 : 21, size * 0.14, String(centerMain||"").length > 10 ? (size > 160 ? 22 : 16) : (size > 160 ? 29 : 21)), fontWeight: 300, color: "var(--txt)", lineHeight: 1, whiteSpace: "nowrap" }}>{centerMain}</div>
+              {centerSub && <div style={{ fontSize: 10.5, color: "var(--mut)", opacity: 0.8, marginTop: 7 }}>{centerSub}</div>}
             </>
           )}
         </div>
@@ -6310,7 +6310,7 @@ function InteractiveRing({ segments, size = 190, thickness = 20, glowColor, cent
             <div key={i} onMouseEnter={() => setHover(i)} onMouseLeave={() => setHover(null)}
               style={{
                 display: "flex", alignItems: "center", gap: 12, padding: "8px 12px", borderRadius: 11, cursor: "pointer",
-                background: hover === i ? `${s.color}16` : "transparent",
+                background: hover === i ? "rgba(0,0,0,.028)" : "transparent",
                 transform: hover === i ? "translateX(4px)" : "none",
                 transition: "background .2s ease, transform .2s ease",
               }}>
@@ -6384,10 +6384,10 @@ function SporakRingTile({ financeItems, onSaveFinance, invoices, dpfoMonths, loa
     && !autoLbls.has((i.label||"").toLowerCase().trim())
   );
   const envSegs    = [
-    { label: "DPH",          amount: dphAuto,   color: "#241177" },
-    { label: "DPFO 2026",    amount: dpfoAcc,   color: "#3518A5" },
-    ...(bobBal > 0 ? [{ label: "Bobnice", amount: bobBal, color: "#6358D4" }] : []),
-    { label: "Daň z úschov", amount: danUschov, color: "#8A7FE0" },
+    { label: "DPH",          amount: dphAuto,   color: "#312E81" },
+    { label: "DPFO 2026",    amount: dpfoAcc,   color: "#4F46E5" },
+    ...(bobBal > 0 ? [{ label: "Bobnice", amount: bobBal, color: "#818CF8" }] : []),
+    { label: "Daň z úschov", amount: danUschov, color: "#A5B4FC" },
     ...manObálky.map((o,idx) => ({ label: o.label, amount: o.amount||0, color: ["#5B4FCF","#9D93DD"][idx%2] })),
   ].filter(e => e.amount > 0);
   const totalEar   = envSegs.reduce((s,e) => s+e.amount, 0);
@@ -6403,7 +6403,7 @@ function SporakRingTile({ financeItems, onSaveFinance, invoices, dpfoMonths, loa
   const S_COL = "#3518A5";
 
   const secHdr = (col, text) => (
-    <div style={{ fontSize: 9.5, letterSpacing: ".16em", color: col, fontWeight: 800, textTransform: "uppercase", opacity: 0.7, marginBottom: 3 }}>{text}</div>
+    <div style={{ fontSize: 8.5, letterSpacing: ".24em", color: "var(--mut)", fontWeight: 700, textTransform: "uppercase", opacity: 0.7, marginBottom: 5 }}>{text}</div>
   );
   const eBtn = (onClick, active, col) => (
     <button onClick={onClick} style={{ width: 24, height: 24, borderRadius: 7, border: "1px solid var(--line)", background: active ? `${col}18` : "none", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", color: active ? col : "var(--mut)", fontSize: 11, flexShrink: 0 }}>
@@ -6414,8 +6414,8 @@ function SporakRingTile({ financeItems, onSaveFinance, invoices, dpfoMonths, loa
   return (
     <div style={{
       height: "100%", borderRadius: 3, overflow: "hidden",
-      background: "#fff", borderTop: `4px solid ${S_COL}`,
-      boxShadow: "0 0 0 1px rgba(0,0,0,.08)",
+      background: "#fff", borderTop: "1px solid rgba(0,0,0,.05)",
+      boxShadow: "0 0 0 1px rgba(0,0,0,.05)",
       display: "flex", flexDirection: "column", alignItems: "center",
       padding: square ? "22px 22px 18px" : "26px 34px 28px",
       boxSizing: "border-box",
@@ -6500,10 +6500,10 @@ function TriGrafyPanel({ financeItems, onSaveFinance, invoices, dpfoMonths, loan
     && !autoLbls.has((i.label||"").toLowerCase().trim())
   );
   const envSegs    = [
-    { label: "DPH",          amount: dphAuto,   color: "#241177" },
-    { label: "DPFO 2026",    amount: dpfoAcc,   color: "#3518A5" },
-    ...(bobBal > 0 ? [{ label: "Bobnice", amount: bobBal, color: "#6358D4" }] : []),
-    { label: "Daň z úschov", amount: danUschov, color: "#8A7FE0" },
+    { label: "DPH",          amount: dphAuto,   color: "#312E81" },
+    { label: "DPFO 2026",    amount: dpfoAcc,   color: "#4F46E5" },
+    ...(bobBal > 0 ? [{ label: "Bobnice", amount: bobBal, color: "#818CF8" }] : []),
+    { label: "Daň z úschov", amount: danUschov, color: "#A5B4FC" },
     ...manObálky.map((o,idx) => ({ label: o.label, amount: o.amount||0, color: ["#5B4FCF","#9D93DD"][idx%2] })),
   ].filter(e => e.amount > 0);
   const totalEar   = envSegs.reduce((s,e) => s+e.amount, 0);
@@ -6565,13 +6565,13 @@ function TriGrafyPanel({ financeItems, onSaveFinance, invoices, dpfoMonths, loan
   const card = (accentColor, bgGrad) => ({
     flex: 1,
     background: bgGrad || "var(--card)",
-    border: `1px solid ${accentColor}20`,
+    border: "1px solid rgba(0,0,0,.05)",
     borderRadius: 20,
-    padding: "22px 22px 18px",
+    padding: "24px 24px 20px",
     display: "flex", flexDirection: "column",
-    boxShadow: `0 2px 8px rgba(0,0,0,0.04), 0 12px 48px ${accentColor}18`,
+    boxShadow: "0 1px 2px rgba(16,12,60,.04), 0 16px 48px -24px rgba(16,12,60,.10)",
   });
-  const lbl = (col) => ({ fontSize: 8, letterSpacing: ".16em", color: col, fontWeight: 800, textTransform: "uppercase", marginBottom: 4, opacity: 0.75 });
+  const lbl = () => ({ fontSize: 8.5, letterSpacing: ".22em", color: "var(--mut)", fontWeight: 700, textTransform: "uppercase", marginBottom: 6, opacity: 0.7 });
   const bigNum = (col) => ({ fontFamily: "Fraunces,serif", fontSize: 28, fontWeight: 300, color: col || "var(--ink)", lineHeight: 1, marginBottom: 14 });
   const eBtn = (onClick, active, col) => (
     <button onClick={onClick} style={{ width: 24, height: 24, borderRadius: 6, border: "1px solid var(--line)", background: active ? `${col}18` : "none", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", color: active ? col : "var(--mut)", fontSize: 11, flexShrink: 0 }}>
@@ -6592,7 +6592,7 @@ function TriGrafyPanel({ financeItems, onSaveFinance, invoices, dpfoMonths, loan
     : [{ label: "Deficit", value: Math.abs(firmaRez), color: R_WARN }, { label: "Do cíle", value: planKap, color: "rgba(220,38,38,0.14)" }];
 
   const secHdr = (col, text) => (
-    <div style={{ fontSize: 9, letterSpacing: ".22em", color: col, fontWeight: 700, textTransform: "uppercase", opacity: 0.55, marginBottom: 4 }}>{text}</div>
+    <div style={{ fontSize: 8.5, letterSpacing: ".24em", color: "var(--mut)", fontWeight: 700, textTransform: "uppercase", opacity: 0.7, marginBottom: 6 }}>{text}</div>
   );
   const secNum = (col, content) => (
     <div style={{ fontFamily: "Fraunces,serif", fontSize: 28, fontWeight: 300, color: col, lineHeight: 1, marginBottom: 2 }}>{content}</div>
@@ -6606,7 +6606,7 @@ function TriGrafyPanel({ financeItems, onSaveFinance, invoices, dpfoMonths, loan
       <div style={{ display: "flex" }}>
 
         {/* ── MAJETEK ── */}
-        <div style={{ flex: 3, padding: "32px 36px 34px", background: "#fff", borderTop: `4px solid ${M_COL}`, borderRight: "1px solid rgba(0,0,0,0.06)" }}>
+        <div style={{ flex: 3, padding: "32px 36px 34px", background: "#fff", borderRight: "1px solid rgba(0,0,0,.05)" }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 22 }}>
             {secHdr(M_COL, "Osobní majetek")}
             {eBtn(() => setEditMaj(e => !e), editMaj, M_COL)}
@@ -6666,7 +6666,7 @@ function TriGrafyPanel({ financeItems, onSaveFinance, invoices, dpfoMonths, loan
         </div>
 
         {/* ── REZERVA ── */}
-        <div style={{ flex: 2, padding: "32px 36px 34px", background: "#fff", borderTop: `4px solid ${R_COL}` }}>
+        <div style={{ flex: 2, padding: "32px 36px 34px", background: "#fff" }}>
           <div style={{ marginBottom: 22 }}>{secHdr(R_COL, "Firemní rezerva")}</div>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "center" }}>
             <InteractiveRing segments={rezGlassSegs} size={180} thickness={22} glowColor={firmaRez < 0 ? R_WARN : R_COL} legendOnly
@@ -8782,7 +8782,7 @@ function JosefPanel({ logs, attendance: attendanceProp, availability }) {
   return (
     <div style={{
       background:"#fff", borderRadius:3, overflow:"hidden",
-      borderTop:"4px solid #3518A5",
+      borderTop:"1px solid rgba(0,0,0,.05)",
       boxShadow:"0 0 0 1px rgba(0,0,0,.08)",
     }}>
       {/* Header — clean legal-tech brand */}
@@ -9014,10 +9014,13 @@ function TripleRingPanel({ sporSegs, sporBal, sporEarmarked, firmaRez, planKap,
 
 /* ─── PANEL CONTEXT — defined at file level so Panel is a stable component reference ─── */
 const PanelCtx = createContext(null);
+// "Tichý papír" (Tom, 26.7.2026: "chci, aby mě uklidňovalo na to koukat"): panely už nemají
+// každý svou barvu. Jeden neutrální vlasový rám + měkký stín; barva zůstává jen uvnitř obsahu
+// a jen tam, kde něco hoří. Klíče ponechány kvůli kompatibilitě volání.
 const PANEL_ACCENTS = {
-  finance: "#3518A5", uschovy: "#7C3AED", trigrafy: "#4338CA", firma: "#4F46E5",
-  josef: "#6D28D9", pulz: "#4C1D95", chart: "#2563EB", klienti: "#5B21B6",
-  navstevnost: "#4338CA", xtb: "#4F46E5", ziskovost: "#6D28D9", claude: "#3518A5",
+  finance: "#4F46E5", uschovy: "#4F46E5", trigrafy: "#4F46E5", firma: "#4F46E5",
+  josef: "#4F46E5", pulz: "#4F46E5", chart: "#4F46E5", klienti: "#4F46E5",
+  navstevnost: "#4F46E5", xtb: "#4F46E5", ziskovost: "#4F46E5", claude: "#4F46E5",
 };
 function Panel({ id, children }) {
   const { panelState, dragOver, editLayout, handleDragStart, handleDragOver, handleDrop, setDragOver, toggleHide } = useContext(PanelCtx);
@@ -9040,12 +9043,13 @@ function Panel({ id, children }) {
         order: cssOrder >= 0 ? cssOrder : 99,
         outline: isOver ? "2px solid #6366F1" : editLayout ? "2px dashed rgba(99,102,241,.3)" : "none",
         outlineOffset: isOver ? 0 : 4,
-        borderRadius: 8,
-        border: `1px solid ${accent}22`,
+        borderRadius: 18,
+        border: "1px solid rgba(0,0,0,.05)",
+        background: "#fff",
         opacity: isDragging ? 0.5 : hidden ? 0.4 : 1,
         position: "relative",
         cursor: editLayout ? "grab" : "default",
-        boxShadow: isOver ? "0 0 20px rgba(99,102,241,.2), inset 0 0 0 1px rgba(99,102,241,.3)" : `0 0 0 1px ${accent}14, 0 1px 10px ${accent}0d`,
+        boxShadow: isOver ? "0 0 20px rgba(99,102,241,.2), inset 0 0 0 1px rgba(99,102,241,.3)" : "0 1px 2px rgba(16,12,60,.04), 0 16px 48px -24px rgba(16,12,60,.10)",
         transition: "outline .2s, outline-offset .2s, box-shadow .3s, opacity .2s, transform .2s",
         transform: isOver ? "scale(1.01)" : isDragging ? "scale(0.98)" : "scale(1)",
       }}
@@ -9268,11 +9272,12 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
   const c35Pos = c35 >= 0;
   // Ratio: -1 = costs doubled (very bad), 0 = break-even, 1+ = full profit
   const c35Ratio = Math.abs(totalVydaje) > 0 ? c35 / Math.abs(totalVydaje) : 0;
-  const c35Bg = c35Ratio >= 1   ? "linear-gradient(135deg,#064E3B,#059669)"  // smrkově zelená — čistý zisk
-              : c35Ratio >= 0.3 ? "linear-gradient(135deg,#14532D,#4ADE80)"  // světle zelená — pokryto s přebytkem
-              : c35Ratio >= 0   ? "linear-gradient(135deg,#1E3A2F,#34D399)"  // ledvinka — těsně pokryto
-              : c35Ratio >= -0.5? "linear-gradient(135deg,#374151,#6B7280)"  // střední šedá — blíže k pokrytí
-              :                   "linear-gradient(135deg,#111827,#374151)"; // tmavě šedá — daleko od pokrytí
+  // "Tichý papír": jedna tlumená škála místo semaforu — sytost roste se ziskem, barva se nemění.
+  const c35Bg = c35Ratio >= 1   ? "linear-gradient(135deg,#312E81,#4F46E5)"
+              : c35Ratio >= 0.3 ? "linear-gradient(135deg,#3730A3,#6366F1)"
+              : c35Ratio >= 0   ? "linear-gradient(135deg,#44409B,#818CF8)"
+              : c35Ratio >= -0.5? "linear-gradient(135deg,#4B5563,#9CA3AF)"
+              :                   "linear-gradient(135deg,#374151,#6B7280)";
 
   // Stacked bar chart — PŘÍJEM MAUX LEGAL: posledních 12 měsíců nebo od 09/2025
   const CZ_M_SHORT = ["L","Ú","B","D","K","Č","Čv","S","Z","Ř","Li","P"];
@@ -9721,7 +9726,7 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
             <div style={{
               flex:3, minWidth:0,
               background:"#fff", borderRadius:3, overflow:"hidden",
-              borderTop: "4px solid #3518A5",
+              borderTop: "1px solid rgba(0,0,0,.05)",
               boxShadow:"0 0 0 1px rgba(0,0,0,.08)",
               display:"flex", flexDirection:"column",
             }}>
@@ -9852,15 +9857,15 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
                     && !autoLblsS.has((i.label||"").toLowerCase().trim())
                   );
                   const sEnvSegs = [
-                    { label: "DPH",          value: dphAutoS,   color: "#6366f1" },
-                    { label: "DPFO",         value: dpfoAccS,   color: "#f59e0b" },
-                    ...(bobBalS > 0 ? [{ label: "Bobnice", value: bobBalS, color: "#10b981" }] : []),
-                    { label: "Daň z úschov", value: danUschovS, color: "#f43f5e" },
-                    ...manObalkyS.map((o,idx) => ({ label: o.label, value: o.amount||0, color: ["#8b5cf6","#06b6d4"][idx%2] })),
+                    { label: "DPH",          value: dphAutoS,   color: "#312E81" },
+                    { label: "DPFO",         value: dpfoAccS,   color: "#4F46E5" },
+                    ...(bobBalS > 0 ? [{ label: "Bobnice", value: bobBalS, color: "#818CF8" }] : []),
+                    { label: "Daň z úschov", value: danUschovS, color: "#A5B4FC" },
+                    ...manObalkyS.map((o,idx) => ({ label: o.label, value: o.amount||0, color: ["#C7D2FE","#DDD6FE"][idx%2] })),
                   ].filter(e => e.value > 0);
                   const sTotalEar = sEnvSegs.reduce((s,e) => s+e.value, 0);
                   const sFirmaRez = sporBalS - sTotalEar;
-                  const sFullSegs = [...sEnvSegs, ...(sFirmaRez > 0 ? [{ label: "Volné", value: sFirmaRez, color: "#22c55e" }] : [])];
+                  const sFullSegs = [...sEnvSegs, ...(sFirmaRez > 0 ? [{ label: "Volné", value: sFirmaRez, color: "#E0E7FF" }] : [])];
                   const sTotalAll = sFullSegs.reduce((s,e)=>s+e.value,0) || 1;
                   const boundPct  = Math.round((sTotalEar / Math.max(sporBalS,1)) * 100);
                   // SVG donut — r=34
@@ -10037,23 +10042,23 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
               {/* Header */}
               <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:12}}>
                 <div>
-                  <div style={{fontSize:9,letterSpacing:".16em",textTransform:"uppercase",color:"var(--ink)",fontWeight:700,fontFamily:"'JetBrains Mono','SF Mono',Menlo,monospace"}}>REV — PŘÍJEM MAUX LEGAL · {year}</div>
+                  <div style={{fontSize:8.5,letterSpacing:".24em",textTransform:"uppercase",color:"var(--mut)",fontWeight:700,opacity:.7}}>Příjem MAUX Legal · {year}</div>
                   <div style={{fontSize:9,color:"var(--mut)",marginTop:3,display:"flex",gap:14,fontFamily:"'JetBrains Mono','SF Mono',Menlo,monospace"}}>
                     <span style={{display:"flex",alignItems:"center",gap:4}}>
-                      <span style={{display:"inline-block",width:10,height:10,borderRadius:2,background:"#4ADE80"}}/>
+                      <span style={{display:"inline-block",width:10,height:10,borderRadius:2,background:"#6366F1"}}/>
                       Fakturace {fmtKc(ytdInv)}
                     </span>
                     {ytdEsc > 0 && (
                       <span style={{display:"flex",alignItems:"center",gap:4}}>
-                        <span style={{display:"inline-block",width:10,height:10,borderRadius:2,background:"#FB923C"}}/>
+                        <span style={{display:"inline-block",width:10,height:10,borderRadius:2,background:"#C8B48A"}}/>
                         Úschovy {fmtKc(ytdEsc)}
                       </span>
                     )}
                   </div>
                 </div>
                 <div style={{textAlign:"right"}}>
-                  <div style={{fontSize:9,color:"var(--ink)",fontFamily:"'JetBrains Mono','SF Mono',Menlo,monospace",fontWeight:600,letterSpacing:".06em"}}>CELKEM YTD</div>
-                  <div className="maux-num" style={{fontSize:17,fontWeight:700,color:"var(--gold)",textShadow:"0 0 14px rgba(184,146,61,.35)"}}>{fmtKc(ytdInv + ytdEsc)}</div>
+                  <div style={{fontSize:8.5,color:"var(--mut)",letterSpacing:".22em",fontWeight:700,textTransform:"uppercase",opacity:.7}}>Celkem YTD</div>
+                  <div style={{fontFamily:"Fraunces,serif",fontSize:20,fontWeight:300,color:"var(--txt)"}}>{fmtKc(ytdInv + ytdEsc)}</div>
                 </div>
               </div>
 
@@ -10139,8 +10144,8 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
                         <rect
                           x={x} y={baseY - invH} width={barW} height={invH}
                           rx={d.escrow > 0 ? 0 : 4} ry={d.escrow > 0 ? 0 : 4}
-                          fill={isLive ? "#A78BFA" : (isNow ? "#059669" : "#4ADE80")}
-                          stroke={isLive ? "#7C3AED" : "none"}
+                          fill={isLive ? "#C7D2FE" : (isNow ? "#4338CA" : "#6366F1")}
+                          stroke={isLive ? "#818CF8" : "none"}
                           strokeWidth={isLive ? 1.2 : 0}
                           strokeDasharray={isLive ? "4,3" : "none"}
                           opacity={isLive ? (isHov ? 0.95 : 0.62) : (isHov ? 1 : (hoverBar != null ? 0.45 : 1))}
@@ -10153,7 +10158,7 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
                           x={x} y={baseY - totalH} width={barW} height={escH}
                           rx={4} ry={4}
                           fill={isLive ? "#C4B5FD" : (isNow ? "#D97706" : "#FB923C")}
-                          stroke={isLive ? "#7C3AED" : "none"}
+                          stroke={isLive ? "#818CF8" : "none"}
                           strokeWidth={isLive ? 1.2 : 0}
                           strokeDasharray={isLive ? "4,3" : "none"}
                           opacity={isLive ? (isHov ? 0.95 : 0.62) : (isHov ? 1 : (hoverBar != null ? 0.45 : 1))}
@@ -10972,8 +10977,10 @@ function VykazyCalendar({ workEntries, escrows, dense = false, onOpenFull, onAdd
   const [hoverDay, setHoverDay] = useState(null);
 
   // Indigo phosphor — barva čísel z výkazů; ESC — zlatá pro denní úrok z úschov (ať vydělávám i ve dnech bez výkazu)
-  const PHOS = "#5B4FE5";
-  const ESC = "#B8923D";
+  // "Tichý papír": kalendář už nesvítí. Jedno tlumené indigo pro práci, teplá šedo-zlatá
+  // pro úschovy. Žádné textShadow glow — čitelnost dělá typografie, ne záře.
+  const PHOS = "#4F46E5";
+  const ESC  = "#A1834A";
 
   const base = new Date();
   const viewDate = new Date(base.getFullYear(), base.getMonth() - monthOffset, 1);
@@ -11055,14 +11062,14 @@ function VykazyCalendar({ workEntries, escrows, dense = false, onOpenFull, onAdd
   const circleSize = dense ? 24 : 42;
 
   return (
-    <div style={{ background: "#fff", borderRadius: dense ? 3 : 18, overflow: "hidden", height: "100%", display: "flex", flexDirection: "column", boxShadow: "0 0 0 1px rgba(0,0,0,.08)" }}>
+    <div style={{ background: "#fff", borderRadius: dense ? 3 : 18, overflow: "hidden", height: "100%", display: "flex", flexDirection: "column", boxShadow: "0 0 0 1px rgba(0,0,0,.05)" }}>
       {/* Header */}
       <div style={{ padding: dense ? "18px 20px 12px" : "26px 30px 18px", borderBottom: "1px solid rgba(0,0,0,.05)", flexShrink: 0 }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
           <div>
             {!dense && <div style={{fontSize:9,letterSpacing:".26em",textTransform:"uppercase",fontWeight:700,color:"var(--mut)",marginBottom:5}}>ZAPSANÁ PRÁCE — DEN PO DNI</div>}
             <div style={{display:"flex",alignItems:"baseline",gap:8}}>
-              <span style={{fontWeight:600,fontSize:dense?20:26,color:"var(--ink)",lineHeight:1}}>{monthNamesFull[m]} {y}</span>
+              <span style={{fontFamily:"Fraunces,serif",fontWeight:400,fontSize:dense?20:26,color:"var(--txt)",lineHeight:1}}>{monthNamesFull[m]} {y}</span>
               {monthOffset !== 0 && (
                 <span style={{fontSize:10.5,color:PHOS,cursor:"pointer",textDecoration:"underline"}} onClick={() => { setMonthOffset(0); setSelectedDay(null); }}>zpět na dnešek</span>
               )}
@@ -11070,7 +11077,7 @@ function VykazyCalendar({ workEntries, escrows, dense = false, onOpenFull, onAdd
           </div>
           <div style={{display:"flex",alignItems:"center",gap:6}}>
             {onOpenFull && (
-              <span style={{fontSize:11,color:"#3518A5",fontWeight:700,cursor:"pointer",marginRight:4}} onClick={onOpenFull}>Otevřít →</span>
+              <span style={{fontSize:11,color:"#4F46E5",fontWeight:600,cursor:"pointer",marginRight:4}} onClick={onOpenFull}>Otevřít →</span>
             )}
             <button onClick={() => { setMonthOffset(o => o + 1); setSelectedDay(null); }}
               style={{background:"none",border:"none",cursor:"pointer",color:"var(--mut)",fontSize:dense?16:19,padding:"3px 8px",lineHeight:1}}
@@ -11082,7 +11089,7 @@ function VykazyCalendar({ workEntries, escrows, dense = false, onOpenFull, onAdd
           </div>
         </div>
         <div style={{marginTop:dense?8:13,display:"flex",alignItems:"baseline",gap:8,flexWrap:"wrap"}}>
-          <span className="maux-num" style={{fontSize:dense?32:46,fontWeight:800,letterSpacing:"-.01em",color:(monthTotal+escMonthTotal)>0?PHOS:"var(--mut)",lineHeight:1,textShadow:(monthTotal+escMonthTotal)>0?`0 0 20px ${PHOS}40`:"none"}}>{(monthTotal+escMonthTotal)>0?"+":""}{fmtKc(monthTotal+escMonthTotal)}</span>
+          <span style={{fontFamily:"Fraunces,serif",fontSize:dense?30:44,fontWeight:300,letterSpacing:"-.01em",color:(monthTotal+escMonthTotal)>0?"var(--txt)":"var(--mut)",lineHeight:1}}>{(monthTotal+escMonthTotal)>0?"+":""}{fmtKc(monthTotal+escMonthTotal)}</span>
           {!dense && <span style={{fontSize:12,color:"var(--mut)"}}>za měsíc, bez DPH</span>}
         </div>
         {!dense && (monthTotal > 0 || escMonthTotal > 0) && (
@@ -11090,13 +11097,13 @@ function VykazyCalendar({ workEntries, escrows, dense = false, onOpenFull, onAdd
             {monthTotal > 0 && (
               <div style={{display:"flex",alignItems:"center",gap:5}}>
                 <span style={{width:7,height:7,borderRadius:"50%",background:PHOS}} />
-                <span style={{fontSize:11.5,color:PHOS,fontWeight:600}}>{fmtKc(monthTotal)} práce</span>
+                <span style={{fontSize:11.5,color:"var(--mut)"}}>{fmtKc(monthTotal)} práce</span>
               </div>
             )}
             {escMonthTotal > 0 && (
               <div style={{display:"flex",alignItems:"center",gap:5}}>
                 <span style={{width:7,height:7,borderRadius:"50%",background:ESC}} />
-                <span style={{fontSize:11.5,color:ESC,fontWeight:600}}>{fmtKc(Math.round(escMonthTotal))} úschovy</span>
+                <span style={{fontSize:11.5,color:"var(--mut)"}}>{fmtKc(Math.round(escMonthTotal))} úschovy</span>
               </div>
             )}
           </div>
@@ -11107,7 +11114,7 @@ function VykazyCalendar({ workEntries, escrows, dense = false, onOpenFull, onAdd
       <div style={{padding: dense ? "12px 14px 12px" : "20px 26px 24px", flex: 1, display: "flex", flexDirection: "column", minHeight: 0}}>
         <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:dense?2:8,marginBottom:dense?6:12}}>
           {["Po","Út","St","Čt","Pá","So","Ne"].map(n => (
-            <div key={n} style={{textAlign:"center",fontSize:dense?9.5:11,color:"var(--mut)",fontWeight:700,letterSpacing:".03em"}}>{n}</div>
+            <div key={n} style={{textAlign:"center",fontSize:dense?9.5:10,color:"var(--mut)",fontWeight:600,letterSpacing:".12em",textTransform:"uppercase",opacity:.65}}>{n}</div>
           ))}
         </div>
         <div style={{flex:1, display:"flex", flexDirection:"column", gap:dense?2:8, minHeight:0}}>
@@ -11131,7 +11138,7 @@ function VykazyCalendar({ workEntries, escrows, dense = false, onOpenFull, onAdd
                     title={cellTitle}
                     style={{
                       border: "none",
-                      background: amt > 0 ? "rgba(91,79,229,.09)" : (escAmt > 0 ? "rgba(184,146,61,.08)" : (isHov ? "rgba(91,79,229,.06)" : "none")),
+                      background: isHov ? "rgba(79,70,229,.05)" : amt > 0 ? "rgba(79,70,229,.035)" : "none",
                       borderRadius: dense ? 8 : 14, position:"relative",
                       display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:dense?1:3,
                       cursor: canAct ? "pointer" : "default",
@@ -11145,18 +11152,17 @@ function VykazyCalendar({ workEntries, escrows, dense = false, onOpenFull, onAdd
                       }}/>
                     )}
                     <span style={{
-                      minHeight: dense?11:17, fontSize:dense?9.5:15.5, fontWeight:800, letterSpacing:"-.01em",
+                      minHeight: dense?11:17, fontSize:dense?9.5:13.5, fontWeight:600, letterSpacing:"-.01em",
                       fontVariantNumeric:"tabular-nums", lineHeight:1, whiteSpace:"nowrap",
                       color: amt>0 ? PHOS : "transparent",
-                      textShadow: amt>0 ? `0 0 9px ${PHOS}55` : "none",
                     }}>
                       {amt>0 ? `+${fmtKc(amt)}` : "0"}
                     </span>
                     {!dense && (
                       <span style={{
-                        minHeight: 11, fontSize:9.5, fontWeight:700, letterSpacing:"-.01em",
+                        minHeight: 11, fontSize:9, fontWeight:500, letterSpacing:"-.01em",
                         fontVariantNumeric:"tabular-nums", lineHeight:1, whiteSpace:"nowrap",
-                        color: escAmt>0 ? ESC : "transparent",
+                        color: escAmt>0 ? ESC : "transparent", opacity:.75,
                       }}>
                         {escAmt>0 ? `+${fmtKc(Math.round(escAmt))}` : "0"}
                       </span>
@@ -11164,9 +11170,9 @@ function VykazyCalendar({ workEntries, escrows, dense = false, onOpenFull, onAdd
                     <span style={{
                       width: circleSize, height: circleSize, borderRadius:"50%",
                       display:"flex", alignItems:"center", justifyContent:"center",
-                      fontSize: dense?11.5:16, fontWeight: isToday?700:500, lineHeight:1,
-                      background: isToday ? "#3518A5" : "transparent",
-                      color: isToday ? "#fff" : "var(--ink)",
+                      fontSize: dense?11.5:15, fontWeight: isToday?600:400, lineHeight:1,
+                      background: isToday ? "#4F46E5" : "transparent",
+                      color: isToday ? "#fff" : "var(--txt)",
                       boxShadow: isSel && !isToday ? "inset 0 0 0 1.5px " + PHOS : "none",
                     }}>{d}</span>
                   </button>
@@ -11179,7 +11185,7 @@ function VykazyCalendar({ workEntries, escrows, dense = false, onOpenFull, onAdd
 
       {/* Detail vybraného dne — jen plná verze */}
       {!dense && selectedDay && (
-        <div style={{borderTop:"1px solid rgba(0,0,0,.05)",padding:"14px 26px 20px",background:"#F8F7FF",flexShrink:0,maxHeight:200,overflowY:"auto"}}>
+        <div style={{borderTop:"1px solid rgba(0,0,0,.05)",padding:"14px 26px 20px",background:"#FBFBFD",flexShrink:0,maxHeight:200,overflowY:"auto"}}>
           <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:10}}>
             <div style={{fontSize:11,letterSpacing:".08em",color:PHOS,fontWeight:700,textTransform:"uppercase"}}>
               {fmtDate(selectedDay)}{selEntries.length > 0 ? ` · ${selEntries.length}× výkaz` : ""}
@@ -12426,7 +12432,7 @@ function DphOdpocetTile({ invoices, financeItems, onSaveFinance, onNav, dashNadm
   if (prevodPrev > 0) kpis.push({ label: `Přesah odpočtu · ${prevMonthName}`, value: fmtKc(prevodPrev), color: "#7C3AED", hint: "nadměrný odpočet — převádí se dál" });
 
   return (
-    <div style={{ background:"#fff", borderRadius:14, overflow:"hidden", border:"1px solid var(--line)", borderTop:"4px solid #3518A5", boxShadow:"0 1px 3px rgba(53,24,165,.06)" }}>
+    <div style={{ background:"#fff", borderRadius:14, overflow:"hidden", border:"1px solid var(--line)", borderTop:"1px solid rgba(0,0,0,.05)", boxShadow:"0 1px 3px rgba(53,24,165,.06)" }}>
       {/* Header — stav, ne věta */}
       <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", gap:12, flexWrap:"wrap", padding:"18px 22px 0" }}>
         <div style={{ display:"flex", alignItems:"center", gap:7 }}>
@@ -12577,7 +12583,7 @@ function DaneModule({ year, taxRecords, financeItems, invoices, dpfoMonths, escr
       <DphOdpocetTile invoices={invoices} financeItems={financeItems} onSaveFinance={onSaveFinance} onNav={onNav} dashNadmernyOdpocet={dashNadmernyOdpocet} />
 
       {/* Souhrnná karta — daňový přehled roku, ve stylu "Bilance" dlaždice na Dashboardu */}
-      <div style={{ background: "#fff", borderRadius: 14, overflow: "hidden", border: "1px solid var(--line)", borderTop: "4px solid #3518A5", boxShadow: "0 1px 3px rgba(53,24,165,.06)", padding: "20px 22px" }}>
+      <div style={{ background: "#fff", borderRadius: 14, overflow: "hidden", border: "1px solid var(--line)", borderTop: "1px solid rgba(0,0,0,.05)", boxShadow: "0 1px 3px rgba(53,24,165,.06)", padding: "20px 22px" }}>
         <div style={{ display:"flex", alignItems:"center", gap:7, marginBottom: 14 }}>
           <span className="maux-dot" style={{ width:6, height:6, background:"#3518A5", boxShadow:"0 0 4px rgba(53,24,165,.5)" }} />
           <div style={{ fontSize: 10, letterSpacing: ".22em", textTransform: "uppercase", fontWeight: 800, color: "#3518A5" }}>
@@ -15027,7 +15033,7 @@ export default function MauxCRM() {
                   if (el) { el.open = true; el.scrollIntoView({ behavior: "smooth", block: "start" }); }
                 }, 80);
               }} title="Klikni pro detail v Financích"
-              style={{background:"linear-gradient(135deg,#2d14a0,#4a2bc4)",padding:"10px 40px 8px"}}>
+              style={{background:"linear-gradient(135deg,#312E81,#4338CA)",padding:"12px 40px 10px"}}>
               <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:16,flexWrap:"wrap"}}>
                 <div style={{display:"flex",alignItems:"center",gap:18,flexWrap:"wrap"}}>
                   <span style={{fontSize:12.5,color:"rgba(255,255,255,.75)",fontWeight:500,letterSpacing:".01em",whiteSpace:"nowrap"}}>{_gr}, Tomáši</span>
@@ -15045,11 +15051,11 @@ export default function MauxCRM() {
                     <div style={{width:1,height:14,background:"rgba(255,255,255,.2)",flexShrink:0}} />
                     <div style={{display:"flex",alignItems:"baseline",gap:6,whiteSpace:"nowrap"}}>
                       <span style={{fontSize:9.5,color:"rgba(255,255,255,.45)",letterSpacing:".1em",textTransform:"uppercase"}}>Do cíle zbývá</span>
-                      <span style={{fontSize:15,fontFamily:"Fraunces,serif",fontWeight:300,color:_rem===0?"#4ade80":"#fff"}}>{_rem===0?"✓ Splněno":_fmt(_rem)}</span>
+                      <span style={{fontSize:15,fontFamily:"Fraunces,serif",fontWeight:300,color:_rem===0?"#C7D2FE":"#fff"}}>{_rem===0?"✓ Splněno":_fmt(_rem)}</span>
                     </div>
                     <div style={{display:"flex",alignItems:"center",gap:5,whiteSpace:"nowrap"}}>
                       <div style={{width:60,height:3,background:"rgba(255,255,255,.15)",borderRadius:99,overflow:"hidden"}}>
-                        <div style={{width:`${_pct*100}%`,height:"100%",background:_pct>=1?"#4ade80":"#FDE68A",borderRadius:99,transition:"width .5s ease"}} />
+                        <div style={{width:`${_pct*100}%`,height:"100%",background:_pct>=1?"#C7D2FE":"rgba(255,255,255,.55)",borderRadius:99,transition:"width .5s ease"}} />
                       </div>
                       <span style={{fontSize:10,color:"rgba(253,230,138,.85)",fontWeight:600}}>{Math.round(_pct*100)}% cíle</span>
                     </div>
@@ -15057,7 +15063,7 @@ export default function MauxCRM() {
                       <div style={{width:1,height:14,background:"rgba(255,255,255,.2)",flexShrink:0}} />
                       <div style={{display:"flex",alignItems:"baseline",gap:6,whiteSpace:"nowrap"}}>
                         <span style={{fontSize:9.5,color:"rgba(255,255,255,.45)",letterSpacing:".1em",textTransform:"uppercase"}}>{_dailyDone ? "Dnešní tempo" : "Dnes ideálně"}</span>
-                        <span style={{fontSize:15,fontFamily:"Fraunces,serif",fontWeight:300,color:_dailyDone?"#4ade80":"rgba(253,230,138,.85)"}}>{_dailyDone ? "✓ na tahu" : _fmt(_dailyTarget)}</span>
+                        <span style={{fontSize:15,fontFamily:"Fraunces,serif",fontWeight:300,color:_dailyDone?"#C7D2FE":"rgba(255,255,255,.7)"}}>{_dailyDone ? "✓ na tahu" : _fmt(_dailyTarget)}</span>
                         {!_dailyDone && <span style={{fontSize:9,color:"rgba(255,255,255,.3)"}}>({_wdLeft} dní)</span>}
                       </div>
                     </>}
@@ -15097,7 +15103,7 @@ export default function MauxCRM() {
                         onKeyDown={e=>{if(e.key==="Enter")saveGoal();if(e.key==="Escape")setEditingGoal(false);}}
                         placeholder="150000" autoFocus
                         style={{width:88,padding:"4px 8px",borderRadius:6,border:"none",fontSize:12,fontFamily:"var(--mono)",outline:"none"}} />
-                      <button onClick={saveGoal} style={{padding:"4px 10px",borderRadius:6,background:"#4ade80",border:"none",fontSize:11,fontWeight:700,cursor:"pointer",color:"#166534"}}>OK</button>
+                      <button onClick={saveGoal} style={{padding:"4px 10px",borderRadius:6,background:"#fff",border:"none",fontSize:11,fontWeight:700,cursor:"pointer",color:"#312E81"}}>OK</button>
                       <button onClick={()=>setEditingGoal(false)} style={{padding:"4px 8px",borderRadius:6,background:"rgba(255,255,255,.12)",border:"none",fontSize:12,cursor:"pointer",color:"rgba(255,255,255,.7)"}}>✕</button>
                     </div>
                   ) : (
