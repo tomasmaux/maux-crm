@@ -12104,9 +12104,16 @@ function DphKalkulacka({ odpItem, onSaveFinance }) {
       .map(([key, items]) => ({
         key,
         items: [...items].sort((a, b) => (b.date || "").localeCompare(a.date || "")),
-        sum: items.reduce((s, e) => s + (e.vat || 0), 0),
+        sum:    items.reduce((s, e) => s + (e.vat || 0), 0),
+        // Rozpad na nákupy vs. vratky (dobropisy) — bez toho vypadá záporný součet jako chyba,
+        // přitom jde o legitimní stav: vrátil jsi víc zboží, než v daném měsíci nakoupil.
+        plus:   items.reduce((s, e) => s + Math.max(e.vat || 0, 0), 0),
+        minus:  items.reduce((s, e) => s + Math.min(e.vat || 0, 0), 0),
+        nCredit: items.filter(e => (e.vat || 0) < 0).length,
       }));
   }, [log]);
+  // Jednotné znaménkové formátování — dřív se lepilo "+" natvrdo i před záporné číslo ("+-947 Kč")
+  const fmtSigned = (v) => v === 0 ? "0 Kč" : v > 0 ? `+${fmtKc(v)}` : `−${fmtKc(Math.abs(v))}`;
   const groupLabel = (key) => {
     const [y, m] = key.split("-");
     const mi = Number(m) - 1;
@@ -12243,7 +12250,9 @@ function DphKalkulacka({ odpItem, onSaveFinance }) {
 
       {groups.length > 1 && (() => {
         const chartGroups = [...groups].slice(0, 12).reverse();
-        const maxSum = Math.max(...chartGroups.map(g => g.sum), 1);
+        // Měsíc může vyjít i záporně (vratky > nákupy) — škálujeme podle absolutní hodnoty,
+        // aby se záporný sloupec nekreslil obráceně/mimo graf.
+        const maxSum = Math.max(...chartGroups.map(g => Math.abs(g.sum)), 1);
         return (
           <div style={{ marginTop: 20 }}>
             <div style={{ fontSize: 9, letterSpacing: ".22em", textTransform: "uppercase", color: "var(--mut)", fontWeight: 700, marginBottom: 10 }}>
@@ -12251,16 +12260,19 @@ function DphKalkulacka({ odpItem, onSaveFinance }) {
             </div>
             <div style={{ display: "flex", alignItems: "flex-end", gap: 9, height: 110, padding: "0 2px" }}>
               {chartGroups.map(grp => {
-                const h = Math.max(6, Math.round((grp.sum / maxSum) * 78));
+                const neg = grp.sum < 0;
+                const h = Math.max(6, Math.round((Math.abs(grp.sum) / maxSum) * 78));
                 const isOpen = expanded === grp.key || (expanded === null && groups[0] && groups[0].key === grp.key);
                 return (
                   <div key={grp.key} onClick={() => setExpanded(grp.key)}
-                    title={`${grp.items.length}× účtenek/faktur · uplatněno ${fmtKc(grp.sum)}`}
+                    title={`${grp.items.length}× dokladů · nákupy +${fmtKc(grp.plus)} · vratky −${fmtKc(Math.abs(grp.minus))} · celkem ${fmtSigned(grp.sum)}`}
                     style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 4, flex: 1, cursor: "pointer" }}>
-                    <span style={{ fontSize: 9.5, color: "#3518A5", fontWeight: 600, whiteSpace: "nowrap" }}>{fmtKc(grp.sum)}</span>
+                    <span style={{ fontSize: 9.5, color: neg ? "#B45309" : "#3518A5", fontWeight: 600, whiteSpace: "nowrap" }}>{fmtSigned(grp.sum)}</span>
                     <div style={{
                       width: "100%", maxWidth: 26, height: h,
-                      background: isOpen ? "linear-gradient(180deg,#C4B5FD,#3518A5)" : "linear-gradient(180deg,#E9E4FB,#B7AAF2)",
+                      background: neg
+                        ? (isOpen ? "linear-gradient(180deg,#FCD34D,#B45309)" : "linear-gradient(180deg,#FEF3C7,#FCD34D)")
+                        : (isOpen ? "linear-gradient(180deg,#C4B5FD,#3518A5)" : "linear-gradient(180deg,#E9E4FB,#B7AAF2)"),
                       borderRadius: "5px 5px 2px 2px",
                     }} />
                     <span style={{ fontSize: 9, color: "var(--mut)" }}>{groupLabel(grp.key).split(" ")[0].slice(0, 3)} {grp.key.slice(2, 4)}</span>
@@ -12287,13 +12299,28 @@ function DphKalkulacka({ odpItem, onSaveFinance }) {
               <div key={grp.key} style={{ border: "1px solid var(--line)", borderRadius: 10, overflow: "hidden" }}>
                 <div onClick={() => setExpanded(isOpen ? "_zaviti_" : grp.key)}
                   style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 14px", cursor: "pointer", background: isOpen ? "#F5F3FF" : "#FAFAFC" }}>
-                  <span style={{ fontSize: 12, color: "var(--txt)", fontWeight: 600, display:"flex", alignItems:"center", gap:7 }}>
+                  <span style={{ fontSize: 12, color: "var(--txt)", fontWeight: 600, display:"flex", alignItems:"center", gap:7, flexWrap:"wrap" }}>
                     <span style={{ color:"#3518A5", fontSize:10 }}>{isOpen ? "▾" : "▸"}</span>
                     {groupLabel(grp.key)}
                     <span style={{ color: "var(--mut)", fontWeight: 400, fontSize:10.5 }}>· {grp.items.length}×</span>
+                    {grp.nCredit > 0 && (
+                      <span style={{ fontSize: 10, fontWeight: 400, color: "var(--mut)", whiteSpace: "nowrap" }}>
+                        · nákupy <b style={{ color:"#3518A5", fontWeight:600 }}>+{fmtKc(grp.plus)}</b>
+                        {" "}· vratky <b style={{ color:"#B45309", fontWeight:600 }}>−{fmtKc(Math.abs(grp.minus))}</b>
+                      </span>
+                    )}
                   </span>
-                  <b className="maux-num" style={{ fontSize: 13, color: "#3518A5" }}>{fmtKc(grp.sum)}</b>
+                  <b className="maux-num" style={{ fontSize: 13, color: grp.sum < 0 ? "#B45309" : "#3518A5" }}>
+                    {grp.sum < 0 ? `−${fmtKc(Math.abs(grp.sum))}` : fmtKc(grp.sum)}
+                  </b>
                 </div>
+                {isOpen && grp.sum < 0 && (
+                  <div style={{ padding:"9px 14px", background:"#FFFBEB", borderTop:"1px solid #FDE68A", fontSize:10.5, color:"#92400E", lineHeight:1.55 }}>
+                    Záporný součet je v pořádku — vratky ({fmtKc(Math.abs(grp.minus))}) převýšily nákupy ({fmtKc(grp.plus)}),
+                    protože se vrací i zboží koupené v předchozím měsíci. Za tento měsíc si tedy odpočet neuplatníš, naopak
+                    o {fmtKc(Math.abs(grp.sum))} zvyšuje DPH k odvodu.
+                  </div>
+                )}
                 {isOpen && (
                   <div style={{ padding: "8px 14px 12px", display: "flex", flexDirection: "column", gap: 5, background:"#fff" }}>
                     {grp.items.map(e => (
@@ -12306,8 +12333,8 @@ function DphKalkulacka({ odpItem, onSaveFinance }) {
                               vratka již obdržena
                             </span>
                           )}
-                          <b className="maux-num" style={{ color: (e.vat || 0) === 0 ? "var(--mut)" : "#3518A5", opacity: (e.vat || 0) === 0 ? .7 : 1 }}>
-                            {(e.vat || 0) === 0 ? "0 Kč" : `+${fmtKc(e.vat)}`}
+                          <b className="maux-num" style={{ color: (e.vat || 0) === 0 ? "var(--mut)" : (e.vat || 0) < 0 ? "#B45309" : "#3518A5", opacity: (e.vat || 0) === 0 ? .7 : 1, whiteSpace: "nowrap" }}>
+                            {fmtSigned(e.vat || 0)}
                           </b>
                           <button onClick={() => removeEntry(e.id)} title="Odebrat z odpočtu i z archivu" style={{ background: "none", border: "none", color: "var(--mut)", cursor: "pointer", fontSize: 10, opacity: .6 }}>✕</button>
                         </span>
