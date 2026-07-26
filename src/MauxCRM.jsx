@@ -9865,7 +9865,7 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
                   ].filter(e => e.value > 0);
                   const sTotalEar = sEnvSegs.reduce((s,e) => s+e.value, 0);
                   const sFirmaRez = sporBalS - sTotalEar;
-                  const sFullSegs = [...sEnvSegs, ...(sFirmaRez > 0 ? [{ label: "Volné", value: sFirmaRez, color: "#E0E7FF" }] : [])];
+                  const sFullSegs = [...sEnvSegs, ...(sFirmaRez > 0 ? [{ label: "Volné", value: sFirmaRez, color: "#6366F1" }] : [])];
                   const sTotalAll = sFullSegs.reduce((s,e)=>s+e.value,0) || 1;
                   const boundPct  = Math.round((sTotalEar / Math.max(sporBalS,1)) * 100);
                   // SVG donut — r=34
@@ -9971,11 +9971,12 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
                       <div style={{display:"flex",flexWrap:"wrap",gap:4,marginTop:12}}>
                         {sFullSegs.map((s,i)=>(
                           <span key={i} title={`${s.label}: ${fmtKc(s.value)} · ${Math.round(s.value/sTotalAll*100)}%`} style={{
-                            fontSize:9.5,padding:"3px 9px",borderRadius:99,
-                            background:`${s.color}16`,color:s.color,
-                            border:`1px solid ${s.color}30`,
-                            fontWeight:600,cursor:"default",whiteSpace:"nowrap",
-                          }}>{s.label} {fmtKc(s.value)}</span>
+                            fontSize:9.5,padding:"3px 9px 3px 7px",borderRadius:99,
+                            background:"rgba(0,0,0,.022)",color:"var(--txt)",
+                            border:"1px solid rgba(0,0,0,.06)",
+                            fontWeight:500,cursor:"default",whiteSpace:"nowrap",
+                            display:"inline-flex",alignItems:"center",gap:5,
+                          }}><span style={{width:6,height:6,borderRadius:"50%",background:s.color,flexShrink:0}}/>{s.label} {fmtKc(s.value)}</span>
                         ))}
                       </div>
 
@@ -10157,7 +10158,7 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
                         <rect
                           x={x} y={baseY - totalH} width={barW} height={escH}
                           rx={4} ry={4}
-                          fill={isLive ? "#C4B5FD" : (isNow ? "#D97706" : "#FB923C")}
+                          fill={isLive ? "#E7E1D3" : (isNow ? "#A1834A" : "#C8B48A")}
                           stroke={isLive ? "#818CF8" : "none"}
                           strokeWidth={isLive ? 1.2 : 0}
                           strokeDasharray={isLive ? "4,3" : "none"}
