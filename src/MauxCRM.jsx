@@ -2842,105 +2842,6 @@ function Sidebar({ mod, setMod, onLogout, privacyMode, onTogglePrivacy }) {
 }
 
 /* ─── SPOŘÁK TILE (extracted component to allow useState) ─── */
-function SpořákTile({ financeItems, invoices, dpfoMonths, loanTransactions, onSaveFinance }) {
-  const sporaci = (financeItems||[]).filter(i => i.category === "sporaci" && i.notes !== "SKIP_DISPLAY");
-  const zůstatekItem = sporaci.find(i => i.id === "fi_sp_99");
-  // Always exclude fi_sp_02 (Bobnice) from manual — comes from loan tracker
-  const manualObálky = sporaci.filter(i => i.id !== "fi_sp_99" && i.id !== "fi_sp_01" && i.id !== "fi_sp_02");
-  const dphAuto = dphObalkaUnsettled(invoices, financeItems); // vybrané DPH minus odpočet období — viz red team 24.7.
-  // Net DPFO balance on spořák = paid monthly savings (+) minus FÚ payments (-)
-  const dpfoAcc = (dpfoMonths||[]).filter(m => m.is_paid).reduce((s,m) => s+(m.amount||0), 0);
-  const bobloanTxs = loanTransactions?.loan_bobnice || [];
-  const bobloanBal = bobloanTxs.reduce((s,t) => s+t.amount, 0);
-  const bobniceFallback = (financeItems||[]).find(i => i.id === "fi_sp_02")?.amount || 0;
-  // Fallback na ruční fi_sp_02 JEN když neexistují žádné transakce — jinak živý zůstatek (clamp na 0,
-  // záporný = dotace z vlastních peněz, ta na spořáku žádnou obálku nedrží)
-  const bobniceBal = Math.max(bobloanTxs.length ? bobloanBal : bobniceFallback, 0);
-  const planKapitál = (financeItems||[]).find(i => i.id === "fi_plan_kapital")?.amount || 150000;
-
-  const allItems = [
-    { label: "DPH", amount: dphAuto, color: "#3518A5", auto: true },
-    { label: "DPFO", amount: dpfoAcc, color: "#F59E0B", auto: true },
-    ...(bobniceBal > 0 ? [{ label: "Bobnice", amount: bobniceBal, color: "#818CF8", auto: true }] : []),
-    ...manualObálky.map((o,i) => ({ id:o.id, label: o.label, amount: o.amount||0, color: ["#7C3AED","#0EA5E9","#DC2626","#6B7280"][i%4], auto: false })),
-  ].filter(i => i.amount > 0);
-
-  const totalEarmarked = allItems.reduce((s,i) => s+i.amount, 0);
-  const actualBalance = zůstatekItem?.amount || 0;
-  const základníKapitál = actualBalance - totalEarmarked;
-
-  const [editBal, setEditBal] = useState(false);
-  const [balInput, setBalInput] = useState(actualBalance);
-
-  return (
-    <div style={{ background: "#fff", border: "1px solid var(--line)", borderRadius: 14, padding: "20px 24px" }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 18 }}>
-        <div>
-          <div style={{ fontSize: 9, letterSpacing: ".28em", textTransform: "uppercase", fontWeight: 600, color: "#3518A5", marginBottom: 6, opacity: .8 }}>Spořící účet</div>
-          {editBal ? (
-            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-              <input type="number" value={balInput} onChange={e => setBalInput(Number(e.target.value))} autoFocus
-                style={{ width: 150, font: "inherit", fontSize: 24, padding: "4px 10px", border: "2px solid var(--ink)", borderRadius: 8, outline: "none", fontFamily: "Fraunces,serif", fontWeight: 300 }}
-                onKeyDown={e => { if(e.key==="Enter") { onSaveFinance({...zůstatekItem, amount: balInput}); setEditBal(false); } if(e.key==="Escape") setEditBal(false); }} />
-              <button onClick={() => { onSaveFinance({...zůstatekItem, amount: balInput}); setEditBal(false); }}
-                style={{ background: "var(--ink)", color: "#fff", border: "none", borderRadius: 7, padding: "7px 14px", fontSize: 13, cursor: "pointer" }}>✓</button>
-            </div>
-          ) : (
-            <div style={{ display: "flex", alignItems: "baseline", gap: 10, cursor: "pointer" }} title="Klikni pro úpravu" onClick={() => { setBalInput(actualBalance); setEditBal(true); }}>
-              <div style={{ fontFamily: "Fraunces,serif", fontSize: 32, fontWeight: 300, color: "var(--ink)" }}>{fmtKc(actualBalance)}</div>
-              <span style={{ fontSize: 11, color: "var(--mut)" }}>skutečný zůstatek ✎</span>
-            </div>
-          )}
-        </div>
-        <div style={{ textAlign: "right" }}>
-          <div style={{ fontSize: 10, color: "var(--mut)", marginBottom: 3 }}>Obálky celkem</div>
-          <div style={{ fontFamily: "Fraunces,serif", fontSize: 20, fontWeight: 300 }}>{fmtKc(totalEarmarked)}</div>
-          <div style={{ fontSize: 12, marginTop: 4, fontWeight: 600, color: základníKapitál >= 0 ? "#059669" : "#DC2626" }}>
-            {základníKapitál >= 0 ? "+" : ""}{fmtKc(základníKapitál)} volného
-          </div>
-        </div>
-      </div>
-      <div style={{ height: 20, borderRadius: 6, overflow: "hidden", display: "flex", marginBottom: 14, background: "#F0EEF8" }}>
-        {allItems.map((item, i) => (
-          <div key={i} title={`${item.label}: ${fmtKc(item.amount)}`}
-            style={{ width: `${totalEarmarked > 0 ? (item.amount/totalEarmarked)*100 : 0}%`, background: item.color, transition: ".5s", display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden" }}>
-            {(item.amount/totalEarmarked) > 0.1 && <span style={{ fontSize: 8, color: "#fff", fontWeight: 700, letterSpacing: ".04em" }}>{item.label}</span>}
-          </div>
-        ))}
-      </div>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(100px, 1fr))", gap: "8px 16px", marginBottom: 16 }}>
-        {allItems.map((item, i) => (
-          <div key={i} style={{ display: "flex", alignItems: "flex-start", gap: 6 }}>
-            <div style={{ width: 8, height: 8, borderRadius: 2, background: item.color, flexShrink: 0, marginTop: 3 }} />
-            <div>
-              <div style={{ fontSize: 10, color: "var(--mut)", display: "flex", gap: 3, alignItems: "center" }}>
-                {item.label}
-                {item.auto && <span style={{ fontSize: 7, background: "#EEF2FF", color: "#3730A3", padding: "1px 4px", borderRadius: 3, fontWeight: 700 }}>auto</span>}
-              </div>
-              <div style={{ fontSize: 13, fontFamily: "Fraunces,serif", fontWeight: 300, color: item.color }}>{fmtKc(item.amount)}</div>
-            </div>
-          </div>
-        ))}
-      </div>
-      <div style={{ background: základníKapitál >= planKapitál ? "#F0FDF4" : "#FEF2F2", borderRadius: 10, padding: "12px 16px", border: `1px solid ${základníKapitál >= planKapitál ? "#BBF7D0" : "#FECACA"}` }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 8 }}>
-          <span style={{ fontSize: 10, letterSpacing: ".12em", textTransform: "uppercase", fontWeight: 600, color: základníKapitál >= planKapitál ? "#065F46" : "#991B1B" }}>Základní kapitál MAUX Legal</span>
-          <span style={{ fontSize: 10, color: "var(--mut)" }}>cíl: {fmtKc(planKapitál)}</span>
-        </div>
-        <div style={{ height: 5, background: "rgba(0,0,0,.08)", borderRadius: 3, marginBottom: 8 }}>
-          <div style={{ height: "100%", width: `${Math.min((Math.max(základníKapitál,0)/planKapitál)*100,100)}%`, background: základníKapitál >= planKapitál ? "#059669" : "#3518A5", borderRadius: 3, transition: ".5s" }} />
-        </div>
-        <div style={{ display: "flex", justifyContent: "space-between" }}>
-          <span style={{ fontFamily: "Fraunces,serif", fontSize: 20, fontWeight: 300, color: základníKapitál >= planKapitál ? "#059669" : "#DC2626" }}>{fmtKc(Math.max(základníKapitál,0))}</span>
-          <span style={{ fontSize: 12, color: základníKapitál >= 0 ? "#059669" : "#DC2626", fontWeight: 600 }}>
-            {základníKapitál >= planKapitál ? "✓ Cíl splněn" : `chybí ${fmtKc(planKapitál - Math.max(základníKapitál,0))}`}
-          </span>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 /* ─── PREMIUM LOAN TILES ─── */
 // Jednorázový import historie splátek auto-půjčky (úkol #33) — z Tomovy excel evidence
 // (jen reálně proběhlé/odklikané pohyby do 15.05.2026; budoucí naplánované splátky se
@@ -4270,30 +4171,63 @@ function dphObalkaUnsettled(invoices, financeItems) {
   }, 0);
 }
 
+/* ══════════════════════════════════════════════════════════════════════════════
+   OBÁLKY NA SPOŘICÍM ÚČTU — jediný zdroj pravdy
+   ------------------------------------------------------------------------------
+   Tom, 27.7.2026: "ať je zdroj na jednom místě". Tenhle výpočet byl zkopírovaný
+   na 5 místech a kopie se rozešly (dvě měly fantomový fallback 8 050 Kč u DPFO,
+   jedna neměla obálku daně z úschov ani filtr proti dvojímu započtení). Přesně
+   takhle vznikla i chyba, kdy Firemní rezerva lhala o 13 tisíc.
+   Vrací i `free` = firemní rezerva (volné peníze nad rámec obálek).
+   Barvy si každá komponenta mapuje sama — to je prezentace, ne výpočet.
+   ═══════════════════════════════════════════════════════════════════════════ */
+function computeSporakEnvelopes(financeItems, invoices, dpfoMonths, loanTransactions, escrows) {
+  const sporaci = (financeItems || []).filter(i => i.category === "sporaci" && i.notes !== "SKIP_DISPLAY");
+  const balance = sporaci.find(i => i.id === "fi_sp_99")?.amount || 0;
+
+  // DPH: vybrané z uhrazených faktur MINUS odpočet z účtenek za totéž období
+  const dph = dphObalkaUnsettled(invoices, financeItems);
+
+  // DPFO: naspořeno minus odvedeno FÚ. POZOR — `|| 0`, nikdy `|| 8050`.
+  // Fallback 8050 byl fantom: měsíc s prázdnou částkou by obálku nafoukl o tisíce.
+  const dpfo = (dpfoMonths || []).filter(m => m.is_paid).reduce((s, m) => s + (m.amount || 0), 0);
+
+  // Bobnice: živý zůstatek z transakcí. Ruční fi_sp_02 JEN když transakce vůbec nejsou —
+  // test na `.length`, ne na kladnou hodnotu (záporný zůstatek = dotace z vlastních peněz,
+  // ta na spořáku žádnou obálku nedrží).
+  const bobTxs = loanTransactions?.loan_bobnice || [];
+  const bobFallback = (financeItems || []).find(i => i.id === "fi_sp_02")?.amount || 0;
+  const bobnice = Math.max(bobTxs.length ? bobTxs.reduce((s, t) => s + t.amount, 0) : bobFallback, 0);
+
+  const danUschov = Math.round(escrowTotalTax(escrows || []));
+
+  // Ruční obálky — bez systémových ID a bez těch, které duplikují automatické (jinak dvojí započtení)
+  const AUTO = new Set(["dph", "dpfo", "dpfo 2026", "bobnice", "daň z úschov"]);
+  const manual = sporaci.filter(i =>
+    !["fi_sp_99", "fi_sp_01", "fi_sp_02"].includes(i.id)
+    && !AUTO.has((i.label || "").toLowerCase().trim())
+  );
+
+  const envelopes = [
+    { key: "dph",    label: "DPH",           amount: dph,       auto: true },
+    { key: "dpfo",   label: "DPFO 2026",     amount: dpfo,      auto: true },
+    { key: "bob",    label: "Bobnice",       amount: bobnice,   auto: true },
+    { key: "danu",   label: "Daň z úschov",  amount: danUschov, auto: true },
+    ...manual.map(o => ({ key: o.id, label: o.label, amount: o.amount || 0, auto: false, item: o })),
+  ].filter(e => e.amount > 0);
+
+  const earmarked = envelopes.reduce((s, e) => s + e.amount, 0);
+  return { balance, envelopes, earmarked, free: balance - earmarked };
+}
+
 // Firemní rezerva = co reálně leží volné na spořicím účtu po odečtení vyhrazených "obálek"
 // (DPH, DPFO, Bobnice, daň z úschov, ruční rezervy). Dřív duplikováno samostatně ve FirmaBar
 // i MajetekBar (riziko, že se čísla časem rozejdou) — od 29.6.2026 jeden zdroj pravdy.
 function computeFirmaRezerva(financeItems, invoices, dpfoMonths, loanTransactions, escrows) {
-  const sporBal  = (financeItems||[]).find(i => i.id === "fi_sp_99")?.amount || 0;
-  const dphF     = dphObalkaUnsettled(invoices, financeItems); // vybrané DPH minus odpočet období
-  const dpfoF    = (dpfoMonths||[]).filter(m => m.is_paid).reduce((s,m) => s+(m.amount||0), 0);
-  const boblTxsF = loanTransactions?.loan_bobnice || [];
-  const boblF    = boblTxsF.reduce((s,t) => s+t.amount, 0);
-  const bobFbF   = (financeItems||[]).find(i => i.id === "fi_sp_02")?.amount || 0;
-  // Fallback jen bez transakcí — záporný živý zůstatek (vlastní dotace) = žádná obálka na spořáku
-  const bobBalF  = Math.max(boblTxsF.length ? boblF : bobFbF, 0);
-  const danUF    = Math.round(escrowTotalTax(escrows||[]));
-  const autoLabF = new Set(["dph","dpfo 2026","bobnice","daň z úschov"]);
-  const manEnvF  = (financeItems||[]).filter(i =>
-    i.category === "sporaci" && i.notes !== "SKIP_DISPLAY"
-    && i.id !== "fi_sp_99" && i.id !== "fi_sp_01" && i.id !== "fi_sp_02"
-    && !autoLabF.has((i.label||"").toLowerCase().trim())
-  );
-  const totalEarF   = dphF + dpfoF + (bobBalF > 0 ? bobBalF : 0) + danUF + manEnvF.reduce((s,i)=>s+(i.amount||0),0);
-  const firmaRez    = sporBal - totalEarF;
-  const planKapItem = (financeItems||[]).find(i => i.id === "fi_plan_kapital");
-  const planKap     = planKapItem?.amount || 130000;
-  return { sporBal, totalEarF, firmaRez, planKap, planKapItem };
+  // Tenká slupka nad computeSporakEnvelopes — zachovává původní tvar návratu kvůli volajícím.
+  const { balance, earmarked, free } = computeSporakEnvelopes(financeItems, invoices, dpfoMonths, loanTransactions, escrows);
+  const planKapItem = (financeItems || []).find(i => i.id === "fi_plan_kapital");
+  return { sporBal: balance, totalEarF: earmarked, firmaRez: free, planKap: planKapItem?.amount || 130000, planKapItem };
 }
 
 // ─── Breakdown row generators (balance-interval engine) ─────────────────────
@@ -5837,128 +5771,6 @@ function EscrowList({ escrows, onNew, onEdit, onDelete, onMarkPaid, onPayment, l
 }
 
 /* ─── MINI SPOŘÁK BAR (kompakt pro dashboard) ─── */
-function MiniSpořák({ financeItems, invoices, dpfoMonths, loanTransactions, escrows, onSaveFinance }) {
-  const sporaci = (financeItems||[]).filter(i => i.category === "sporaci" && i.notes !== "SKIP_DISPLAY");
-  const zItem = sporaci.find(i => i.id === "fi_sp_99");
-  const dphAuto = dphObalkaUnsettled(invoices, financeItems); // vybrané DPH minus odpočet období — viz red team 24.7.
-  // Net DPFO balance on spořák = paid monthly savings (+) minus FÚ payments (-)
-  const dpfoAcc = (dpfoMonths||[]).filter(m => m.is_paid).reduce((s,m) => s+(m.amount||0), 0);
-  const bobloanTxs = loanTransactions?.loan_bobnice || [];
-  const bobloanBal = bobloanTxs.reduce((s,t) => s+t.amount, 0);
-  const bobFb = (financeItems||[]).find(i => i.id === "fi_sp_02")?.amount || 0;
-  const bobBal = Math.max(bobloanTxs.length ? bobloanBal : bobFb, 0);
-  const danUschov = Math.round(escrowTotalTax(escrows));
-  // Exclude auto-computed envelopes from manual list to avoid duplicates
-  const autoEnvLabels = new Set(["dph","dpfo 2026","bobnice","daň z úschov"]);
-  const manualObálky = sporaci.filter(i =>
-    i.id !== "fi_sp_99" && i.id !== "fi_sp_01" && i.id !== "fi_sp_02"
-    && !autoEnvLabels.has((i.label||"").toLowerCase().trim())
-  );
-  const allEnvelopes = [
-    { label: "DPH",          amount: dphAuto,   color: "#3518A5", auto: true },
-    { label: "DPFO 2026",    amount: dpfoAcc,   color: "#F59E0B", auto: true },
-    ...(bobBal > 0 ? [{ label: "Bobnice", amount: bobBal, color: "#818CF8", auto: true }] : []),
-    { label: "Daň z úschov", amount: danUschov, color: "#A8A29E", auto: true },
-    ...manualObálky.map((o,i) => ({ label: o.label, amount: o.amount||0, color: ["#7C3AED","#0EA5E9","#DC2626","#6B7280"][i%4], auto: false })),
-  ].filter(e => e.amount > 0);
-  const totalEarmarked = allEnvelopes.reduce((s,e) => s+e.amount, 0);
-  const actualBalance  = zItem?.amount || 0;
-  const volné = actualBalance - totalEarmarked;
-
-  // Majetek
-  const akcie     = (financeItems||[]).find(i => i.id === "fi_ma_01")?.amount || 0;
-  const stavebko  = (financeItems||[]).find(i => i.id === "fi_ma_02")?.amount || 0;
-  const firmaKap  = (financeItems||[]).find(i => i.id === "fi_ma_03")?.amount || 0;
-  const majetek   = akcie + stavebko + firmaKap;
-
-  // Firma / runway
-  const nutne      = (financeItems||[]).filter(i => i.category === "nutne");
-  const luxus      = (financeItems||[]).filter(i => i.category === "luxus");
-  const totalVydaje = Math.abs(nutne.reduce((s,i)=>s+(i.amount||0),0) + luxus.reduce((s,i)=>s+(i.amount||0),0));
-  const runway      = totalVydaje > 0 ? actualBalance / totalVydaje : 0;
-  const runwayM     = Math.floor(runway);
-  const runwayD     = Math.round((runway - runwayM) * 30);
-  const planKap     = (financeItems||[]).find(i => i.id === "fi_plan_kapital")?.amount || 130000;
-  const unbilledOTW = (financeItems||[]).find(i => i.id === "fi_otw")?.amount || 0;
-
-  const [editBal, setEditBal] = useState(false);
-  const [balInput, setBalInput] = useState(actualBalance);
-
-  const Div = () => <div style={{width:1,alignSelf:"stretch",background:"var(--line)",margin:"0 4px",flexShrink:0}} />;
-  const Chip = ({children}) => <span style={{fontSize:7,background:"#EEF2FF",color:"#3730A3",padding:"1px 4px",borderRadius:3,fontWeight:700}}>{children}</span>;
-
-  return (
-    <div style={{background:"#fff",border:"2px solid #3518A5",borderRadius:14,padding:"32px 36px",display:"flex",alignItems:"stretch",gap:24,flexWrap:"wrap"}}>
-      {/* === SPOŘÁK === */}
-      <div style={{minWidth:280,display:"flex",flexDirection:"column",justifyContent:"center"}}>
-        <div style={{fontSize:11,letterSpacing:".22em",textTransform:"uppercase",color:"#3518A5",fontWeight:700,marginBottom:10}}>SPOŘÍCÍ ÚČET · OBÁLKY</div>
-        {editBal ? (
-          <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:6}}>
-            <input type="number" value={balInput} autoFocus
-              onChange={e => setBalInput(Number(e.target.value))}
-              onKeyDown={e => { if(e.key==="Enter") { onSaveFinance({...zItem,amount:balInput}); setEditBal(false); } if(e.key==="Escape") setEditBal(false); }}
-              style={{width:180,fontSize:30,padding:"6px 12px",border:"2px solid #3518A5",borderRadius:8,fontFamily:"Fraunces,serif",fontWeight:300,outline:"none"}} />
-            <button onClick={() => { onSaveFinance({...zItem,amount:balInput}); setEditBal(false); }}
-              style={{background:"#3518A5",color:"#fff",border:"none",borderRadius:7,padding:"10px 16px",fontSize:14,cursor:"pointer",fontWeight:700}}>✓</button>
-            <button onClick={() => setEditBal(false)}
-              style={{background:"none",border:"1px solid var(--line)",borderRadius:7,padding:"10px 12px",fontSize:14,cursor:"pointer",color:"var(--mut)"}}>✕</button>
-          </div>
-        ) : (
-          <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:6}}>
-            <div style={{fontFamily:"Fraunces,serif",fontSize:44,fontWeight:300,color:"#3518A5",lineHeight:1}}>{fmtKc(actualBalance)}</div>
-            <button onClick={() => { setBalInput(actualBalance); setEditBal(true); }}
-              title="Denně aktualizuj skutečný zůstatek bankovního účtu"
-              style={{background:"#3518A5",color:"#fff",border:"none",borderRadius:20,padding:"9px 20px",fontSize:13,cursor:"pointer",fontWeight:700,letterSpacing:".03em",whiteSpace:"nowrap",flexShrink:0}}>
-              ✎ Aktualizovat
-            </button>
-          </div>
-        )}
-        {/* === GRAF — poměrné rozložení zůstatku jako plně vyplněné, vzdušné bloky (barva = obálka) === */}
-        {actualBalance > 0 && (
-          <div style={{display:"flex",gap:7,marginTop:16}}>
-            {volné > 0 && (
-              <div style={{flexGrow:Math.max(volné,1),flexBasis:0,height:38,borderRadius:11,background:"#D9C7A3"}} title={`Firemní rezerva (volné): ${fmtKc(volné)}`} />
-            )}
-            {allEnvelopes.map((e,i) => (
-              <div key={i} style={{flexGrow:Math.max(e.amount,1),flexBasis:0,height:38,borderRadius:11,background:e.color}} title={`${e.label}: ${fmtKc(e.amount)}`} />
-            ))}
-          </div>
-        )}
-      </div>
-
-      <Div />
-
-      {/* === OBÁLKY (+ Firemní rezerva = totéž co "volné", jen jako běžná položka — propojení s Osobním majetkem) === */}
-      <div style={{display:"flex",gap:20,flexWrap:"wrap",alignItems:"center"}}>
-        {volné > 0 && (
-          <div style={{display:"flex",alignItems:"center",gap:8}}>
-            <div style={{width:11,height:11,borderRadius:3,background:"#B8923D",flexShrink:0,boxShadow:"0 0 6px 1px rgba(184,146,61,.45)"}} />
-            <div>
-              <div style={{fontSize:11,color:"var(--mut)",display:"flex",gap:3,alignItems:"center"}}>
-                Firemní rezerva <Chip>auto</Chip>
-              </div>
-              <div style={{fontSize:20,fontFamily:"Fraunces,serif",fontWeight:300,color:"#B8923D",lineHeight:1.2,textShadow:"0 0 14px rgba(184,146,61,.35)"}}>{fmtKc(volné)}</div>
-              <div style={{fontSize:9,color:"var(--mut)",opacity:.75}}>= volné · v Osobním majetku</div>
-            </div>
-          </div>
-        )}
-        {allEnvelopes.map((e,i) => (
-          <div key={i} style={{display:"flex",alignItems:"center",gap:8}}>
-            <div style={{width:11,height:11,borderRadius:3,background:e.color,flexShrink:0}} />
-            <div>
-              <div style={{fontSize:11,color:"var(--mut)",display:"flex",gap:3,alignItems:"center"}}>
-                {e.label} {e.auto && <Chip>auto</Chip>}
-              </div>
-              <div style={{fontSize:20,fontFamily:"Fraunces,serif",fontWeight:300,color:e.color,lineHeight:1.2}}>{fmtKc(e.amount)}</div>
-            </div>
-          </div>
-        ))}
-      </div>
-
-    </div>
-  );
-}
-
 /* ─── LIQUID TANK (interaktivní "dolévající se" vizualizace k cíli — V.03) ─── */
 function LiquidTank({ pct, color, value, goal, onSetGoal, size = 46 }) {
   const p = Math.max(0, Math.min(pct, 1));
@@ -6367,119 +6179,6 @@ function FinDonutChart({ segments, centerDefault, centerColor, size = 170 }) {
 }
 
 /* ─── SPOŘICÍ ÚČET — samostatná čtvercová dlaždice (vedle Příjmy/Výdaje na Přehledu) ─── */
-function SporakRingTile({ financeItems, onSaveFinance, invoices, dpfoMonths, loanTransactions, escrows, square }) {
-  const sporaci    = (financeItems||[]).filter(i => i.category === "sporaci" && i.notes !== "SKIP_DISPLAY");
-  const zItem      = sporaci.find(i => i.id === "fi_sp_99");
-  const actualBal  = zItem?.amount || 0;
-  const dphAuto    = dphObalkaUnsettled(invoices, financeItems); // vybrané DPH minus odpočet období
-  const dpfoAcc    = (dpfoMonths||[]).filter(m => m.is_paid).reduce((s,m) => s+(m.amount||8050), 0);
-  const bobloanTxs = loanTransactions?.loan_bobnice || [];
-  const bobloanBal = bobloanTxs.reduce((s,t) => s+t.amount, 0);
-  const bobFb      = (financeItems||[]).find(i => i.id === "fi_sp_02")?.amount || 0;
-  const bobBal     = Math.max(bobloanTxs.length ? bobloanBal : bobFb, 0);
-  const danUschov  = Math.round(escrowTotalTax(escrows||[]));
-  const autoLbls   = new Set(["dph","dpfo 2026","bobnice","daň z úschov"]);
-  const manObálky  = sporaci.filter(i =>
-    i.id !== "fi_sp_99" && i.id !== "fi_sp_01" && i.id !== "fi_sp_02"
-    && !autoLbls.has((i.label||"").toLowerCase().trim())
-  );
-  const envSegs    = [
-    { label: "DPH",          amount: dphAuto,   color: "#2B2478" },
-    { label: "DPFO 2026",    amount: dpfoAcc,   color: "#5B52F0" },
-    ...(bobBal > 0 ? [{ label: "Bobnice", amount: bobBal, color: "#818CF8" }] : []),
-    { label: "Daň z úschov", amount: danUschov, color: "#A5B4FC" },
-    ...manObálky.map((o,idx) => ({ label: o.label, amount: o.amount||0, color: ["#5B4FCF","#9D93DD"][idx%2] })),
-  ].filter(e => e.amount > 0);
-  const totalEar   = envSegs.reduce((s,e) => s+e.amount, 0);
-  const firmaRez   = actualBal - totalEar;
-  const R_COL = "#4F46E5";
-  const fullSporSegs = [
-    ...envSegs.map(e => ({ label: e.label, value: e.amount, color: e.color })),
-    ...(firmaRez > 0 ? [{ label: "Rezerva", value: firmaRez, color: R_COL }] : []),
-  ];
-
-  const [editBal, setEditBal] = useState(false);
-  const [balInput, setBalInput] = useState(actualBal);
-  const S_COL = "#3518A5";
-
-  const secHdr = (col, text) => (
-    <div style={{ fontSize: 8.5, letterSpacing: ".24em", color: "var(--mut)", fontWeight: 700, textTransform: "uppercase", opacity: 0.7, marginBottom: 5 }}>{text}</div>
-  );
-  const eBtn = (onClick, active, col) => (
-    <button onClick={onClick} style={{ width: 24, height: 24, borderRadius: 7, border: "1px solid var(--line)", background: active ? `${col}18` : "none", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", color: active ? col : "var(--mut)", fontSize: 11, flexShrink: 0 }}>
-      {active ? "✕" : "✎"}
-    </button>
-  );
-
-  return (
-    <div style={{
-      height: "100%", borderRadius: BP.rInner, overflow: "hidden",
-      background: "#fff",
-      display: "flex", flexDirection: "column", alignItems: "center",
-      padding: square ? "22px 22px 18px" : "26px 34px 28px",
-      boxSizing: "border-box",
-    }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12, width: "100%" }}>
-        {secHdr(S_COL, "Spořicí účet")}
-        {eBtn(() => { setBalInput(actualBal); setEditBal(e => !e); }, editBal, S_COL)}
-      </div>
-      {editBal && (
-        <div style={{ display: "flex", gap: 6, marginBottom: 12, alignItems: "center", width: "100%" }}>
-          <input type="number" value={balInput} autoFocus onChange={e => setBalInput(Number(e.target.value))}
-            onKeyDown={e => { if (e.key === "Enter") { onSaveFinance({ ...zItem, amount: balInput }); setEditBal(false); } if (e.key === "Escape") setEditBal(false); }}
-            style={{ flex: 1, fontSize: 14, padding: "5px 9px", border: `2px solid ${S_COL}`, borderRadius: 8, outline: "none", fontFamily: "inherit", background: "rgba(255,255,255,0.75)" }} />
-          <button onClick={() => { onSaveFinance({ ...zItem, amount: balInput }); setEditBal(false); }} style={{ background: S_COL, color: "#fff", border: "none", borderRadius: 8, padding: "5px 11px", cursor: "pointer", fontWeight: 700 }}>✓</button>
-          <button onClick={() => setEditBal(false)} style={{ background: "none", border: "1px solid rgba(0,0,0,0.12)", borderRadius: 8, padding: "5px 9px", cursor: "pointer", color: "var(--mut)" }}>✕</button>
-        </div>
-      )}
-      {(() => {
-        const totalAll = fullSporSegs.reduce((s, x) => s + x.value, 0) || 1;
-        return (
-          <div style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0, width: "100%", gap: square ? 14 : 14 }}>
-            {/* Velké číslo nahoře — bez prstence, žádný "donut", jen čisté maux-glow číslo */}
-            <div style={{ textAlign: "center", flexShrink: 0 }}>
-              <div className="maux-num maux-glow" style={{ fontSize: square ? 32 : 40, fontWeight: 600, color: S_COL, lineHeight: 1 }}>
-                {fmtKc(actualBal)}
-              </div>
-              <div style={{ fontSize: square ? 11.5 : 11, color: "var(--mut)", marginTop: 6 }}>{fmtKc(totalEar)} v obálkách</div>
-            </div>
-
-            {/* Segmentovaná "capsule" lišta poměru — moderní náhrada donutu (2026 fintech trend: Mercury/Ramp/Linear styl) */}
-            <div style={{ flexShrink: 0, width: "100%", height: square ? 14 : 16, borderRadius: 99, background: "rgba(0,0,0,.045)", display: "flex", gap: 2, padding: 2, boxSizing: "border-box" }}>
-              {fullSporSegs.map((s, i) => (
-                <div key={i} title={`${s.label}: ${fmtKc(s.value)}`} style={{
-                  width: `${Math.max((s.value / totalAll) * 100, 1.5)}%`,
-                  minWidth: 4, borderRadius: 99, position: "relative", overflow: "hidden",
-                  background: s.color,
-                  transition: "width .6s ease",
-                  boxShadow: `0 0 8px ${s.color}55`,
-                }}>
-                  <div style={{ position: "absolute", inset: 0, background: "linear-gradient(180deg, rgba(255,255,255,.4), rgba(255,255,255,0) 60%)" }} />
-                </div>
-              ))}
-            </div>
-
-            {/* Legenda — tečka, název, částka, procento; scrolluje, pokud je víc obálek než se vejde */}
-            <div style={{ flex: 1, minHeight: 0, overflowY: "auto", display: "flex", flexDirection: "column", gap: square ? 9 : 9 }}>
-              {fullSporSegs.map((s, i) => {
-                const pct = Math.round((s.value / totalAll) * 100);
-                return (
-                  <div key={i} style={{ display: "flex", alignItems: "center", gap: 9 }}>
-                    <span style={{ width: 8, height: 8, borderRadius: "50%", background: s.color, flexShrink: 0, boxShadow: `0 0 4px ${s.color}88` }} />
-                    <span style={{ flex: 1, fontSize: square ? 13 : 13, fontWeight: 600, color: "var(--ink)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.label}</span>
-                    <span className="maux-num" style={{ fontSize: square ? 13 : 13, fontWeight: 600, color: "var(--ink)", flexShrink: 0 }}>{fmtKc(s.value)}</span>
-                    <span style={{ fontSize: square ? 10.5 : 10.5, color: "var(--mut)", width: 32, textAlign: "right", flexShrink: 0 }}>{pct}%</span>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        );
-      })()}
-    </div>
-  );
-}
-
 /* ─── TRI GRAFY PANEL — Majetek + Rezerva jako interaktivní donut grafy (Spořák je teď samostatná dlaždice na Přehledu) ─── */
 function TriGrafyPanel({ financeItems, onSaveFinance, invoices, dpfoMonths, loanTransactions, escrows }) {
   // ── SPOŘÁK ──
@@ -6487,26 +6186,15 @@ function TriGrafyPanel({ financeItems, onSaveFinance, invoices, dpfoMonths, loan
   const zItem      = sporaci.find(i => i.id === "fi_sp_99");
   const actualBal  = zItem?.amount || 0;
   const dphAuto    = dphObalkaUnsettled(invoices, financeItems); // vybrané DPH minus odpočet období
-  const dpfoAcc    = (dpfoMonths||[]).filter(m => m.is_paid).reduce((s,m) => s+(m.amount||8050), 0);
-  const bobloanTxs = loanTransactions?.loan_bobnice || [];
-  const bobloanBal = bobloanTxs.reduce((s,t) => s+t.amount, 0);
-  const bobFb      = (financeItems||[]).find(i => i.id === "fi_sp_02")?.amount || 0;
-  const bobBal     = Math.max(bobloanTxs.length ? bobloanBal : bobFb, 0);
-  const danUschov  = Math.round(escrowTotalTax(escrows||[]));
-  const autoLbls   = new Set(["dph","dpfo 2026","bobnice","daň z úschov"]);
-  const manObálky  = sporaci.filter(i =>
-    i.id !== "fi_sp_99" && i.id !== "fi_sp_01" && i.id !== "fi_sp_02"
-    && !autoLbls.has((i.label||"").toLowerCase().trim())
-  );
-  const envSegs    = [
-    { label: "DPH",          amount: dphAuto,   color: "#2B2478" },
-    { label: "DPFO 2026",    amount: dpfoAcc,   color: "#5B52F0" },
-    ...(bobBal > 0 ? [{ label: "Bobnice", amount: bobBal, color: "#818CF8" }] : []),
-    { label: "Daň z úschov", amount: danUschov, color: "#A5B4FC" },
-    ...manObálky.map((o,idx) => ({ label: o.label, amount: o.amount||0, color: ["#5B4FCF","#9D93DD"][idx%2] })),
-  ].filter(e => e.amount > 0);
-  const totalEar   = envSegs.reduce((s,e) => s+e.amount, 0);
-  const volné      = actualBal - totalEar;
+  // Jediný zdroj pravdy — viz computeSporakEnvelopes
+  const _env       = computeSporakEnvelopes(financeItems, invoices, dpfoMonths, loanTransactions, escrows);
+  const ENV_COLOR  = { dph: "#2B2478", dpfo: "#5B52F0", bob: "#818CF8", danu: "#A5B4FC" };
+  const envSegs    = _env.envelopes.map((e, idx) => ({
+    label: e.label, amount: e.amount,
+    color: ENV_COLOR[e.key] || ["#5B4FCF","#9D93DD"][idx % 2],
+  }));
+  const totalEar   = _env.earmarked;
+  const volné      = _env.free;
   const sporSegs   = [
     ...envSegs.map(e => ({ label: e.label, value: e.amount, color: e.color })),
     ...(volné > 0 ? [{ label: "Volné", value: volné, color: "rgba(83,74,183,0.1)" }] : []),
@@ -6599,7 +6287,6 @@ function TriGrafyPanel({ financeItems, onSaveFinance, invoices, dpfoMonths, loan
 
   return (
     <div style={{ borderRadius: BP.rInner, overflow: "hidden", border: "1px solid rgba(0,0,0,0.06)" }}>
-      {/* Spořák (celkové rozložení) byl přesunut na Přehled — viz <SporakRingTile> vedle karty Příjmy/Výdaje */}
 
       {/* ═══ DOLNÍ PŮLKA: MAJETEK + REZERVA ═══ */}
       <div style={{ display: "flex" }}>
@@ -9897,30 +9584,17 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
 
                 {/* ── SPOŘICÍ ÚČET — fintech v3 airy+interactive (3.7.2026) ── */}
                 {(() => {
-                  const sporaciItems = (financeItems||[]).filter(i => i.category === "sporaci" && i.notes !== "SKIP_DISPLAY");
-                  const zItemS     = sporaciItems.find(i => i.id === "fi_sp_99");
-                  const sporBalS   = zItemS?.amount || 0;
-                  const dphAutoS   = dphObalkaUnsettled(invoices, financeItems); // vybrané DPH minus odpočet období
-                  const dpfoAccS   = (dpfoMonths||[]).filter(m => m.is_paid).reduce((s,m) => s+(m.amount||0), 0);
-                  const bobTxsS    = loanTransactions?.loan_bobnice || [];
-                  const bobloanS   = bobTxsS.reduce((s,t) => s+t.amount, 0);
-                  const bobFbS     = (financeItems||[]).find(i => i.id === "fi_sp_02")?.amount || 0;
-                  const bobBalS    = Math.max(bobTxsS.length ? bobloanS : bobFbS, 0);
-                  const danUschovS = Math.round(escrowTotalTax(escrows||[]));
-                  const autoLblsS  = new Set(["dph","dpfo 2026","bobnice","daň z úschov"]);
-                  const manObalkyS = sporaciItems.filter(i =>
-                    i.id !== "fi_sp_99" && i.id !== "fi_sp_01" && i.id !== "fi_sp_02"
-                    && !autoLblsS.has((i.label||"").toLowerCase().trim())
-                  );
-                  const sEnvSegs = [
-                    { label: "DPH",          value: dphAutoS,   color: "#2B2478" },
-                    { label: "DPFO",         value: dpfoAccS,   color: "#5B52F0" },
-                    ...(bobBalS > 0 ? [{ label: "Bobnice", value: bobBalS, color: "#7A6BF5" }] : []),
-                    { label: "Daň z úschov", value: danUschovS, color: "#A79BFF" },
-                    ...manObalkyS.map((o,idx) => ({ label: o.label, value: o.amount||0, color: ["#C7D2FE","#DDD6FE"][idx%2] })),
-                  ].filter(e => e.value > 0);
-                  const sTotalEar = sEnvSegs.reduce((s,e) => s+e.value, 0);
-                  const sFirmaRez = sporBalS - sTotalEar;
+                  // Jediný zdroj pravdy — viz computeSporakEnvelopes
+                  const _envS = computeSporakEnvelopes(financeItems, invoices, dpfoMonths, loanTransactions, escrows);
+                  const sporBalS = _envS.balance;
+                  const S_ENV_COLOR = { dph: "#2B2478", dpfo: "#5B52F0", bob: "#7A6BF5", danu: "#A79BFF" };
+                  const sEnvSegs = _envS.envelopes.map((e, idx) => ({
+                    label: e.key === "dpfo" ? "DPFO" : e.label,
+                    value: e.amount,
+                    color: S_ENV_COLOR[e.key] || ["#C7D2FE","#DDD6FE"][idx % 2],
+                  }));
+                  const sTotalEar = _envS.earmarked;
+                  const sFirmaRez = _envS.free;
                   const sFullSegs = [...sEnvSegs, ...(sFirmaRez > 0 ? [{ label: "Volné", value: sFirmaRez, color: "#5B52F0" }] : [])];
                   const sTotalAll = sFullSegs.reduce((s,e)=>s+e.value,0) || 1;
                   const boundPct  = Math.round((sTotalEar / Math.max(sporBalS,1)) * 100);
@@ -12118,6 +11792,27 @@ const JULY_2026_RECEIPTS = [
   { id: "imp_jul26_05", date: "2026-07-09", label: "STYLTEX – záclona+závěs+montáž kanceláře, přenesená DPH §92a (fakt. 202600441)", gross: 15383, rate: 21, vat: 3230 },
 ];
 
+/* ══════════════════════════════════════════════════════════════════════════════
+   PRAVIDLA EVIDENCE ÚČTENEK — soulad s účetní (Tom, 27. 7. 2026)
+   ------------------------------------------------------------------------------
+   "Od teď přizpůsob evidenci účtenek, které ti nahrávám, dle souladu s účetní
+   Čechmanovou." Andrea Čechmanová (anmavi.cz) posílá podklady + platební příkaz
+   kolem 25. dne za měsíc předchozí; evidence tady musí sedět na její vyúčtování.
+
+   1) PŘIJATÁ faktura → období podle data VYSTAVENÍ, ne DUZP.
+      Doslova: "DUZP je sice 30.06. ale je to Vaše faktura na vstupu a řídí se
+      datem vystavení." (U VYDANÝCH faktur naopak platí DUZP — vatPeriodKeyOf.)
+   2) gross = částka S DPH (celkem k úhradě), ne základ. DPH opsat z dokladu.
+   3) Přenesená daňová povinnost §92a → vat: 0 (odpočet kryje vlastní přiznání daně).
+   4) Anthropic / Claude → vat: 0 (viz ANTHROPIC_VAT_NOTE níže).
+   5) Opravné doklady/dobropisy → záporné DPH v období DORUČENÍ (§42), i když se
+      týkají nákupu z minulého měsíce. Záporný měsíční součet je legitimní.
+   6) Hlídat duplicity — reálný případ: notářka 5 674,90 Kč evidovaná 2×.
+   7) NEUZAVŘENÉ: GANT oblečení (660426055583) — účetní ho do odpočtu nedala.
+      Pokud je neuznatelné, nesmí uplatnit ani dobropisy 660426062119/660426065862.
+   Detail viz ~/Desktop/Cowork/PAMET.md
+   ═══════════════════════════════════════════════════════════════════════════ */
+
 // Anthropic / Claude — VÝJIMKA (jednorázová, 25.7.2026): DPH z těchto dokladů se vrátilo
 // přímo na účet druhý den, mimo standardní měsíční vyúčtování s Čechmanovou. Doklady proto
 // v evidenci ZŮSTÁVAJÍ (kvůli úplnosti archivu), ale s vat: 0 — neuplatňují se v odpočtu,
@@ -12581,7 +12276,8 @@ function DaneModule({ year, taxRecords, financeItems, invoices, dpfoMonths, escr
                           .reduce((s,i) => s + (i.vat_amount||0), 0);
   const dpfoYear = (dpfoMonths||[]).filter(m => m.year === year);
   const dpfoPaid = dpfoYear.filter(m => m.is_paid);
-  const dpfoAcc  = dpfoPaid.reduce((s,m) => s + (m.amount||8050), 0);
+  // `|| 0`, nikdy `|| 8050` — fantomový fallback nafukoval součet u měsíce s prázdnou částkou
+  const dpfoAcc  = dpfoPaid.reduce((s,m) => s + (m.amount||0), 0);
   const danUschov = Math.round(escrowTotalTax(escrows));
 
   // Sociální/zdravotní pojištění zatím nemá appka vlastní evidenci jako DPFO —
