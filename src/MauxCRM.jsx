@@ -60,6 +60,25 @@ const ASSISTANT_HOURLY_RATE = 170; // Kč/h — Josef Řehák
 // Od 6/2026 dál se vše počítá automaticky z docházky — tahle mapa se dál nerozšiřuje.
 const JOSEF_WAGE_MANUAL_OVERRIDES = { "2026-05": 10399 };
 
+// ── Efektivně datovaná hodinovka asistenta ───────────────────────────────────
+// Navýšení se ukládá do finance položky fi_asistent_sazba (category "config") jako
+// { history: [{ from:"YYYY-MM", rate:N }] }. Sazba platí OD daného měsíce dál; starší
+// měsíce zůstávají na předchozí sazbě — už odpracované/zaplacené měsíce se NEPŘEPOČÍTÁVAJÍ.
+// Prázdný rozvrh => všude platí ASSISTANT_HOURLY_RATE (170), takže žádné číslo se nemění.
+function assistantRateSchedule(financeItems) {
+  const it = (financeItems || []).find(i => i.id === "fi_asistent_sazba");
+  try { const p = JSON.parse(it?.notes || '{}'); return Array.isArray(p.history) ? p.history : []; }
+  catch (e) { return []; }
+}
+function assistantRateForMonth(ym, schedule) {
+  let r = ASSISTANT_HOURLY_RATE;
+  if (!Array.isArray(schedule)) return r;
+  for (const s of [...schedule].sort((a, b) => (a.from || '').localeCompare(b.from || ''))) {
+    if (s && s.from && s.from <= ym && s.rate > 0) r = s.rate;
+  }
+  return r;
+}
+
 // ── Privacy mode: čistě zobrazovací maska částek, NIKDY nepřepisuje reálná data ──
 let PRIVACY_MODE = false;
 const PRIVACY_DOTS = "• • • •";
@@ -8378,171 +8397,278 @@ function OstatniModule({ dpfoMonths, loanTrackers, loanTransactions, financeItem
 }
 
 /* ─── JOSEF PANEL — Dashboard widget ─── */
-function JosefPanel({ logs, attendance: attendanceProp, availability }) {
-  const now      = new Date();
-  // Use local date string (not UTC) to avoid timezone mismatch with stored dates
-  const ym       = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,"0")}`;
-  const todayStr = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,"0")}-${String(now.getDate()).padStart(2,"0")}`;
+function JosefPanel({ logs, attendance: attendanceProp, availability, clients = [], financeItems = [], onSaveFinance }) {
+  const now = new Date();
+  const pad = n => String(n).padStart(2, "0");
+  const ym = `${now.getFullYear()}-${pad(now.getMonth() + 1)}`;
+  const todayStr = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+  const CZM = ["ledna","února","března","dubna","května","června","července","srpna","září","října","listopadu","prosince"];
+  const CZM_SH = ["led","úno","bře","dub","kvě","čvn","čvc","srp","zář","říj","lis","pro"];
+  const monthNameJP = CZM[now.getMonth()];
+  const fh = h => (h % 1 === 0 ? String(h) : h.toFixed(1));
 
-  // JosefPanel fetches its own fresh data so stale props from parent don't cause 0h
   const [freshAtt, setFreshAtt] = useState(null);
-  useEffect(() => {
-    fetchAssistantAttendance("asistent@maux.cz")
-      .then(setFreshAtt)
-      .catch(() => setFreshAtt([]));
-  }, []);
-  // Use fresh data if available, fallback to prop
-  const attendance = freshAtt !== null ? freshAtt : (attendanceProp||[]);
+  useEffect(() => { fetchAssistantAttendance("asistent@maux.cz").then(setFreshAtt).catch(() => setFreshAtt([])); }, []);
+  const attendance = freshAtt !== null ? freshAtt : (attendanceProp || []);
 
-  const workingDaysInMonth = () => {
-    const y = now.getFullYear(), m = now.getMonth();
-    const last = new Date(y, m+1, 0).getDate();
-    let n = 0;
-    for (let d = 1; d <= last; d++) { const dow = new Date(y,m,d).getDay(); if (dow!==0&&dow!==6) n++; }
-    return n;
-  };
-  const workingDaysPassed = () => {
-    const y = now.getFullYear(), m = now.getMonth(), today = now.getDate();
-    let n = 0;
-    for (let d = 1; d <= today; d++) { const dow = new Date(y,m,d).getDay(); if (dow!==0&&dow!==6) n++; }
-    return n;
-  };
+  const INK = "#2B2478", IND = "#3518A5", INDV = "#5B52F0", MUT = "#8B87A8", SND = "#B8923D", UP = "#059669", HL = "rgba(53,24,165,.08)";
 
-  const monthLogs = (logs||[]).filter(l => (l.entry_date||"").startsWith(ym));
-  const monthAtt  = (attendance||[]).filter(a => (a.date||"").startsWith(ym));
+  // Efektivně datovaná sazba — prázdný rozvrh => 170 (žádná změna čísel)
+  const rateSched = assistantRateSchedule(financeItems);
+  const rateNow = assistantRateForMonth(ym, rateSched);
 
+  // Docházka po měsících (net hodiny + počet dní)
+  const attByMonth = {};
+  (attendance || []).forEach(a => {
+    if (!a.date) return;
+    const m = a.date.slice(0, 7);
+    if (!attByMonth[m]) attByMonth[m] = { hours: 0, days: 0 };
+    if (a.check_in) attByMonth[m].days += 1;
+    if (a.check_in && a.check_out) { const h = netAttHours(a.check_in, a.check_out); if (isFinite(h) && h > 0) attByMonth[m].hours += h; }
+  });
+
+  // Náklady po měsících — ruční override, jinak docházka × sazba daného měsíce
+  const monthsSet = new Set([...Object.keys(JOSEF_WAGE_MANUAL_OVERRIDES), ...Object.keys(attByMonth), ym]);
+  const costMonths = [...monthsSet].sort().slice(-6).map(m => {
+    const manual = JOSEF_WAGE_MANUAL_OVERRIDES[m];
+    const att = attByMonth[m] || { hours: 0, days: 0 };
+    const cost = manual != null ? manual : Math.round(att.hours * assistantRateForMonth(m, rateSched));
+    return { m, cost, hours: att.hours, days: att.days, manual: manual != null, running: m === ym };
+  });
+  const maxCost = Math.max(...costMonths.map(c => c.cost), 1);
+  const prevCost = costMonths.length >= 2 ? costMonths[costMonths.length - 2].cost : null;
+  const curCostM = costMonths.find(c => c.m === ym) || { cost: 0, hours: 0, days: 0 };
+  const costDeltaPct = prevCost && prevCost > 0 ? Math.round((curCostM.cost - prevCost) / prevCost * 100) : null;
+
+  // Aktuální měsíc / docházka
+  const monthAtt = (attendance || []).filter(a => (a.date || "").startsWith(ym));
   const daysWorked = monthAtt.filter(a => a.check_in).length;
-  const totalHours = monthAtt.reduce((s,a) => {
-    if (!a.check_in || !a.check_out) return s;
-    const h = netAttHours(a.check_in, a.check_out);
-    return s + (isFinite(h) && h > 0 ? h : 0);
-  }, 0);
-  const wageToDate = Math.round(totalHours * ASSISTANT_HOURLY_RATE);
-  const wdTotal    = workingDaysInMonth();
-  const wdPassed   = workingDaysPassed();
+  const totalHours = curCostM.hours;
+  const wageToDate = Math.round(totalHours * rateNow);
   const missingCheckout = daysWorked > 0 && totalHours === 0;
 
-  // Projekce na základě Pepových plánovaných směn (ne průměr z odpracovaných dnů).
-  // Minulé dny: skutečná docházka. Budoucí plánované dny: presumpce 8h × sazba.
-  const plannedDatesSet = new Set((availability && availability.year_month === ym ? availability.planned_dates : null) || []);
-  const daysInMonth = new Date(now.getFullYear(), now.getMonth()+1, 0).getDate();
-  let projectedHours = 0;
-  let projectedPlannedDays = 0;
-  const attByDate = {};
-  (attendance||[]).forEach(a => { if ((a.date||"").startsWith(ym)) attByDate[a.date] = a; });
+  // Projekce z plánovaných směn (budoucí den = 8 h)
+  const plannedSet = new Set((availability && availability.year_month === ym ? availability.planned_dates : null) || []);
+  const attByDate = {}; monthAtt.forEach(a => { attByDate[a.date] = a; });
+  const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+  let projHours = 0, projPlannedDays = 0;
   for (let d = 1; d <= daysInMonth; d++) {
-    const dateStr = `${ym}-${String(d).padStart(2,"0")}`;
-    if (dateStr <= todayStr) {
-      // past/today: use actual attendance
-      const a = attByDate[dateStr];
-      if (a && a.check_in && a.check_out) {
-        const h = netAttHours(a.check_in, a.check_out);
-        if (isFinite(h) && h > 0) projectedHours += h;
-      }
-    } else if (plannedDatesSet.has(dateStr)) {
-      // future planned day: presume 8h
-      projectedHours += 8;
-      projectedPlannedDays++;
-    }
+    const ds = `${ym}-${pad(d)}`;
+    if (ds <= todayStr) { const a = attByDate[ds]; if (a && a.check_in && a.check_out) { const h = netAttHours(a.check_in, a.check_out); if (isFinite(h) && h > 0) projHours += h; } }
+    else if (plannedSet.has(ds)) { projHours += 8; projPlannedDays++; }
   }
-  const projectedWage = Math.round(projectedHours * ASSISTANT_HOURLY_RATE);
-  const totalPlannedDays = daysWorked + projectedPlannedDays;
-  const progress = totalPlannedDays > 0 && wdTotal > 0 ? Math.min(1, daysWorked / totalPlannedDays) : (wdTotal > 0 ? Math.min(1, daysWorked / wdTotal) : 0);
+  const projWage = Math.round(projHours * rateNow);
+  const wdTotal = (() => { const y = now.getFullYear(), mo = now.getMonth(); const last = new Date(y, mo + 1, 0).getDate(); let n = 0; for (let d = 1; d <= last; d++) { const dow = new Date(y, mo, d).getDay(); if (dow !== 0 && dow !== 6) n++; } return n; })();
+  const totalPlannedDays = daysWorked + projPlannedDays;
+  const progressDenom = totalPlannedDays > 0 ? totalPlannedDays : wdTotal;
+  const progress = progressDenom > 0 ? Math.min(1, daysWorked / progressDenom) : 0;
 
-  const todayAtt   = (attendance||[]).find(a => a.date === todayStr);
-  const isIn       = !!(todayAtt?.check_in && !todayAtt?.check_out);
-  const isOut      = !!(todayAtt?.check_in && todayAtt?.check_out);
+  // Dnešek
+  const todayAtt = (attendance || []).find(a => a.date === todayStr);
+  const isIn = !!(todayAtt?.check_in && !todayAtt?.check_out);
+  const isOut = !!(todayAtt?.check_in && todayAtt?.check_out);
   const statusLabel = isIn ? "Přítomen" : isOut ? "Odhlášen" : "Nezaznamenán";
   const statusColor = isIn ? "#059669" : isOut ? "#6B7280" : "#D97706";
-  const statusBg    = isIn ? "rgba(5,150,105,.08)" : isOut ? "rgba(107,114,128,.06)" : "rgba(217,119,6,.06)";
+  const statusBg = isIn ? "rgba(5,150,105,.08)" : isOut ? "rgba(107,114,128,.06)" : "rgba(217,119,6,.06)";
+  const checkInStr = todayAtt?.check_in ? new Date(todayAtt.check_in).toLocaleTimeString("cs-CZ", { hour: "2-digit", minute: "2-digit" }) : null;
+  const todayHours = todayAtt?.check_in ? (todayAtt.check_out ? netAttHours(todayAtt.check_in, todayAtt.check_out) : Math.max(0, (now - new Date(todayAtt.check_in)) / 36e5)) : 0;
 
-  // mini bar chart — last days with logs
-  const dayMap = {};
-  monthLogs.forEach(l => { if (l.entry_date) dayMap[l.entry_date] = (dayMap[l.entry_date]||0) + (Number(l.hours)||0); });
-  const recentKeys = Object.keys(dayMap).sort().slice(-7);
-  const maxH = recentKeys.length > 0 ? Math.max(...recentKeys.map(k => dayMap[k]), 1) : 1;
+  // Efektivita z výkazů (tento měsíc)
+  const mLogs = (logs || []).filter(l => (l.entry_date || "").startsWith(ym) && l.status !== "archived");
+  const billH = billableHoursOf(mLogs);
+  const bdH = bdHoursOf(mLogs);
+  const totLogH = billH + bdH;
+  const billShare = totLogH > 0 ? billH / totLogH : 0;
+  const util = totalHours > 0 ? Math.min(1, totLogH / totalHours) : 0;
+  const effCost = billH > 0 ? Math.round(rateNow * totLogH / billH) : null;
 
-  const CZM_JP = ["ledna","února","března","dubna","května","června","července","srpna","září","října","listopadu","prosince"];
-  const monthNameJP = CZM_JP[now.getMonth()];
+  // Co dělá nejdýl (tento měsíc) — klient nebo BD kategorie
+  const clientName = id => (clients.find(c => c.id === id)?.name) || "Klient";
+  const taskMap = {};
+  mLogs.forEach(l => {
+    const b = isBd(l);
+    const key = b ? (l.bd_category || "BD — jiné") : clientName(l.client_id);
+    if (!taskMap[key]) taskMap[key] = { h: 0, bd: b };
+    taskMap[key].h += (Number(l.hours) || 0);
+  });
+  const topTasks = Object.entries(taskMap).map(([label, v]) => ({ label, ...v })).sort((a, b) => b.h - a.h).slice(0, 5);
+  const maxTask = topTasks.length ? Math.max(...topTasks.map(t => t.h)) : 1;
+
+  // Editor sazby
+  const _nm = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+  const nextYm = `${_nm.getFullYear()}-${pad(_nm.getMonth() + 1)}`;
+  const [rateOpen, setRateOpen] = useState(false);
+  const [newRate, setNewRate] = useState(rateNow);
+  const [effMonth, setEffMonth] = useState(nextYm);
+  const [savingRate, setSavingRate] = useState(false);
+  const saveRate = async () => {
+    if (!onSaveFinance) return;
+    const val = Number(newRate) || rateNow;
+    setSavingRate(true);
+    try {
+      const item = (financeItems || []).find(i => i.id === "fi_asistent_sazba");
+      const hist = rateSched.filter(h => h.from !== effMonth).concat([{ from: effMonth, rate: val }]).sort((a, b) => a.from.localeCompare(b.from));
+      await onSaveFinance({ ...(item || {}), id: "fi_asistent_sazba", category: "config", label: "Hodinovka asistenta", amount: val, notes: JSON.stringify({ history: hist }) });
+      setRateOpen(false);
+    } catch (e) { alert("Chyba: " + e.message); }
+    finally { setSavingRate(false); }
+  };
+  const fmtMonth = m => { const p = m.split("-"); return `${CZM_SH[Number(p[1]) - 1]} ${p[0].slice(2)}`; };
+
+  const lbl = (extra = {}) => ({ fontSize: 8.5, letterSpacing: ".22em", textTransform: "uppercase", color: MUT, fontWeight: 700, ...extra });
+  const hero = (size, color) => ({ fontFamily: "Fraunces,Georgia,serif", fontWeight: 300, fontSize: size, color, lineHeight: 1, whiteSpace: "nowrap" });
 
   return (
-    <div style={{
-      background:"#fff", borderRadius:3, overflow:"hidden",
-      borderTop:"1px solid rgba(0,0,0,.05)",
-      boxShadow:"0 0 0 1px rgba(0,0,0,.08)",
-    }}>
-      {/* Header — clean legal-tech brand */}
-      <div style={{ padding:"18px 22px 14px", display:"flex", alignItems:"flex-start", justifyContent:"space-between" }}>
+    <div style={{ position: "relative", borderRadius: BP.r, overflow: "hidden" }}>
+      <BpCorners />
+
+      {/* Hlavička */}
+      <div style={{ padding: "18px 22px 14px", display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 10 }}>
         <div>
-          <div style={{ display:"flex", alignItems:"center", gap:7, marginBottom:4 }}>
-            <span className="maux-dot" style={{ width:6, height:6, background:"#3518A5", boxShadow:"0 0 4px rgba(53,24,165,.5)" }} />
-            <span style={{ fontSize:10, letterSpacing:".22em", textTransform:"uppercase", color:"#3518A5", fontWeight:800 }}>Josef Řehák</span>
+          <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 5 }}>
+            <span style={{ width: 6, height: 6, borderRadius: "50%", background: IND, boxShadow: "0 0 4px rgba(53,24,165,.5)" }} />
+            <span style={{ fontSize: 11, letterSpacing: ".22em", textTransform: "uppercase", color: IND, fontWeight: 800 }}>Josef Řehák</span>
           </div>
-          <div style={{ fontSize:10, color:"var(--mut)", letterSpacing:".02em" }}>Asistent · {ASSISTANT_HOURLY_RATE} Kč/h · {monthNameJP} {now.getFullYear()}</div>
+          <div style={{ fontSize: 10.5, color: MUT }}>Asistent · {monthNameJP} {now.getFullYear()}</div>
         </div>
-        <div style={{ display:"flex", alignItems:"center", gap:5, background:statusBg, borderRadius:4, padding:"5px 10px" }}>
-          <div style={{ width:6, height:6, borderRadius:"50%", background:statusColor, flexShrink:0, boxShadow: isIn ? `0 0 6px ${statusColor}` : "none" }} />
-          <span style={{ fontSize:10, color:statusColor, fontWeight:600, letterSpacing:".02em" }}>{statusLabel}</span>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <button onClick={() => { setNewRate(rateNow); setEffMonth(nextYm); setRateOpen(o => !o); }}
+            style={{ display: "flex", alignItems: "center", gap: 6, background: "rgba(91,82,240,.07)", border: "1px solid rgba(91,82,240,.18)", borderRadius: 8, padding: "6px 10px", cursor: "pointer" }}>
+            <span style={{ fontSize: 12, fontWeight: 600, color: "#3F35C7" }}>{rateNow} Kč/h</span>
+            <span style={{ fontSize: 9, color: INDV, fontWeight: 600, borderLeft: "1px solid rgba(91,82,240,.25)", paddingLeft: 6 }}>upravit</span>
+          </button>
+          <div style={{ display: "flex", alignItems: "center", gap: 5, background: statusBg, borderRadius: 8, padding: "6px 10px" }}>
+            <span style={{ width: 6, height: 6, borderRadius: "50%", background: statusColor, boxShadow: isIn ? `0 0 6px ${statusColor}` : "none" }} />
+            <span style={{ fontSize: 10, color: statusColor, fontWeight: 600 }}>{statusLabel}</span>
+          </div>
         </div>
       </div>
 
-      {/* KPI row */}
-      <div style={{ display:"flex", borderTop:"1px solid rgba(53,24,165,.08)", borderBottom:"1px solid rgba(53,24,165,.08)" }}>
-        {[
-          { label:"Odpracováno", value: totalHours > 0 ? `${totalHours % 1 === 0 ? totalHours : totalHours.toFixed(1)} h` : (missingCheckout ? "—" : "0 h"), sub: `${daysWorked} dní`, accent: "#3518A5" },
-          { label:"Mzda k dnešku", value: fmtKc(wageToDate), sub: `${daysWorked} z ${wdPassed} prac. dní`, accent: "#059669" },
-          { label:"Projekce", value: projectedWage > 0 ? fmtKc(projectedWage) : "—", sub: projectedPlannedDays > 0 ? `${Math.round(projectedHours)} h (${projectedPlannedDays} plán. dní)` : `${Math.round(projectedHours)} h`, accent: "#3518A5" },
-        ].map((m,i) => (
-          <div key={i} style={{ flex:1, padding:"14px 16px", borderRight: i < 2 ? "1px solid rgba(53,24,165,.08)" : "none", textAlign:"center" }}>
-            <div style={{ fontSize:8.5, letterSpacing:".12em", textTransform:"uppercase", color:"var(--mut)", fontWeight:600, marginBottom:6 }}>{m.label}</div>
-            <div className="maux-num" style={{ fontSize:17, fontWeight:600, color:m.accent, lineHeight:1, whiteSpace:"nowrap" }}>{m.value}</div>
-            <div style={{ fontSize:9.5, color:"var(--mut)", marginTop:5 }}>{m.sub}</div>
-          </div>
-        ))}
-      </div>
-
-      {/* Progress + mini chart */}
-      <div style={{ padding:"14px 22px 16px" }}>
-        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:6 }}>
-          <span style={{ fontSize:9.5, color:"var(--mut)", letterSpacing:".04em", fontWeight:500 }}>Docházka</span>
-          <span style={{ fontSize:9.5, color:"var(--ink)", fontWeight:600 }}>{daysWorked}/{totalPlannedDays > 0 ? totalPlannedDays : wdTotal} dní · {Math.round(progress*100)} %</span>
-        </div>
-        <div style={{ height:4, background:"rgba(53,24,165,.06)", borderRadius:99, overflow:"hidden" }}>
-          <div style={{ height:"100%", width:`${progress*100}%`, background:"#3518A5", borderRadius:99, transition:"width .5s ease" }} />
-        </div>
-
-        {recentKeys.length > 0 && (
-          <div style={{ marginTop:14 }}>
-            <div style={{ fontSize:9, color:"var(--mut)", marginBottom:8, letterSpacing:".04em" }}>Posledních {recentKeys.length} dní</div>
-            <div style={{ display:"flex", gap:4, alignItems:"flex-end", height:36 }}>
-              {recentKeys.map(d => {
-                const h = dayMap[d];
-                const pctH = h / maxH;
-                const date = new Date(d + "T12:00:00");
-                const label = `${date.getDate()}.${date.getMonth()+1}.`;
-                const isToday = d === todayStr;
-                return (
-                  <div key={d} style={{ flex:1, display:"flex", flexDirection:"column", alignItems:"center", gap:2 }}>
-                    <div style={{ fontSize:7.5, color: isToday ? "#3518A5" : "var(--mut)", fontWeight: isToday ? 700 : 400 }}>{h % 1 === 0 ? h : h.toFixed(1)}</div>
-                    <div title={`${h} h`} style={{
-                      width:"100%", maxWidth:22,
-                      height: Math.max(3, pctH*24),
-                      background: isToday ? "#3518A5" : "rgba(53,24,165,.12)",
-                      borderRadius:"2px 2px 0 0",
-                      transition:"height .3s ease",
-                    }} />
-                    <div style={{ fontSize:7.5, color:"var(--mut)", whiteSpace:"nowrap" }}>{label}</div>
-                  </div>
-                );
-              })}
+      {/* Editor sazby */}
+      {rateOpen && (
+        <div style={{ margin: "0 22px 6px", padding: "12px 14px", background: "rgba(91,82,240,.04)", border: "1px solid rgba(91,82,240,.16)", borderRadius: BP.rInner, display: "flex", alignItems: "flex-end", gap: 12, flexWrap: "wrap" }}>
+          <div>
+            <div style={lbl({ marginBottom: 5 })}>Nová sazba</div>
+            <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+              <input type="number" value={newRate} onChange={e => setNewRate(e.target.value)}
+                style={{ width: 74, padding: "6px 8px", fontSize: 14, fontWeight: 600, color: "#3F35C7", border: "1px solid rgba(91,82,240,.3)", borderRadius: 7, outline: "none" }} />
+              <span style={{ fontSize: 11, color: MUT }}>Kč/h</span>
             </div>
           </div>
-        )}
+          <div>
+            <div style={lbl({ marginBottom: 5 })}>Platí od</div>
+            <input type="month" value={effMonth} onChange={e => setEffMonth(e.target.value)}
+              style={{ padding: "6px 8px", fontSize: 12, color: INK, border: "1px solid rgba(91,82,240,.3)", borderRadius: 7, outline: "none" }} />
+          </div>
+          <div style={{ fontSize: 9.5, color: INDV, fontWeight: 600, flex: 1, minWidth: 140, paddingBottom: 6 }}>
+            {rateNow} → {Number(newRate) || rateNow} Kč/h · minulé měsíce beze změny
+          </div>
+          <div style={{ display: "flex", gap: 7, paddingBottom: 2 }}>
+            <button onClick={() => setRateOpen(false)} style={{ fontSize: 11, color: MUT, background: "none", border: "1px solid rgba(0,0,0,.1)", borderRadius: 7, padding: "6px 11px", cursor: "pointer" }}>Zrušit</button>
+            <button onClick={saveRate} disabled={savingRate} style={{ fontSize: 11, fontWeight: 600, color: "#fff", background: IND, border: "none", borderRadius: 7, padding: "6px 13px", cursor: "pointer", opacity: savingRate ? .6 : 1 }}>{savingRate ? "Ukládám…" : "Uložit sazbu"}</button>
+          </div>
+        </div>
+      )}
+
+      {/* Řada 1 — Aktuální náklad + Docházka dnes */}
+      <div style={{ display: "flex", borderTop: `1px solid ${HL}`, borderBottom: `1px solid ${HL}` }}>
+        <div style={{ flex: 1.3, padding: "16px 22px", borderRight: `1px solid ${HL}` }}>
+          <div style={lbl({ marginBottom: 9 })}>Aktuální náklad · tento měsíc</div>
+          <div style={{ display: "flex", alignItems: "baseline", gap: 10, flexWrap: "wrap" }}>
+            <span style={hero(32, INK)}>{missingCheckout ? "—" : fmtKc(wageToDate)}</span>
+            {projWage > wageToDate && (
+              <span style={{ fontSize: 10.5, color: INDV, fontWeight: 600, background: "rgba(91,82,240,.08)", border: "1px dashed rgba(91,82,240,.35)", borderRadius: 20, padding: "3px 9px" }}>→ {fmtKc(projWage)} projekce</span>
+            )}
+          </div>
+          <div style={{ fontSize: 10.5, color: MUT, marginTop: 8 }}>{fh(Math.round(totalHours * 10) / 10)} h × {rateNow} Kč{projPlannedDays > 0 ? ` · do konce měsíce plán ${Math.round(projHours)} h` : ""}</div>
+        </div>
+        <div style={{ flex: 1, padding: "16px 22px" }}>
+          <div style={lbl({ marginBottom: 9 })}>Docházka dnes</div>
+          <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
+            <span style={hero(24, INK)}>{todayAtt?.check_in ? `${fh(Math.round(todayHours * 10) / 10)} h` : "—"}</span>
+            {checkInStr && <span style={{ fontSize: 10.5, color: MUT }}>od {checkInStr}</span>}
+          </div>
+          <div style={{ display: "flex", justifyContent: "space-between", margin: "11px 0 5px" }}>
+            <span style={{ fontSize: 9.5, color: MUT }}>Odpracováno v {monthNameJP}</span>
+            <span style={{ fontSize: 9.5, color: INK, fontWeight: 600 }}>{daysWorked}/{progressDenom} dní · {Math.round(progress * 100)} %</span>
+          </div>
+          <div style={{ height: 4, background: HL, borderRadius: 99, overflow: "hidden" }}>
+            <div style={{ height: "100%", width: `${progress * 100}%`, background: IND, borderRadius: 99, transition: "width .5s ease" }} />
+          </div>
+        </div>
       </div>
 
-      {monthLogs.length === 0 && monthAtt.length === 0 && (
-        <div style={{ padding:"10px 22px 16px", fontSize:11, color:"var(--mut)" }}>Zatím žádné záznamy za {monthNameJP}.</div>
-      )}
+      {/* Řada 2 — Náklady za minulé měsíce */}
+      <div style={{ padding: "16px 22px 8px" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+          <span style={lbl()}>Náklady za minulé měsíce</span>
+          {costDeltaPct != null && (
+            <span style={{ fontSize: 9.5, fontWeight: 600, color: costDeltaPct <= 0 ? UP : "#DC2626" }}>{costDeltaPct <= 0 ? "▼" : "▲"} {costDeltaPct > 0 ? "+" : ""}{costDeltaPct} % vs. minulý</span>
+          )}
+        </div>
+        <div style={{ display: "flex", alignItems: "flex-end", gap: 12, height: 96 }}>
+          {costMonths.map(c => {
+            const barH = Math.max(4, Math.round(c.cost / maxCost * 82));
+            const col = c.running ? "rgba(91,82,240,.28)" : c.manual ? SND : IND;
+            const tcol = c.running ? INDV : c.manual ? SND : INK;
+            return (
+              <div key={c.m} style={{ flex: 1, textAlign: "center", minWidth: 0 }}>
+                <div style={{ fontSize: 9, color: tcol, fontWeight: c.running || c.manual ? 600 : 400, marginBottom: 5 }}>{c.cost > 0 ? fmtKc(c.cost).replace(" Kč", "") : "—"}</div>
+                <div style={{ height: barH, borderRadius: "2px 2px 0 0", background: col, border: c.running ? `1.5px dashed ${INDV}` : "none" }} />
+                <div style={{ fontSize: 8.5, color: c.running ? INDV : c.manual ? SND : MUT, marginTop: 5 }}>{fmtMonth(c.m)}{c.manual ? " ✎" : c.running ? " ●" : ""}</div>
+              </div>
+            );
+          })}
+        </div>
+        <div style={{ fontSize: 8.5, color: MUT, marginTop: 9 }}>
+          Plná = z docházky · <span style={{ color: SND }}>písek = ruční (před 6/2026)</span> · <span style={{ color: INDV }}>přerušovaná = běžící měsíc</span>
+        </div>
+      </div>
+
+      {/* Řada 3 — Efektivita + Co dělá nejdýl */}
+      <div style={{ display: "flex", borderTop: `1px solid ${HL}`, marginTop: 8 }}>
+        <div style={{ flex: 1, padding: "16px 22px", borderRight: `1px solid ${HL}` }}>
+          <div style={lbl({ marginBottom: 11 })}>Efektivita · {monthNameJP}</div>
+          <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
+            <span style={hero(28, INK)}>{totLogH > 0 ? `${Math.round(billShare * 100)} %` : "—"}</span>
+            <span style={{ fontSize: 10, color: MUT }}>klientská práce</span>
+          </div>
+          <div style={{ fontSize: 9.5, color: MUT, marginTop: 4 }}>{fh(Math.round(billH * 10) / 10)} h fakturovatelných z {fh(Math.round(totLogH * 10) / 10)} h výkazů</div>
+          <div style={{ display: "flex", height: 6, margin: "12px 0 5px", borderRadius: 99, overflow: "hidden", background: HL }}>
+            <div style={{ width: `${billShare * 100}%`, background: IND }} />
+            <div style={{ width: 2 }} />
+            <div style={{ flex: 1, background: SND }} />
+          </div>
+          <div style={{ display: "flex", justifyContent: "space-between", fontSize: 9 }}>
+            <span style={{ color: "#3F35C7", fontWeight: 600 }}>Klient {Math.round(billShare * 100)} %</span>
+            <span style={{ color: SND, fontWeight: 600 }}>BD {Math.round((1 - billShare) * 100)} %</span>
+          </div>
+          <div style={{ marginTop: 11, paddingTop: 10, borderTop: `1px solid ${HL}`, display: "flex", justifyContent: "space-between", gap: 8 }}>
+            <span style={{ fontSize: 10, color: MUT }}>Využití času <span style={{ color: INK, fontWeight: 600 }}>{totalHours > 0 ? `${Math.round(util * 100)} %` : "—"}</span></span>
+            <span style={{ fontSize: 10, color: MUT }}>Efekt. náklad <span style={{ color: INK, fontWeight: 600 }}>{effCost != null ? `${effCost} Kč/h` : "—"}</span></span>
+          </div>
+        </div>
+        <div style={{ flex: 1, padding: "16px 22px" }}>
+          <div style={lbl({ marginBottom: 12 })}>Co dělá nejdýl · {monthNameJP}</div>
+          {topTasks.length === 0 ? (
+            <div style={{ fontSize: 10.5, color: MUT, paddingTop: 4 }}>Zatím žádné výkazy za {monthNameJP}.</div>
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: 9 }}>
+              {topTasks.map((t, i) => (
+                <div key={i}>
+                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10, marginBottom: 3, gap: 8 }}>
+                    <span style={{ color: INK, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{t.label}{t.bd ? <span style={{ color: SND }}> · BD</span> : null}</span>
+                    <span style={{ color: MUT, fontWeight: 600, flexShrink: 0 }}>{fh(Math.round(t.h * 10) / 10)} h</span>
+                  </div>
+                  <div style={{ height: 5, background: HL, borderRadius: 99 }}>
+                    <div style={{ height: "100%", width: `${Math.max(4, t.h / maxTask * 100)}%`, background: t.bd ? SND : IND, borderRadius: 99 }} />
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
     </div>
   );
 }
@@ -8947,7 +9073,9 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
       _josefHoursSum += 8; // presumpce — den ještě nenastal
     }
   }
-  const _josefWageAuto = Math.round(_josefHoursSum * ASSISTANT_HOURLY_RATE);
+  // Efektivně datovaná sazba — prázdný rozvrh => 170 (žádné číslo se nemění)
+  const _josefRateSched = assistantRateSchedule(financeItems);
+  const _josefWageAuto = Math.round(_josefHoursSum * assistantRateForMonth(_josefYm, _josefRateSched));
   // pro měsíce před zavedením docházky v appce (viz JOSEF_WAGE_MANUAL_OVERRIDES) použij ruční částku
   const josefWage = JOSEF_WAGE_MANUAL_OVERRIDES[_josefYm] ?? _josefWageAuto;
   const totalVydaje = totalNutne + totalLuxus - josefWage;
@@ -8972,7 +9100,7 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
       _josefNextHoursSum += 8; // presumpce — den ještě nenastal
     }
   }
-  const josefWageNext = JOSEF_WAGE_MANUAL_OVERRIDES[_josefNextYm] ?? Math.round(_josefNextHoursSum * ASSISTANT_HOURLY_RATE);
+  const josefWageNext = JOSEF_WAGE_MANUAL_OVERRIDES[_josefNextYm] ?? Math.round(_josefNextHoursSum * assistantRateForMonth(_josefNextYm, _josefRateSched));
   const cashflow = mRev + totalVydaje;
   // DPH — nadměrný odpočet (na žádost): kolik mi reálně ZŮSTANE díky účtenkám, které posílám Čechmanové
   // jako odpočet proti DPH z vystavených faktur. Nemění se tím "to číslo shrnující daň" v modulu Daně —
@@ -9352,7 +9480,8 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
       </Panel>
 
       <Panel id="josef">
-        <JosefPanel logs={assistantLogs} attendance={assistantAttendance} availability={assistantAvailability} />
+        <JosefPanel logs={assistantLogs} attendance={assistantAttendance} availability={assistantAvailability}
+          clients={clients} financeItems={financeItems} onSaveFinance={onSaveFinance} />
       </Panel>
 
       {/* ─── PULZ FIRMY — překvapivá novinka V.03: jeden pohled, který spojí vše dohromady ─── */}
@@ -9563,7 +9692,7 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
                       <span className="maux-num" style={{fontSize:11.5,fontWeight:500,color:"var(--ink)"}}>{fmtKc(Math.abs(totalNutne)+Math.abs(totalLuxus))}</span>
                     </div>
                     <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"4px 0"}}>
-                      <span style={{fontSize:10,color:"var(--mut)",letterSpacing:".02em"}}>Pepa — průběžný ({Math.round(_josefNextHoursSum)} h × {ASSISTANT_HOURLY_RATE} Kč)</span>
+                      <span style={{fontSize:10,color:"var(--mut)",letterSpacing:".02em"}}>Pepa — průběžný ({Math.round(_josefNextHoursSum)} h × {assistantRateForMonth(_josefNextYm, _josefRateSched)} Kč)</span>
                       <span className="maux-num" style={{fontSize:11.5,fontWeight:500,color:"#3518A5"}}>{fmtKc(josefWageNext)}</span>
                     </div>
                   </div>
