@@ -6414,8 +6414,7 @@ function SporakRingTile({ financeItems, onSaveFinance, invoices, dpfoMonths, loa
   return (
     <div style={{
       height: "100%", borderRadius: 3, overflow: "hidden",
-      background: "#fff", borderTop: "1px solid rgba(0,0,0,.05)",
-      boxShadow: "0 0 0 1px rgba(0,0,0,.05)",
+      background: "#fff",
       display: "flex", flexDirection: "column", alignItems: "center",
       padding: square ? "22px 22px 18px" : "26px 34px 28px",
       boxSizing: "border-box",
@@ -6565,11 +6564,11 @@ function TriGrafyPanel({ financeItems, onSaveFinance, invoices, dpfoMonths, loan
   const card = (accentColor, bgGrad) => ({
     flex: 1,
     background: bgGrad || "var(--card)",
-    border: "1px solid rgba(0,0,0,.05)",
-    borderRadius: 20,
-    padding: "24px 24px 20px",
+    border: "none",
+    borderRadius: 0,
+    padding: "26px 28px 22px",
     display: "flex", flexDirection: "column",
-    boxShadow: "0 1px 2px rgba(16,12,60,.04), 0 16px 48px -24px rgba(16,12,60,.10)",
+    boxShadow: "none",
   });
   const lbl = () => ({ fontSize: 8.5, letterSpacing: ".22em", color: "var(--mut)", fontWeight: 700, textTransform: "uppercase", marginBottom: 6, opacity: 0.7 });
   const bigNum = (col) => ({ fontFamily: "Fraunces,serif", fontSize: 28, fontWeight: 300, color: col || "var(--ink)", lineHeight: 1, marginBottom: 14 });
@@ -9014,6 +9013,55 @@ function TripleRingPanel({ sporSegs, sporBal, sporEarmarked, firmaRez, planKap,
 
 /* ─── PANEL CONTEXT — defined at file level so Panel is a stable component reference ─── */
 const PanelCtx = createContext(null);
+/* ══════════════════════════════════════════════════════════════════════════════
+   MAUX BLUEPRINT — sdílený vizuální jazyk Přehledu
+   ------------------------------------------------------------------------------
+   Tom, 26.7.2026 (o grafu Příjem MAUX Legal): "ty fonty, ty barvy, ta estetika —
+   naprosto dokonalá, chtěl bych v této estetice celý dashboard."
+   Rohové značky + prostrkané verzálkové popisky + Fraunces na hrdinská čísla +
+   dvoutón indigo/písek + delta čipy. Jeden zdroj pravdy, ať se to nerozejde.
+   ═══════════════════════════════════════════════════════════════════════════ */
+const BP = {
+  indigo: "#6366F1", indigoDeep: "#4338CA", indigoInk: "#312E81",
+  sand: "#C8B48A", sandDeep: "#A1834A",
+  live: "#C7D2FE", liveEdge: "#818CF8",
+  up: "#059669", down: "#DC2626",
+  corner: "#9b8cff",
+  frame: "1.5px solid rgba(53,24,165,.16)",
+};
+// Rohové značky — technický "blueprint" rám, podpis celé estetiky
+function BpCorners({ color = BP.corner, inset = 8, size = 12 }) {
+  const base = { position: "absolute", width: size, height: size, pointerEvents: "none" };
+  return (
+    <>
+      <span style={{ ...base, top: inset, left: inset, borderTop: `1.5px solid ${color}`, borderLeft: `1.5px solid ${color}` }} />
+      <span style={{ ...base, top: inset, right: inset, borderTop: `1.5px solid ${color}`, borderRight: `1.5px solid ${color}` }} />
+      <span style={{ ...base, bottom: inset, left: inset, borderBottom: `1.5px solid ${color}`, borderLeft: `1.5px solid ${color}` }} />
+      <span style={{ ...base, bottom: inset, right: inset, borderBottom: `1.5px solid ${color}`, borderRight: `1.5px solid ${color}` }} />
+    </>
+  );
+}
+// Prostrkaný verzálkový popisek sekce
+const bpLabel = (extra = {}) => ({
+  fontSize: 8.5, letterSpacing: ".24em", textTransform: "uppercase",
+  color: "var(--mut)", fontWeight: 700, opacity: .7, ...extra,
+});
+// Hrdinské číslo — Fraunces v lehkém řezu
+const bpHero = (size = 30, color = "var(--txt)", extra = {}) => ({
+  fontFamily: "Fraunces,serif", fontSize: size, fontWeight: 300,
+  color, lineHeight: 1, whiteSpace: "nowrap", ...extra,
+});
+// Malý delta čip ▲/▼ — jen tam, kde změna něco znamená
+function BpDelta({ value, suffix = "", size = 9.5 }) {
+  if (value == null || value === 0) return null;
+  const up = value > 0;
+  return (
+    <span style={{ fontSize: size, fontWeight: 700, color: up ? BP.up : BP.down, whiteSpace: "nowrap" }}>
+      {up ? "▲" : "▼"} {up ? "+" : "−"}{fmtKc(Math.abs(value)).replace(" Kč", "")}{suffix}
+    </span>
+  );
+}
+
 // "Tichý papír" (Tom, 26.7.2026: "chci, aby mě uklidňovalo na to koukat"): panely už nemají
 // každý svou barvu. Jeden neutrální vlasový rám + měkký stín; barva zůstává jen uvnitř obsahu
 // a jen tam, kde něco hoří. Klíče ponechány kvůli kompatibilitě volání.
@@ -9043,8 +9091,9 @@ function Panel({ id, children }) {
         order: cssOrder >= 0 ? cssOrder : 99,
         outline: isOver ? "2px solid #6366F1" : editLayout ? "2px dashed rgba(99,102,241,.3)" : "none",
         outlineOffset: isOver ? 0 : 4,
-        borderRadius: 18,
-        border: "1px solid rgba(0,0,0,.05)",
+        borderRadius: 14,
+        // Blueprint rám — jemná indigo linka místo neutrální šedé (podpis estetiky grafu)
+        border: BP.frame,
         background: "#fff",
         opacity: isDragging ? 0.5 : hidden ? 0.4 : 1,
         position: "relative",
@@ -9069,6 +9118,8 @@ function Panel({ id, children }) {
           >{hidden ? "+" : "×"}</button>
         </>
       )}
+      {/* Blueprint rohové značky — podpis estetiky, na všech panelech Přehledu */}
+      {!editLayout && <BpCorners />}
       {children}
     </div>
   );
@@ -10009,11 +10060,7 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
 
       {/* STACKED BAR CHART — PŘÍJEM MAUX LEGAL: zelená faktury + oranžová úschovy */}
       <Panel id="chart">
-      <Card style={{padding:"18px 20px 14px",position:"relative",border:"1.5px solid rgba(53,24,165,.16)"}}>
-        <span style={{position:"absolute",top:8,left:8,width:12,height:12,borderTop:"1.5px solid #9b8cff",borderLeft:"1.5px solid #9b8cff",pointerEvents:"none"}}/>
-        <span style={{position:"absolute",top:8,right:8,width:12,height:12,borderTop:"1.5px solid #9b8cff",borderRight:"1.5px solid #9b8cff",pointerEvents:"none"}}/>
-        <span style={{position:"absolute",bottom:8,left:8,width:12,height:12,borderBottom:"1.5px solid #9b8cff",borderLeft:"1.5px solid #9b8cff",pointerEvents:"none"}}/>
-        <span style={{position:"absolute",bottom:8,right:8,width:12,height:12,borderBottom:"1.5px solid #9b8cff",borderRight:"1.5px solid #9b8cff",pointerEvents:"none"}}/>
+      <Card style={{padding:"22px 24px 16px",position:"relative",border:"none",boxShadow:"none",background:"transparent"}}>
         {(() => {
           const n = barData.length;
           if (n === 0) return null;
@@ -11064,7 +11111,7 @@ function VykazyCalendar({ workEntries, escrows, dense = false, onOpenFull, onAdd
   const circleSize = dense ? 24 : 42;
 
   return (
-    <div style={{ background: "#fff", borderRadius: dense ? 3 : 18, overflow: "hidden", height: "100%", display: "flex", flexDirection: "column", boxShadow: "0 0 0 1px rgba(0,0,0,.05)" }}>
+    <div style={{ background: "#fff", borderRadius: dense ? 3 : 14, overflow: "hidden", height: "100%", display: "flex", flexDirection: "column" }}>
       {/* Header */}
       <div style={{ padding: dense ? "18px 20px 12px" : "26px 30px 18px", borderBottom: "1px solid rgba(0,0,0,.05)", flexShrink: 0 }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
