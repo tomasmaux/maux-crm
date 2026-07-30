@@ -13052,13 +13052,15 @@ function AsistentPrehled({ logs, attendance, clients, availability, onGo }) {
   const mKey=`${cy}-${String(cm).padStart(2,"0")}`;
   const prevKey=(()=>{ const d=new Date(cy,cm-2,1); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`; })();
   const hasPrev=activeLogs.some(l=>(l.entry_date||"").startsWith(prevKey));
-  const pKey = period==="prev" ? prevKey : period==="all" ? null : mKey;
-  const pName = period==="all" ? "vše od začátku" : MONTHS_CS[Number(pKey.slice(5,7))-1];
+  const pKey  = period==="prev" ? prevKey : mKey;
+  const pName = MONTHS_CS[Number(pKey.slice(5,7))-1];
+  const monthBefore = (k)=>{ const [y,m]=k.split("-").map(Number); const d=new Date(y,m-2,1);
+    return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`; };
 
-  const mLogs=pKey ? activeLogs.filter(l=>(l.entry_date||"").startsWith(pKey)) : activeLogs;
+  const mLogs=activeLogs.filter(l=>(l.entry_date||"").startsWith(pKey));
   const mH=billableHoursOf(mLogs), mBdH=bdHoursOf(mLogs);
   const mDays=new Set(mLogs.map(l=>l.entry_date)).size;
-  const mAttRows=attendance.filter(a=>a.check_in && (!pKey || a.date.startsWith(pKey)));
+  const mAttRows=attendance.filter(a=>a.check_in && a.date.startsWith(pKey));
   const mAtt=mAttRows.length;
   const mOffice=mAttRows.reduce((s,a)=>s+(a.check_out?netAttHours(a.check_in,a.check_out):0),0);
   const mClients=new Set(mLogs.filter(l=>!isBd(l)&&l.client_id).map(l=>l.client_id)).size;
@@ -13070,16 +13072,15 @@ function AsistentPrehled({ logs, attendance, clients, availability, onGo }) {
     return `${String(Math.floor(avg/60)).padStart(2,"0")}:${String(avg%60).padStart(2,"0")}`;
   })();
 
-  // ── UTILIZACE — klouzavé 60denní okno ────────────────────────────────────
-  // Kalendářní měsíc se 1. dne vynuluje a ukazatel je pak dva týdny k ničemu.
-  // Okno posledních 60 dní má vždycky plný vzorek a mění se plynule každý den:
-  // ráno vypadne nejstarší den, přibude včerejšek.
-  const dsBack = (n) => { const d=new Date(now); d.setHours(0,0,0,0); d.setDate(d.getDate()-n); return localDs(d); };
+  // ── UTILIZACE — za vybraný kalendářní měsíc ──────────────────────────────
+  // Jmenovatel = jen dny, kdy byl Josef reálně v práci (docházka NEBO výkaz).
+  // Volno, víkendy ani dny bez docházky se do toho nepromítají.
+  // Starší měsíce než minulý se čtou z grafu "Utilizace po měsících".
   const utilOf = (from, to) => {
     const ls = activeLogs.filter(l=>l.entry_date && l.entry_date>=from && l.entry_date<=to);
     const as = attendance.filter(a=>a.check_in && a.date>=from && a.date<=to);
     const bill = billableHoursOf(ls), bd = bdHoursOf(ls), logged = bill+bd;
-    const days = Math.max(as.length, new Set(ls.map(l=>l.entry_date)).size);
+    const days = new Set(as.map(a=>a.date).concat(ls.map(l=>l.entry_date))).size;
     const goal = days*ASISTENT_DAY_CAPTURE_H;
     const office = as.reduce((acc,a)=>acc+(a.check_out?netAttHours(a.check_in,a.check_out):0),0);
     const billF = goal>0 ? Math.min(1, bill/goal) : 0;
@@ -13089,9 +13090,11 @@ function AsistentPrehled({ logs, attendance, clients, availability, onGo }) {
              avg: days>0 ? logged/days : 0,
              unlogged: Math.max(0, office-logged) };
   };
-  const ut     = utilOf(dsBack(WIN_DAYS-1), todayStr);
-  const utPrev = utilOf(dsBack(2*WIN_DAYS-1), dsBack(WIN_DAYS));
+  const utBefKey = monthBefore(pKey);
+  const ut     = utilOf(pKey+"-01", pKey+"-31");
+  const utPrev = utilOf(utBefKey+"-01", utBefKey+"-31");
   const utDelta  = (ut.pct!=null && utPrev.pct!=null && utPrev.days>=3) ? ut.pct-utPrev.pct : null;
+  const utBefName= MONTHS_CS[Number(utBefKey.slice(5,7))-1];
   const utGapDay = Math.max(0, ASISTENT_DAY_CAPTURE_H-ut.avg);
 
   // ── TEMPO MĚSÍCE ──
@@ -13314,7 +13317,7 @@ function AsistentPrehled({ logs, attendance, clients, availability, onGo }) {
         <div style={{textAlign:"right",fontSize:10.5,color:MUT,lineHeight:1.7}}>
           <div>{now.toLocaleDateString("cs-CZ",{weekday:"long"})} · {now.toLocaleDateString("cs-CZ",{day:"numeric",month:"long",year:"numeric"})}</div>
           <div style={{display:"inline-flex",gap:3,background:"rgba(0,0,0,.045)",borderRadius:11,padding:3,marginTop:7}}>
-            {[{k:"this",l:"Tento měsíc"},{k:"prev",l:"Minulý měsíc",off:!hasPrev},{k:"all",l:"Celkem"}].map(t=>(
+            {[{k:"this",l:"Tento měsíc"},{k:"prev",l:"Minulý měsíc",off:!hasPrev}].map(t=>(
               <button key={t.k} onClick={()=>!t.off&&setPeriod(t.k)} disabled={t.off}
                 style={{padding:"5px 13px",borderRadius:9,border:"none",cursor:t.off?"default":"pointer",
                   fontSize:10.5,fontWeight:period===t.k?600:500,letterSpacing:".01em",transition:"all .16s",
@@ -13417,13 +13420,13 @@ function AsistentPrehled({ logs, attendance, clients, availability, onGo }) {
         <div style={{flex:1,minWidth:0,padding:"24px 28px 22px"}}>
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",gap:12,flexWrap:"wrap",marginBottom:20}}>
             <div style={{display:"flex",alignItems:"baseline",gap:11}}>
-              <div style={lbl}>Utilizace · posledních {WIN_DAYS} dní</div>
+              <div style={lbl}>Utilizace · {pName}</div>
               <span style={{fontSize:8,letterSpacing:".16em",fontWeight:700,color:VIVID,background:"rgba(91,82,240,.09)",borderRadius:5,padding:"3px 7px",textTransform:"uppercase"}}>Klíčový ukazatel</span>
             </div>
             <div style={{fontSize:10,color:MUT}}>
               Cíl <b style={{color:"var(--txt)"}}>{ASISTENT_DAY_CAPTURE_H} h zapsaných denně</b>
               {ut.days>0 && <> · {ut.days} {dnyWord(ut.days)} v práci</>}
-              {utDelta!=null && <> · <b style={{color:utDelta>=0?OK:SANDD}}>{utDelta>=0?"+":"−"}{Math.abs(utDelta)} b. proti předchozím {WIN_DAYS} dnům</b></>}
+              {utDelta!=null && <> · <b style={{color:utDelta>=0?OK:SANDD}}>{utDelta>=0?"+":"−"}{Math.abs(utDelta)} b. proti {utBefName}u</b></>}
             </div>
           </div>
 
@@ -13788,7 +13791,7 @@ function AsistentPrehled({ logs, attendance, clients, availability, onGo }) {
 
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
           {[
-            {l:period==="all"?"Celkem":"Období", v:fmtH(mH),   s:`${mDays} ${dnyWord(mDays)} s výkazem`, c:IND},
+            {l:"Měsíc",     v:fmtH(mH),                        s:`${mDays} ${dnyWord(mDays)} s výkazem`, c:IND},
             {l:"Příchody",  v:`${mAtt}`,                       s:avgArrival?`Ø příchod ${avgArrival}`:"dní v kanceláři", c:IND},
             {l:"Série",     v:streak>0?`${streak}`:"—",        s:bestStreak>0?`rekord ${bestStreak} ${dnyWord(bestStreak)}`:"splněný cíl v řadě", c:streak>0&&streak>=bestStreak?OK:IND},
             {l:"Efektivita",v:curPct!=null?`${curPct} %`:"—",  s:effDelta!=null?`${effDelta>=0?"+":"−"}${Math.abs(effDelta)} b. vs ${MONTHS_CS[(cm+10)%12]}`:"klientské práce", c:IND, sc:effDelta!=null?(effDelta>=0?OK:SANDD):MUT},
