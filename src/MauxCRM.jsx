@@ -8949,9 +8949,10 @@ function Panel({ id, children }) {
 // se uloží do localStorage. Spouští se jen na UZAVŘENÉM měsíci (ne na průběžné projekci) —
 // číslo už nemůže couvnout, takže oslava nikdy není předčasná.
 const MILESTONE_ACK_KEY = "maux_milestone_ack";
+const MILESTONE_LIVE_ACK_KEY = "maux_milestone_live_ack";
 const MILESTONE_MONTHS = ["lednu","únoru","březnu","dubnu","květnu","červnu","červenci","srpnu","září","říjnu","listopadu","prosinci"];
 
-function MilestoneCelebration({ row, nextGoal, onClose }) {
+function MilestoneCelebration({ row, nextGoal, variant = "closed", onClose }) {
   const cvsRef = useRef(null);
   useEffect(() => {
     const cvs = cvsRef.current;
@@ -9006,6 +9007,7 @@ function MilestoneCelebration({ row, nextGoal, onClose }) {
   }, []);
 
   const monIdx = Number(row.ym.slice(5, 7)) - 1;
+  const live = variant === "live";
   return (
     <div style={{ position: "fixed", inset: 0, zIndex: 9998, background: "rgba(20,14,60,.44)", backdropFilter: "blur(3px)",
       display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}
@@ -9019,19 +9021,25 @@ function MilestoneCelebration({ row, nextGoal, onClose }) {
         <BpCorners color="rgba(198,168,107,.75)" />
         <div style={{ width: 56, height: 56, borderRadius: "50%", border: "1.5px solid #C6A86B",
           display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 6px", fontSize: 23 }}>🏆</div>
-        <div style={bpLabel({ color: "#96773C" })}>Meta překročena · {row.milestoneNum}. milník</div>
+        <div style={bpLabel({ color: "#96773C" })}>
+          {live ? "Právě jsi překlopil metu" : `Meta překročena · ${row.milestoneNum}. milník`}
+        </div>
         <div style={{ ...bpHero(42), marginTop: 10 }}>{fmtKc(row.totalM)}</div>
         <div style={{ fontSize: 11.5, color: "#96773C", fontWeight: 600, marginTop: 4 }}>
-          v {MILESTONE_MONTHS[monIdx]} {row.ym.slice(0, 4)} · meta byla {fmtKc(row.goal)}
+          {live
+            ? `průběžně za ${MILESTONE_MONTHS[monIdx]} ${row.ym.slice(0, 4)} · meta je ${fmtKc(row.goal)}`
+            : `v ${MILESTONE_MONTHS[monIdx]} ${row.ym.slice(0, 4)} · meta byla ${fmtKc(row.goal)}`}
         </div>
         <div style={{ height: 1, background: "rgba(0,0,0,.06)", margin: "18px 0" }} />
         <div style={{ fontSize: 11.5, color: "var(--mut)", lineHeight: 1.55 }}>
           Fakturace <strong style={{ color: "var(--txt)" }}>{fmtKc(row.invAmt)}</strong> · úschovy <strong style={{ color: "var(--txt)" }}>{fmtKc(row.escAmt)}</strong><br />
-          Meta se posouvá na <strong style={{ color: "var(--ink)" }}>{fmtKc(nextGoal)}</strong>.
+          {live
+            ? <>Do trofejní síně se to zapíše po uzávěrce měsíce — až bude práce vyfakturovaná.</>
+            : <>Meta se posouvá na <strong style={{ color: "var(--ink)" }}>{fmtKc(nextGoal)}</strong>.</>}
         </div>
         <button onClick={onClose} style={{ marginTop: 20, background: "var(--ink)", color: "#fff", border: "none",
           borderRadius: 10, padding: "10px 22px", font: "inherit", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>
-          Beru na vědomí
+          {live ? "Paráda" : "Beru na vědomí"}
         </button>
       </div>
     </div>
@@ -9129,24 +9137,6 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
   // v hlavičkové liště — Tom, 29.6.2026: "já chci reálnou moji bilanci financí, mých peněz."
   const unbilledAmt = unbilledWorkNetNoVat(workEntries);
 
-  // ── Oslava milníku ──────────────────────────────────────────────────────────
-  // Spouštěč = poslední UZAVŘENÝ měsíc, který přeskočil metu (aktuální ani průběžný se
-  // nepočítá — jejich číslo ještě může couvnout). Razítko v localStorage, nic na pozadí.
-  const [milestoneAck, setMilestoneAck] = useState(() => {
-    try { return localStorage.getItem(MILESTONE_ACK_KEY) || ""; } catch (e) { return ""; }
-  });
-  const milestoneToCelebrate = useMemo(() => {
-    const l = computeMilestoneLadder(invoices, escrows, new Date());
-    const closed = l.rows.filter(r => r.milestoneNum && !r.isCurrent);
-    const last = closed[closed.length - 1];
-    return (last && last.ym > milestoneAck) ? { row: last, nextGoal: l.activeGoal } : null;
-  }, [invoices, escrows, milestoneAck]);
-  const ackMilestone = () => {
-    const ym = milestoneToCelebrate && milestoneToCelebrate.row.ym;
-    if (!ym) return;
-    try { localStorage.setItem(MILESTONE_ACK_KEY, ym); } catch (e) {}
-    setMilestoneAck(ym);
-  };
   const unbilledByClient = unbilled.reduce((acc,e) => { if(e.client_id) acc[e.client_id]=(acc[e.client_id]||[]).concat(e); return acc; }, {});
 
   // Overdue
@@ -9567,10 +9557,6 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
           </>
         );
       })()}
-
-      {milestoneToCelebrate && (
-        <MilestoneCelebration row={milestoneToCelebrate.row} nextGoal={milestoneToCelebrate.nextGoal} onClose={ackMilestone} />
-      )}
 
       {editLayout && (
         <div style={{background:"linear-gradient(135deg,#EEF2FF,#E0E7FF)",border:"1px solid rgba(99,102,241,.25)",borderRadius:10,padding:"12px 18px",fontSize:12,color:"#3730A3",display:"flex",alignItems:"center",gap:10}}>
@@ -15095,6 +15081,55 @@ export default function MauxCRM() {
   const [xtbTitles, setXtbTitles] = useState([]);
   const [xtbClosedTrades, setXtbClosedTrades] = useState([]);
   const [escrows, setEscrows] = useState([]);
+
+  // ── Oslava milníku ──────────────────────────────────────────────────────────
+  // Dvě různé chvíle, dvě různé váhy:
+  //  • "live"   — výkaz, který PRÁVĚ překlopil průběžný měsíc přes metu. Radost patří
+  //               k okamžiku zadání (Tom 30.7.2026), proto to visí na App, ne na Přehledu —
+  //               vyskočí to i když ukládáš ze stránky Výkaz práce.
+  //  • "closed" — potvrzení po uzávěrce měsíce, kdy už je práce vyfakturovaná a číslo
+  //               nemůže couvnout. Teprve tohle je trvalý zápis.
+  // Žádný interval, žádné hlídání na pozadí — jen render + razítko v localStorage.
+  const [milestoneAck, setMilestoneAck] = useState(() => {
+    try { return localStorage.getItem(MILESTONE_ACK_KEY) || ""; } catch (e) { return ""; }
+  });
+  const [milestoneLiveAck, setMilestoneLiveAck] = useState(() => {
+    try { return localStorage.getItem(MILESTONE_LIVE_ACK_KEY) || ""; } catch (e) { return ""; }
+  });
+  const milestoneToCelebrate = useMemo(() => {
+    if (!invoices.length && !workEntries.length) return null;
+    const nowD = new Date();
+    const l = computeMilestoneLadder(invoices, escrows, nowD);
+    const closed = l.rows.filter(r => r.milestoneNum && !r.isCurrent);
+    const lastClosed = closed[closed.length - 1];
+    if (lastClosed && lastClosed.ym > milestoneAck) {
+      return { row: lastClosed, nextGoal: l.activeGoal, variant: "closed" };
+    }
+    const nY = nowD.getMonth() === 11 ? nowD.getFullYear() + 1 : nowD.getFullYear();
+    const nM = (nowD.getMonth() + 1) % 12;
+    const liveYm = `${nY}-${String(nM + 1).padStart(2, "0")}`;
+    const liveInv = unbilledWorkNetNoVat(workEntries);
+    const liveEsc = Math.round(escrowGrossForMonth(escrows, nowD.getFullYear(), nowD.getMonth()));
+    const liveTotal = liveInv + liveEsc;
+    if (liveTotal > l.activeGoal && milestoneLiveAck !== liveYm) {
+      return {
+        row: { ym: liveYm, totalM: liveTotal, invAmt: liveInv, escAmt: liveEsc, goal: l.activeGoal, milestoneNum: l.milestoneCount + 1 },
+        nextGoal: l.activeGoal, variant: "live",
+      };
+    }
+    return null;
+  }, [invoices, escrows, workEntries, milestoneAck, milestoneLiveAck]);
+  const ackMilestone = () => {
+    if (!milestoneToCelebrate) return;
+    const ym = milestoneToCelebrate.row.ym;
+    if (milestoneToCelebrate.variant === "live") {
+      try { localStorage.setItem(MILESTONE_LIVE_ACK_KEY, ym); } catch (e) {}
+      setMilestoneLiveAck(ym);
+    } else {
+      try { localStorage.setItem(MILESTONE_ACK_KEY, ym); } catch (e) {}
+      setMilestoneAck(ym);
+    }
+  };
   const [escrowMode, setEscrowMode] = useState("list"); // list | edit | new
   const [selEscrow, setSelEscrow] = useState(null);
   const [dataLoading, setDataLoading] = useState(false);
@@ -15576,6 +15611,10 @@ export default function MauxCRM() {
   return (
     <div className="mx">
       <style>{CSS}</style>
+      {milestoneToCelebrate && (
+        <MilestoneCelebration row={milestoneToCelebrate.row} nextGoal={milestoneToCelebrate.nextGoal}
+          variant={milestoneToCelebrate.variant} onClose={ackMilestone} />
+      )}
       <Sidebar mod={mod} setMod={navTo} onLogout={handleLogout}
         privacyMode={privacyMode} onTogglePrivacy={togglePrivacy} />
       <PixelNeko />
