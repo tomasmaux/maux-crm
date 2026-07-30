@@ -4123,7 +4123,9 @@ function computeMilestoneLadder(invoices, escrows, now) {
     r.over = r.totalM > r.goal;
     // Osobní rekord = nejlepší měsíc za posledních 12. Přichází mnohem častěji než milník
     // a je nezmanipulovatelný — proto je to druhý, samostatný důvod k radosti.
-    r.record = r.totalM > 0 && best12 > 0 && r.totalM > best12;
+    // Rekord se počítá až od měsíce, který má váhu — jinak se to slovo opotřebuje dřív,
+    // než začne něco znamenat (Tom 30.7.2026).
+    r.record = r.totalM >= 100000 && best12 > 0 && r.totalM > best12;
     if (r.over) {
       milestoneCount++;
       r.milestoneNum = milestoneCount;
@@ -8962,6 +8964,179 @@ function Panel({ id, children }) {
   );
 }
 
+// ── TROFEJNÍ SÍŇ ────────────────────────────────────────────────────────────────
+// Tom 30.7.2026: "jako na PSKu sbírat odznáčky - achievementy".
+// Pravidla, která si sám nastavil (a která hlídám, ať sbírka nezlevní):
+//  • stupňovité trofeje (bronz/stříbro/zlato na jedné ose) místo jednorázových —
+//    dvanáct konečných odznáčků odemkneš do jara a zbude mrtvý list;
+//  • aspoň třetina za ŘEMESLO a DISCIPLÍNU, ne za obrat — gamifikace samotných peněz
+//    tlačí praxi k objemu na úkor kvality;
+//  • všechno se počítá z dat, která už v appce jsou. Žádná nová tabulka, žádný zápis.
+const TROPHY_TIERS = ["#B08A5E", "#9AA0B5", "#C6A86B"]; // bronz · stříbro · zlato
+
+function trophyStep(value, steps) {
+  let level = 0;
+  for (let i = 0; i < steps.length; i++) if (value >= steps[i]) level = i + 1;
+  const done = level >= steps.length;
+  const next = done ? steps[steps.length - 1] : steps[level];
+  const floor = level === 0 ? 0 : steps[level - 1];
+  const progress = done ? 1 : Math.max(0, Math.min(1, (value - floor) / (next - floor)));
+  return { level, done, next, progress, value };
+}
+
+function computeTrophies({ ladder, invoices, workEntries, clients, firmaRez, reserveGoal }) {
+  const rows = (ladder && ladder.allRows) || [];
+  const best = rows.reduce((m, r) => Math.max(m, r.totalM), 0);
+  const recordCount = rows.filter(r => r.record).length;
+  const year12 = rows.slice(-12).reduce((s, r) => s + r.totalM, 0);
+  const escTotal = rows.reduce((s, r) => s + (r.escAmt || 0), 0);
+  const entries = workEntries || [];
+  const flatCount = entries.filter(e => e.billing_type === "flat_rate").length;
+  const overdueCount = (invoices || []).filter(i => invoiceStatus(i) === "po_splatnosti").length;
+  const billedClients = new Set((invoices || []).map(i => i.client_id).filter(Boolean)).size;
+  // Disciplína: nevyfakturovaná práce z UZAVŘENÝCH měsíců (tedy starší než tenhle měsíc)
+  const thisYm = new Date().toISOString().slice(0, 7);
+  const staleUnbilled = entries.filter(e => !e.invoice_id && (e.entry_date || "") < thisYm + "-01").length;
+  // Řemeslo: záznamy, kde sis vedl i reálně odpracovaný čas
+  const withReal = entries.filter(e => (e.real_hours || 0) > 0).length;
+  const realShare = entries.length ? withReal / entries.length : 0;
+
+  const T = [];
+  const add = (id, icon, name, unitFn, steps, value, kind) => {
+    const st = trophyStep(value, steps);
+    T.push({
+      id, icon, name, kind,
+      done: st.level > 0,
+      complete: st.done,
+      level: st.level,
+      progress: st.level > 0 && !st.done ? st.progress : (st.level === 0 ? st.progress : 1),
+      desc: st.level > 0 && st.done ? unitFn(steps[steps.length - 1], true)
+        : st.level > 0 ? `${unitFn(steps[st.level - 1], true)} · dál ${unitFn(st.next, false)}`
+        : `${unitFn(st.next, false)}`,
+    });
+  };
+  const kc = v => fmtKc(v);
+
+  // — VÝKON —
+  add("mesic", "📈", "Nejlepší měsíc", (v, d) => d ? `překonáno ${kc(v)}` : `cíl ${kc(v)}`,
+      [100000, 200000, 250000], best, "vykon");
+  add("rekord", "🏆", "Rekordman", (v, d) => d ? `${v}× osobní rekord` : `${v} rekordů`,
+      [3, 10, 25], recordCount, "vykon");
+  add("rok", "🌍", "Rok práce", (v, d) => d ? `za 12 měsíců ${kc(v)}` : `za 12 měsíců ${kc(v)}`,
+      [1000000, 2000000, 3000000], year12, "vykon");
+  add("uschovy", "🔐", "Správce cizích peněz", (v, d) => d ? `${kc(v)} na úrocích` : `${kc(v)} na úrocích`,
+      [100000, 250000, 500000], escTotal, "vykon");
+
+  // — DISCIPLÍNA —
+  T.push({
+    id: "bezdluzniku", icon: "⚖️", name: "Bez dlužníků", kind: "disciplina",
+    done: overdueCount === 0, complete: overdueCount === 0, level: overdueCount === 0 ? 3 : 0,
+    progress: overdueCount === 0 ? 1 : 0,
+    desc: overdueCount === 0 ? "žádná faktura po splatnosti" : `${overdueCount}× po splatnosti`,
+  });
+  T.push({
+    id: "cistystul", icon: "🧾", name: "Čistý stůl", kind: "disciplina",
+    done: staleUnbilled === 0, complete: staleUnbilled === 0, level: staleUnbilled === 0 ? 3 : 0,
+    progress: staleUnbilled === 0 ? 1 : Math.max(0, 1 - staleUnbilled / 20),
+    desc: staleUnbilled === 0 ? "nic nevisí z minulých měsíců" : `${staleUnbilled} výkazů z minulých měsíců`,
+  });
+  add("rezerva", "🏛️", "Firemní rezerva", (v, d) => d ? `${kc(v)} v rezervě` : `cíl ${kc(v)}`,
+      [50000, 100000, reserveGoal || 150000], Math.max(0, firmaRez || 0), "disciplina");
+
+  // — ŘEMESLO —
+  add("vykazy", "🗂️", "Kronikář", (v, d) => d ? `${v} zapsaných výkazů` : `${v} výkazů`,
+      [100, 250, 500], entries.length, "remeslo");
+  add("realhod", "⏱️", "Poctivé hodiny", (v, d) => d ? `${Math.round(v * 100)} % výkazů s reálným časem` : `${Math.round(v * 100)} % výkazů s reálným časem`,
+      [0.3, 0.6, 0.9], realShare, "remeslo");
+  add("pausal", "📐", "Paušálista", (v, d) => d ? `${v} paušálních výkazů` : `${v} paušálů`,
+      [5, 15, 40], flatCount, "remeslo");
+  add("klienti", "🤝", "Klientela", (v, d) => d ? `${v} fakturovaných klientů` : `${v} klientů`,
+      [10, 25, 50], billedClients, "remeslo");
+
+  return T;
+}
+
+function TrophyWall({ trophies }) {
+  const done = trophies.filter(t => t.done).length;
+  const KIND = { vykon: "Výkon", disciplina: "Disciplína", remeslo: "Řemeslo" };
+  return (
+    <div style={{ marginTop: 10, background: "#fff", borderRadius: BP.rInner, boxShadow: BP.shadow, padding: "22px 24px", maxWidth: 640 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", marginBottom: 4 }}>
+        <div>
+          <div style={bpLabel()}>Trofejní síň</div>
+          <div style={{ ...bpHero(28), marginTop: 5 }}>{done} <span style={{ fontSize: 16, color: "var(--mut)" }}>z {trophies.length}</span></div>
+        </div>
+      </div>
+      <div style={{ fontSize: 9, color: "var(--mut)", marginBottom: 16 }}>
+        stupně bronz · stříbro · zlato — počítají se ze zápisů, které už v appce máš
+      </div>
+      {["vykon", "disciplina", "remeslo"].map(kind => (
+        <div key={kind} style={{ marginTop: 14 }}>
+          <div style={{ fontSize: 8.5, letterSpacing: ".2em", textTransform: "uppercase", color: "var(--mut)", fontWeight: 700, marginBottom: 10 }}>{KIND[kind]}</div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 14 }}>
+            {trophies.filter(t => t.kind === kind).map(t => {
+              const R = 30, C = 2 * Math.PI * R;
+              const col = t.done ? TROPHY_TIERS[Math.min(t.level, 3) - 1] : "#8F86C4";
+              const dash = t.done && t.complete ? C : C * (t.progress || 0);
+              return (
+                <div key={t.id} style={{ textAlign: "center" }}>
+                  <div style={{ width: 70, height: 70, margin: "0 auto 7px", position: "relative" }}>
+                    <svg viewBox="0 0 70 70" style={{ width: 70, height: 70, transform: "rotate(-90deg)" }}>
+                      <circle cx="35" cy="35" r={R} fill="none" stroke="rgba(28,10,99,.07)" strokeWidth="2.5" />
+                      <circle cx="35" cy="35" r={R} fill="none" stroke={col} strokeWidth="2.5" strokeLinecap="round"
+                        strokeDasharray={`${dash} ${C}`} />
+                    </svg>
+                    <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center",
+                      fontSize: 22, filter: t.done ? "none" : "grayscale(1)", opacity: t.done ? 1 : .28 }}>{t.icon}</div>
+                    {!t.done && (
+                      <div style={{ position: "absolute", bottom: 0, right: 2, fontSize: 8, fontWeight: 800, color: "#8F86C4" }}>
+                        {Math.round((t.progress || 0) * 100)}%
+                      </div>
+                    )}
+                    {t.done && !t.complete && (
+                      <div style={{ position: "absolute", bottom: 0, right: 2, fontSize: 8, fontWeight: 800, color: col }}>
+                        {["I", "II", "III"][t.level - 1]}
+                      </div>
+                    )}
+                  </div>
+                  <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: ".05em", textTransform: "uppercase", lineHeight: 1.3,
+                    color: t.done ? "var(--ink)" : "var(--mut)" }}>{t.name}</div>
+                  <div style={{ fontSize: 8, color: "var(--mut)", marginTop: 2, lineHeight: 1.3 }}>{t.desc}</div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ── PEČEŤ ZA OSOBNÍ REKORD ──────────────────────────────────────────────────────
+// Vědomě TIŠŠÍ než oslava mety: rekord přichází ~8× do roka, meta jednou. Kdyby obojí
+// házelo konfety, meta by zlevnila. Zlatá pečeť shora, sama zmizí, žádné klikání.
+function RecordSeal({ amount, prev, onClose }) {
+  useEffect(() => { const t = setTimeout(onClose, 7000); return () => clearTimeout(t); }, [onClose]);
+  return (
+    <div onClick={onClose} style={{
+      position: "fixed", top: 22, left: "50%", transform: "translateX(-50%)", zIndex: 9997,
+      background: "#fff", borderRadius: 14, padding: "13px 20px 13px 15px", cursor: "pointer",
+      boxShadow: "0 1px 3px rgba(16,12,60,.05), 0 18px 44px -14px rgba(16,12,60,.4)",
+      border: "1px solid rgba(198,168,107,.45)", display: "flex", alignItems: "center", gap: 14,
+      animation: "mauxSealIn .45s cubic-bezier(.2,.9,.3,1.2)",
+    }}>
+      <style>{`@keyframes mauxSealIn { from { opacity:0; transform:translate(-50%,-14px) scale(.94) } to { opacity:1; transform:translate(-50%,0) scale(1) } }`}</style>
+      <div style={{ width: 40, height: 40, borderRadius: "50%", border: "1.5px solid #C6A86B",
+        display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18, flexShrink: 0 }}>🏆</div>
+      <div>
+        <div style={{ fontSize: 8.5, letterSpacing: ".22em", textTransform: "uppercase", color: "#96773C", fontWeight: 800 }}>Nový osobní rekord</div>
+        <div style={{ fontFamily: "Fraunces,serif", fontWeight: 300, fontSize: 22, lineHeight: 1.15, color: "var(--ink)", marginTop: 2 }}>{fmtKc(amount)}</div>
+        <div style={{ fontSize: 10, color: "var(--mut)", marginTop: 1 }}>překonáno {fmtKc(prev)} · nejlepší za 12 měsíců</div>
+      </div>
+    </div>
+  );
+}
+
 // ── OSLAVA MILNÍKU ──────────────────────────────────────────────────────────────
 // Tom 30.7.2026: "když tu metu přesáhnu, mělo by se udělat něco oslavného".
 // Jednorázový moment, ŽÁDNÝ hlídač na pozadí: vyhodnotí se při renderu Přehledu a razítko
@@ -8969,6 +9144,7 @@ function Panel({ id, children }) {
 // číslo už nemůže couvnout, takže oslava nikdy není předčasná.
 const MILESTONE_ACK_KEY = "maux_milestone_ack";
 const MILESTONE_LIVE_ACK_KEY = "maux_milestone_live_ack";
+const RECORD_ACK_KEY = "maux_record_ack";
 const MILESTONE_MONTHS = ["lednu","únoru","březnu","dubnu","květnu","červnu","červenci","srpnu","září","říjnu","listopadu","prosinci"];
 
 function MilestoneCelebration({ row, nextGoal, variant = "closed", onClose }) {
@@ -9557,13 +9733,19 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
                               <div style={{position:"absolute",top:0,left:0,height:13,width:`${w1}%`,background:BP.indigo,borderRadius:"3px 0 0 3px",opacity:r.live?.5:1}} />
                               <div style={{position:"absolute",top:0,left:`${w1}%`,height:13,width:`${w2}%`,background:BP.sand,borderRadius:"0 3px 3px 0",opacity:r.live?.5:1}} />
                               <div style={{position:"absolute",top:-3,left:`${gp}%`,height:19,width:2,background:"rgba(28,10,99,.55)"}} />
-                              {(r.over || r.record) ? (
-                                <span style={{position:"absolute",left:`calc(${Math.min(w1+w2,86)}% + 10px)`,top:-1,fontSize:7.5,letterSpacing:".1em",textTransform:"uppercase",fontWeight:800,whiteSpace:"nowrap",borderRadius:3,padding:"1px 5px",
-                                  color: r.over ? "#C0392B" : "#8A6E2E",
-                                  background: r.over ? "#FCEEEC" : "#F6F0E2"}}>
-                                  {r.over ? (r.milestoneNum ? `🏆 milník ${r.milestoneNum}` : "nad metou") : "rekord"}
-                                </span>
-                              ) : null}
+                              {(r.over || r.record) ? (() => {
+                                // Dlouhý pruh nemá kam štítek postavit — v tom případě si sedne
+                                // dovnitř k pravému okraji, místo aby lezl přes konec pruhu.
+                                const inside = (w1 + w2) > 74;
+                                return (
+                                  <span style={{position:"absolute",top:-1,fontSize:7.5,letterSpacing:".1em",textTransform:"uppercase",fontWeight:800,whiteSpace:"nowrap",borderRadius:3,padding:"1px 5px",
+                                    ...(inside ? {right:4} : {left:`calc(${w1+w2}% + 10px)`}),
+                                    color: r.over ? "#C0392B" : "#8A6E2E",
+                                    background: r.over ? (inside ? "rgba(255,255,255,.92)" : "#FCEEEC") : (inside ? "rgba(255,255,255,.92)" : "#F6F0E2")}}>
+                                    {r.over ? (r.milestoneNum ? `🏆 milník ${r.milestoneNum}` : "nad metou") : "rekord"}
+                                  </span>
+                                );
+                              })() : null}
                             </div>
                             <div style={{fontSize:10.5,textAlign:"right",color:r.over?"#C0392B":"var(--txt)",fontWeight:r.over?700:400,fontVariantNumeric:"tabular-nums"}}>{fmtKc(r.totalM)}</div>
                           </div>
@@ -9577,6 +9759,19 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
                 Úrok z úschov je zde hrubý (před -15% srážkovou daní) — stejná báze jako fakturace, která je taky bez DPH, ale ne po dani z příjmu. Proto se sloupec "Úschovy" může lišit od karty "Příjmy na příští měsíc" výš, která ukazuje reálně přijatou čistou hotovost (po srážkové dani). Sloupec "Fakturace" u řádku "průběžné" = nevyfakturovaná práce bez DPH (stejné číslo jako "nevyfakturováno" v kartě výš).
               </div>
             </details>
+            {(() => {
+              const fr = computeFirmaRezerva(financeItems, invoices, dpfoMonths, loanTransactions, escrows);
+              const trophies = computeTrophies({ ladder, invoices, workEntries, clients, firmaRez: fr.firmaRez, reserveGoal: fr.planKap });
+              const doneN = trophies.filter(t => t.done).length;
+              return (
+                <details style={{marginTop:6}}>
+                  <summary style={{cursor:"pointer",fontSize:10.5,color:"var(--mut)",fontWeight:500,letterSpacing:".02em"}}>
+                    🏆 Trofejní síň — {doneN} z {trophies.length} odemčeno
+                  </summary>
+                  <TrophyWall trophies={trophies} />
+                </details>
+              );
+            })()}
           </>
         );
       })()}
@@ -15142,6 +15337,27 @@ export default function MauxCRM() {
     }
     return null;
   }, [invoices, escrows, workEntries, milestoneAck, milestoneLiveAck]);
+  const [recordAck, setRecordAck] = useState(() => {
+    try { return localStorage.getItem(RECORD_ACK_KEY) || ""; } catch (e) { return ""; }
+  });
+  const recordToShow = useMemo(() => {
+    if (!workEntries.length) return null;
+    const nowD = new Date();
+    const l = computeMilestoneLadder(invoices, escrows, nowD);
+    const nY = nowD.getMonth() === 11 ? nowD.getFullYear() + 1 : nowD.getFullYear();
+    const nM = (nowD.getMonth() + 1) % 12;
+    const ym = `${nY}-${String(nM + 1).padStart(2, "0")}`;
+    const total = unbilledWorkNetNoVat(workEntries) + Math.round(escrowGrossForMonth(escrows, nowD.getFullYear(), nowD.getMonth()));
+    const prev = (l.allRows || []).slice(-12).reduce((m, x) => Math.max(m, x.totalM), 0);
+    // Razítko je na měsíc, ne na částku — jinak by pečeť naskočila po každém dalším výkazu.
+    if (total >= 100000 && prev > 0 && total > prev && recordAck !== ym) return { amount: total, prev, ym };
+    return null;
+  }, [invoices, escrows, workEntries, recordAck]);
+  const ackRecord = () => {
+    if (!recordToShow) return;
+    try { localStorage.setItem(RECORD_ACK_KEY, recordToShow.ym); } catch (e) {}
+    setRecordAck(recordToShow.ym);
+  };
   const ackMilestone = () => {
     if (!milestoneToCelebrate) return;
     const ym = milestoneToCelebrate.row.ym;
@@ -15637,6 +15853,9 @@ export default function MauxCRM() {
       {milestoneToCelebrate && (
         <MilestoneCelebration row={milestoneToCelebrate.row} nextGoal={milestoneToCelebrate.nextGoal}
           variant={milestoneToCelebrate.variant} onClose={ackMilestone} />
+      )}
+      {!milestoneToCelebrate && recordToShow && (
+        <RecordSeal amount={recordToShow.amount} prev={recordToShow.prev} onClose={ackRecord} />
       )}
       <Sidebar mod={mod} setMod={navTo} onLogout={handleLogout}
         privacyMode={privacyMode} onTogglePrivacy={togglePrivacy} />
