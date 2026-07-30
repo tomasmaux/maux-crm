@@ -12944,9 +12944,6 @@ function AsistentPrehled({ logs, attendance, clients, availability, onGo }) {
   const MONTHS_CS = ["leden","únor","březen","duben","květen","červen","červenec","srpen","září","říjen","listopad","prosinec"];
   const dnyWord = (n) => n===1?"den":n<5?"dny":"dní";
 
-  // Jediné okno pro celý přehled. Do jmenovatele jdou VÝHRADNĚ dny, kdy byl
-  // Josef reálně v práci (docházka nebo výkaz) — volno mu čísla nekazí.
-  const WIN_DAYS = 60;
 
   const todayStr  = localDs(now);
   // POZOR: archivace = "posláno účetní", ne smazání. Do Josefova výkonového
@@ -12972,7 +12969,6 @@ function AsistentPrehled({ logs, attendance, clients, availability, onGo }) {
   const todayLogged = todayH+todayBdH;
   const todayDayF   = Math.min(1, todayLogged/ASISTENT_DAY_CAPTURE_H);          // pokrytí 8h dne
   const todayUnlog  = Math.max(0, attNet-todayLogged);                          // čas v kanceláři bez zápisu
-  const todayCap    = attNet>0 ? Math.min(1,todayLogged/attNet) : null;
 
   // Odhad času splnění denního cíle při současném tempu
   const etaTxt = (()=>{
@@ -13062,7 +13058,6 @@ function AsistentPrehled({ logs, attendance, clients, availability, onGo }) {
   const mDays=new Set(mLogs.map(l=>l.entry_date)).size;
   const mAttRows=attendance.filter(a=>a.check_in && a.date.startsWith(pKey));
   const mAtt=mAttRows.length;
-  const mOffice=mAttRows.reduce((s,a)=>s+(a.check_out?netAttHours(a.check_in,a.check_out):0),0);
   const mClients=new Set(mLogs.filter(l=>!isBd(l)&&l.client_id).map(l=>l.client_id)).size;
 
   const avgArrival = (()=>{
@@ -13096,39 +13091,6 @@ function AsistentPrehled({ logs, attendance, clients, availability, onGo }) {
   const utDelta  = (ut.pct!=null && utPrev.pct!=null && utPrev.days>=3) ? ut.pct-utPrev.pct : null;
   const utBefName= MONTHS_CS[Number(utBefKey.slice(5,7))-1];
   const utGapDay = Math.max(0, ASISTENT_DAY_CAPTURE_H-ut.avg);
-
-  // ── TEMPO MĚSÍCE ──
-  const daysInMonth = new Date(cy, cm, 0).getDate();
-  const plannedDates = (()=>{
-    const p=(availability?.planned_dates||[]).filter(d=>String(d).startsWith(mKey));
-    if(p.length) return p.slice().sort();
-    const out=[];
-    for(let d=1;d<=daysInMonth;d++){ const dt=new Date(cy,cm-1,d); const dw=dt.getDay(); if(dw!==0&&dw!==6) out.push(localDs(dt)); }
-    return out;
-  })();
-  const planFromCal = (availability?.planned_dates||[]).some(d=>String(d).startsWith(mKey));
-  const monthGoalH  = plannedDates.length*ASISTENT_DAILY_H;
-
-  const pace = (()=>{
-    const pts=[]; let cum=0;
-    for(let d=1;d<=daysInMonth;d++){
-      const ds=localDs(new Date(cy,cm-1,d));
-      cum += dayBill[ds]||0;
-      const ideal = plannedDates.filter(e=>e<=ds).length*ASISTENT_DAILY_H;
-      pts.push({d,ds,cum,ideal,past:ds<=todayStr});
-    }
-    return pts;
-  })();
-  const pNow   = pace.find(p=>p.ds===todayStr) || pace[pace.length-1];
-  const pDelta = pNow ? pNow.cum-pNow.ideal : 0;
-  const paceMax = Math.max(1, monthGoalH, ...pace.map(p=>p.cum));
-  const PW=900, PH=150, PB=128, PT=14;
-  const px = (d)=> daysInMonth>1 ? (d-1)/(daysInMonth-1)*PW : 0;
-  const py = (v)=> PB-(v/paceMax)*(PB-PT);
-  const idealPath = pace.map((p,i)=>`${i?"L":"M"}${px(p.d).toFixed(1)},${py(p.ideal).toFixed(1)}`).join(" ");
-  const pastPts   = pace.filter(p=>p.past);
-  const realPath  = pastPts.map((p,i)=>`${i?"L":"M"}${px(p.d).toFixed(1)},${py(p.cum).toFixed(1)}`).join(" ");
-  const realArea  = pastPts.length ? `${realPath} L${px(pastPts[pastPts.length-1].d).toFixed(1)},${PB} L0,${PB} Z` : "";
 
   // ── HEATMAPA — posledních 10 týdnů ──
   const HEAT_W = 10;
@@ -13215,54 +13177,13 @@ function AsistentPrehled({ logs, attendance, clients, availability, onGo }) {
   const runMonth = monthRows.find(m=>m.running);
   const bestUtilM= closedM.length ? closedM.reduce((a,b)=>b.pct>a.pct?b:a) : null;
   const curPct = (mH+mBdH)>0 ? Math.round(mH/(mH+mBdH)*100) : null;   // vybrané období
-  const runM = byMonth[mKey];
-  const runPct = runM&&(runM.bill+runM.bd)>0 ? Math.round(runM.bill/(runM.bill+runM.bd)*100) : null;
   const prevM = byMonth[prevKey];
   const prevPct = prevM&&(prevM.bill+prevM.bd)>0 ? Math.round(prevM.bill/(prevM.bill+prevM.bd)*100) : null;
   const effDelta = (curPct!=null&&prevPct!=null&&period==="this") ? curPct-prevPct : null;
 
-  // ── TVOJE VÝSLEDKY — kumulativní čísla, která nikdy neklesají ──
-  const allBill=billableHoursOf(activeLogs), allBd=bdHoursOf(activeLogs), allTot=allBill+allBd;
-  const allDays=new Set(activeLogs.map(l=>l.entry_date).filter(Boolean)).size;
-  const allClients=new Set(activeLogs.filter(l=>!isBd(l)&&l.client_id).map(l=>l.client_id)).size;
-  const bestDay=(()=>{ let k=null,v=0; Object.keys(dayBill).forEach(d=>{ if(dayBill[d]>v){v=dayBill[d];k=d;} }); return k?{ds:k,h:v}:null; })();
   // Nejlepší měsíc NEMĚŘÍME objemem hodin — ten závisí na tom, kolik dní Tom
   // Josefovi naplánuje, ne na jeho výkonu. Měříme utilizaci: kolik z 8h dne
   // reálně zapsal. To je na počtu dnů nezávislé.
-  // ── FORMA: Ø klientské práce na PRACOVNÍ den, klouzavé okno ──────────────
-  // Nepočítáme součet hodin — ten klesne pokaždé, když Tom naplánuje míň dnů,
-  // a trestal by Josefa za cizí rozhodnutí. Počítáme průměr na den, kdy byl
-  // reálně v práci. Dny volna do jmenovatele nejdou vůbec.
-  const startD = new Date(Number(JOSEF_LOG_START.slice(0,4)), Number(JOSEF_LOG_START.slice(5,7))-1, 1);
-  const dIdx = (ds) => Math.round((new Date(ds+"T00:00:00") - startD)/864e5);
-  const endI = Math.max(0, dIdx(todayStr));
-  const aBill = new Array(endI+1).fill(0);
-  const aWork = new Array(endI+1).fill(0);          // 1 = Josef ten den byl v práci
-  activeLogs.forEach(l=>{ if(!l.entry_date) return; const i=dIdx(l.entry_date);
-    if(i>=0&&i<=endI){ if(!isBd(l)) aBill[i]+=(l.hours||0); aWork[i]=1; } });
-  attendance.forEach(a=>{ if(!a.check_in) return; const i=dIdx(a.date); if(i>=0&&i<=endI) aWork[i]=1; });
-  const pB=[0], pW=[0];
-  for(let i=0;i<=endI;i++){ pB.push(pB[i]+aBill[i]); pW.push(pW[i]+aWork[i]); }
-  const formOf=(a2,b2)=>{ const lo=Math.max(a2,0), hi=Math.min(b2,endI);
-    if(hi<lo) return {bill:0,days:0,avg:0};
-    const bill=pB[hi+1]-pB[lo], days=pW[hi+1]-pW[lo];
-    return {bill,days,avg:days>0?bill/days:0}; };
-  const form60   = formOf(endI-WIN_DAYS+1, endI);
-  const formPrev = formOf(endI-2*WIN_DAYS+1, endI-WIN_DAYS);
-  const bestForm = (()=>{ let best=0; for(let e=0;e<=endI;e++){ const r=formOf(e-WIN_DAYS+1,e); if(r.days>=3&&r.avg>best) best=r.avg; } return best; })();
-  const winDelta = formPrev.days>=3 ? form60.avg-formPrev.avg : null;
-  const winPctD  = formPrev.days>=3 && formPrev.avg>0 ? Math.round((form60.avg/formPrev.avg-1)*100) : null;
-  const histDays = endI+1;
-  // Dokud je historie kratší než WIN_DAYS+30, je okno ≈ celá historie a "osobní
-  // rekord" by svítil natrvalo. Do té doby jedeme na kumulativní milníky.
-  const winMature = histDays >= WIN_DAYS + 30;
-  const isRecord  = winMature && bestForm>0 && form60.avg>=bestForm-0.005;
-  const mileF     = bestForm>0 ? Math.min(1, form60.avg/bestForm) : 0;
-  const MILE=[25,50,100,150,200,250,300,400,500,750,1000,1500,2000];
-  const nextMile=MILE.find(x=>x>allTot)||Math.ceil((allTot+1)/500)*500;
-  const prevMile=[0].concat(MILE).filter(x=>x<=allTot).pop()||0;
-  const mileCumF=nextMile>prevMile?Math.min(1,(allTot-prevMile)/(nextMile-prevMile)):0;
-
   const CH = 118;
 
   // ── styly ──
@@ -13316,19 +13237,6 @@ function AsistentPrehled({ logs, attendance, clients, availability, onGo }) {
         </div>
         <div style={{textAlign:"right",fontSize:10.5,color:MUT,lineHeight:1.7}}>
           <div>{now.toLocaleDateString("cs-CZ",{weekday:"long"})} · {now.toLocaleDateString("cs-CZ",{day:"numeric",month:"long",year:"numeric"})}</div>
-          <div style={{display:"inline-flex",gap:3,background:"rgba(0,0,0,.045)",borderRadius:11,padding:3,marginTop:7}}>
-            {[{k:"this",l:"Tento měsíc"},{k:"prev",l:"Minulý měsíc",off:!hasPrev}].map(t=>(
-              <button key={t.k} onClick={()=>!t.off&&setPeriod(t.k)} disabled={t.off}
-                style={{padding:"5px 13px",borderRadius:9,border:"none",cursor:t.off?"default":"pointer",
-                  fontSize:10.5,fontWeight:period===t.k?600:500,letterSpacing:".01em",transition:"all .16s",
-                  background:period===t.k?"#fff":"transparent",
-                  color:t.off?"rgba(0,0,0,.22)":period===t.k?IND:MUT,
-                  boxShadow:period===t.k?"0 1px 3px rgba(20,18,60,.13)":"none"}}>
-                {t.l}
-              </button>
-            ))}
-          </div>
-          <br/>
           <div style={{display:"inline-flex",alignItems:"center",gap:7,background:"#fff",border:`1px solid ${LINE}`,borderRadius:20,padding:"4px 11px",marginTop:5}}>
             <span style={{width:6,height:6,borderRadius:"50%",background:attOpen?OK:todayAtt?.check_out?SAND:"rgba(0,0,0,.18)"}}/>
             <span style={{color:"var(--txt)",fontWeight:600,fontSize:10}}>
@@ -13419,9 +13327,24 @@ function AsistentPrehled({ logs, attendance, clients, availability, onGo }) {
         <div style={{width:4,background:`linear-gradient(180deg, ${VIVID} 0%, ${SEC} 55%, ${SAND} 100%)`,flexShrink:0}}/>
         <div style={{flex:1,minWidth:0,padding:"24px 28px 22px"}}>
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",gap:12,flexWrap:"wrap",marginBottom:20}}>
-            <div style={{display:"flex",alignItems:"baseline",gap:11}}>
-              <div style={lbl}>Utilizace · {pName}</div>
+            <div style={{display:"flex",alignItems:"center",gap:12,flexWrap:"wrap"}}>
+              <div style={lbl}>Utilizace</div>
               <span style={{fontSize:8,letterSpacing:".16em",fontWeight:700,color:VIVID,background:"rgba(91,82,240,.09)",borderRadius:5,padding:"3px 7px",textTransform:"uppercase"}}>Klíčový ukazatel</span>
+              <div style={{display:"inline-flex",gap:3,background:"rgba(0,0,0,.045)",borderRadius:11,padding:3}}>
+                {[{k:"this",m:mKey},{k:"prev",m:prevKey,off:!hasPrev}].map(t=>{
+                  const nm=MONTHS_CS[Number(t.m.slice(5,7))-1];
+                  return (
+                    <button key={t.k} onClick={()=>!t.off&&setPeriod(t.k)} disabled={t.off}
+                      style={{padding:"5px 14px",borderRadius:9,border:"none",cursor:t.off?"default":"pointer",
+                        fontSize:11,fontWeight:period===t.k?600:500,letterSpacing:".01em",transition:"all .16s",
+                        background:period===t.k?"#fff":"transparent",
+                        color:t.off?"rgba(0,0,0,.22)":period===t.k?IND:MUT,
+                        boxShadow:period===t.k?"0 1px 3px rgba(20,18,60,.13)":"none"}}>
+                      {nm.charAt(0).toUpperCase()+nm.slice(1)}
+                    </button>
+                  );
+                })}
+              </div>
             </div>
             <div style={{fontSize:10,color:MUT}}>
               Cíl <b style={{color:"var(--txt)"}}>{ASISTENT_DAY_CAPTURE_H} h zapsaných denně</b>
@@ -13532,119 +13455,6 @@ function AsistentPrehled({ logs, attendance, clients, availability, onGo }) {
             </div>
           </div>
         </div>
-      )}
-
-      {/* ── TVOJE FORMA — klouzavé 60denní okno + osobní rekord ── */}
-      <div style={{...paper,padding:"22px 26px 20px"}}>
-        <div style={{display:"grid",gridTemplateColumns:"minmax(0,1fr) 1px 1.15fr",gap:26,alignItems:"center"}}>
-          <div style={{minWidth:0}}>
-            <div style={{display:"flex",alignItems:"baseline",gap:10,flexWrap:"wrap",marginBottom:11}}>
-              <div style={lbl}>{winMature ? `Tvoje forma · posledních ${WIN_DAYS} dní` : `Tvoje výsledky · od ${MONTHS_CS[Number(JOSEF_LOG_START.slice(5,7))-1]} ${JOSEF_LOG_START.slice(0,4)}`}</div>
-              {isRecord && form60.avg>0 && (
-                <span style={{fontSize:8,letterSpacing:".16em",fontWeight:700,color:OK,background:"rgba(5,150,105,.09)",
-                  borderRadius:5,padding:"3px 7px",textTransform:"uppercase"}}>Osobní rekord</span>
-              )}
-            </div>
-            <div style={{display:"flex",alignItems:"baseline",gap:11,flexWrap:"wrap"}}>
-              <span style={hero(isRecord&&form60.avg>0?OK:IND,40)}>{fmtH(winMature?form60.avg:allTot)}</span>
-              {winMature
-                ? (winDelta!=null
-                    ? <span style={{fontSize:11.5,color:winDelta>=0?OK:SANDD,fontWeight:600}}>
-                        klientské práce na den · {winDelta>=0?"+":"−"}{fmtH(Math.abs(winDelta))} ({winPctD>=0?"+":"−"}{Math.abs(winPctD)} %) proti předchozím {WIN_DAYS} dnům
-                      </span>
-                    : <span style={{fontSize:11.5,color:MUT}}>klientské práce na pracovní den · cíl {String(ASISTENT_DAILY_H).replace(".",",")} h</span>)
-                : <span style={{fontSize:11.5,color:MUT}}>odpracováno celkem za {histDays} {dnyWord(histDays)}</span>}
-            </div>
-
-            <div style={{marginTop:16}}>
-              <div style={{display:"flex",justifyContent:"space-between",gap:12,fontSize:10,color:MUT,marginBottom:6}}>
-                {winMature
-                  ? <>
-                      <span>{isRecord
-                        ? <>Tvoje nejlepší {WIN_DAYS}denní období — {form60.days} {dnyWord(form60.days)} v práci.</>
-                        : <>Osobní rekord <b style={{color:"var(--txt)"}}>{fmtH(bestForm)}</b> / den</>}</span>
-                      {!isRecord && <span>zbývá <b style={{color:"var(--txt)"}}>{fmtH(Math.max(0,bestForm-form60.avg))}</b> denně</span>}
-                    </>
-                  : <>
-                      <span>Další milník <b style={{color:"var(--txt)"}}>{nextMile} h</b></span>
-                      <span>zbývá <b style={{color:"var(--txt)"}}>{fmtH(Math.max(0,nextMile-allTot))}</b></span>
-                    </>}
-              </div>
-              <div style={{height:8,borderRadius:5,background:"rgba(0,0,0,.055)",overflow:"hidden"}}>
-                <div style={{height:8,borderRadius:5,width:`${Math.round((winMature?mileF:mileCumF)*100)}%`,
-                  background:isRecord?OK:`linear-gradient(90deg, ${VIVID} 0%, ${SEC} 100%)`,transition:"width .8s ease"}}/>
-              </div>
-              {!winMature && (
-                <div style={{fontSize:9.5,color:MUT,marginTop:8,lineHeight:1.6,opacity:.9}}>
-                  Až budeš mít {WIN_DAYS+30} dní evidence, přepne se tenhle panel na tvoji <b>formu za posledních {WIN_DAYS} dní</b> — průměr klientské práce na den, kdy jsi v práci. Dny volna se do něj nepočítají.
-                </div>
-              )}
-            </div>
-
-            <div style={{marginTop:16,paddingTop:12,borderTop:`1px solid ${LINE}`,display:"flex",gap:18,fontSize:10.5,color:MUT,flexWrap:"wrap"}}>
-              <span><span style={dot(VIVID)}/>Klientská práce <b style={{color:"var(--txt)"}}>{fmtH(allBill)}</b></span>
-              <span><span style={dot(SANDL)}/>Development <b style={{color:"var(--txt)"}}>{fmtH(allBd)}</b></span>
-              <span style={{opacity:.85}}>Celkem od {MONTHS_CS[Number(JOSEF_LOG_START.slice(5,7))-1]} {JOSEF_LOG_START.slice(0,4)} <b style={{color:"var(--txt)"}}>{fmtH(allTot)}</b></span>
-            </div>
-          </div>
-
-          <div style={{background:LINE,alignSelf:"stretch"}}/>
-
-          <div style={{display:"grid",gridTemplateColumns:"repeat(2,minmax(0,1fr))",gap:10}}>
-            <div style={tile}>
-              <div style={tlbl}>Ø zápis / den</div>
-              <div style={{...hero(IND,19),marginTop:6}}>{allDays>0?fmtH(allTot/allDays):"—"}</div>
-              <div style={{fontSize:9,color:MUT,marginTop:4}}>na den v práci · cíl {ASISTENT_DAY_CAPTURE_H} h</div>
-            </div>
-            <div style={tile}>
-              <div style={tlbl}>Nejsilnější den</div>
-              <div style={{...hero(IND,19),marginTop:6}}>{bestDay?fmtH(bestDay.h):"—"}</div>
-              <div style={{fontSize:9,color:MUT,marginTop:4}}>{bestDay?new Date(bestDay.ds).toLocaleDateString("cs-CZ",{day:"numeric",month:"long"}):"zatím žádný"}</div>
-            </div>
-            <div style={tile}>
-              <div style={tlbl}>Dní odpracováno</div>
-              <div style={{...hero(IND,19),marginTop:6}}>{allDays}</div>
-              <div style={{fontSize:9,color:MUT,marginTop:4}}>nejdelší série {bestStreak} {dnyWord(bestStreak)}</div>
-            </div>
-            <div style={tile}>
-              <div style={tlbl}>Klientů</div>
-              <div style={{...hero(IND,19),marginTop:6}}>{allClients}</div>
-              <div style={{fontSize:9,color:MUT,marginTop:4}}>na kterých jsi dělal</div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* ── TEMPO MĚSÍCE — jen pro běžící měsíc ── */}
-      {period==="this" && (
-      <div style={{...paper,padding:"20px 26px 14px"}}>
-        <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",gap:12,flexWrap:"wrap"}}>
-          <div style={lbl}>Tempo měsíce · {MONTHS_CS[cm-1]}</div>
-          <div style={{fontSize:10.5,color:MUT}}>
-            Odpracováno <b style={{color:"var(--txt)"}}>{fmtH(mH)}</b> z plánu <b style={{color:"var(--txt)"}}>{fmtH(monthGoalH)}</b>
-            {" · "}
-            <b style={{color:Math.abs(pDelta)<0.05?MUT:pDelta>=0?OK:SANDD}}>
-              {Math.abs(pDelta)<0.05?"přesně na tempu":pDelta>0?`${fmtH(pDelta)} nad tempem`:`${fmtH(-pDelta)} pod tempem`}
-            </b>
-          </div>
-        </div>
-        <svg viewBox={`0 0 ${PW} ${PH}`} style={{width:"100%",height:150,marginTop:6}} preserveAspectRatio="none">
-          <line x1="0" y1={PB} x2={PW} y2={PB} stroke="rgba(0,0,0,.08)"/>
-          <line x1="0" y1={py(monthGoalH)} x2={PW} y2={py(monthGoalH)} stroke="rgba(0,0,0,.05)" strokeDasharray="3 6"/>
-          <path d={idealPath} stroke={SANDL} strokeWidth="2" fill="none" strokeDasharray="6 6"/>
-          {realArea && <path d={realArea} fill="rgba(91,82,240,.10)"/>}
-          {realPath && <path d={realPath} stroke={VIVID} strokeWidth="2.5" fill="none" strokeLinejoin="round"/>}
-          {pNow && <circle cx={px(pNow.d)} cy={py(pNow.cum)} r="4.5" fill={VIVID}/>}
-        </svg>
-        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:12,fontSize:9.5,color:MUT,borderTop:`1px solid ${LINE}`,paddingTop:9,marginTop:2}}>
-          <span>1. {cm}.</span>
-          <span>
-            <span style={dot(VIVID)}/>Skutečnost &nbsp;&nbsp;
-            <span style={dot(SANDL)}/>Ideální tempo · {plannedDates.length} {dnyWord(plannedDates.length)} {planFromCal?"z tvého plánu":"(pracovní dny)"}
-          </span>
-          <span>{daysInMonth}. {cm}.</span>
-        </div>
-      </div>
       )}
 
       {/* ── HEATMAPA ── */}
@@ -14657,9 +14467,8 @@ function AsistentDochazka({ email, attendance, onRefreshAttendance }) {
    přihlášení. Když se nic nezmění, Josef nic neuvidí a nic se nikam nevolá.    */
 const ASISTENT_BUILD = "2026-07-30";
 const ASISTENT_BUILD_NOTE = [
-  "Nový přehled — utilizace, tempo měsíce a mapa posledních 10 týdnů.",
-  "Panel Tvoje výsledky: kolik jsi odpracoval celkem a jak daleko je další milník.",
-  "Nahoře vpravo přepneš statistiky na tento měsíc, minulý měsíc, nebo celkem.",
+  "Nový přehled — utilizace, mapa posledních 10 týdnů a rozpad hodin po klientech.",
+  "V panelu Utilizace si přepneš mezi tímhle a minulým měsícem; starší najdeš v grafu níž.",
   "Panel Ještě chybí popsat ti ukáže dny, kde máš v docházce víc času než ve výkazu.",
 ];
 
