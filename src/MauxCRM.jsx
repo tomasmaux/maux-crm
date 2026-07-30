@@ -9128,6 +9128,25 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
   // viz komentář u mRevVatAmt výše). Stejná báze jako invoice.subtotal a jako "Tento měsíc"
   // v hlavičkové liště — Tom, 29.6.2026: "já chci reálnou moji bilanci financí, mých peněz."
   const unbilledAmt = unbilledWorkNetNoVat(workEntries);
+
+  // ── Oslava milníku ──────────────────────────────────────────────────────────
+  // Spouštěč = poslední UZAVŘENÝ měsíc, který přeskočil metu (aktuální ani průběžný se
+  // nepočítá — jejich číslo ještě může couvnout). Razítko v localStorage, nic na pozadí.
+  const [milestoneAck, setMilestoneAck] = useState(() => {
+    try { return localStorage.getItem(MILESTONE_ACK_KEY) || ""; } catch (e) { return ""; }
+  });
+  const milestoneToCelebrate = useMemo(() => {
+    const l = computeMilestoneLadder(invoices, escrows, new Date());
+    const closed = l.rows.filter(r => r.milestoneNum && !r.isCurrent);
+    const last = closed[closed.length - 1];
+    return (last && last.ym > milestoneAck) ? { row: last, nextGoal: l.activeGoal } : null;
+  }, [invoices, escrows, milestoneAck]);
+  const ackMilestone = () => {
+    const ym = milestoneToCelebrate && milestoneToCelebrate.row.ym;
+    if (!ym) return;
+    try { localStorage.setItem(MILESTONE_ACK_KEY, ym); } catch (e) {}
+    setMilestoneAck(ym);
+  };
   const unbilledByClient = unbilled.reduce((acc,e) => { if(e.client_id) acc[e.client_id]=(acc[e.client_id]||[]).concat(e); return acc; }, {});
 
   // Overdue
@@ -9449,7 +9468,6 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
 
       {/* Kontrola hranice 200 000 Kč/měs. (úschovy — čistý úrok + fakturace — vlastní odměna), s automatickým posunem mety a živým řádkem na příští měsíc */}
       {(() => {
-        const MESICE_LOC = ["lednu","únoru","březnu","dubnu","květnu","červnu","červenci","srpnu","září","říjnu","listopadu","prosinci"];
         // Historie (od prvního dokladu po AKTUÁLNÍ měsíc, uzavřené měsíce) + posun mety počítá
         // sdílená funkce computeMilestoneLadder — stejná, kterou používá i gamifikační lišta
         // nahoře v hlavičce, ať se obě místa nikdy nerozejdou.
@@ -9475,39 +9493,12 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
         const liveEscAmt = Math.round(escrowGrossThisMonth);
         const liveTotal = liveInvAmt + liveEscAmt;
         const rows = [...ladder.rows, { ym: nextYmStr, invAmt: liveInvAmt, escAmt: liveEscAmt, totalM: liveTotal, live: true, monIdx: lastM, goal: ladder.activeGoal, over: liveTotal > ladder.activeGoal }];
-        const firstMilestone = ladder.firstMilestone;
         const milestoneCount = ladder.milestoneCount;
         const anyOver = ladder.anyOver;
         const liveOver = liveTotal > ladder.activeGoal;
         const activeGoal = ladder.activeGoal;
         return (
           <>
-            {firstMilestone && (
-              <div style={{
-                marginTop:2, position:"relative", overflow:"hidden",
-                background:"linear-gradient(135deg,#3518A5 0%,#7C3AED 45%,#A8527A 100%)",
-                borderRadius:14, padding:"16px 20px", color:"#fff",
-                boxShadow:"0 8px 28px -8px rgba(53,24,165,.45)",
-              }}>
-                <span style={{position:"absolute",top:8,left:18,fontSize:18,animation:"mauxSparkle 2.4s ease-in-out infinite"}}>✨</span>
-                <span style={{position:"absolute",top:14,right:34,fontSize:14,animation:"mauxSparkle 2.4s ease-in-out infinite .5s"}}>✨</span>
-                <span style={{position:"absolute",bottom:10,right:14,fontSize:20,animation:"mauxSparkle 2.4s ease-in-out infinite 1s"}}>🎉</span>
-                <div style={{display:"flex",alignItems:"center",gap:14}}>
-                  <div style={{fontSize:34,animation:"mauxTrophyPop .7s ease-out"}}>🏆</div>
-                  <div>
-                    <div style={{fontSize:9,letterSpacing:".22em",textTransform:"uppercase",opacity:.8,fontWeight:700,marginBottom:3}}>Nový milník</div>
-                    <div style={{fontFamily:"Fraunces,serif",fontSize:18,fontWeight:500,lineHeight:1.25}}>
-                      Poprvé jsi v {MESICE_LOC[firstMilestone.monIdx]} {firstMilestone.ym.slice(0,4)} prolomil hranici 200 000 Kč/měs. — {fmtKc(firstMilestone.totalM)}!
-                    </div>
-                    <div style={{fontSize:11,opacity:.85,marginTop:4}}>Meta se posouvá výš — další cíl je {fmtKc(250000)}, pak vždy o dalších 25 000 Kč.</div>
-                  </div>
-                </div>
-              </div>
-            )}
-            <style>{`
-              @keyframes mauxSparkle { 0%,100% { opacity:.25; transform:scale(.85) rotate(0deg); } 50% { opacity:1; transform:scale(1.15) rotate(12deg); } }
-              @keyframes mauxTrophyPop { 0% { transform:scale(.4) rotate(-15deg); opacity:0; } 60% { transform:scale(1.15) rotate(6deg); opacity:1; } 100% { transform:scale(1) rotate(0deg); opacity:1; } }
-            `}</style>
             <details id="maux-finance-detail" style={{marginTop:2}}>
               {/* Souhrn musí brát v potaz i ŽIVÝ řádek — jinak tvrdí "nikdy překročeno", zatímco
                   průběžný měsíc už metu přeskočil (Tom 30.7.2026: 214 883 vs. hlavička "nikdy"). */}
@@ -9576,6 +9567,10 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
           </>
         );
       })()}
+
+      {milestoneToCelebrate && (
+        <MilestoneCelebration row={milestoneToCelebrate.row} nextGoal={milestoneToCelebrate.nextGoal} onClose={ackMilestone} />
+      )}
 
       {editLayout && (
         <div style={{background:"linear-gradient(135deg,#EEF2FF,#E0E7FF)",border:"1px solid rgba(99,102,241,.25)",borderRadius:10,padding:"12px 18px",fontSize:12,color:"#3730A3",display:"flex",alignItems:"center",gap:10}}>
