@@ -13230,7 +13230,7 @@ function AsistentPrehled({ logs, attendance, clients, availability, onGo }) {
             <div style={{width:`${Math.min(100-pctRound,Math.round(todayBdH/ASISTENT_DAILY_H*100))}%`,background:SANDL}}/>
           </div>
           <div style={{display:"flex",justifyContent:"space-between",gap:12,fontSize:10,color:MUT}}>
-            <span>{todayPct>=1?"Denní cíl splněn.":todayH>0?<>Ještě <b style={{color:"var(--txt)"}}>{fmtH(zbyva)}</b> do cíle</>:"Zaloguj první hodiny dne."}{streak>0&&<> · série <b style={{color:"var(--txt)"}}>{streak} {dnyWord(streak)}</b></>} · {todayLogs.length} {todayLogs.length===1?"zápis":todayLogs.length<5?"zápisy":"zápisů"}</span>
+            <span>{todayPct>=1?"Denní cíl splněn.":todayH>0?<>Ještě <b style={{color:"var(--txt)"}}>{fmtH(zbyva)}</b> do cíle</>:"Zapište prosím první hodiny dne."}{streak>0&&<> · série <b style={{color:"var(--txt)"}}>{streak} {dnyWord(streak)}</b></>} · {todayLogs.length} {todayLogs.length===1?"zápis":todayLogs.length<5?"zápisy":"zápisů"}</span>
             <span style={{whiteSpace:"nowrap"}}>{todayDayF>=1?<b style={{color:OK}}>Den plně zachycen</b>:<>do {ASISTENT_DAY_CAPTURE_H} h dne ještě <b style={{color:"var(--txt)"}}>{fmtH(ASISTENT_DAY_CAPTURE_H-todayLogged)}</b></>}</span>
           </div>
         </div>
@@ -13323,7 +13323,7 @@ function AsistentPrehled({ logs, attendance, clients, availability, onGo }) {
               </div>
               {ut.unlogged>0.5 && (
                 <div style={{marginTop:16,paddingTop:11,borderTop:`1px solid ${LINE}`,fontSize:10,color:MUT,lineHeight:1.6}}>
-                  Podle docházky jsi byl v kanceláři <b style={{color:"var(--txt)"}}>{fmtH(ut.office)}</b>, ve výkazu je <b style={{color:"var(--txt)"}}>{fmtH(ut.logged)}</b>
+                  Podle docházky jste byl v kanceláři <b style={{color:"var(--txt)"}}>{fmtH(ut.office)}</b>, ve výkazu je <b style={{color:"var(--txt)"}}>{fmtH(ut.logged)}</b>
                   {" — "}<b style={{color:SANDD}}>{fmtH(ut.unlogged)}</b> zatím nemá popis.
                 </div>
               )}
@@ -13336,10 +13336,10 @@ function AsistentPrehled({ logs, attendance, clients, availability, onGo }) {
                 Kolik z pracovního dne je <b>popsané ve výkazu</b> — klientská práce i development dohromady.
               </p>
               <p style={{margin:"10px 0 0",fontSize:10.5,color:MUT,lineHeight:1.75}}>
-                V advokacii je to nejsledovanější číslo vůbec: co není ve výkazu, to kancelář neumí vyfakturovat ani doložit klientovi. Není to kontrola — je to způsob, jak je celá tvoje práce vidět.
+                V advokacii je to nejsledovanější číslo vůbec: co není ve výkazu, to kancelář neumí vyfakturovat ani doložit klientovi. Není to kontrola — je to způsob, jak je celá Vaše práce vidět.
               </p>
               <p style={{margin:"10px 0 0",fontSize:10.5,color:MUT,lineHeight:1.75}}>
-                <b style={{color:"var(--txt)"}}>Cíl {ASISTENT_DAY_CAPTURE_H} h denně.</b> Zapisuj průběžně, ne až večer — zpětně se vždycky něco ztratí.
+                <b style={{color:"var(--txt)"}}>Cíl {ASISTENT_DAY_CAPTURE_H} h denně.</b> Zapisujte prosím průběžně, ne až večer — zpětně se vždycky něco ztratí.
               </p>
             </div>
           </div>
@@ -13359,7 +13359,7 @@ function AsistentPrehled({ logs, attendance, clients, availability, onGo }) {
               </div>
             </div>
             <p style={{margin:"0 0 14px",fontSize:10.5,color:MUT,lineHeight:1.7,maxWidth:640}}>
-              Co není popsané, to kancelář neumí vyfakturovat ani doložit klientovi. Doplň to, dokud si to pamatuješ.
+              Co není popsané, to kancelář neumí vyfakturovat ani doložit klientovi. Doplňte to prosím, dokud si to pamatujete.
             </p>
             <div style={{display:"flex",flexDirection:"column",gap:7}}>
               {todoRows.slice(0,5).map((r,i)=>(
@@ -13445,7 +13445,7 @@ function AsistentPrehled({ logs, attendance, clients, availability, onGo }) {
                     {runMonth&&runMonth.days>0?<> · {MONTHS_CS[cm-1]} zatím <b style={{color:runMonth.pct>=avgUtil?OK:SANDD,fontWeight:600}}>{runMonth.pct>=avgUtil?"+":"−"}{Math.abs(runMonth.pct-avgUtil)} b. {runMonth.pct>=avgUtil?"nad":"pod"} průměrem</b></>:null}</>
                 : <>Evidence běží od {MONTHS_CS[Number(JOSEF_LOG_START.slice(5,7))-1]} {JOSEF_LOG_START.slice(0,4)} — první uzavřený měsíc se objeví po skončení tohoto měsíce.</>}
               <br/>
-              <span style={{opacity:.85}}>Počítá se jen z dnů, kdy jsi byl v práci — volno ani víkendy se do toho nepromítají.</span>
+              <span style={{opacity:.85}}>Počítá se jen ze dnů, kdy jste byl v práci — volno ani víkendy se do toho nepromítají.</span>
             </div>
           </>
         )}
@@ -13608,7 +13608,7 @@ function AsistentVykazy({ email, clients }) {
             <div>
               <label style={iL}>Kategorie BD *</label>
               <select value={form.bd_category} onChange={e=>set("bd_category",e.target.value)} style={iS}>
-                <option value="">Vyber kategorii…</option>
+                <option value="">Vyberte kategorii…</option>
                 {BD_CATEGORIES.map(c=><option key={c} value={c}>{c}</option>)}
               </select>
             </div>
@@ -13638,14 +13638,14 @@ function AsistentVykazy({ email, clients }) {
           </div>
         </div>
         <div style={{marginBottom:14}}>
-          <label style={iL}>Popis úkonu * {isBdForm && <span style={{fontWeight:400,opacity:.6,letterSpacing:0,textTransform:"none"}}>— vždy konkrétní, co přesně jsi dělal</span>}</label>
+          <label style={iL}>Popis úkonu * {isBdForm && <span style={{fontWeight:400,opacity:.6,letterSpacing:0,textTransform:"none"}}>— vždy konkrétně, co přesně jste dělal</span>}</label>
           <textarea value={form.description} onChange={e=>set("description",e.target.value)} rows={3}
             placeholder={isBdForm ? "Např. naskenování a založení 12 spisů do archivu; vyzvednutí dokumentů na katastru…" : "Příprava podkladů, výzkum judikatury, komunikace s klientem…"}
             style={{...iS,resize:"vertical",lineHeight:1.5,
               borderColor: descOk ? "rgba(0,0,0,.1)" : "rgba(198,168,107,.55)"}}/>
           {!descOk && (
             <div style={{fontSize:10.5,color:"#8A6E2E",marginTop:7,lineHeight:1.6}}>
-              Bez popisu úkon neuložíš — napiš, co jsi dělal. Tenhle text uvidí klient.
+              Bez popisu úkon neuložíte — napište prosím, co jste dělal. Tento text uvidí klient.
             </div>
           )}
         </div>
@@ -14016,7 +14016,7 @@ function AsistentDochazka({ email, attendance, onRefreshAttendance }) {
       {isOn && subOn ? (
         <>
           <div style={{fontFamily:"Fraunces,serif",fontSize:38,fontWeight:300,color,lineHeight:1,letterSpacing:"-.02em",marginBottom:4}}>{subOn}</div>
-          <div style={{fontSize:10,color:"var(--mut)"}}>klikni pro zrušení</div>
+          <div style={{fontSize:10,color:"var(--mut)"}}>klikněte pro zrušení</div>
         </>
       ) : (
         <div style={{fontSize:12,color:"var(--mut)",lineHeight:1.5}}>{subOff}</div>
@@ -14039,7 +14039,7 @@ function AsistentDochazka({ email, attendance, onRefreshAttendance }) {
             <div style={{fontSize:11,color:"var(--mut)",lineHeight:1.65}}>
               {openDays.slice(0,3).map(a=>fmtDate(a.date)).join(" · ")}
               {openDays.length>3 && ` a ${openDays.length-3} další`}
-              {" — "}bez odchodu se den nezapočítá do tvých statistik. Doplň ho tlačítkem <b style={{color:"var(--txt)"}}>Upravit</b> níže.
+              {" — "}bez odchodu se den nezapočítá do Vašich statistik. Doplňte ho prosím tlačítkem <b style={{color:"var(--txt)"}}>Upravit</b> níže.
             </div>
           </div>
           <button onClick={()=>openEditAtt(openDays[0])}
@@ -14096,7 +14096,7 @@ function AsistentDochazka({ email, attendance, onRefreshAttendance }) {
           isOn={!!todayRec?.check_in}
           color="#059669"
           subOn={fmtTime(todayRec?.check_in)}
-          subOff="Klikni po příchodu do kanceláře"
+          subOff="Klikněte po příchodu do kanceláře"
           onToggle={toggleCheckIn}
         />
         <ToggleCard
@@ -14104,7 +14104,7 @@ function AsistentDochazka({ email, attendance, onRefreshAttendance }) {
           isOn={!!todayRec?.check_out}
           color="#4F46E5"
           subOn={fmtTime(todayRec?.check_out)}
-          subOff={todayRec?.check_in?"Klikni při odchodu z kanceláře":"Nejdřív označ příchod"}
+          subOff={todayRec?.check_in?"Klikněte při odchodu z kanceláře":"Nejprve prosím označte příchod"}
           onToggle={toggleCheckOut}
           disabled={!todayRec?.check_in}
         />
@@ -14345,10 +14345,12 @@ function AsistentDochazka({ email, attendance, onRefreshAttendance }) {
    a dopíšeme, co se změnilo. Josef to uvidí právě jednou — při nejbližším
    přihlášení. Když se nic nezmění, Josef nic neuvidí a nic se nikam nevolá.    */
 const ASISTENT_BUILD = "2026-07-30";
+// Texty pro Josefa se píšou VYKÁNÍM a zdvořile ("Zapište prosím…", "Vaše práce").
+// Tykání se do asistentského portálu nedostane — Tom si to takhle přeje.
 const ASISTENT_BUILD_NOTE = [
-  "Nový přehled — hlavní ukazatel je utilizace: kolik z 8h dne máš popsané ve výkazu.",
-  "V panelu Utilizace si přepneš mezi tímhle a minulým měsícem; starší najdeš v grafu níž.",
-  "Panel Ještě chybí popsat ti ukáže dny, kde máš v docházce víc času než ve výkazu.",
+  "Nový přehled — hlavním ukazatelem je utilizace: kolik z 8h dne máte popsané ve výkazu.",
+  "V panelu Utilizace si přepnete mezi tímto a minulým měsícem; starší najdete v grafu níže.",
+  "Panel Ještě chybí popsat Vám ukáže dny, kde máte v docházce více času než ve výkazu.",
 ];
 
 const HARD_RELOAD_KEYS = (() => {
@@ -14395,7 +14397,7 @@ function UpdateNotice() {
             Máme novou verzi.
           </h3>
           <p style={{fontSize:12.5,color:"var(--mut)",lineHeight:1.7,margin:"0 0 18px"}}>
-            V době do vašeho přihlášení proběhla aktualizace systému.<br/>
+            V době do Vašeho přihlášení proběhla aktualizace systému.<br/>
             Zmáčkněte <b style={{color:"var(--txt)",background:"rgba(28,10,99,.07)",borderRadius:7,padding:"3px 9px",
               fontWeight:600,whiteSpace:"nowrap",letterSpacing:".02em"}}>{HARD_RELOAD_KEYS}</b> pro její načtení.
           </p>
