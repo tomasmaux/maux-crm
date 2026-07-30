@@ -13049,7 +13049,6 @@ function AsistentPrehled({ logs, attendance, clients, availability, onGo }) {
   const prevKey=(()=>{ const d=new Date(cy,cm-2,1); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`; })();
   const hasPrev=activeLogs.some(l=>(l.entry_date||"").startsWith(prevKey));
   const pKey  = period==="prev" ? prevKey : mKey;
-  const pName = MONTHS_CS[Number(pKey.slice(5,7))-1];
   const monthBefore = (k)=>{ const [y,m]=k.split("-").map(Number); const d=new Date(y,m-2,1);
     return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`; };
 
@@ -13058,7 +13057,6 @@ function AsistentPrehled({ logs, attendance, clients, availability, onGo }) {
   const mDays=new Set(mLogs.map(l=>l.entry_date)).size;
   const mAttRows=attendance.filter(a=>a.check_in && a.date.startsWith(pKey));
   const mAtt=mAttRows.length;
-  const mClients=new Set(mLogs.filter(l=>!isBd(l)&&l.client_id).map(l=>l.client_id)).size;
 
   const avgArrival = (()=>{
     const mins=mAttRows.map(a=>{ const d=new Date(a.check_in); return d.getHours()*60+d.getMinutes(); }).filter(x=>x>0);
@@ -13091,55 +13089,6 @@ function AsistentPrehled({ logs, attendance, clients, availability, onGo }) {
   const utDelta  = (ut.pct!=null && utPrev.pct!=null && utPrev.days>=3) ? ut.pct-utPrev.pct : null;
   const utBefName= MONTHS_CS[Number(utBefKey.slice(5,7))-1];
   const utGapDay = Math.max(0, ASISTENT_DAY_CAPTURE_H-ut.avg);
-
-  // ── HEATMAPA — posledních 10 týdnů ──
-  const HEAT_W = 10;
-  const heat = (()=>{
-    const cols=[];
-    for(let w=HEAT_W-1;w>=0;w--){
-      const mon=new Date(weekMon); mon.setDate(weekMon.getDate()-w*7);
-      const days=[];
-      for(let i=0;i<5;i++){
-        const d=new Date(mon); d.setDate(mon.getDate()+i);
-        const ds=localDs(d);
-        days.push({ds,h:dayBill[ds]||0,bd:dayBd[ds]||0,future:ds>todayStr,label:d.toLocaleDateString("cs-CZ",{day:"numeric",month:"numeric"})});
-      }
-      cols.push({mon:localDs(mon),days,month:mon.getMonth()});
-    }
-    return cols;
-  })();
-  const heatDays = heat.flatMap(c=>c.days).filter(d=>!d.future);
-  const heatLogged = heatDays.filter(d=>d.h>0||d.bd>0).length;
-  const heatColor = (c)=>{
-    if(c.future) return "rgba(0,0,0,.025)";
-    const r=c.h/ASISTENT_DAILY_H;
-    if(r>=1) return OK;
-    if(r>=.7) return VIVID;
-    if(r>=.4) return "rgba(91,82,240,.55)";
-    if(r>0)   return "rgba(91,82,240,.26)";
-    if(c.bd>0) return SANDL;
-    return "rgba(0,0,0,.05)";
-  };
-  const heatMonths = (()=>{
-    const seen=[], out=[];
-    heat.forEach((c,i)=>{ if(!seen.includes(c.month)){ seen.push(c.month); out.push({i,name:MONTHS_CS[c.month]}); } });
-    return out;
-  })();
-
-  // ── KAM ŠLY HODINY ──
-  const cliRows = (()=>{
-    const by={};
-    mLogs.filter(l=>!isBd(l)).forEach(l=>{ const k=l.client_id||"—"; by[k]=(by[k]||0)+(l.hours||0); });
-    const rows=Object.entries(by).map(([id,h])=>({name:(clients||[]).find(c=>c.id===id)?.name||"Bez klienta",h})).sort((a,b)=>b.h-a.h);
-    const top=rows.slice(0,5), rest=rows.slice(5);
-    if(rest.length) top.push({name:`Ostatní (${rest.length} ${rest.length===1?"klient":rest.length<5?"klienti":"klientů"})`,h:rest.reduce((s,r)=>s+r.h,0)});
-    return top;
-  })();
-  const bdRows = (()=>{
-    const by={};
-    mLogs.filter(isBd).forEach(l=>{ const k=l.bd_category||"Jiné"; by[k]=(by[k]||0)+(l.hours||0); });
-    return Object.entries(by).map(([k,h])=>({name:k,h})).sort((a,b)=>b.h-a.h);
-  })();
 
   // ── MĚSÍČNÍ ŘADA · efektivita ──
   const byMonth = {};
@@ -13203,26 +13152,6 @@ function AsistentPrehled({ logs, attendance, clients, availability, onGo }) {
 
   // prstenec zachyceného času
   const UC = 2*Math.PI*15.9;
-
-  const Bars = ({rows,color,shade,unitColor}) => (
-    <div>
-      {rows.length===0 && <div style={{fontSize:11.5,color:MUT,padding:"14px 0"}}>Za tohle období zatím nic.</div>}
-      {rows.map((r,i)=>{
-        const mx=Math.max(...rows.map(x=>x.h),0.1);
-        return (
-          <div key={r.name+i} style={{marginBottom:i<rows.length-1?13:0}}>
-            <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",gap:10,fontSize:11,marginBottom:5}}>
-              <span style={{color:"var(--txt)",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{r.name}</span>
-              <span style={{...hero(unitColor,13),flexShrink:0}}>{fmtH(r.h)}</span>
-            </div>
-            <div style={{height:6,borderRadius:3,background:"rgba(0,0,0,.05)"}}>
-              <div style={{height:6,borderRadius:3,width:`${Math.max(3,r.h/mx*100)}%`,background:i===0?color:shade(i),transition:"width .5s"}}/>
-            </div>
-          </div>
-        );
-      })}
-    </div>
-  );
 
   return (
     <div style={{padding:"34px 34px 44px",display:"flex",flexDirection:"column",gap:14}}>
@@ -13456,56 +13385,6 @@ function AsistentPrehled({ logs, attendance, clients, availability, onGo }) {
           </div>
         </div>
       )}
-
-      {/* ── HEATMAPA ── */}
-      <div style={{...paper,padding:"20px 24px",display:"flex",flexDirection:"column"}}>
-        <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",gap:12,marginBottom:16}}>
-          <div style={lbl}>Posledních {HEAT_W} týdnů</div>
-          <div style={{fontSize:10,color:MUT}}>
-            <b style={{color:"var(--txt)"}}>{heatLogged}</b> {dnyWord(heatLogged)} s výkazem · nejdelší série <b style={{color:"var(--txt)"}}>{bestStreak} {dnyWord(bestStreak)}</b>
-          </div>
-        </div>
-        <div style={{display:"flex",gap:6}}>
-          {heat.map(col=>(
-            <div key={col.mon} style={{flex:1,display:"flex",flexDirection:"column",gap:6,minWidth:0}}>
-              {col.days.map(c=>(
-                <div key={c.ds} title={`${c.label} · ${fmtH(c.h)}${c.bd>0?` + ${fmtH(c.bd)} development`:""}`}
-                  style={{height:22,borderRadius:5,background:heatColor(c),
-                    border:c.ds===todayStr?`1.5px solid ${IND}`:"none",transition:"background .3s"}}/>
-              ))}
-            </div>
-          ))}
-        </div>
-        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:12,marginTop:13,fontSize:9,color:MUT}}>
-          <span>{heatMonths.map(m=>m.name).join(" → ")}</span>
-          <span style={{display:"flex",alignItems:"center",gap:5}}>
-            méně
-            <i style={{width:11,height:11,borderRadius:3,background:"rgba(0,0,0,.05)"}}/>
-            <i style={{width:11,height:11,borderRadius:3,background:"rgba(91,82,240,.26)"}}/>
-            <i style={{width:11,height:11,borderRadius:3,background:"rgba(91,82,240,.55)"}}/>
-            <i style={{width:11,height:11,borderRadius:3,background:VIVID}}/>
-            <i style={{width:11,height:11,borderRadius:3,background:OK}}/>
-            cíl splněn
-          </span>
-        </div>
-      </div>
-      {/* ── KAM ŠLY HODINY ── */}
-      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:14}}>
-        <div style={{...paper,padding:"20px 22px"}}>
-          <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:16}}>
-            <div style={lbl}>Kam šly hodiny · {pName}</div>
-            <div style={{fontSize:10,color:MUT}}><b style={{color:"var(--txt)"}}>{mClients}</b> {mClients===1?"klient":mClients<5?"klienti":"klientů"}</div>
-          </div>
-          <Bars rows={cliRows} color={VIVID} unitColor={IND} shade={(i)=>`rgba(91,82,240,${Math.max(.22,.72-i*.12)})`}/>
-        </div>
-        <div style={{...paper,padding:"20px 22px"}}>
-          <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:16}}>
-            <div style={lbl}>Development · kategorie · {pName}</div>
-            <div style={{fontSize:10,color:MUT}}><b style={{color:"var(--txt)"}}>{fmtH(mBdH)}</b> celkem</div>
-          </div>
-          <Bars rows={bdRows} color={SAND} unitColor={SANDD} shade={(i)=>`rgba(198,168,107,${Math.max(.25,.75-i*.15)})`}/>
-        </div>
-      </div>
 
       {/* ── UTILIZACE PO MĚSÍCÍCH ── */}
       <div style={{...paper,padding:"22px 26px 18px"}}>
@@ -14467,7 +14346,7 @@ function AsistentDochazka({ email, attendance, onRefreshAttendance }) {
    přihlášení. Když se nic nezmění, Josef nic neuvidí a nic se nikam nevolá.    */
 const ASISTENT_BUILD = "2026-07-30";
 const ASISTENT_BUILD_NOTE = [
-  "Nový přehled — utilizace, mapa posledních 10 týdnů a rozpad hodin po klientech.",
+  "Nový přehled — hlavní ukazatel je utilizace: kolik z 8h dne máš popsané ve výkazu.",
   "V panelu Utilizace si přepneš mezi tímhle a minulým měsícem; starší najdeš v grafu níž.",
   "Panel Ještě chybí popsat ti ukáže dny, kde máš v docházce víc času než ve výkazu.",
 ];
