@@ -8964,6 +8964,10 @@ function Panel({ id, children }) {
   );
 }
 
+// ── TROFEJNÍ SÍŇ — VYPNUTO 30.7.2026 na žádost Toma ───────────────────────────
+// Logika i komponenta zůstávají v souboru, ale NIC je nerenderuje. Zapnutí zpět =
+// vrátit <TrophyWall trophies={trophies} /> do rozbaleného panelu na Přehledu
+// a k němu výpočet computeTrophies({...}) nad returnem téhož IIFE.
 // ── TROFEJNÍ SÍŇ ────────────────────────────────────────────────────────────────
 // Tom 30.7.2026: "jako na PSKu sbírat odznáčky - achievementy".
 // Pravidla, která si sám nastavil (a která hlídám, ať sbírka nezlevní):
@@ -9699,9 +9703,6 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
         // nejblíž k dalšímu stupni trofeje.
         const projBest = Math.max(bestNext, liveTotal);
         const projGoal = Math.max(200000, Math.round(projBest * 1.10 / 5000) * 5000);
-        const fr = computeFirmaRezerva(financeItems, invoices, dpfoMonths, loanTransactions, escrows);
-        const trophies = computeTrophies({ ladder, invoices, workEntries, clients, firmaRez: fr.firmaRez, reserveGoal: fr.planKap });
-        const nextTrophy = trophies.filter(t => !t.complete && t.remain).sort((a, b) => (b.progress || 0) - (a.progress || 0))[0] || null;
         return (
           <>
             <details id="maux-finance-detail" style={{marginTop:2}}>
@@ -9717,17 +9718,8 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
                         : <>Meta zůstává <strong style={{color:"var(--ink)"}}>{fmtKc(activeGoal)}</strong></>}
                     </div>
                   </div>
-                  <div style={{flex:1.2,padding:"13px 18px",borderLeft:"1px solid rgba(0,0,0,.06)",
-                    display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,minWidth:0}}>
-                    <div style={{minWidth:0}}>
-                      <div style={bpLabel()}>Nejblíž k dalšímu stupni</div>
-                      <div style={{fontSize:12.5,color:"var(--txt)",marginTop:5,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>
-                        {nextTrophy
-                          ? <>{nextTrophy.icon} <strong style={{color:"var(--ink)"}}>{nextTrophy.name}</strong> <span style={{color:"var(--mut)"}}>— {nextTrophy.remain}</span></>
-                          : <span style={{color:"var(--mut)"}}>všechno na zlatě</span>}
-                      </div>
-                    </div>
-                    <span style={{fontSize:12,color:"#C4BFDA",flexShrink:0}}>⌄</span>
+                  <div style={{padding:"13px 18px",display:"flex",alignItems:"center"}}>
+                    <span style={{fontSize:12,color:"#C4BFDA"}}>⌄</span>
                   </div>
                 </div>
               </summary>
@@ -9794,8 +9786,6 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
               <div style={{fontSize:9.5,color:"var(--mut)",marginTop:6,maxWidth:600}}>
                 Úrok z úschov je zde hrubý (před -15% srážkovou daní) — stejná báze jako fakturace, která je taky bez DPH, ale ne po dani z příjmu. Proto se sloupec "Úschovy" může lišit od karty "Příjmy na příští měsíc" výš, která ukazuje reálně přijatou čistou hotovost (po srážkové dani). Sloupec "Fakturace" u řádku "průběžné" = nevyfakturovaná práce bez DPH (stejné číslo jako "nevyfakturováno" v kartě výš).
               </div>
-              <div style={{height:1,background:"rgba(0,0,0,.06)",margin:"16px 0 0",maxWidth:640}} />
-              <TrophyWall trophies={trophies} />
             </details>
           </>
         );
