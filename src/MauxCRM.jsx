@@ -542,10 +542,17 @@ async function fetchXtbClosedTrades() {
   if (error) throw error;
   return data || [];
 }
+// Ostatní peněžní operace na účtu XTB — dividendy, srážková daň, úroky, poplatky.
+// Jsou to skutečné pohyby hotovosti, bez nich by zůstatek nikdy nesedl na XTB.
+async function fetchXtbCashOps() {
+  const { data, error } = await supabase.from("xtb_cash_ops").select("*").order("op_time");
+  if (error) throw error;
+  return data || [];
+}
 // ── POZICE (nákupní tranše) — surová fakta z XTB, jeden řádek = jeden nákup ──
-// Tabulka drží záměrně jen to, co se stalo (kdy, kolik kusů, za kolik, jaký kurz).
-// Kolik čeho ještě držím, se dopočítává FIFO v computeXtbPortfolio — nikdy se to neukládá,
-// aby se evidence nemohla rozejít se skutečností.
+// Tabulka drží, co se stalo (kdy, kolik kusů, za kolik, jaký kurz) a kolik kusů z té
+// tranše už XTB uzavřelo (`closed_volume`). To poslední je taky fakt z výpisu, ne dopočet:
+// XTB nezavírá nejstarší lot, ale ten, který si vyberu — a datum nákupu určuje 3letý test.
 async function fetchXtbPositions() {
   const { data, error } = await supabase.from("xtb_positions").select("*").order("trade_date");
   if (error) throw error;
@@ -587,7 +594,7 @@ async function kurzKeDni(mena, isoDatum) {
    3) Nákupy se drží lot po lotu, prodeje se odečítají FIFO (od nejstaršího),
       protože časový test běží od data konkrétního nákupu.
    4) Kurz je zamrazený ke dni obchodu; dnešní kurz se používá jen na dnešní ocenění.  */
-function computeXtbPortfolio(positions = [], closedTrades = [], tranches = [], market = null) {
+function computeXtbPortfolio(positions = [], closedTrades = [], tranches = [], market = null, cashOps = []) {
   const kurzy = (market && market.kurzy) || { CZK: 1 };
   const ceny = {};
   for (const c of (market && market.ceny) || []) {
@@ -599,46 +606,76 @@ function computeXtbPortfolio(positions = [], closedTrades = [], tranches = [], m
   const nakupyCzk = positions.reduce((s, p) => s + (Number(p.amount_czk) || 0), 0);
   const realizovano = closedTrades.reduce((s, t) => s + (Number(t.profit) || 0), 0);
 
-  // Kolik kusů každého titulu už je prodáno
-  const prodano = {};
-  for (const t of closedTrades) {
-    const s = String(t.symbol || "").toUpperCase();
-    prodano[s] = (prodano[s] || 0) + (Number(t.volume) || 0);
-  }
-
-  // FIFO — od nejstaršího nákupu ubíráme prodané kusy
-  const lots = [];
-  let prodanoCzk = 0;
-  const podleTitulu = {};
-  for (const p of positions) {
-    const s = String(p.symbol || "").toUpperCase();
-    (podleTitulu[s] = podleTitulu[s] || []).push(p);
-  }
-  for (const s of Object.keys(podleTitulu)) {
-    const rada = podleTitulu[s].slice().sort((a, b) => String(a.trade_date).localeCompare(String(b.trade_date)));
-    let zbyvaProdat = prodano[s] || 0;
-    for (const p of rada) {
-      const ks = Number(p.volume) || 0;
-      const czk = Number(p.amount_czk) || 0;
-      const ubrat = Math.min(zbyvaProdat, ks);
-      zbyvaProdat -= ubrat;
-      if (ks > 0) prodanoCzk += czk * (ubrat / ks);
-      const zbytek = Math.round((ks - ubrat) * 1e6) / 1e6;
-      if (zbytek > 1e-6) {
-        lots.push({
-          id: p.id, symbol: s, nazev: p.instrument_name || s, datum: p.trade_date,
-          ks: zbytek, cena: Number(p.price) || 0, mena: p.currency || "USD",
-          kurzNakup: Number(p.fx_rate) || null,
-          porizovaci: ks > 0 ? czk * (zbytek / ks) : 0,
-        });
+  // Které kusy z které tranše už jsou uzavřené — ptáme se výpisu, nedopočítáváme.
+  // ⚠️ Dřív se tu jelo FIFO (od nejstaršího nákupu). To bylo špatně: XTB nezavírá nejstarší
+  // lot, ale ten konkrétní, který jsem v xStation vybral. U BKNG jsem koupil 20 → 4 → 5 kusů
+  // a prodal těch 5 posledních; FIFO to odepsalo z prvních dvaceti. Důsledek nebyl jen
+  // rozdíl v hotovosti, ale hlavně špatné datum u otevřených tranší — a na tom stojí 3letý
+  // daňový test. `closed_volume` je fakt z výpisu, spárovaný přes Open Time.
+  const maClosedVolume = positions.some(p => p && p.closed_volume != null);
+  const zavreno = {};
+  if (maClosedVolume) {
+    for (const p of positions) zavreno[p.id] = Number(p.closed_volume) || 0;
+  } else {
+    // Záloha pro starší data bez sloupce: FIFO po titulech (nepřesné, ale lepší než nic).
+    const prodano = {};
+    for (const t of closedTrades) {
+      const s = String(t.symbol || "").toUpperCase();
+      prodano[s] = (prodano[s] || 0) + (Number(t.volume) || 0);
+    }
+    const podleTitulu = {};
+    for (const p of positions) {
+      const s = String(p.symbol || "").toUpperCase();
+      (podleTitulu[s] = podleTitulu[s] || []).push(p);
+    }
+    for (const s of Object.keys(podleTitulu)) {
+      const rada = podleTitulu[s].slice().sort((a, b) => String(a.trade_date).localeCompare(String(b.trade_date)));
+      let zbyvaProdat = prodano[s] || 0;
+      for (const p of rada) {
+        const ubrat = Math.min(zbyvaProdat, Number(p.volume) || 0);
+        zbyvaProdat -= ubrat;
+        zavreno[p.id] = ubrat;
       }
     }
   }
 
-  // Hotovost = co jsi vložil, mínus co jsi utratil za nákupy, plus co ti přišlo z prodejů.
-  // (Dividendy a poplatky zatím v evidenci nejsou — o ně se to může lišit o stokoruny,
-  //  proto tlačítko Sesouhlasit.)
-  const hotovost = vlozeno - nakupyCzk + prodanoCzk + realizovano;
+  const lots = [];
+  let prodanoCzk = 0;
+  for (const p of positions) {
+    const s = String(p.symbol || "").toUpperCase();
+    const ks = Number(p.volume) || 0;
+    const czk = Number(p.amount_czk) || 0;
+    const ubrat = Math.min(zavreno[p.id] || 0, ks);
+    if (ks > 0) prodanoCzk += czk * (ubrat / ks);
+    const zbytek = Math.round((ks - ubrat) * 1e6) / 1e6;
+    if (zbytek > 1e-6) {
+      lots.push({
+        id: p.id, symbol: s, nazev: p.instrument_name || s, datum: p.trade_date,
+        ks: zbytek, cena: Number(p.price) || 0, mena: p.currency || "USD",
+        kurzNakup: Number(p.fx_rate) || null,
+        porizovaci: ks > 0 ? czk * (zbytek / ks) : 0,
+      });
+    }
+  }
+  lots.sort((a, b) => String(a.datum).localeCompare(String(b.datum)));
+
+  // Hotovost = součet skutečných peněžních toků, nic odvozeného.
+  // Vklady − výběry − nákupy + výtěžky prodejů + dividendy − srážková daň + úroky − poplatky.
+  // Dřív se výtěžek prodeje rekonstruoval jako pořizovací cena + zisk; to je pravda jen
+  // tehdy, když se trefí ten správný lot. Teď se bere přímo částka, která na účet dorazila.
+  const prodejeCzk = closedTrades.reduce((s, t) => s + (
+    t && t.amount_czk != null ? Number(t.amount_czk) || 0
+      : (Number(t.cost_czk) || 0) + (Number(t.profit) || 0)
+  ), 0);
+  const ostatniCzk = (cashOps || []).reduce((s, o) => s + (Number(o.amount_czk) || 0), 0);
+  const dividendy = (cashOps || []).reduce((s, o) => {
+    const t = String(o.op_type || "");
+    return t === "Dividend" || t === "Withholding tax" ? s + (Number(o.amount_czk) || 0) : s;
+  }, 0);
+  const maProdeje = closedTrades.some(t => t && t.amount_czk != null);
+  const hotovost = maProdeje
+    ? vlozeno - nakupyCzk + prodejeCzk + ostatniCzk
+    : vlozeno - nakupyCzk + prodanoCzk + realizovano + ostatniCzk;
 
   const DEN = 86400000;
   const dnes = new Date();
@@ -687,7 +724,7 @@ function computeXtbPortfolio(positions = [], closedTrades = [], tranches = [], m
   const celkem = trzni + hotovost;
   const nerealizovano = trzni - porizovaciOtevrene;
   return {
-    vlozeno, hotovost, trzni, celkem,
+    vlozeno, hotovost, trzni, celkem, dividendy,
     porizovaciOtevrene, nerealizovano, realizovano,
     vydelaly: celkem - vlozeno,
     vydelalyPct: vlozeno > 0 ? (celkem - vlozeno) / vlozeno : 0,
@@ -7473,11 +7510,11 @@ function XtbPanel({ xtbTranches = [], onNav }) {
    přístup k API (ws.xtb.com vyřazeno 14.3.2025, náhradní ws.xapi.pro slouží jen klientům
    X Open Hub, ne běžným XTB účtům, viz chyba "account from a different platform").
    Nezbylo nic, co by šlo automaticky stahovat — modul vede jen ruční ledger tranší. */
-function AkcieModule({ xtbTranches = [], onTrancheSave, onTrancheDelete, xtbTitles = [], onTitleSave, onTitleDelete, xtbClosedTrades = [], xtbPositions = [], onPositionSave, onPositionDelete, market = null, marketState = "idle", onRefreshPrices }) {
+function AkcieModule({ xtbTranches = [], onTrancheSave, onTrancheDelete, xtbTitles = [], onTitleSave, onTitleDelete, xtbClosedTrades = [], xtbPositions = [], xtbCashOps = [], onPositionSave, onPositionDelete, market = null, marketState = "idle", onRefreshPrices }) {
   // Portfolio — jediný zdroj pravdy, žádný výpočet inline v komponentě.
   const pf = useMemo(
-    () => computeXtbPortfolio(xtbPositions, xtbClosedTrades, xtbTranches, market),
-    [xtbPositions, xtbClosedTrades, xtbTranches, market]
+    () => computeXtbPortfolio(xtbPositions, xtbClosedTrades, xtbTranches, market, xtbCashOps),
+    [xtbPositions, xtbClosedTrades, xtbTranches, market, xtbCashOps]
   );
   // Při otevření listu stáhni aktuální ceny. Jednou — dál jen na Obnovit.
   const cenyTazeny = useRef(false);
@@ -15429,6 +15466,7 @@ export default function MauxCRM() {
   const [xtbTitles, setXtbTitles] = useState([]);
   const [xtbClosedTrades, setXtbClosedTrades] = useState([]);
   const [xtbPositions, setXtbPositions] = useState([]);
+  const [xtbCashOps, setXtbCashOps] = useState([]);
   // Živé ceny + kurzy. Tahají se při otevření listu Akcie a na Obnovit — jinde nikdy.
   const [xtbMarket, setXtbMarket] = useState(null);
   const [xtbMarketState, setXtbMarketState] = useState("idle");
@@ -15583,8 +15621,9 @@ export default function MauxCRM() {
       fetchXtbTitles().catch(e => { console.error("xtb titles:", e); return []; }),
       fetchXtbClosedTrades().catch(e => { console.error("xtb closed trades:", e); return []; }),
       fetchXtbPositions().catch(e => { console.error("xtb positions:", e); return []; }),
+      fetchXtbCashOps().catch(e => { console.error("xtb cash ops:", e); return []; }),
     ])
-      .then(async ([c, i, w, f, dpfo, tax, checks, loans, esc, aLogs, aAtt, aAvail, xtbTr, xtbSnap, xtbTit, xtbCt, xtbPos]) => {
+      .then(async ([c, i, w, f, dpfo, tax, checks, loans, esc, aLogs, aAtt, aAvail, xtbTr, xtbSnap, xtbTit, xtbCt, xtbPos, xtbCo]) => {
         setClients(c); setInvoices(i); setWorkEntries(w); setFinanceItems(f);
         setDpfoMonths(dpfo);
         setTaxRecords(tax);
@@ -15596,6 +15635,7 @@ export default function MauxCRM() {
         setXtbTitles(xtbTit || []);
         setXtbClosedTrades(xtbCt || []);
         setXtbPositions(xtbPos || []);
+        setXtbCashOps(xtbCo || []);
         setAssistantLogs(aLogs || []);
         setAssistantAttendance(aAtt || []);
         setAssistantAvailability(aAvail || null);
@@ -16339,6 +16379,7 @@ export default function MauxCRM() {
               onTitleDelete={handleXtbTitleDelete}
               xtbClosedTrades={xtbClosedTrades}
               xtbPositions={xtbPositions}
+              xtbCashOps={xtbCashOps}
               onPositionSave={handleXtbPositionSave}
               onPositionDelete={handleXtbPositionDelete}
               market={xtbMarket}
