@@ -4074,11 +4074,18 @@ function escrowGrossForMonth(escrows, year, month) {
   }, 0);
 }
 
-// Žebřík mety 200 000 Kč/měs. (fakturace bez DPH + hrubý úrok z úschov), s automatickým
-// posunem mety (200k → 250k → +25k pokaždé, co je měsíc překročen). Sdílená logika pro
-// gamifikační lištu v hlavičce i detailní panel v Financích, ať se obě místa nikdy nerozejdou.
+// Žebřík mety (fakturace bez DPH + hrubý úrok z úschov). Sdílená logika pro gamifikační
+// lištu v hlavičce i detailní panel v Financích, ať se obě místa nikdy nerozejdou.
 // Vrací uzavřené měsíce od prvního dokladu po AKTUÁLNÍ měsíc (včetně) — BEZ živé projekce na
 // příští měsíc, tu si volající doplní sám (potřebuje unbilledAmt, který je jen v Dashboardu).
+//
+// PRAVIDLO MĚTY — "klouzavý rekord" (Tom 30.7.2026, nahradilo pevných 200k → 250k → +25k):
+//   meta = zaokrouhli na 5 000 ( nejlepší z posledních 12 měsíců × 1,10 ), min. 200 000 Kč
+// Proč ne pevný přírůstek: +25 000 je při metě 200k skok o 12,5 %, ale při metě 400k už jen
+// o 6,7 % — hra se s růstem sama změkčuje. Procento drží obtížnost konstantní.
+// Proč z rekordu a ne z mety: meta má reagovat na to, co jsi dokázal, ne na to, co jsi měl.
+// Proč klouzavé okno: rohatka, která jde jen nahoru, tě po jednom výjimečném měsíci uvězní
+// v trvale červeném čísle. Tahle meta umí i klesnout (ne však pod 200 000 Kč).
 function computeMilestoneLadder(invoices, escrows, now) {
   const ymSet = new Set();
   (invoices || []).forEach(i => { if (i.issue_date) ymSet.add(i.issue_date.slice(0, 7)); });
@@ -4094,27 +4101,39 @@ function computeMilestoneLadder(invoices, escrows, now) {
   const sortedYm = [...ymSet].sort();
   const [startY, startM0] = sortedYm[0].split("-").map(Number);
   let cy = startY, cm = startM0 - 1;
-  const rows = [];
+  // POZOR: do "all" jdou i prázdné měsíce — klouzavé okno musí být 12 KALENDÁŘNÍCH měsíců,
+  // ne 12 řádků s daty. Prázdné měsíce se z výsledku vyfiltrují až na konci.
+  const all = [];
   while (cy < now.getFullYear() || (cy === now.getFullYear() && cm <= now.getMonth())) {
     const ym = `${cy}-${String(cm + 1).padStart(2, "0")}`;
     const invAmt = (invoices || []).filter(i => (i.issue_date || "").startsWith(ym)).reduce((s, i) => s + (i.subtotal || 0), 0);
     const escAmt = Math.round(escrowGrossForMonth(escrows, cy, cm));
     const totalM = invAmt + escAmt;
-    if (totalM > 0 || ym === thisYm) rows.push({ ym, invAmt, escAmt, totalM, monIdx: cm, isCurrent: ym === thisYm });
+    all.push({ ym, invAmt, escAmt, totalM, monIdx: cm, isCurrent: ym === thisYm });
     cm++; if (cm > 11) { cm = 0; cy++; }
   }
-  let goal = 200000, milestoneCount = 0, firstMilestone = null;
-  rows.forEach(r => {
-    r.goal = goal;
-    r.over = r.totalM > goal;
+  const MILESTONE_FLOOR = 200000;
+  const r5k = v => Math.round(v / 5000) * 5000;
+  const bestOf = arr => arr.reduce((m, x) => Math.max(m, x.totalM), 0);
+  let milestoneCount = 0, firstMilestone = null;
+  all.forEach((r, i) => {
+    const best12 = bestOf(all.slice(Math.max(0, i - 12), i));
+    r.best12 = best12;
+    r.goal = Math.max(MILESTONE_FLOOR, r5k(best12 * 1.10));
+    r.over = r.totalM > r.goal;
+    // Osobní rekord = nejlepší měsíc za posledních 12. Přichází mnohem častěji než milník
+    // a je nezmanipulovatelný — proto je to druhý, samostatný důvod k radosti.
+    r.record = r.totalM > 0 && best12 > 0 && r.totalM > best12;
     if (r.over) {
       milestoneCount++;
       r.milestoneNum = milestoneCount;
       if (!firstMilestone) firstMilestone = r;
-      goal = (goal === 200000) ? 250000 : goal + 25000;
     }
   });
-  return { rows, milestoneCount, activeGoal: goal, firstMilestone, anyOver: milestoneCount > 0 };
+  // Meta pro PŘÍŠTÍ měsíc (živý řádek si ji vezme) — okno se posune o jeden měsíc dál.
+  const activeGoal = Math.max(MILESTONE_FLOOR, r5k(bestOf(all.slice(Math.max(0, all.length - 12))) * 1.10));
+  const rows = all.filter(r => r.totalM > 0 || r.isCurrent);
+  return { rows, allRows: all, milestoneCount, activeGoal, firstMilestone, anyOver: milestoneCount > 0 };
 }
 
 // Čistá nevyfakturovaná klientská práce BEZ DPH a BEZ pass-through poplatků (sp. poplatek,
@@ -9482,7 +9501,8 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
         const liveInvAmt = unbilledWorkNetNoVat(workEntries);
         const liveEscAmt = Math.round(escrowGrossThisMonth);
         const liveTotal = liveInvAmt + liveEscAmt;
-        const rows = [...ladder.rows, { ym: nextYmStr, invAmt: liveInvAmt, escAmt: liveEscAmt, totalM: liveTotal, live: true, monIdx: lastM, goal: ladder.activeGoal, over: liveTotal > ladder.activeGoal }];
+        const bestNext = (ladder.allRows || []).slice(-12).reduce((m, x) => Math.max(m, x.totalM), 0);
+        const rows = [...ladder.rows, { ym: nextYmStr, invAmt: liveInvAmt, escAmt: liveEscAmt, totalM: liveTotal, live: true, monIdx: lastM, goal: ladder.activeGoal, over: liveTotal > ladder.activeGoal, record: liveTotal > bestNext }];
         const milestoneCount = ladder.milestoneCount;
         const anyOver = ladder.anyOver;
         const liveOver = liveTotal > ladder.activeGoal;
@@ -9509,8 +9529,9 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
                     <>
                       <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-end",marginBottom:16}}>
                         <div>
-                          <div style={bpLabel()}>Meta měsíce · fakturace + úschovy</div>
+                          <div style={bpLabel()}>Meta příštího měsíce · fakturace + úschovy</div>
                           <div style={{...bpHero(28), marginTop:5}}>{fmtKc(activeGoal)}</div>
+                          <div style={{fontSize:9,color:"var(--mut)",marginTop:4}}>nejlepší z 12 měsíců × 1,10 · zaokr. na 5 000 · min. 200 000</div>
                         </div>
                         <div style={{textAlign:"right"}}>
                           <div style={bpLabel()}>Prolomeno</div>
@@ -9536,9 +9557,11 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
                               <div style={{position:"absolute",top:0,left:0,height:13,width:`${w1}%`,background:BP.indigo,borderRadius:"3px 0 0 3px",opacity:r.live?.5:1}} />
                               <div style={{position:"absolute",top:0,left:`${w1}%`,height:13,width:`${w2}%`,background:BP.sand,borderRadius:"0 3px 3px 0",opacity:r.live?.5:1}} />
                               <div style={{position:"absolute",top:-3,left:`${gp}%`,height:19,width:2,background:"rgba(28,10,99,.55)"}} />
-                              {r.over ? (
-                                <span style={{position:"absolute",left:`calc(${Math.min(w1+w2,88)}% + 8px)`,top:-1,fontSize:7.5,letterSpacing:".1em",textTransform:"uppercase",fontWeight:800,color:"#C0392B",background:"#FCEEEC",borderRadius:3,padding:"1px 5px",whiteSpace:"nowrap"}}>
-                                  {r.milestoneNum ? `milník ${r.milestoneNum}` : "nad metou"}
+                              {(r.over || r.record) ? (
+                                <span style={{position:"absolute",left:`calc(${Math.min(w1+w2,86)}% + 10px)`,top:-1,fontSize:7.5,letterSpacing:".1em",textTransform:"uppercase",fontWeight:800,whiteSpace:"nowrap",borderRadius:3,padding:"1px 5px",
+                                  color: r.over ? "#C0392B" : "#8A6E2E",
+                                  background: r.over ? "#FCEEEC" : "#F6F0E2"}}>
+                                  {r.over ? (r.milestoneNum ? `🏆 milník ${r.milestoneNum}` : "nad metou") : "rekord"}
                                 </span>
                               ) : null}
                             </div>
