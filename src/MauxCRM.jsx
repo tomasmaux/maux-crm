@@ -600,7 +600,9 @@ async function kurzKeDni(mena, isoDatum) {
 const XTB_BENCHMARK = "VWCE.DE"; // FTSE All-World, akumulační → total return
 async function fetchXtbHistorie(tickery, od) {
   const dnes = new Date().toISOString().slice(0, 10);
-  const klic = `maux_xtb_hist_${dnes}`;
+  // V klíči je i počet titulů — jinak by se po doplnění dalšího titulu do konce dne
+  // servírovala stará, neúplná odpověď a graf by tiše počítal s pořizovací cenou.
+  const klic = `maux_xtb_hist_${dnes}_${(tickery || []).length}`;
   try {
     const c = localStorage.getItem(klic);
     if (c) return JSON.parse(c);
@@ -8141,7 +8143,7 @@ function AkcieModule({ xtbTranches = [], onTrancheSave, onTrancheDelete, xtbTitl
       <div style={{ position: "relative", background: "#fff", border: "1px solid var(--line)", borderRadius: BP.r, padding: "22px 24px", boxShadow: BP.shadow }}>
         <BpCorners />
         <div style={bpLabel({ marginBottom: 4 })}>Portfolio proti světovému indexu</div>
-        <AkcieGraf serie={xtbSerie} stav={serieState} onNacti={() => onNactiHistorii && onNactiHistorii(pf.tickery)} />
+        <AkcieGraf serie={xtbSerie} stav={serieState} onNacti={() => onNactiHistorii && onNactiHistorii()} />
       </div>
 
       {/* ── TITULY A TRANŠE ── */}
@@ -15814,11 +15816,14 @@ export default function MauxCRM() {
   const [xtbSerieState, setXtbSerieState] = useState("idle");
   // Historie pro graf. Stahuje se spolu s cenami (otevření listu + Obnovit) a drží
   // se den v localStorage — na pozadí neběží nic.
-  const nactiXtbHistorii = async (tickery) => {
-    if (!tickery || !tickery.length) return;
+  // ⚠️ Musí to být VŠECHNY kdy držené tituly, ne jen ty otevřené. S užším seznamem
+  // se prodané pozice ocení pořizovací cenou a celá starší část křivky je plochá.
+  const nactiXtbHistorii = async () => {
+    const vsechny = Array.from(new Set(xtbPositions.map(p => String(p.symbol || "").toUpperCase()).filter(Boolean)));
+    if (!vsechny.length) return;
     setXtbSerieState("loading");
     try {
-      setXtbHist(await fetchXtbHistorie(tickery, "2025-04-01"));
+      setXtbHist(await fetchXtbHistorie(vsechny, "2025-04-01"));
       setXtbSerieState("ok");
     } catch (e) {
       console.error("historie:", e);
@@ -15836,7 +15841,7 @@ export default function MauxCRM() {
       console.error("ceny:", e);
       setXtbMarketState("error");
     }
-    nactiXtbHistorii(tickery);
+    nactiXtbHistorii();
   };
   const xtbSerie = useMemo(
     () => computeXtbSerie(xtbPositions, xtbClosedTrades, xtbTranches, xtbCashOps, xtbHist),
