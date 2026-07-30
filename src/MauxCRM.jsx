@@ -561,12 +561,22 @@ async function deleteXtbPosition(id) {
 }
 // Živé ceny (Yahoo) + kurzy (ČNB) přes Edge Function "ceny". Volá se při otevření
 // listu Akcie a na tlačítko Obnovit. Nikde jinde a nikdy na pozadí.
-async function fetchXtbCeny(tickery) {
+async function fetchXtbCeny(tickery, datum) {
   const uniq = Array.from(new Set((tickery || []).filter(Boolean).map(t => String(t).toUpperCase())));
-  if (!uniq.length) return { ceny: [], kurzy: { CZK: 1 }, chyby: [] };
-  const { data, error } = await supabase.functions.invoke("ceny", { body: { tickery: uniq } });
+  const body = { tickery: uniq };
+  if (datum) body.datum = datum;                 // formát DD.MM.RRRR — historický kurz ČNB
+  if (!uniq.length && !datum) return { ceny: [], kurzy: { CZK: 1 }, chyby: [] };
+  const { data, error } = await supabase.functions.invoke("ceny", { body });
   if (error) throw error;
   return data || { ceny: [], kurzy: { CZK: 1 }, chyby: [] };
+}
+// Kurz ČNB k danému dni (YYYY-MM-DD) — používá se při zápisu nového nákupu,
+// aby se korunová pořizovací cena zamrazila stejně, jak to dělá XTB.
+async function kurzKeDni(mena, isoDatum) {
+  if (!mena || mena === "CZK") return 1;
+  const [y, m, d] = String(isoDatum).split("-");
+  const r = await fetchXtbCeny([], `${d}.${m}.${y}`);
+  return (r && r.kurzy && r.kurzy[mena]) || null;
 }
 
 /* ── JEDINÝ ZDROJ PRAVDY PRO PORTFOLIO ──────────────────────────────────────
@@ -7463,7 +7473,7 @@ function XtbPanel({ xtbTranches = [], onNav }) {
    přístup k API (ws.xtb.com vyřazeno 14.3.2025, náhradní ws.xapi.pro slouží jen klientům
    X Open Hub, ne běžným XTB účtům, viz chyba "account from a different platform").
    Nezbylo nic, co by šlo automaticky stahovat — modul vede jen ruční ledger tranší. */
-function AkcieModule({ xtbTranches = [], onTrancheSave, onTrancheDelete, xtbTitles = [], onTitleSave, onTitleDelete, xtbClosedTrades = [], xtbPositions = [], market = null, marketState = "idle", onRefreshPrices }) {
+function AkcieModule({ xtbTranches = [], onTrancheSave, onTrancheDelete, xtbTitles = [], onTitleSave, onTitleDelete, xtbClosedTrades = [], xtbPositions = [], onPositionSave, onPositionDelete, market = null, marketState = "idle", onRefreshPrices }) {
   // Portfolio — jediný zdroj pravdy, žádný výpočet inline v komponentě.
   const pf = useMemo(
     () => computeXtbPortfolio(xtbPositions, xtbClosedTrades, xtbTranches, market),
@@ -7484,6 +7494,30 @@ function AkcieModule({ xtbTranches = [], onTrancheSave, onTrancheDelete, xtbTitl
   }, [marketState, pf.celkem, pf.hotovost, pf.maCeny]);
 
   const [openSym, setOpenSym] = useState(null);
+  const [posForm, setPosForm] = useState(false);
+  const [posDraft, setPosDraft] = useState({ symbol: "", instrument_name: "", trade_date: today(), volume: "", price: "", currency: "USD" });
+  const [posSaving, setPosSaving] = useState(false);
+  const cislo = (s) => Number(String(s).replace(/\s/g, "").replace(",", "."));
+  const posMena = { US: "USD", DE: "EUR", NL: "EUR", NO: "NOK", UK: "USD", FR: "EUR", IT: "EUR" };
+  const ulozPozici = async () => {
+    const sym = posDraft.symbol.trim().toUpperCase();
+    const ks = cislo(posDraft.volume), cena = cislo(posDraft.price);
+    if (!sym) { alert("Zadej ticker, například MSFT.US"); return; }
+    if (!ks || ks <= 0) { alert("Zadej počet kusů."); return; }
+    if (!cena || cena <= 0) { alert("Zadej cenu za kus."); return; }
+    setPosSaving(true);
+    try {
+      await onPositionSave({
+        id: `xtbpos_${Date.now()}`, symbol: sym,
+        instrument_name: posDraft.instrument_name.trim() || sym,
+        trade_date: posDraft.trade_date, volume: ks, price: cena,
+        currency: posDraft.currency,
+      });
+      setPosDraft({ symbol: "", instrument_name: "", trade_date: today(), volume: "", price: "", currency: "USD" });
+      setPosForm(false);
+    } catch (e) { alert("Chyba: " + e.message); }
+    setPosSaving(false);
+  };
   const [addForm, setAddForm] = useState(false);
   const [newTranche, setNewTranche] = useState({ date: today(), type: "vklad", amount: "", symbol: "", note: "" });
   const [savingTranche, setSavingTranche] = useState(false);
@@ -7734,10 +7768,85 @@ function AkcieModule({ xtbTranches = [], onTrancheSave, onTrancheDelete, xtbTitl
       )}
 
       {/* ── TITULY A TRANŠE ── */}
-      {pf.tituly.length > 0 && (
+      {true && (
         <div style={{ position: "relative", background: "#fff", border: "1px solid var(--line)", borderRadius: BP.r, padding: "22px 24px" }}>
           <BpCorners />
-          <div style={bpLabel()}>Co držíš · {pf.lots.length} nákupních tranší</div>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+            <div style={bpLabel()}>Co držíš · {pf.lots.length} nákupních tranší</div>
+            <button
+              onClick={() => setPosForm(v => !v)}
+              style={{ fontSize: 11, padding: "5px 12px", borderRadius: 9, border: "1px solid rgba(53,24,164,.2)", background: posForm ? "#fff" : "#F4F2FC", color: BP.indigoDeep, cursor: "pointer", fontFamily: "inherit" }}>
+              {posForm ? "Zavřít" : "+ Přidat nákup"}
+            </button>
+          </div>
+
+          {posForm && (
+            <div style={{ background: "#F7F6FC", borderRadius: BP.rInner, padding: "16px 18px", marginTop: 14 }}>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(110px, 1fr))", gap: 10 }}>
+                <div>
+                  <div style={{ fontSize: 10, color: "var(--mut)", marginBottom: 5 }}>Ticker</div>
+                  <input value={posDraft.symbol} placeholder="MSFT.US"
+                    onChange={e => {
+                      const v = e.target.value.toUpperCase();
+                      const cc = v.includes(".") ? v.split(".").pop() : "";
+                      setPosDraft(d => ({ ...d, symbol: v, currency: posMena[cc] || d.currency }));
+                    }}
+                    style={{ width: "100%", boxSizing: "border-box", border: "1px solid rgba(28,10,99,.14)", borderRadius: 8, padding: "8px 10px", fontSize: 13, fontFamily: "inherit" }} />
+                </div>
+                <div>
+                  <div style={{ fontSize: 10, color: "var(--mut)", marginBottom: 5 }}>Datum nákupu</div>
+                  <input type="date" value={posDraft.trade_date}
+                    onChange={e => setPosDraft(d => ({ ...d, trade_date: e.target.value }))}
+                    style={{ width: "100%", boxSizing: "border-box", border: "1px solid rgba(28,10,99,.14)", borderRadius: 8, padding: "8px 10px", fontSize: 13, fontFamily: "inherit" }} />
+                </div>
+                <div>
+                  <div style={{ fontSize: 10, color: "var(--mut)", marginBottom: 5 }}>Počet kusů</div>
+                  <input value={posDraft.volume} placeholder="2,5"
+                    onChange={e => setPosDraft(d => ({ ...d, volume: e.target.value }))}
+                    style={{ width: "100%", boxSizing: "border-box", border: "1px solid rgba(28,10,99,.14)", borderRadius: 8, padding: "8px 10px", fontSize: 13, fontFamily: "inherit" }} />
+                </div>
+                <div>
+                  <div style={{ fontSize: 10, color: "var(--mut)", marginBottom: 5 }}>Cena za kus</div>
+                  <input value={posDraft.price} placeholder="451,10"
+                    onChange={e => setPosDraft(d => ({ ...d, price: e.target.value }))}
+                    style={{ width: "100%", boxSizing: "border-box", border: "1px solid rgba(28,10,99,.14)", borderRadius: 8, padding: "8px 10px", fontSize: 13, fontFamily: "inherit" }} />
+                </div>
+                <div>
+                  <div style={{ fontSize: 10, color: "var(--mut)", marginBottom: 5 }}>Měna</div>
+                  <select value={posDraft.currency}
+                    onChange={e => setPosDraft(d => ({ ...d, currency: e.target.value }))}
+                    style={{ width: "100%", boxSizing: "border-box", border: "1px solid rgba(28,10,99,.14)", borderRadius: 8, padding: "8px 10px", fontSize: 13, fontFamily: "inherit", background: "#fff" }}>
+                    {["USD", "EUR", "NOK", "GBP", "CZK"].map(m => <option key={m} value={m}>{m}</option>)}
+                  </select>
+                </div>
+              </div>
+              {cislo(posDraft.volume) > 0 && cislo(posDraft.price) > 0 && (
+                <div style={{ fontSize: 11.5, color: "var(--mut)", marginTop: 12, lineHeight: 1.6 }}>
+                  Objem obchodu <b style={{ color: "var(--txt)" }}>
+                    {(cislo(posDraft.volume) * cislo(posDraft.price)).toLocaleString("cs-CZ", { maximumFractionDigits: 2 })} {posDraft.currency}
+                  </b>. Kurz ČNB k datu nákupu se dotáhne sám a zamrazí — korunová pořizovací cena se pak už nezmění.
+                  Nákup nemění vložený kapitál, jen přesune hotovost do pozice.
+                </div>
+              )}
+              <div style={{ display: "flex", gap: 8, marginTop: 14 }}>
+                <button onClick={ulozPozici} disabled={posSaving}
+                  style={{ fontSize: 12, padding: "7px 16px", borderRadius: 9, border: "none", background: BP.indigoDeep, color: "#fff", cursor: posSaving ? "default" : "pointer", fontFamily: "inherit" }}>
+                  {posSaving ? "Ukládám…" : "Uložit nákup"}
+                </button>
+                <button onClick={() => setPosForm(false)}
+                  style={{ fontSize: 12, padding: "7px 14px", borderRadius: 9, border: "1px solid rgba(28,10,99,.14)", background: "#fff", color: "var(--txt)", cursor: "pointer", fontFamily: "inherit" }}>
+                  Zrušit
+                </button>
+              </div>
+            </div>
+          )}
+
+          {pf.tituly.length === 0 && !posForm && (
+            <div style={{ fontSize: 12, color: "var(--mut)", marginTop: 14 }}>
+              Zatím tu nic není. Přidej první nákup tlačítkem nahoře.
+            </div>
+          )}
+
           <div style={{ marginTop: 12 }}>
             {pf.tituly.map(t => (
               <div key={t.symbol}>
@@ -7789,105 +7898,6 @@ function AkcieModule({ xtbTranches = [], onTrancheSave, onTrancheDelete, xtbTitl
         </div>
       )}
 
-      {/* SOUHRN */}
-      <div style={{ background: "#fff", border: "1px solid var(--line)", borderRadius: 14, overflow: "hidden" }}>
-        <div style={{ padding: "18px 24px 12px", display: "flex", alignItems: "center", gap: 6 }}>
-          <span className="maux-dot" style={{ width: 6, height: 6, background: "#4F46E5", boxShadow: "0 0 4px rgba(79,70,229,.55)" }} />
-          <div style={{ ...label }}>Portfolio — souhrn</div>
-        </div>
-        {/* Zdroje — kolik bylo kdy vloženo/vybráno, rozepsáno (ne jen čisté číslo) */}
-        <div style={{ padding: "16px 24px", borderTop: "1px solid var(--line)", display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 18 }}>
-          <div>
-            <div style={{ ...label, marginBottom: 8 }}>Vloženo celkem</div>
-            <div className="maux-num" style={{ fontSize: 20, fontWeight: 600, color: "var(--ink)", lineHeight: 1 }}>{hasTranches ? fmtMoney(grossDeposited, currency) : "—"}</div>
-            {!hasTranches && <div style={{ fontSize: 9.5, color: "var(--mut)", marginTop: 5 }}>doplň tranše níž</div>}
-          </div>
-          <div>
-            <div style={{ ...label, marginBottom: 8 }}>Vybráno celkem</div>
-            <div className="maux-num" style={{ fontSize: 20, fontWeight: 600, color: grossWithdrawn > 0 ? "#DC2626" : "var(--mut)", lineHeight: 1 }}>{hasTranches ? (grossWithdrawn > 0 ? `−${fmtMoney(grossWithdrawn, currency)}` : "—") : "—"}</div>
-          </div>
-          <div>
-            <div style={{ ...label, marginBottom: 8 }}>Čistě vloženo (zdroje)</div>
-            <div className="maux-num" style={{ fontSize: 20, fontWeight: 600, color: "var(--ink)", lineHeight: 1 }}>{hasTranches ? fmtMoney(netDeposited, currency) : "—"}</div>
-            <div style={{ fontSize: 9.5, color: "var(--mut)", marginTop: 5 }}>vloženo − vybráno</div>
-          </div>
-        </div>
-
-        {/* Realizovaný zisk — zvýrazněno indigo/gold, odlišeno od "čistě vloženo" výše */}
-        <div style={{ margin: "0 24px 16px", padding: "16px 20px", borderRadius: 12, background: "linear-gradient(135deg, #3518A5 0%, #4F46E5 100%)", display: "flex", flexWrap: "wrap", gap: 24, alignItems: "center" }}>
-          <div>
-            <div style={{ fontSize: 9, letterSpacing: ".14em", textTransform: "uppercase", color: "rgba(255,255,255,.65)", fontWeight: 700, marginBottom: 6 }}>Realizovaný zisk/ztráta</div>
-            <div className="maux-num maux-glow" style={{ fontSize: 26, fontWeight: 600, color: "var(--gold)", lineHeight: 1 }}>
-              {hasClosedTrades ? `${totalRealizedProfit >= 0 ? "+" : ""}${fmtMoney(totalRealizedProfit, currency)}` : "—"}
-            </div>
-            {hasClosedTrades && <div style={{ fontSize: 9.5, color: "rgba(255,255,255,.6)", marginTop: 5 }}>ze {sortedClosedTrades.length} uzavřených obchodů, už je to hotovo a v hotovosti/na účtu</div>}
-          </div>
-          <div>
-            <div style={{ fontSize: 9, letterSpacing: ".14em", textTransform: "uppercase", color: "rgba(255,255,255,.65)", fontWeight: 700, marginBottom: 6 }}>Zhodnocení</div>
-            <div className="maux-num" style={{ fontSize: 22, fontWeight: 600, color: "#fff", lineHeight: 1 }}>
-              {hasClosedTrades && hasTranches ? `${returnPct >= 0 ? "+" : ""}${returnPct.toFixed(1)} %` : "—"}
-            </div>
-            <div style={{ fontSize: 9.5, color: "rgba(255,255,255,.6)", marginTop: 5 }}>vůči čistě vloženým zdrojům</div>
-          </div>
-          <div>
-            <div style={{ fontSize: 9, letterSpacing: ".14em", textTransform: "uppercase", color: "rgba(255,255,255,.65)", fontWeight: 700, marginBottom: 6 }}>Úspěšnost</div>
-            <div className="maux-num" style={{ fontSize: 22, fontWeight: 600, color: "#fff", lineHeight: 1 }}>
-              {hasClosedTrades ? `${winRate.toFixed(0)} %` : "—"}
-            </div>
-            {hasClosedTrades && <div style={{ fontSize: 9.5, color: "rgba(255,255,255,.6)", marginTop: 5 }}>{winCount} ziskových z {sortedClosedTrades.length}</div>}
-          </div>
-        </div>
-
-        <div style={{ padding: "0 24px 16px", fontSize: 9.5, color: "var(--mut)" }}>
-          Realizovaný zisk = uzavřené obchody (napevno, z výpisu XTB). Nerealizovaný zisk z titulů, které právě držíš (živá cena), appka zatím nepočítá — XTB API je zrušené a u "Historie titulů" níže chybí počet kusů a nákupní cena. Řekni, jestli to chceš doplnit.
-        </div>
-      </div>
-
-      {/* ZHODNOCENÍ V ČASE — YTD / 12 měsíců / od založení, srovnatelné s tím, jak se "kamarádi" baví o zhodnocení */}
-      {hasClosedTrades && (
-        <div style={{ background: "#fff", border: "1px solid var(--line)", borderRadius: 14, overflow: "hidden" }}>
-          <div style={{ padding: "18px 24px 4px" }}>
-            <div style={{ ...label, marginBottom: 4 }}>Zhodnocení v čase</div>
-            <div style={{ fontSize: 9.5, color: "var(--mut)" }}>Stejné srovnání, jaké si lidi dělají mezi sebou — kolik to vyneslo za dané období, vztaženo k vloženému kapitálu na začátku období.</div>
-          </div>
-          <div style={{ padding: "14px 24px 18px", display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 16 }}>
-            <div>
-              <div style={{ ...label, marginBottom: 7 }}>YTD {new Date().getFullYear()}</div>
-              <div className="maux-num" style={{ fontSize: 19, fontWeight: 600, color: perfPeriods.ytd.profit >= 0 ? "#059669" : "#DC2626", lineHeight: 1 }}>
-                {perfPeriods.ytd.pct != null ? `${perfPeriods.ytd.pct >= 0 ? "+" : ""}${perfPeriods.ytd.pct.toFixed(1)} %` : `${perfPeriods.ytd.profit >= 0 ? "+" : ""}${fmtMoney(perfPeriods.ytd.profit, currency)}`}
-              </div>
-              <div style={{ fontSize: 9, color: "var(--mut)", marginTop: 4 }}>{perfPeriods.ytd.pct != null ? `zisk ${fmtMoney(perfPeriods.ytd.profit, currency)}` : "bez kapitálové báze k 1.1."}</div>
-            </div>
-            <div>
-              <div style={{ ...label, marginBottom: 7 }}>Posledních 12 měsíců</div>
-              <div className="maux-num" style={{ fontSize: 19, fontWeight: 600, color: perfPeriods.m12.profit >= 0 ? "#059669" : "#DC2626", lineHeight: 1 }}>
-                {perfPeriods.m12.pct != null ? `${perfPeriods.m12.pct >= 0 ? "+" : ""}${perfPeriods.m12.pct.toFixed(1)} %` : `${perfPeriods.m12.profit >= 0 ? "+" : ""}${fmtMoney(perfPeriods.m12.profit, currency)}`}
-              </div>
-              <div style={{ fontSize: 9, color: "var(--mut)", marginTop: 4 }}>{perfPeriods.m12.pct != null ? `zisk ${fmtMoney(perfPeriods.m12.profit, currency)}` : "—"}</div>
-            </div>
-            <div>
-              <div style={{ ...label, marginBottom: 7 }}>Od založení účtu</div>
-              <div className="maux-num" style={{ fontSize: 19, fontWeight: 600, color: returnPct >= 0 ? "#059669" : "#DC2626", lineHeight: 1 }}>
-                {hasTranches ? `${returnPct >= 0 ? "+" : ""}${returnPct.toFixed(1)} %` : "—"}
-              </div>
-              <div style={{ fontSize: 9, color: "var(--mut)", marginTop: 4 }}>{perfPeriods.accountStart ? `od ${fmtDate(perfPeriods.accountStart.toISOString().slice(0, 10))}` : "—"}</div>
-            </div>
-            <div style={{ opacity: 0.45 }}>
-              <div style={{ ...label, marginBottom: 7 }}>3 roky</div>
-              <div className="maux-num" style={{ fontSize: 19, fontWeight: 600, color: "var(--mut)", lineHeight: 1 }}>—</div>
-              <div style={{ fontSize: 9, color: "var(--mut)", marginTop: 4 }}>{perfPeriods.y3date ? `k dispozici od ${fmtDate(perfPeriods.y3date.toISOString().slice(0, 10))}` : "—"}</div>
-            </div>
-            <div style={{ opacity: 0.45 }}>
-              <div style={{ ...label, marginBottom: 7 }}>5 let</div>
-              <div className="maux-num" style={{ fontSize: 19, fontWeight: 600, color: "var(--mut)", lineHeight: 1 }}>—</div>
-              <div style={{ fontSize: 9, color: "var(--mut)", marginTop: 4 }}>{perfPeriods.y5date ? `k dispozici od ${fmtDate(perfPeriods.y5date.toISOString().slice(0, 10))}` : "—"}</div>
-            </div>
-          </div>
-          <div style={{ padding: "0 24px 16px", fontSize: 9.5, color: "var(--mut)" }}>
-            2022/2023 a 3leté/5leté srovnání zatím nejdou spočítat — historie účtu začíná až {perfPeriods.accountStart ? fmtDate(perfPeriods.accountStart.toISOString().slice(0, 10)) : "prvním vkladem"} (první vklad). Appka si data tiše ukládá dál, takže tahle pole se sama doplní, jak účet zestárne — žádný zásah nebude potřeba.
-          </div>
-        </div>
-      )}
 
       {/* DAŇOVÝ PŘEHLED — časový test, hodnotový test 100k, odhad daně, termíny DPFO */}
       {hasClosedTrades && (
@@ -15666,6 +15676,24 @@ export default function MauxCRM() {
     await deleteXtbTranche(id);
     setXtbTranches(p => p.filter(t => t.id !== id));
   };
+  // Nová nákupní tranše. Kurz se dotáhne z ČNB k datu obchodu a zamrazí se —
+  // korunová pořizovací cena se pak už nikdy nemění.
+  const handleXtbPositionSave = async (p) => {
+    let fx = p.fx_rate;
+    if (!fx) { try { fx = await kurzKeDni(p.currency, p.trade_date); } catch (e) { fx = null; } }
+    const row = {
+      ...p,
+      fx_rate: fx || null,
+      amount_czk: fx ? Math.round(p.volume * p.price * fx * 100) / 100 : null,
+      source: p.source || "rucne",
+    };
+    await upsertXtbPosition(row);
+    setXtbPositions(await fetchXtbPositions());
+  };
+  const handleXtbPositionDelete = async (id) => {
+    await deleteXtbPosition(id);
+    setXtbPositions(p => p.filter(x => x.id !== id));
+  };
   const handleXtbTitleSave = async (t) => {
     await upsertXtbTitle(t);
     setXtbTitles(await fetchXtbTitles());
@@ -16311,6 +16339,8 @@ export default function MauxCRM() {
               onTitleDelete={handleXtbTitleDelete}
               xtbClosedTrades={xtbClosedTrades}
               xtbPositions={xtbPositions}
+              onPositionSave={handleXtbPositionSave}
+              onPositionDelete={handleXtbPositionDelete}
               market={xtbMarket}
               marketState={xtbMarketState}
               onRefreshPrices={nactiXtbCeny}
