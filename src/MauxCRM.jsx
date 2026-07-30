@@ -591,9 +591,150 @@ async function kurzKeDni(mena, isoDatum) {
    1) Vložený kapitál mění JEN převod (vklad/výběr). Nákup ani prodej s ním nedělá nic.
    2) Hodnota účtu = otevřené pozice + hotovost. Po prodeji se hodnota nezmění,
       peníze jen přejdou z pozice do hotovosti — proto graf nedostane schod.
-   3) Nákupy se drží lot po lotu, prodeje se odečítají FIFO (od nejstaršího),
-      protože časový test běží od data konkrétního nákupu.
+   3) Nákupy se drží lot po lotu. Které kusy jsou uzavřené, říká `closed_volume`
+      z výpisu — NE FIFO. XTB nezavírá nejstarší lot, a datum nákupu určuje 3letý test.
    4) Kurz je zamrazený ke dni obchodu; dnešní kurz se používá jen na dnešní ocenění.  */
+// Historické denní řady pro graf. Tahá se ze stejné Edge Function, jen s ?historie=.
+// Jeden dotaz vrátí ceny všech titulů i celý kurzovní lístek ČNB po dnech.
+// Drží se den v localStorage — druhé otevření listu už na síť nesahá.
+const XTB_BENCHMARK = "VWCE.DE"; // FTSE All-World, akumulační → total return
+async function fetchXtbHistorie(tickery, od) {
+  const dnes = new Date().toISOString().slice(0, 10);
+  const klic = `maux_xtb_hist_${dnes}`;
+  try {
+    const c = localStorage.getItem(klic);
+    if (c) return JSON.parse(c);
+  } catch (e) { /* plné úložiště nebo privátní režim — prostě to stáhneme znovu */ }
+  const seznam = Array.from(new Set((tickery || []).map(t => String(t).toUpperCase()).concat(XTB_BENCHMARK)));
+  const { data, error } = await supabase.functions.invoke("ceny", {
+    body: { historie: od || "2025-04-01", tickery: seznam },
+  });
+  if (error) throw error;
+  try { localStorage.setItem(klic, JSON.stringify(data)); } catch (e) { /* nevadí */ }
+  return data;
+}
+
+// ── Denní řada hodnoty portfolia od prvního obchodu ─────────────────────────
+// Staví se ze surových faktů: nákup přidá kusy, uzavření je ubere, převod změní
+// vložený kapitál. Ke každému dni se vezme zavírací cena a kurz ČNB toho dne.
+//
+// ⚠️ Benchmark se NEPOROVNÁVÁ jako index proti indexu. Vezmou se Tomovy vklady
+// v jeho termínech a pustí se místo do jeho titulů do světového ETF. Teprve rozdíl
+// těch dvou čísel odpovídá na otázku „vyplatilo se mi vybírat si sám?".
+function computeXtbSerie(positions = [], closedTrades = [], tranches = [], cashOps = [], hist = null) {
+  if (!hist || !Array.isArray(hist.rady) || !hist.rady.length) return null;
+  const rady = {};
+  for (const r of hist.rady) {
+    if (r && r.body && r.body.length) rady[String(r.ticker).toUpperCase()] = { mena: r.mena, body: r.body };
+  }
+  const bench = rady[XTB_BENCHMARK];
+  if (!bench) return null;
+  const kurzy = hist.kurzy || {};
+
+  const fxCache = {};
+  const fx = (mena, den) => {
+    if (!mena || mena === "CZK") return 1;
+    const k = mena + den;
+    if (fxCache[k] != null) return fxCache[k];
+    let d = den;
+    for (let i = 0; i < 12; i++) {           // víkendy a svátky — vezmi poslední známý
+      const r = kurzy[d];
+      if (r && r[mena]) return (fxCache[k] = r[mena]);
+      const t = new Date(d + "T00:00:00Z");
+      t.setUTCDate(t.getUTCDate() - 1);
+      d = t.toISOString().slice(0, 10);
+    }
+    return (fxCache[k] = null);
+  };
+  const posledni = (body, den) => {
+    let v = null;
+    for (const b of body) { if (b[0] <= den) v = b[1]; else break; }
+    return v;
+  };
+
+  const den = (x) => String(x || "").slice(0, 10);
+  const dnySet = new Set();
+  for (const k in rady) for (const b of rady[k].body) dnySet.add(b[0]);
+  const prvni = positions.reduce((m, p) => (!m || p.trade_date < m ? p.trade_date : m), null)
+    || tranches.reduce((m, t) => (!m || t.tranche_date < m ? t.tranche_date : m), null);
+  const dny = Array.from(dnySet).sort().filter((d) => !prvni || d >= prvni);
+  if (!dny.length) return null;
+
+  // Kumulativní součty peněžních toků — jednou seřadit, pak jen posouvat ukazatel.
+  const bezi = (rows, klic, hodnota) => {
+    const s = rows.map((r) => [den(r[klic]), hodnota(r)]).sort((a, b) => (a[0] < b[0] ? -1 : 1));
+    let i = 0, sum = 0;
+    return (d) => { while (i < s.length && s[i][0] <= d) sum += s[i++][1]; return sum; };
+  };
+  const cVklad = bezi(tranches, "tranche_date", (r) => (r.type === "výběr" ? -(r.amount || 0) : (r.amount || 0)));
+  const cNakup = bezi(positions, "trade_date", (r) => Number(r.amount_czk) || 0);
+  const cProdej = bezi(closedTrades, "close_time", (r) => Number(r.amount_czk) || 0);
+  const cOstat = bezi(cashOps, "op_time", (r) => Number(r.amount_czk) || 0);
+
+  const nakupy = {}, prodeje = {};
+  for (const p of positions) {
+    const s = String(p.symbol || "").toUpperCase();
+    (nakupy[s] = nakupy[s] || []).push([p.trade_date, Number(p.volume) || 0, Number(p.amount_czk) || 0]);
+  }
+  for (const c of closedTrades) {
+    const s = String(c.symbol || "").toUpperCase();
+    (prodeje[s] = prodeje[s] || []).push([den(c.close_time), Number(c.volume) || 0]);
+  }
+  for (const k in nakupy) nakupy[k].sort((a, b) => (a[0] < b[0] ? -1 : 1));
+  for (const k in prodeje) prodeje[k].sort((a, b) => (a[0] < b[0] ? -1 : 1));
+
+  const toky = {};
+  for (const t of tranches) {
+    const d = den(t.tranche_date);
+    toky[d] = (toky[d] || 0) + (t.type === "výběr" ? -(t.amount || 0) : (t.amount || 0));
+  }
+  const tokySer = Object.entries(toky).sort((a, b) => (a[0] < b[0] ? -1 : 1));
+
+  const rada = [];
+  let podily = 0, ti = 0, jednotka = 1, predchozi = null, bezCeny = new Set();
+  for (const d of dny) {
+    const bCena = posledni(bench.body, d), bFx = fx(bench.mena, d);
+    const bCzk = bCena != null && bFx != null ? bCena * bFx : null;
+    while (ti < tokySer.length && tokySer[ti][0] <= d) {
+      if (bCzk) podily += tokySer[ti][1] / bCzk;
+      ti++;
+    }
+    let trzni = 0;
+    for (const s in nakupy) {
+      let ks = 0;
+      for (const [dt, v] of nakupy[s]) { if (dt <= d) ks += v; else break; }
+      if (prodeje[s]) for (const [dt, v] of prodeje[s]) { if (dt <= d) ks -= v; else break; }
+      if (ks <= 1e-9) continue;
+      const r = rady[s];
+      const px = r ? posledni(r.body, d) : null;
+      const f = r ? fx(r.mena, d) : null;
+      if (px != null && f != null) { trzni += ks * px * f; continue; }
+      // Titul bez historie (delistovaný) — oceň ho pořizovací cenou. Rovná čára
+      // je poctivější než dopočet pohybu, který nikdy nenastal.
+      bezCeny.add(s);
+      let czk = 0, q = 0;
+      for (const [dt, v, c] of nakupy[s]) if (dt <= d) { czk += c; q += v; }
+      if (q > 0) trzni += ks * (czk / q);
+    }
+    const vlozeno = cVklad(d);
+    const hodnota = trzni + vlozeno - cNakup(d) + cProdej(d) + cOstat(d);
+    if (predchozi !== null) {
+      const zaklad = predchozi + (toky[d] || 0);
+      if (zaklad > 0) jednotka *= hodnota / zaklad;   // TWR — vklad jednotku nemění
+    }
+    predchozi = hodnota;
+    rada.push({
+      datum: d,
+      hodnota: Math.round(hodnota),
+      vlozeno: Math.round(vlozeno),
+      benchmark: bCzk ? Math.round(podily * bCzk) : null,
+      indexCena: bCzk,
+      jednotka,
+    });
+  }
+  return { rada, bezCeny: Array.from(bezCeny), cas: hist.cas || null };
+}
+
 function computeXtbPortfolio(positions = [], closedTrades = [], tranches = [], market = null, cashOps = []) {
   const kurzy = (market && market.kurzy) || { CZK: 1 };
   const ceny = {};
@@ -7510,7 +7651,199 @@ function XtbPanel({ xtbTranches = [], onNav }) {
    přístup k API (ws.xtb.com vyřazeno 14.3.2025, náhradní ws.xapi.pro slouží jen klientům
    X Open Hub, ne běžným XTB účtům, viz chyba "account from a different platform").
    Nezbylo nic, co by šlo automaticky stahovat — modul vede jen ruční ledger tranší. */
-function AkcieModule({ xtbTranches = [], onTrancheSave, onTrancheDelete, xtbTitles = [], onTitleSave, onTitleDelete, xtbClosedTrades = [], xtbPositions = [], xtbCashOps = [], onPositionSave, onPositionDelete, market = null, marketState = "idle", onRefreshPrices }) {
+// ── GRAF PORTFOLIA PROTI SVĚTOVÉMU INDEXU ───────────────────────────────────
+// Tři optiky, tři řady přepínačů. Default: Procenta · 1R — odpovídá na otázku
+// „jsem lepší než trh?". Verdiktová pilulka mluví VŽDY v korunách, protože bere
+// v úvahu, kdy peníze doopravdy přišly; TWR to schválně ignoruje.
+function AkcieGraf({ serie, stav = "idle", onNacti }) {
+  const [okno, setOkno] = useState("1R");
+  const [rok, setRok] = useState(null);
+  const [optika, setOptika] = useState("Procenta");
+  const [kurzor, setKurzor] = useState(null);
+
+  const rada = (serie && serie.rada) || [];
+
+  // Kde v řadě začíná zvolené okno. Kalendářní rok má přednost před relativním.
+  const rozsah = useMemo(() => {
+    if (!rada.length) return null;
+    const konec = rada.length - 1;
+    if (rok) {
+      const od = rada.findIndex(r => r.datum >= `${rok}-01-01`);
+      let doI = konec;
+      for (let i = rada.length - 1; i >= 0; i--) { if (rada[i].datum <= `${rok}-12-31`) { doI = i; break; } }
+      return od < 0 ? null : { a: Math.max(0, od - 1), b: doI };
+    }
+    const posl = rada[konec].datum;
+    const zpet = (d) => { const t = new Date(posl + "T00:00:00Z"); t.setUTCDate(t.getUTCDate() - d); return t.toISOString().slice(0, 10); };
+    const hranice = { "1T": zpet(7), "1M": zpet(30), "3M": zpet(91), "YTD": `${posl.slice(0, 4)}-01-01`, "1R": zpet(365), "Vše": rada[0].datum }[okno];
+    let a = 0;
+    for (let i = 0; i < rada.length; i++) { if (rada[i].datum <= hranice) a = i; else break; }
+    return { a, b: konec };
+  }, [rada, okno, rok]);
+
+  if (stav === "loading") return <div style={{ ...bpLabel(), padding: "28px 2px" }}>Skládám historii z cen a kurzů…</div>;
+  if (!rada.length || !rozsah) {
+    return (
+      <div style={{ padding: "22px 2px" }}>
+        <div style={{ ...bpLabel({ marginBottom: 8 }) }}>Graf</div>
+        <div style={{ fontSize: 12.5, color: "var(--mut)", marginBottom: 10 }}>
+          Historie se zatím nenačetla. {stav === "error" ? "Server ceny neodpověděl." : ""}
+        </div>
+        {onNacti && <button onClick={onNacti} style={{ fontSize: 11, padding: "6px 13px", borderRadius: 999, border: "1px solid rgba(0,0,0,.1)", background: "#fff", color: BP.indigoDeep, cursor: "pointer", fontFamily: "inherit" }}>Načíst historii</button>}
+      </div>
+    );
+  }
+
+  const { a, b } = rozsah;
+  const usek = rada.slice(a, b + 1);
+  const A = rada[a], B = rada[b];
+
+  // Řady podle optiky. s1 = ty, s2 = index, s3 = vložený kapitál (jen u Hodnoty).
+  let s1 = [], s2 = [], s3 = [], popis1 = "", popis2 = "", popis3 = "";
+  if (optika === "Procenta") {
+    s1 = usek.map(r => (r.jednotka / A.jednotka - 1) * 100);
+    s2 = usek.map(r => (r.indexCena && A.indexCena ? (r.indexCena / A.indexCena - 1) * 100 : 0));
+    popis1 = "Tvoje portfolio (TWR)"; popis2 = "Světový index";
+  } else if (optika === "Koruny") {
+    s1 = usek.map(r => r.hodnota - A.hodnota - (r.vlozeno - A.vlozeno));
+    s2 = usek.map(r => (r.benchmark || 0) - (A.benchmark || 0) - (r.vlozeno - A.vlozeno));
+    popis1 = "Kolik vydělalo tvoje"; popis2 = "Kolik by vydělal index";
+  } else {
+    s1 = usek.map(r => r.hodnota);
+    s2 = usek.map(r => r.benchmark || 0);
+    s3 = usek.map(r => r.vlozeno);
+    popis1 = "Hodnota portfolia"; popis2 = "Kdyby to celé šlo do indexu"; popis3 = "Vložený kapitál";
+  }
+
+  const vse = s1.concat(s2, s3);
+  let lo = Math.min(...vse), hi = Math.max(...vse);
+  if (hi === lo) hi = lo + 1;
+  const rez = (hi - lo) * 0.12; lo -= rez; hi += rez;
+  const W = 900, H = 250, ml = 4, mr = 4, mt = 12, mb = 22;
+  const n = usek.length;
+  const px = (i) => ml + (W - ml - mr) * (n < 2 ? 0 : i / (n - 1));
+  const py = (v) => mt + (H - mt - mb) * (1 - (v - lo) / (hi - lo));
+  const cesta = (s) => s.map((v, i) => `${i ? "L" : "M"}${px(i).toFixed(1)} ${py(v).toFixed(1)}`).join(" ");
+
+  // Měsíční rysky — u dlouhých oken jen každý druhý měsíc, ať to není hřeben.
+  const rysky = [];
+  let prevM = "";
+  usek.forEach((r, i) => { const m = r.datum.slice(0, 7); if (m !== prevM) { prevM = m; rysky.push({ i, m }); } });
+  const krok = rysky.length > 9 ? 2 : 1;
+
+  const twr = (B.jednotka / A.jednotka - 1) * 100;
+  const ixPct = A.indexCena && B.indexCena ? (B.indexCena / A.indexCena - 1) * 100 : 0;
+  const tok = B.vlozeno - A.vlozeno;
+  const korun = B.hodnota - A.hodnota - tok;
+  const korunIx = (B.benchmark || 0) - (A.benchmark || 0) - tok;
+  const rozdil = korun - korunIx;
+  const dnu = Math.round((new Date(B.datum) - new Date(A.datum)) / 86400000);
+
+  const velke = optika === "Procenta" ? (twr >= 0 ? "+" : "−") + Math.abs(twr).toFixed(1).replace(".", ",") + " %"
+    : optika === "Koruny" ? (korun >= 0 ? "+" : "−") + fmtKc(Math.abs(Math.round(korun)))
+      : fmtKc(Math.round(B.hodnota));
+
+  // Věta mlčí, když je zpráva špatná. Jediná výjimka v appce je benchmark —
+  // ten Tom chtěl slyšet na obě strany, ale věcně a bez omluv.
+  const vetaOK = rozdil > 0 && korun > 0;
+
+  const pilulka = (txt, akt, klik, zlata) => (
+    <button key={txt} onClick={klik} style={{
+      fontSize: 11, padding: "5px 11px", borderRadius: 999, cursor: "pointer", fontFamily: "inherit",
+      border: `1px solid ${akt ? (zlata ? BP.sand : BP.indigoInk) : "rgba(0,0,0,.08)"}`,
+      background: akt ? (zlata ? BP.sand : BP.indigoInk) : "#fff",
+      color: akt ? (zlata ? "#2C2208" : "#fff") : "#5C5770",
+    }}>{txt}</button>
+  );
+
+  return (
+    <div style={{ marginTop: 6 }}>
+      <div style={{ display: "flex", flexDirection: "column", gap: 7, marginBottom: 16 }}>
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+          {["1T", "1M", "3M", "YTD", "1R", "Vše"].map(k => pilulka(k, !rok && okno === k, () => { setOkno(k); setRok(null); }, false))}
+        </div>
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+          <span style={bpLabel({ marginRight: 4 })}>kalendářní rok</span>
+          {["2025", "2026"].map(k => pilulka(k, rok === k, () => setRok(rok === k ? null : k), false))}
+        </div>
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+          {["Procenta", "Koruny", "Hodnota"].map(k => pilulka(k, optika === k, () => setOptika(k), true))}
+        </div>
+      </div>
+
+      {vetaOK && (
+        <div style={{ fontSize: 14.5, lineHeight: 1.45, color: "#3A3550", maxWidth: "62ch", marginBottom: 4 }}>
+          Tvoje peníze rostly rychleji než celý svět dohromady.
+        </div>
+      )}
+      <div style={{ ...bpHero(46), marginTop: 6 }}>
+        {velke}
+        {optika === "Procenta" && (
+          <span style={{
+            display: "inline-block", marginLeft: 12, verticalAlign: "middle", fontSize: 9,
+            letterSpacing: ".18em", textTransform: "uppercase", fontWeight: 700,
+            padding: "5px 10px", borderRadius: 999, background: "rgba(198,168,107,.18)", color: BP.sandDeep,
+          }}>TWR · říká se nahlas</span>
+        )}
+      </div>
+      <div style={{ fontSize: 11, color: "var(--mut)", marginTop: 9, display: "flex", gap: 8, flexWrap: "wrap" }}>
+        <span>Období <b style={{ color: "var(--txt)" }}>{rok || okno}</b></span><span style={{ opacity: .35 }}>·</span>
+        <span>Index <b style={{ color: "var(--txt)" }}>{(ixPct >= 0 ? "+" : "−") + Math.abs(ixPct).toFixed(1).replace(".", ",")} %</b></span><span style={{ opacity: .35 }}>·</span>
+        <span>Vydělalo <b style={{ color: "var(--txt)" }}>{(korun >= 0 ? "+" : "−") + fmtKc(Math.abs(Math.round(korun)))}</b></span>
+        {kurzor && <><span style={{ opacity: .35 }}>·</span><span>{kurzor}</span></>}
+      </div>
+
+      <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" style={{ display: "block", width: "100%", height: 250, marginTop: 8, overflow: "visible" }}
+        onMouseLeave={() => setKurzor(null)}
+        onMouseMove={(e) => {
+          const r = e.currentTarget.getBoundingClientRect();
+          const i = Math.max(0, Math.min(n - 1, Math.round(((e.clientX - r.left) / r.width) * (n - 1))));
+          const u = usek[i];
+          setKurzor(`${u.datum} · ${fmtKc(Math.round(u.hodnota))}`);
+        }}>
+        {optika !== "Hodnota" && lo < 0 && hi > 0 && (
+          <line x1={ml} y1={py(0)} x2={W - mr} y2={py(0)} stroke="rgba(0,0,0,.14)" strokeWidth="1" />
+        )}
+        {rysky.filter((_, k) => k % krok === 0).map(r => (
+          <g key={r.i}>
+            <line x1={px(r.i)} y1={mt} x2={px(r.i)} y2={H - mb} stroke="rgba(0,0,0,.045)" strokeWidth="1" />
+            <text x={px(r.i) + 4} y={H - 7} fontSize="9" fill="#A8A4B5" letterSpacing=".08em">{["I","II","III","IV","V","VI","VII","VIII","IX","X","XI","XII"][+r.m.slice(5, 7) - 1]}</text>
+          </g>
+        ))}
+        <path d={`${cesta(s1)} L ${px(n - 1)} ${H - mb} L ${px(0)} ${H - mb} Z`} fill="rgba(142,130,224,.10)" stroke="none" />
+        {s3.length > 0 && <path d={cesta(s3)} fill="none" stroke={BP.indigoDeep} strokeWidth="1.6" strokeOpacity=".55" />}
+        <path d={cesta(s2)} fill="none" stroke={BP.sand} strokeWidth="2" strokeDasharray="5 4" />
+        <path d={cesta(s1)} fill="none" stroke="#8E82E0" strokeWidth="2.6" strokeLinejoin="round" />
+        <circle cx={px(n - 1)} cy={py(s1[n - 1])} r="4" fill="#8E82E0" />
+      </svg>
+
+      <div style={{ display: "flex", gap: 16, flexWrap: "wrap", fontSize: 10.5, color: "#5C5770", marginTop: 10, paddingTop: 10, borderTop: "1px solid rgba(0,0,0,.06)" }}>
+        <span><i style={{ display: "inline-block", width: 15, borderTop: "2.5px solid #8E82E0", verticalAlign: "middle", marginRight: 6 }} />{popis1}</span>
+        <span><i style={{ display: "inline-block", width: 15, borderTop: `2.5px dashed ${BP.sand}`, verticalAlign: "middle", marginRight: 6 }} />{popis2}</span>
+        {popis3 && <span><i style={{ display: "inline-block", width: 15, borderTop: `2.5px solid ${BP.indigoDeep}`, opacity: .6, verticalAlign: "middle", marginRight: 6 }} />{popis3}</span>}
+      </div>
+
+      <div style={{
+        display: "inline-block", fontSize: 11.5, padding: "6px 12px", borderRadius: 999,
+        border: "1px solid rgba(0,0,0,.06)", marginTop: 14, color: BP.indigoInk,
+      }}>
+        <span style={{ display: "inline-block", width: 6, height: 6, borderRadius: "50%", background: BP.sand, marginRight: 7, verticalAlign: "middle" }} />
+        {rozdil >= 0 ? <>Porážíš index o <b>{fmtKc(Math.round(rozdil))}</b></> : <>Za indexem o <b>{fmtKc(Math.round(-rozdil))}</b></>}
+      </div>
+
+      <div style={{ fontSize: 11, color: "var(--mut)", marginTop: 12, lineHeight: 1.5 }}>
+        {dnu < 365
+          ? "Období kratší než rok — neannualizuje se."
+          : "Srovnává se se světovým indexem FTSE All-World, total return, přepočteným do korun."}
+        {serie && serie.bezCeny && serie.bezCeny.length > 0 && (
+          <> Tituly {serie.bezCeny.join(", ")} už na burze nejsou — po dobu držení jsou vedené v pořizovací ceně.</>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function AkcieModule({ xtbTranches = [], onTrancheSave, onTrancheDelete, xtbTitles = [], onTitleSave, onTitleDelete, xtbClosedTrades = [], xtbPositions = [], xtbCashOps = [], xtbSerie = null, serieState = "idle", onNactiHistorii, onPositionSave, onPositionDelete, market = null, marketState = "idle", onRefreshPrices }) {
   // Portfolio — jediný zdroj pravdy, žádný výpočet inline v komponentě.
   const pf = useMemo(
     () => computeXtbPortfolio(xtbPositions, xtbClosedTrades, xtbTranches, market, xtbCashOps),
@@ -7803,6 +8136,13 @@ function AkcieModule({ xtbTranches = [], onTrancheSave, onTrancheDelete, xtbTitl
           )}
         </div>
       )}
+
+      {/* ── GRAF PROTI SVĚTOVÉMU INDEXU ── */}
+      <div style={{ position: "relative", background: "#fff", border: "1px solid var(--line)", borderRadius: BP.r, padding: "22px 24px", boxShadow: BP.shadow }}>
+        <BpCorners />
+        <div style={bpLabel({ marginBottom: 4 })}>Portfolio proti světovému indexu</div>
+        <AkcieGraf serie={xtbSerie} stav={serieState} onNacti={() => onNactiHistorii && onNactiHistorii(pf.tickery)} />
+      </div>
 
       {/* ── TITULY A TRANŠE ── */}
       {true && (
@@ -15470,6 +15810,21 @@ export default function MauxCRM() {
   // Živé ceny + kurzy. Tahají se při otevření listu Akcie a na Obnovit — jinde nikdy.
   const [xtbMarket, setXtbMarket] = useState(null);
   const [xtbMarketState, setXtbMarketState] = useState("idle");
+  const [xtbHist, setXtbHist] = useState(null);
+  const [xtbSerieState, setXtbSerieState] = useState("idle");
+  // Historie pro graf. Stahuje se spolu s cenami (otevření listu + Obnovit) a drží
+  // se den v localStorage — na pozadí neběží nic.
+  const nactiXtbHistorii = async (tickery) => {
+    if (!tickery || !tickery.length) return;
+    setXtbSerieState("loading");
+    try {
+      setXtbHist(await fetchXtbHistorie(tickery, "2025-04-01"));
+      setXtbSerieState("ok");
+    } catch (e) {
+      console.error("historie:", e);
+      setXtbSerieState("error");
+    }
+  };
   const nactiXtbCeny = async (tickery) => {
     if (!tickery || !tickery.length) return;
     setXtbMarketState("loading");
@@ -15481,7 +15836,12 @@ export default function MauxCRM() {
       console.error("ceny:", e);
       setXtbMarketState("error");
     }
+    nactiXtbHistorii(tickery);
   };
+  const xtbSerie = useMemo(
+    () => computeXtbSerie(xtbPositions, xtbClosedTrades, xtbTranches, xtbCashOps, xtbHist),
+    [xtbPositions, xtbClosedTrades, xtbTranches, xtbCashOps, xtbHist]
+  );
   const [escrows, setEscrows] = useState([]);
 
   // ── Oslava milníku ──────────────────────────────────────────────────────────
@@ -16380,6 +16740,9 @@ export default function MauxCRM() {
               xtbClosedTrades={xtbClosedTrades}
               xtbPositions={xtbPositions}
               xtbCashOps={xtbCashOps}
+              xtbSerie={xtbSerie}
+              serieState={xtbSerieState}
+              onNactiHistorii={nactiXtbHistorii}
               onPositionSave={handleXtbPositionSave}
               onPositionDelete={handleXtbPositionDelete}
               market={xtbMarket}
