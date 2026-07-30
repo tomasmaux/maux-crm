@@ -105,6 +105,8 @@ function saveZapisnicekOpen(v) {
 }
 
 const fmtKc = (n) => maskNum(new Intl.NumberFormat("cs-CZ").format(Math.round(n || 0))) + " Kč";
+// Znaménko se nikdy nelepí natvrdo před hodnotu — vždycky přes tohle.
+const fmtSigned = (v) => v === 0 ? "0 Kč" : v > 0 ? `+${fmtKc(v)}` : `−${fmtKc(Math.abs(v))}`;
 const fmtDate = (d) => d ? new Date(d).toLocaleDateString("cs-CZ", { day: "numeric", month: "numeric", year: "numeric" }) : "—";
 const uid = () => "id_" + Math.random().toString(36).slice(2, 10);
 const today = () => new Date().toISOString().slice(0, 10);
@@ -540,6 +542,151 @@ async function fetchXtbClosedTrades() {
   if (error) throw error;
   return data || [];
 }
+// ── POZICE (nákupní tranše) — surová fakta z XTB, jeden řádek = jeden nákup ──
+// Tabulka drží záměrně jen to, co se stalo (kdy, kolik kusů, za kolik, jaký kurz).
+// Kolik čeho ještě držím, se dopočítává FIFO v computeXtbPortfolio — nikdy se to neukládá,
+// aby se evidence nemohla rozejít se skutečností.
+async function fetchXtbPositions() {
+  const { data, error } = await supabase.from("xtb_positions").select("*").order("trade_date");
+  if (error) throw error;
+  return data || [];
+}
+async function upsertXtbPosition(p) {
+  const { error } = await supabase.from("xtb_positions").upsert(p);
+  if (error) throw error;
+}
+async function deleteXtbPosition(id) {
+  const { error } = await supabase.from("xtb_positions").delete().eq("id", id);
+  if (error) throw error;
+}
+// Živé ceny (Yahoo) + kurzy (ČNB) přes Edge Function "ceny". Volá se při otevření
+// listu Akcie a na tlačítko Obnovit. Nikde jinde a nikdy na pozadí.
+async function fetchXtbCeny(tickery) {
+  const uniq = Array.from(new Set((tickery || []).filter(Boolean).map(t => String(t).toUpperCase())));
+  if (!uniq.length) return { ceny: [], kurzy: { CZK: 1 }, chyby: [] };
+  const { data, error } = await supabase.functions.invoke("ceny", { body: { tickery: uniq } });
+  if (error) throw error;
+  return data || { ceny: [], kurzy: { CZK: 1 }, chyby: [] };
+}
+
+/* ── JEDINÝ ZDROJ PRAVDY PRO PORTFOLIO ──────────────────────────────────────
+   Nikde jinde v appce se hodnota akcií nepočítá. Čtyři pravidla, na kterých to stojí:
+   1) Vložený kapitál mění JEN převod (vklad/výběr). Nákup ani prodej s ním nedělá nic.
+   2) Hodnota účtu = otevřené pozice + hotovost. Po prodeji se hodnota nezmění,
+      peníze jen přejdou z pozice do hotovosti — proto graf nedostane schod.
+   3) Nákupy se drží lot po lotu, prodeje se odečítají FIFO (od nejstaršího),
+      protože časový test běží od data konkrétního nákupu.
+   4) Kurz je zamrazený ke dni obchodu; dnešní kurz se používá jen na dnešní ocenění.  */
+function computeXtbPortfolio(positions = [], closedTrades = [], tranches = [], market = null) {
+  const kurzy = (market && market.kurzy) || { CZK: 1 };
+  const ceny = {};
+  for (const c of (market && market.ceny) || []) {
+    if (c && c.ticker && typeof c.cena === "number") ceny[String(c.ticker).toUpperCase()] = c;
+  }
+  const fx = (m) => (m && kurzy[m] != null ? kurzy[m] : (m === "CZK" ? 1 : null));
+
+  const vlozeno = tranches.reduce((s, t) => s + (t.type === "výběr" ? -(t.amount || 0) : (t.amount || 0)), 0);
+  const nakupyCzk = positions.reduce((s, p) => s + (Number(p.amount_czk) || 0), 0);
+  const realizovano = closedTrades.reduce((s, t) => s + (Number(t.profit) || 0), 0);
+
+  // Kolik kusů každého titulu už je prodáno
+  const prodano = {};
+  for (const t of closedTrades) {
+    const s = String(t.symbol || "").toUpperCase();
+    prodano[s] = (prodano[s] || 0) + (Number(t.volume) || 0);
+  }
+
+  // FIFO — od nejstaršího nákupu ubíráme prodané kusy
+  const lots = [];
+  let prodanoCzk = 0;
+  const podleTitulu = {};
+  for (const p of positions) {
+    const s = String(p.symbol || "").toUpperCase();
+    (podleTitulu[s] = podleTitulu[s] || []).push(p);
+  }
+  for (const s of Object.keys(podleTitulu)) {
+    const rada = podleTitulu[s].slice().sort((a, b) => String(a.trade_date).localeCompare(String(b.trade_date)));
+    let zbyvaProdat = prodano[s] || 0;
+    for (const p of rada) {
+      const ks = Number(p.volume) || 0;
+      const czk = Number(p.amount_czk) || 0;
+      const ubrat = Math.min(zbyvaProdat, ks);
+      zbyvaProdat -= ubrat;
+      if (ks > 0) prodanoCzk += czk * (ubrat / ks);
+      const zbytek = Math.round((ks - ubrat) * 1e6) / 1e6;
+      if (zbytek > 1e-6) {
+        lots.push({
+          id: p.id, symbol: s, nazev: p.instrument_name || s, datum: p.trade_date,
+          ks: zbytek, cena: Number(p.price) || 0, mena: p.currency || "USD",
+          kurzNakup: Number(p.fx_rate) || null,
+          porizovaci: ks > 0 ? czk * (zbytek / ks) : 0,
+        });
+      }
+    }
+  }
+
+  // Hotovost = co jsi vložil, mínus co jsi utratil za nákupy, plus co ti přišlo z prodejů.
+  // (Dividendy a poplatky zatím v evidenci nejsou — o ně se to může lišit o stokoruny,
+  //  proto tlačítko Sesouhlasit.)
+  const hotovost = vlozeno - nakupyCzk + prodanoCzk + realizovano;
+
+  const DEN = 86400000;
+  const dnes = new Date();
+  let trzni = 0, porizovaciOtevrene = 0;
+  const chybiCena = [];
+  for (const l of lots) {
+    porizovaciOtevrene += l.porizovaci;
+    const q = ceny[l.symbol];
+    const k = q ? fx(q.mena) : null;
+    if (q && k != null) {
+      l.aktualni = q.cena;
+      l.menaTrhu = q.mena;
+      l.kurzDnes = k;
+      l.hodnota = l.ks * q.cena * k;
+      l.zisk = l.hodnota - l.porizovaci;
+    } else {
+      l.hodnota = l.porizovaci;
+      l.zisk = 0;
+      l.bezCeny = true;
+      if (!chybiCena.includes(l.symbol)) chybiCena.push(l.symbol);
+    }
+    trzni += l.hodnota;
+    const drzeno = l.datum ? Math.floor((dnes - new Date(l.datum + "T00:00:00")) / DEN) : 0;
+    l.dnyDrzeni = drzeno;
+    l.testSplnen = drzeno >= 1095;
+    l.dnyDoTestu = Math.max(0, 1095 - drzeno);
+  }
+
+  const tituly = {};
+  for (const l of lots) {
+    const t = tituly[l.symbol] || (tituly[l.symbol] = {
+      symbol: l.symbol, nazev: l.nazev, ks: 0, porizovaci: 0, hodnota: 0, zisk: 0,
+      mena: l.mena, aktualni: l.aktualni ?? null, lots: [], bezCeny: false,
+    });
+    t.ks += l.ks; t.porizovaci += l.porizovaci; t.hodnota += l.hodnota; t.zisk += l.zisk;
+    if (l.aktualni != null) t.aktualni = l.aktualni;
+    if (l.bezCeny) t.bezCeny = true;
+    t.lots.push(l);
+  }
+  const titulySeznam = Object.values(tituly).sort((a, b) => b.hodnota - a.hodnota);
+  for (const t of titulySeznam) {
+    t.podil = trzni > 0 ? t.hodnota / trzni : 0;
+    t.lots.sort((a, b) => String(a.datum).localeCompare(String(b.datum)));
+  }
+
+  const celkem = trzni + hotovost;
+  const nerealizovano = trzni - porizovaciOtevrene;
+  return {
+    vlozeno, hotovost, trzni, celkem,
+    porizovaciOtevrene, nerealizovano, realizovano,
+    vydelaly: celkem - vlozeno,
+    vydelalyPct: vlozeno > 0 ? (celkem - vlozeno) / vlozeno : 0,
+    lots, tituly: titulySeznam, chybiCena,
+    maCeny: Object.keys(ceny).length > 0,
+    tickery: Array.from(new Set(lots.map(l => l.symbol))),
+  };
+}
+
 // Zapíše dnešní equity, jen pokud za dnešek ještě žádný snapshot neexistuje —
 // volá se z AkcieModule při každém otevření, tak roste historie pro graf v čase.
 async function ensureTodaySnapshot(equity, balance, currency) {
@@ -7316,7 +7463,27 @@ function XtbPanel({ xtbTranches = [], onNav }) {
    přístup k API (ws.xtb.com vyřazeno 14.3.2025, náhradní ws.xapi.pro slouží jen klientům
    X Open Hub, ne běžným XTB účtům, viz chyba "account from a different platform").
    Nezbylo nic, co by šlo automaticky stahovat — modul vede jen ruční ledger tranší. */
-function AkcieModule({ xtbTranches = [], onTrancheSave, onTrancheDelete, xtbTitles = [], onTitleSave, onTitleDelete, xtbClosedTrades = [] }) {
+function AkcieModule({ xtbTranches = [], onTrancheSave, onTrancheDelete, xtbTitles = [], onTitleSave, onTitleDelete, xtbClosedTrades = [], xtbPositions = [], market = null, marketState = "idle", onRefreshPrices }) {
+  // Portfolio — jediný zdroj pravdy, žádný výpočet inline v komponentě.
+  const pf = useMemo(
+    () => computeXtbPortfolio(xtbPositions, xtbClosedTrades, xtbTranches, market),
+    [xtbPositions, xtbClosedTrades, xtbTranches, market]
+  );
+  // Při otevření listu stáhni aktuální ceny. Jednou — dál jen na Obnovit.
+  const cenyTazeny = useRef(false);
+  useEffect(() => {
+    if (cenyTazeny.current) return;
+    if (!pf.tickery.length) return;
+    cenyTazeny.current = true;
+    onRefreshPrices && onRefreshPrices(pf.tickery);
+  }, [pf.tickery.join(","), onRefreshPrices]);
+  // Jakmile máme ceny, ulož dnešní hodnotu — z ní pak žije graf a Přehled.
+  useEffect(() => {
+    if (marketState !== "ok" || !pf.maCeny || !pf.celkem) return;
+    ensureTodaySnapshot(Math.round(pf.celkem), Math.round(pf.hotovost), "CZK").catch(() => {});
+  }, [marketState, pf.celkem, pf.hotovost, pf.maCeny]);
+
+  const [openSym, setOpenSym] = useState(null);
   const [addForm, setAddForm] = useState(false);
   const [newTranche, setNewTranche] = useState({ date: today(), type: "vklad", amount: "", symbol: "", note: "" });
   const [savingTranche, setSavingTranche] = useState(false);
@@ -7480,6 +7647,148 @@ function AkcieModule({ xtbTranches = [], onTrancheSave, onTrancheDelete, xtbTitl
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+
+      {/* ── ŽIVÉ PORTFOLIO — vložil jsi → máš teď → vydělaly ti peníze ──────────
+          Dominantní je rozdíl, ne hodnota. Ceny se tahají při otevření listu. */}
+      {pf.lots.length > 0 && (
+        <div style={{ position: "relative", background: "#fff", border: "1px solid var(--line)", borderRadius: BP.r, padding: "24px 26px" }}>
+          <BpCorners />
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+            <div style={bpLabel()}>Portfolio · živé ceny</div>
+            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              <span style={{ fontSize: 10.5, color: "var(--mut)" }}>
+                {marketState === "loading" ? "stahuji ceny…"
+                  : marketState === "error" ? "ceny se nepodařilo načíst"
+                  : market && market.kurzy_platnost ? `kurzy ČNB ${market.kurzy_platnost}`
+                  : "ceny zatím nenačteny"}
+              </span>
+              <button
+                onClick={() => onRefreshPrices && onRefreshPrices(pf.tickery)}
+                disabled={marketState === "loading"}
+                style={{ fontSize: 11, padding: "5px 12px", borderRadius: 9, border: "1px solid rgba(28,10,99,.16)", background: "#fff", color: BP.indigoDeep, cursor: marketState === "loading" ? "default" : "pointer", fontFamily: "inherit" }}>
+                Obnovit
+              </button>
+            </div>
+          </div>
+
+          <div style={{ display: "flex", alignItems: "flex-end", gap: 30, flexWrap: "wrap", marginTop: 16 }}>
+            <div>
+              <div style={bpLabel({ marginBottom: 6 })}>Vložil jsi</div>
+              <div style={bpHero(26, "var(--txt)")}>{fmtKc(Math.round(pf.vlozeno))}</div>
+            </div>
+            <div style={{ fontSize: 19, color: "rgba(28,10,99,.2)", paddingBottom: 5 }}>→</div>
+            <div>
+              <div style={bpLabel({ marginBottom: 6 })}>Máš tam teď</div>
+              <div style={bpHero(26, "var(--txt)")}>{fmtKc(Math.round(pf.celkem))}</div>
+            </div>
+            <div style={{ paddingLeft: 28, borderLeft: "1px solid rgba(28,10,99,.1)" }}>
+              <div style={bpLabel({ marginBottom: 4 })}>Vydělaly ti peníze</div>
+              <div style={bpHero(42, pf.vydelaly >= 0 ? BP.indigoDeep : "#DC2626")}>
+                {fmtSigned(Math.round(pf.vydelaly))}
+              </div>
+            </div>
+          </div>
+
+          {pf.vlozeno > 0 && pf.vydelaly > 0 && (
+            <div style={{ marginTop: 20 }}>
+              <div style={{ display: "flex", height: 10, borderRadius: 5, overflow: "hidden", gap: 2 }}>
+                <div style={{ flex: pf.vlozeno, background: BP.indigoDeep }} />
+                <div style={{ flex: pf.vydelaly, background: BP.sand }} />
+              </div>
+              <div style={{ display: "flex", gap: 18, flexWrap: "wrap", fontSize: 11, color: "var(--mut)", marginTop: 9 }}>
+                <span><span style={{ display: "inline-block", width: 6, height: 6, borderRadius: "50%", background: BP.indigoDeep, marginRight: 6 }} />Tvoje peníze</span>
+                <span><span style={{ display: "inline-block", width: 6, height: 6, borderRadius: "50%", background: BP.sand, marginRight: 6 }} />Výnos {(pf.vydelalyPct * 100).toFixed(1).replace(".", ",")} %</span>
+              </div>
+            </div>
+          )}
+
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 16, marginTop: 20, paddingTop: 16, borderTop: "1px solid rgba(28,10,99,.07)" }}>
+            <div>
+              <div style={bpLabel({ marginBottom: 5 })}>Už realizováno</div>
+              <div style={bpHero(19, "var(--txt)")}>{fmtKc(Math.round(pf.realizovano))}</div>
+              <div style={{ fontSize: 10, color: "var(--mut)", marginTop: 3 }}>prodáno a zaúčtováno</div>
+            </div>
+            <div>
+              <div style={bpLabel({ marginBottom: 5 })}>Zatím na papíře</div>
+              <div style={bpHero(19, "var(--txt)")}>{fmtKc(Math.round(pf.nerealizovano))}</div>
+              <div style={{ fontSize: 10, color: "var(--mut)", marginTop: 3 }}>v otevřených pozicích</div>
+            </div>
+            <div>
+              <div style={bpLabel({ marginBottom: 5 })}>Hotovost</div>
+              <div style={bpHero(19, "var(--txt)")}>{fmtKc(Math.round(pf.hotovost))}</div>
+              <div style={{ fontSize: 10, color: "var(--mut)", marginTop: 3 }}>volné na účtu</div>
+            </div>
+            <div>
+              <div style={bpLabel({ marginBottom: 5 })}>Otevřené pozice</div>
+              <div style={bpHero(19, "var(--txt)")}>{fmtKc(Math.round(pf.trzni))}</div>
+              <div style={{ fontSize: 10, color: "var(--mut)", marginTop: 3 }}>{pf.tituly.length} titulů · {pf.lots.length} tranší</div>
+            </div>
+          </div>
+
+          {pf.chybiCena.length > 0 && (
+            <div style={{ marginTop: 14, fontSize: 11, color: BP.sandDeep }}>
+              U těchto titulů se nepodařilo najít cenu, počítají se pořizovací cenou: {pf.chybiCena.join(", ")}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── TITULY A TRANŠE ── */}
+      {pf.tituly.length > 0 && (
+        <div style={{ position: "relative", background: "#fff", border: "1px solid var(--line)", borderRadius: BP.r, padding: "22px 24px" }}>
+          <BpCorners />
+          <div style={bpLabel()}>Co držíš · {pf.lots.length} nákupních tranší</div>
+          <div style={{ marginTop: 12 }}>
+            {pf.tituly.map(t => (
+              <div key={t.symbol}>
+                <div
+                  onClick={() => setOpenSym(s => s === t.symbol ? null : t.symbol)}
+                  style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, padding: "11px 0", borderTop: "1px solid rgba(28,10,99,.06)", cursor: "pointer" }}>
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ fontSize: 13, color: "var(--ink)" }}>
+                      {t.symbol}
+                      <span style={{ fontSize: 10.5, color: "var(--mut)", marginLeft: 8 }}>{t.nazev}</span>
+                    </div>
+                    <div style={{ fontSize: 10.5, color: "var(--mut)", marginTop: 2 }}>
+                      {t.ks.toLocaleString("cs-CZ", { maximumFractionDigits: 4 })} ks
+                      {t.aktualni != null && <> · {t.aktualni.toLocaleString("cs-CZ", { maximumFractionDigits: 2 })} {t.mena}</>}
+                      {" · "}{t.lots.length} {t.lots.length === 1 ? "tranše" : t.lots.length < 5 ? "tranše" : "tranší"}
+                      {" "}{openSym === t.symbol ? "▲" : "▾"}
+                    </div>
+                  </div>
+                  <div style={{ textAlign: "right", flexShrink: 0 }}>
+                    <div className="maux-num" style={{ fontSize: 14, color: "var(--ink)" }}>{fmtKc(Math.round(t.hodnota))}</div>
+                    <div style={{ fontSize: 11, color: t.zisk >= 0 ? BP.indigoDeep : "#DC2626", marginTop: 2 }}>
+                      {fmtSigned(Math.round(t.zisk))} · {Math.round(t.podil * 100)} %
+                    </div>
+                  </div>
+                </div>
+                {openSym === t.symbol && (
+                  <div style={{ padding: "4px 0 12px 0" }}>
+                    {t.lots.map(l => (
+                      <div key={l.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, padding: "7px 0 7px 14px", borderTop: "1px solid rgba(28,10,99,.04)" }}>
+                        <div style={{ fontSize: 11.5, color: "var(--mut)" }}>
+                          {l.datum} · {l.ks.toLocaleString("cs-CZ", { maximumFractionDigits: 4 })} ks @ {l.cena.toLocaleString("cs-CZ", { maximumFractionDigits: 2 })} {l.mena}
+                          {l.kurzNakup ? <span style={{ opacity: .7 }}> · kurz {l.kurzNakup.toLocaleString("cs-CZ", { maximumFractionDigits: 3 })}</span> : null}
+                        </div>
+                        <div style={{ display: "flex", alignItems: "center", gap: 14, flexShrink: 0 }}>
+                          <span style={{ fontSize: 10.5, color: l.testSplnen ? BP.sandDeep : "var(--mut)" }}>
+                            {l.testSplnen ? "časový test splněn" : `do testu ${Math.ceil(l.dnyDoTestu / 30)} měs.`}
+                          </span>
+                          <span className="maux-num" style={{ fontSize: 12, color: l.zisk >= 0 ? BP.indigoDeep : "#DC2626", minWidth: 78, textAlign: "right" }}>
+                            {fmtSigned(Math.round(l.zisk))}
+                          </span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* SOUHRN */}
       <div style={{ background: "#fff", border: "1px solid var(--line)", borderRadius: 14, overflow: "hidden" }}>
         <div style={{ padding: "18px 24px 12px", display: "flex", alignItems: "center", gap: 6 }}>
@@ -9803,6 +10112,13 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
                 }}>
                   {positiveBalance?"+":"−"}{fmtKc(Math.abs(nextMonthBalance))}
                 </div>
+                {/* Věta závěru (Tom 30.7.2026): panel má říct odpověď, ne stav. Mlčí, když je
+                    bilance záporná — tam ať mluví holé číslo. */}
+                {positiveBalance && (
+                  <div style={{fontSize:12.5,lineHeight:1.5,color:"var(--ink)",marginTop:9,opacity:.85}}>
+                    Tolik ti příští měsíc zbyde po nákladech i odvodech.
+                  </div>
+                )}
               </div>
 
               <div style={{flex:1,display:"flex",flexDirection:"column",justifyContent:"flex-start",gap:13,padding:"20px 24px",overflowY:"auto"}}>
@@ -10012,6 +10328,12 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
                           <span style={{fontSize:10.5,color:"#9ca3af"}}>{fmtKc(sTotalEar)} vázáno</span>
                           {sFirmaRez > 0 && <span style={{fontSize:10.5,color:"#10b981",fontWeight:600}}>+ {fmtKc(sFirmaRez)} volné</span>}
                         </div>
+                        {/* Věta závěru — mlčí, když nezbývá nic volného. */}
+                        {sFirmaRez > 0 && (
+                          <div style={{fontSize:12,lineHeight:1.5,color:"var(--ink)",marginTop:9,opacity:.8}}>
+                            Sáhnout můžeš na {fmtKc(sFirmaRez)}. Zbytek už patří státu.
+                          </div>
+                        )}
                       </div>
 
                       {/* Allocation pills */}
@@ -15096,6 +15418,22 @@ export default function MauxCRM() {
   const [xtbSnapshots, setXtbSnapshots] = useState([]);
   const [xtbTitles, setXtbTitles] = useState([]);
   const [xtbClosedTrades, setXtbClosedTrades] = useState([]);
+  const [xtbPositions, setXtbPositions] = useState([]);
+  // Živé ceny + kurzy. Tahají se při otevření listu Akcie a na Obnovit — jinde nikdy.
+  const [xtbMarket, setXtbMarket] = useState(null);
+  const [xtbMarketState, setXtbMarketState] = useState("idle");
+  const nactiXtbCeny = async (tickery) => {
+    if (!tickery || !tickery.length) return;
+    setXtbMarketState("loading");
+    try {
+      const d = await fetchXtbCeny(tickery);
+      setXtbMarket(d);
+      setXtbMarketState("ok");
+    } catch (e) {
+      console.error("ceny:", e);
+      setXtbMarketState("error");
+    }
+  };
   const [escrows, setEscrows] = useState([]);
 
   // ── Oslava milníku ──────────────────────────────────────────────────────────
@@ -15234,8 +15572,9 @@ export default function MauxCRM() {
       fetchXtbSnapshots().catch(e => { console.error("xtb snapshots:", e); return []; }),
       fetchXtbTitles().catch(e => { console.error("xtb titles:", e); return []; }),
       fetchXtbClosedTrades().catch(e => { console.error("xtb closed trades:", e); return []; }),
+      fetchXtbPositions().catch(e => { console.error("xtb positions:", e); return []; }),
     ])
-      .then(async ([c, i, w, f, dpfo, tax, checks, loans, esc, aLogs, aAtt, aAvail, xtbTr, xtbSnap, xtbTit, xtbCt]) => {
+      .then(async ([c, i, w, f, dpfo, tax, checks, loans, esc, aLogs, aAtt, aAvail, xtbTr, xtbSnap, xtbTit, xtbCt, xtbPos]) => {
         setClients(c); setInvoices(i); setWorkEntries(w); setFinanceItems(f);
         setDpfoMonths(dpfo);
         setTaxRecords(tax);
@@ -15246,6 +15585,7 @@ export default function MauxCRM() {
         setXtbSnapshots(xtbSnap || []);
         setXtbTitles(xtbTit || []);
         setXtbClosedTrades(xtbCt || []);
+        setXtbPositions(xtbPos || []);
         setAssistantLogs(aLogs || []);
         setAssistantAttendance(aAtt || []);
         setAssistantAvailability(aAvail || null);
@@ -15715,6 +16055,18 @@ export default function MauxCRM() {
           const _val = { color: "var(--txt)", fontWeight: 600 };
           const _scale = Math.max(_monthAmt, _goal, 1);
 
+          // Stín minulého měsíce (Tom 30.7.2026, varianta B): hero drží kalendářní měsíc, ale
+          // nesmí být fotka dneška — potřebuje kontext, kam se dostal naposledy. Bere se poslední
+          // UZAVŘENÝ měsíc ze žebříku, žádná nová definice čísla.
+          const _prevRow = (ladder.rows || []).slice(-1)[0] || null;
+          const _prevTot = _prevRow ? _prevRow.totalM : 0;
+          const _closedMax = (ladder.rows || []).length ? Math.max(...(ladder.rows || []).map(r => r.totalM)) : 0;
+          // Věta MLČÍ, když je zpráva špatná (Tom: "mlčí"). Pod metou zůstane holé číslo + bar.
+          const _sentence = _rem > 0 ? null
+            : (_closedMax > 0 && _monthAmt >= _closedMax)
+              ? `Nejsilnější měsíc za posledních ${(ladder.rows || []).length + 1}. Metu jsi překročil o ${_fmt(_monthAmt - _goal)}.`
+              : `Metu jsi překročil o ${_fmt(_monthAmt - _goal)}.`;
+
           return (
             <div style={{padding:"18px 40px 15px",borderBottom:"1px solid rgba(0,0,0,.06)",background:"#fff"}}>
               <div style={{display:"flex",alignItems:"flex-start",justifyContent:"space-between",gap:36,flexWrap:"wrap"}}>
@@ -15725,13 +16077,17 @@ export default function MauxCRM() {
                 <div style={{flex:"1 1 360px",minWidth:290}}>
                   <div style={bpLabel({ marginBottom: 7 })}>Tento měsíc</div>
                   <div style={{display:"flex",alignItems:"baseline",gap:12,flexWrap:"wrap"}}>
-                    <span style={bpHero(34, "var(--txt)")}>{_fmt(_monthAmt)}</span>
-                    {_goal > 0 && (
-                      <span style={{background:_rem===0?"rgba(91,82,240,.10)":"rgba(0,0,0,.04)",color:_rem===0?BP.indigoDeep:"var(--mut)",fontSize:10.5,padding:"3px 10px",borderRadius:99,whiteSpace:"nowrap",letterSpacing:".01em"}}>
-                        {_rem === 0 ? `cíl splněn · +${_fmt(_monthAmt - _goal)}` : `zbývá ${_fmt(_rem)}`}
+                    <span style={bpHero(46, "var(--txt)")}>{_fmt(_monthAmt)}</span>
+                    {_goal > 0 && _rem > 0 && (
+                      <span style={{background:"rgba(0,0,0,.04)",color:"var(--mut)",fontSize:10.5,padding:"3px 10px",borderRadius:99,whiteSpace:"nowrap",letterSpacing:".01em"}}>
+                        zbývá {_fmt(_rem)}
                       </span>
                     )}
                   </div>
+                  {/* Věta závěru místo holého stavu. Mlčí, když je měsíc pod metou. */}
+                  {_sentence && (
+                    <div style={{fontSize:13,lineHeight:1.5,color:"var(--txt)",marginTop:9,maxWidth:360}}>{_sentence}</div>
+                  )}
 
                   {/* Vlasovy bar. Skala jde az na dosazenou hodnotu, takze presah nad cil je videt;
                       zlata ryska drzi pozici cile. Zadna zelena — jedina barva je indigo + zlata. */}
@@ -15754,6 +16110,12 @@ export default function MauxCRM() {
                     )}
                     <span style={_sep}>·</span>
                     <span title="Meta se počítá sama: nejlepší z 12 měsíců × 1,10, zaokr. na 5 000, min. 200 000">Meta <b style={_val}>{_fmt(_goal)}</b></span>
+                    {_prevTot > 0 && (
+                      <>
+                        <span style={_sep}>·</span>
+                        <span>Minulý měsíc <b style={_val}>{_fmt(_prevTot)}</b></span>
+                      </>
+                    )}
                     <span style={_sep}>·</span>
                     <span onClick={() => {
                         navTo("dashboard");
@@ -15775,6 +16137,11 @@ export default function MauxCRM() {
                   <div style={{textAlign:"right",flexShrink:0,marginTop:4}}>
                     <svg width={svgW} height={chartH + 8} style={{display:"block",overflow:"visible"}}>
                       {yGoal !== null && <line x1={-3} y1={yGoal} x2={svgW + 3} y2={yGoal} stroke="rgba(198,168,107,.6)" strokeWidth="1" strokeDasharray="3,3" />}
+                      {_prevTot > 0 && (
+                        <line x1={-3} y1={chartH - Math.min(1, _prevTot / maxTotal) * chartH + 4} x2={svgW + 3}
+                          y2={chartH - Math.min(1, _prevTot / maxTotal) * chartH + 4}
+                          stroke="rgba(91,82,240,.30)" strokeWidth="1" strokeDasharray="2,4" />
+                      )}
                       {sparkRows.map((r, idx) => {
                         const h = Math.max(2, (r.totalM / maxTotal) * chartH);
                         const x = idx * (barW + gap);
@@ -15791,7 +16158,7 @@ export default function MauxCRM() {
                       })}
                     </svg>
                     <div style={{fontSize:9,letterSpacing:".14em",color:"var(--mut)",textTransform:"uppercase",marginTop:8,opacity:.8,whiteSpace:"nowrap"}}>
-                      {sparkRows.length} měsíců · max {_kc(_peak)}
+                      {sparkRows.length} měsíců · zlatá = meta · tečkovaná = minulý měsíc
                     </div>
                   </div>
                 )}
@@ -15932,7 +16299,8 @@ export default function MauxCRM() {
             />
           )}
 
-          {/* AKCIE — ruční evidence vkladů/výběrů + historie titulů + historie reálných obchodů (živé XTB API zrušeno) */}
+          {/* AKCIE — evidence pozic, vkladů a uzavřených obchodů. Ceny a kurzy se tahají
+              živě přes Edge Function "ceny" při otevření listu a na tlačítko Obnovit. */}
           {mod === "akcie" && (
             <AkcieModule
               xtbTranches={xtbTranches}
@@ -15942,6 +16310,10 @@ export default function MauxCRM() {
               onTitleSave={handleXtbTitleSave}
               onTitleDelete={handleXtbTitleDelete}
               xtbClosedTrades={xtbClosedTrades}
+              xtbPositions={xtbPositions}
+              market={xtbMarket}
+              marketState={xtbMarketState}
+              onRefreshPrices={nactiXtbCeny}
             />
           )}
 
