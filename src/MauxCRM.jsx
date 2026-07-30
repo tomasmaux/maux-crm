@@ -12882,6 +12882,11 @@ function Placeholder({ m }) {
 // BD práce se do tohoto cíle nezapočítává — je to "navíc", dokud má popis.
 const ASISTENT_DAILY_H = 3.5;
 
+// ── Odkdy Josef reálně vykazuje v appce ──────────────────────────────────────
+// První výkaz 2. 6. 2026. Graf měsíců začíná tímhle měsícem — dřívější (prázdná
+// nebo testovací) období se nekreslí, aby % efektivity nesedělo na pár hodinách.
+const JOSEF_LOG_START = "2026-06";
+
 // ── BUSINESS DEVELOPMENT (BD) — nefakturovatelná interní práce, 0 Kč ─────────
 const BD_CATEGORIES = [
   "Backoffice kancelář",
@@ -12908,32 +12913,49 @@ const localDs = (d) =>
   `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
 
 // ── PŘEHLED — motivační dashboard Josefa ─────────────────────────────────────
-function AsistentPrehled({ logs, attendance }) {
+function AsistentPrehled({ logs, attendance, onGo }) {
   const [now, setNow] = useState(new Date());
   useEffect(()=>{ const id=setInterval(()=>setNow(new Date()),30000); return()=>clearInterval(id); },[]);
 
-  const todayStr = localDs(now);
+  const IND   = "#2B2478";   // inkoust
+  const VIVID = "#5B52F0";   // indigo
+  const SAND  = "#C6A86B";   // písek — development
+  const SANDL = "#E3D6B8";
+  const LIVE  = "#C3CCFF";   // běžící měsíc
+  const MUT   = "var(--mut)";
+
+  const fmtH = (h) => { if(!h||h<=0) return "0 h"; const f=Math.floor(h), m=Math.round((h-f)*60); return m>0?`${f}h ${m}m`:`${f} h`; };
+  const MONTHS_CS = ["leden","únor","březen","duben","květen","červen","červenec","srpen","září","říjen","listopad","prosinec"];
+
+  const todayStr  = localDs(now);
   const todayLogs = logs.filter(l=>l.entry_date===todayStr&&l.status!=="archived");
   const todayH    = billableHoursOf(todayLogs);
   const todayBdH  = bdHoursOf(todayLogs);
   const todayPct  = Math.min(todayH/ASISTENT_DAILY_H,1);
+  const pctRound  = Math.round(todayPct*100);
+  const zbyva     = Math.max(0, ASISTENT_DAILY_H - todayH);
 
   const todayAtt = attendance.find(a=>a.date===todayStr);
+  const attOpen  = !!(todayAtt?.check_in && !todayAtt?.check_out);
   const attDur   = todayAtt?.check_in
     ? (todayAtt.check_out?(new Date(todayAtt.check_out)-new Date(todayAtt.check_in))/36e5:(now-new Date(todayAtt.check_in))/36e5)
     : 0;
+  const attFrom  = todayAtt?.check_in ? new Date(todayAtt.check_in).toLocaleTimeString("cs-CZ",{hour:"2-digit",minute:"2-digit"}) : null;
 
+  // ── Týden ──
   const weekMon = new Date(now); weekMon.setDate(now.getDate()-(now.getDay()===0?6:now.getDay()-1)); weekMon.setHours(0,0,0,0);
   const weekDays = [];
-  for(let i=0;i<7;i++){
+  for(let i=0;i<5;i++){
     const d=new Date(weekMon); d.setDate(weekMon.getDate()+i);
-    if(d>now) break;
     const ds=localDs(d);
+    const future = d>now;
     const dayLogs=logs.filter(l=>l.entry_date===ds&&l.status!=="archived");
-    weekDays.push({ds,h:billableHoursOf(dayLogs),bdH:bdHoursOf(dayLogs),name:["Po","Út","St","Čt","Pá","So","Ne"][i],isToday:ds===todayStr});
+    weekDays.push({ds,h:billableHoursOf(dayLogs),bdH:bdHoursOf(dayLogs),name:["Po","Út","St","Čt","Pá"][i],isToday:ds===todayStr,future});
   }
-  const weekH=weekDays.reduce((s,d)=>s+d.h,0), weekBdH=weekDays.reduce((s,d)=>s+d.bdH,0), weekDone=weekDays.filter(d=>d.h>=ASISTENT_DAILY_H).length;
+  const weekH=weekDays.reduce((s,d)=>s+d.h,0), weekDone=weekDays.filter(d=>d.h>=ASISTENT_DAILY_H).length;
+  const weekElapsed=weekDays.filter(d=>!d.future).length;
 
+  // ── Streak ──
   const streak=(()=>{
     let s=0,d=new Date(now); d.setHours(0,0,0,0);
     for(let i=0;i<60;i++){
@@ -12945,123 +12967,186 @@ function AsistentPrehled({ logs, attendance }) {
     return s;
   })();
 
+  // ── Aktuální měsíc ──
   const mKey=`${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,"0")}`;
   const mLogs=logs.filter(l=>(l.entry_date||"").startsWith(mKey)&&l.status!=="archived");
-  const mH=billableHoursOf(mLogs);
-  const mBdH=bdHoursOf(mLogs);
+  const mH=billableHoursOf(mLogs), mBdH=bdHoursOf(mLogs);
   const mDays=new Set(mLogs.map(l=>l.entry_date)).size;
   const mAtt=attendance.filter(a=>a.date.startsWith(mKey)&&a.check_in).length;
 
-  const fmtH=(h)=>{if(!h||h<=0)return"0 h";const f=Math.floor(h),m=Math.round((h-f)*60);return m>0?`${f}h ${m}m`:`${f} h`;};
-  const pctRound=Math.round(todayPct*100);
-  const INK="var(--ink)";
+  // ── Měsíční řada: billable vs development, efektivita = billable / (billable + BD) ──
+  const byMonth = {};
+  logs.filter(l=>l.status!=="archived").forEach(l=>{
+    const k=(l.entry_date||"").slice(0,7); if(k.length!==7) return;
+    if(!byMonth[k]) byMonth[k]={key:k,bill:0,bd:0};
+    if(isBd(l)) byMonth[k].bd += (l.hours||0); else byMonth[k].bill += (l.hours||0);
+  });
+  // souvislá řada měsíců od zahájení evidence po aktuální měsíc (max 12 posledních)
+  const allKeys = (() => {
+    const out = [];
+    let [y, mm] = JOSEF_LOG_START.split("-").map(Number);
+    const [cy, cm] = mKey.split("-").map(Number);
+    while (y < cy || (y === cy && mm <= cm)) {
+      out.push(`${y}-${String(mm).padStart(2,"0")}`);
+      mm++; if (mm > 12) { mm = 1; y++; }
+      if (out.length > 60) break;
+    }
+    return out.slice(-12);
+  })();
+  const series = allKeys.map(k=>{
+    const m = byMonth[k] || {key:k,bill:0,bd:0};
+    const tot = m.bill+m.bd;
+    const [y,mm] = k.split("-").map(Number);
+    return {...m, key:k, tot, pct: tot>0?Math.round(m.bill/tot*100):0, label: MONTHS_CS[mm-1], year:y, running: k===mKey};
+  });
+  const closed = series.filter(m=>!m.running && m.tot>0);
+  const maxTot = Math.max(1, ...series.map(m=>m.tot));
+  const avgPct = closed.length ? Math.round(closed.reduce((s,m)=>s+m.pct,0)/closed.length) : null;
+  const bestM  = closed.length ? closed.reduce((a,b)=>b.pct>a.pct?b:a) : null;
+  const CH = 124; // výška sloupce
+
+  const paper = { background:"#fff", borderRadius:18, border:"1px solid rgba(0,0,0,.07)", boxShadow:"0 1px 2px rgba(20,18,60,.04), 0 8px 28px rgba(20,18,60,.05)" };
+  const lbl   = { fontSize:8, letterSpacing:".26em", textTransform:"uppercase", color:MUT, fontWeight:600 };
 
   return (
-    <div style={{padding:"32px 32px",display:"flex",flexDirection:"column",gap:16}}>
+    <div style={{padding:"34px 34px 44px",display:"flex",flexDirection:"column",gap:16}}>
 
-      {/* ── Header ── */}
-      <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-end",marginBottom:4}}>
+      {/* ── Hlavička ── */}
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-end",marginBottom:2}}>
         <div>
-          <div style={{fontSize:9,letterSpacing:".22em",textTransform:"uppercase",color:"var(--mut)",marginBottom:6}}>PŘEHLED</div>
-          <h2 style={{fontFamily:"Fraunces,serif",fontWeight:300,fontSize:30,color:"var(--txt)",margin:0,lineHeight:1}}>
+          <div style={{...lbl,marginBottom:8}}>Přehled</div>
+          <h2 style={{fontFamily:"Fraunces,serif",fontWeight:300,fontSize:30,color:"var(--txt)",margin:0,lineHeight:1,letterSpacing:"-.015em"}}>
             {now.getHours()<12?"Dobré ráno":"Dobrý den"}, Josefe.
           </h2>
         </div>
-        <div style={{textAlign:"right",fontSize:11,color:"var(--mut)",lineHeight:1.6}}>
+        <div style={{textAlign:"right",fontSize:11,color:MUT,lineHeight:1.6}}>
           <div>{now.toLocaleDateString("cs-CZ",{weekday:"long"})}</div>
           <div>{now.toLocaleDateString("cs-CZ",{day:"numeric",month:"long",year:"numeric"})}</div>
         </div>
       </div>
 
-      {/* ── Denní hero ── */}
-      <div style={{
-        borderRadius:20,overflow:"hidden",
-        background: todayPct>=1 ? "linear-gradient(135deg,#F0FDF4,#ECFDF5)" : "linear-gradient(135deg,#F7F5FF,#EDE9FD)",
-        boxShadow: todayPct>=1
-          ? "0 0 0 1px rgba(5,150,105,.15), 0 8px 32px rgba(5,150,105,.08)"
-          : "0 0 0 1px rgba(53,24,165,.1), 0 8px 32px rgba(53,24,165,.07)",
-        padding:"28px 32px",
-      }}>
-        <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
-          <div>
-            <div style={{fontSize:7.5,letterSpacing:".28em",textTransform:"uppercase",fontWeight:700,color:todayPct>=1?"#059669":"#3518A5",marginBottom:12}}>
-              KLIENTSKÁ PRÁCE DNES
-            </div>
+      {/* ── Dnešek + akce ── */}
+      <div style={{...paper,padding:"24px 26px"}}>
+        <div style={{display:"flex",alignItems:"stretch",gap:24}}>
+          <div style={{flex:1,minWidth:0}}>
+            <div style={{...lbl,marginBottom:12}}>Klientská práce dnes</div>
             <div style={{display:"flex",alignItems:"baseline",gap:10}}>
-              <span style={{fontFamily:"Fraunces,serif",fontSize:52,fontWeight:300,color:todayPct>=1?"#059669":INK,lineHeight:1,letterSpacing:"-.025em"}}>{fmtH(todayH)}</span>
-              <span style={{fontSize:15,color:"var(--mut)",fontWeight:300}}>/ {ASISTENT_DAILY_H} h cíl</span>
+              <span style={{fontFamily:"Fraunces,serif",fontSize:46,fontWeight:300,color:todayPct>=1?"#059669":IND,lineHeight:1,letterSpacing:"-.03em"}}>{fmtH(todayH)}</span>
+              <span style={{fontSize:14,color:MUT,fontWeight:300}}>/ {String(ASISTENT_DAILY_H).replace(".",",")} h cíl</span>
+            </div>
+            <div style={{height:3,borderRadius:2,background:"rgba(0,0,0,.07)",overflow:"hidden",margin:"18px 0 8px"}}>
+              <div style={{height:"100%",width:`${pctRound}%`,borderRadius:2,background:todayPct>=1?"#059669":VIVID,transition:"width .7s ease"}}/>
+            </div>
+            <div style={{display:"flex",justifyContent:"space-between",fontSize:10.5,color:MUT}}>
+              <span>{todayPct>=1?"Denní cíl splněn":todayH>0?`Ještě ${fmtH(zbyva)} do cíle`:"Zaloguj první hodiny dne."}</span>
+              <span style={{color:"var(--txt)",fontWeight:600}}>{pctRound} %</span>
             </div>
           </div>
-          <div style={{textAlign:"right",display:"flex",flexDirection:"column",gap:8,alignItems:"flex-end"}}>
-            {streak>0&&<div style={{fontSize:15,fontWeight:700,color:"#D97706",letterSpacing:"-.01em"}}>🔥 {streak} dní streak</div>}
-            {todayAtt?.check_in&&(
-              <div style={{fontSize:11,color:"var(--mut)",background:"rgba(255,255,255,.6)",borderRadius:6,padding:"4px 8px"}}>
-                {todayAtt.check_out?"Dnes byl":"Dnes v kanceláři"} {fmtH(Math.round(attDur*4)/4)}
-              </div>
-            )}
-          </div>
-        </div>
-        <div style={{height:3,borderRadius:2,background:"rgba(0,0,0,.1)",overflow:"hidden",marginTop:20,marginBottom:6}}>
-          <div style={{height:"100%",width:`${pctRound}%`,borderRadius:2,background:todayPct>=1?"#10B981":"#4F46E5",transition:"width .7s ease"}}/>
-        </div>
-        <div style={{display:"flex",justifyContent:"space-between"}}>
-          <div style={{fontSize:10.5,color:todayPct>=1?"#059669":todayPct>=.67?"#D97706":"var(--mut)",fontWeight:500}}>
-            {todayPct>=1?"Denní cíl splněn 🎉":todayPct>=.67?"Na dobré cestě — ještě kousek!":todayH>0?"Dobrý začátek!":"Zaloguj první hodiny dne."}
-          </div>
-          <div style={{fontSize:11,color:"var(--mut)",fontWeight:600}}>{pctRound} %</div>
-        </div>
-        {todayBdH>0&&(
-          <div style={{marginTop:14,paddingTop:12,borderTop:"1px solid rgba(0,0,0,.08)",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
-            <div style={{fontSize:10,color:"#6366F1",fontWeight:600,display:"flex",alignItems:"center",gap:6}}>
-              <span style={{width:6,height:6,borderRadius:"50%",background:"#A5B4FC"}}/>
-              BUSINESS DEVELOPMENT dnes
+
+          <div style={{width:1,background:"rgba(0,0,0,.07)"}}/>
+
+          <div style={{display:"flex",flexDirection:"column",gap:8,width:206,flexShrink:0}}>
+            <button onClick={()=>onGo&&onGo("vykaz")}
+              style={{display:"flex",alignItems:"center",gap:9,padding:"12px 15px",borderRadius:12,border:"none",background:IND,color:"#fff",fontSize:12.5,fontWeight:600,cursor:"pointer",textAlign:"left",letterSpacing:".01em"}}>
+              <span style={{fontSize:14,opacity:.8}}>＋</span> Zapsat hodiny
+            </button>
+            <button onClick={()=>onGo&&onGo("dochazka")}
+              style={{display:"flex",alignItems:"center",gap:9,padding:"12px 15px",borderRadius:12,border:"1px solid rgba(0,0,0,.13)",background:"#fff",color:"var(--txt)",fontSize:12.5,fontWeight:500,cursor:"pointer",textAlign:"left"}}>
+              <span style={{fontSize:13,opacity:.55}}>◷</span> {attOpen?"Zapsat odchod":todayAtt?.check_out?"Docházka":"Zapsat příchod"}
+            </button>
+            <div style={{fontSize:10,color:MUT,lineHeight:1.6,paddingLeft:3,marginTop:2}}>
+              {todayAtt?.check_in
+                ? <>V kanceláři od {attFrom} · {fmtH(Math.round(attDur*4)/4)}</>
+                : <>Dnes zatím bez příchodu</>}
+              {todayBdH>0 && <><br/>Development dnes {fmtH(todayBdH)}</>}
+              {streak>0 && <><br/>Série {streak} {streak===1?"den":streak<5?"dny":"dní"} v řadě</>}
             </div>
-            <div style={{fontSize:13,color:"var(--ink)",fontWeight:500}}>{fmtH(todayBdH)} <span style={{fontSize:10,color:"var(--mut)",fontWeight:400}}>· 0 Kč (interní)</span></div>
           </div>
+        </div>
+      </div>
+
+      {/* ── Uzavřené měsíce · efektivita ── */}
+      <div style={{...paper,padding:"24px 26px 20px"}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",gap:12,flexWrap:"wrap"}}>
+          <div style={lbl}>Uzavřené měsíce · efektivita</div>
+          <div style={{display:"flex",gap:16,fontSize:10,color:MUT}}>
+            <span><span style={{display:"inline-block",width:7,height:7,borderRadius:2,background:VIVID,marginRight:6}}/>Klientská práce</span>
+            <span><span style={{display:"inline-block",width:7,height:7,borderRadius:2,background:SAND,marginRight:6}}/>Development</span>
+          </div>
+        </div>
+
+        {series.every(m=>m.tot===0) ? (
+          <div style={{padding:"40px 0 34px",textAlign:"center",color:MUT,fontSize:12.5}}>Zatím nejsou žádné vykázané hodiny.</div>
+        ) : (
+          <>
+            <div style={{display:"flex",alignItems:"flex-end",gap:18,marginTop:20}}>
+              {series.map(m=>{
+                const totH = m.tot>0 ? Math.max(10, Math.round(m.tot/maxTot*CH)) : 4;
+                const bdH  = m.tot>0 ? Math.round(totH*(m.bd/m.tot)) : 0;
+                const biH  = totH-bdH;
+                return (
+                  <div key={m.key} style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",gap:8,minWidth:0}}>
+                    <div style={{fontFamily:"Fraunces,serif",fontSize:19,fontWeight:300,color:m.tot===0?"rgba(0,0,0,.18)":m.running?MUT:IND,lineHeight:1}}>{m.tot>0?`${m.pct} %`:"—"}</div>
+                    <div style={{width:"100%",height:CH,display:"flex",flexDirection:"column",justifyContent:"flex-end",
+                      borderRadius:7,overflow:"hidden",border:m.running?`1px dashed ${LIVE}`:"none"}}>
+                      {bdH>0 && <div style={{height:bdH,background:m.running?"#EDE6D4":SANDL}}/>}
+                      <div style={{height:biH,background:m.tot===0?"rgba(0,0,0,.06)":m.running?LIVE:VIVID}}/>
+                    </div>
+                    <div style={{fontSize:10,color:m.running?"var(--txt)":MUT,fontWeight:m.running?600:400,textAlign:"center",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",maxWidth:"100%"}}>{m.label}</div>
+                    <div style={{fontSize:9.5,color:MUT,opacity:.75}}>{m.running?"běží":m.tot>0?`${fmtH(m.bill)} · ${fmtH(m.bd)}`:"—"}</div>
+                  </div>
+                );
+              })}
+            </div>
+            <div style={{borderTop:"1px solid rgba(0,0,0,.06)",marginTop:16,paddingTop:12,fontSize:11,color:MUT}}>
+              {avgPct!=null
+                ? <>Průměr {closed.length} uzavřen{closed.length===1?"ého měsíce":closed.length<5?"ých měsíců":"ých měsíců"} <b style={{color:"var(--txt)",fontWeight:600}}>{avgPct} % klientské práce</b>{bestM?<> · nejlepší {bestM.label} <b style={{color:"var(--txt)",fontWeight:600}}>{bestM.pct} %</b></>:null}</>
+                : <>Evidence běží od června 2026 — první uzavřený měsíc se objeví po skončení tohoto měsíce.</>}
+            </div>
+          </>
         )}
       </div>
 
-      {/* ── Týden + KPIs ── */}
-      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:16}}>
+      {/* ── Týden + metriky ── */}
+      <div style={{display:"grid",gridTemplateColumns:"1.35fr 1fr",gap:14}}>
 
-        {/* Týdenní bars */}
-        <div style={{background:"#fff",borderRadius:16,padding:"20px 22px",boxShadow:"0 0 0 1px rgba(0,0,0,.06), 0 4px 16px rgba(0,0,0,.05)"}}>
-          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
-            <div style={{fontSize:7.5,letterSpacing:".25em",textTransform:"uppercase",fontWeight:700,color:"var(--mut)"}}>TENTO TÝDEN</div>
-            <div style={{fontSize:10.5,color:"var(--mut)"}}>
-              <b style={{color:INK}}>{weekDone}</b>/{weekDays.length} dní · <b style={{color:INK}}>{fmtH(weekH)}</b>
-              {weekBdH>0&&<span style={{color:"#6366F1"}}> · BD {fmtH(weekBdH)}</span>}
+        <div style={{...paper,padding:"20px 22px"}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
+            <div style={lbl}>Tento týden</div>
+            <div style={{fontSize:10.5,color:MUT}}>
+              <b style={{color:"var(--txt)"}}>{weekDone}</b>/{weekElapsed} dní · <b style={{color:"var(--txt)"}}>{fmtH(weekH)}</b>
             </div>
           </div>
-          <div style={{display:"flex",gap:6,alignItems:"flex-end",height:70}}>
+          <div style={{display:"flex",gap:8,alignItems:"flex-end"}}>
             {weekDays.map(wd=>{
-              const barH=wd.h>0?Math.max(6,Math.min(52,Math.round(wd.h/ASISTENT_DAILY_H*44))):0;
+              const barH=wd.h>0?Math.max(6,Math.min(56,Math.round(wd.h/ASISTENT_DAILY_H*48))):5;
               const done=wd.h>=ASISTENT_DAILY_H;
               return(
-                <div key={wd.ds} style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",gap:3}}>
-                  <div style={{fontSize:8,color:wd.isToday?"#4F46E5":"var(--mut)",fontWeight:wd.isToday?700:400,minHeight:12,textAlign:"center"}}>{wd.h>0?fmtH(wd.h):""}</div>
-                  <div style={{width:"100%",height:48,display:"flex",flexDirection:"column",justifyContent:"flex-end"}}>
-                    <div style={{width:"100%",height:barH,borderRadius:3,background:done?"#22C55E":wd.h>0?"#8A7FE0":wd.isToday?"rgba(53,24,165,.1)":"rgba(0,0,0,.06)",transition:"height .4s"}}/>
+                <div key={wd.ds} style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",gap:5}}>
+                  <div style={{fontSize:8.5,color:wd.isToday?IND:MUT,fontWeight:wd.isToday?700:400,minHeight:12}}>{wd.h>0?fmtH(wd.h):""}</div>
+                  <div style={{width:"100%",height:56,display:"flex",flexDirection:"column",justifyContent:"flex-end"}}>
+                    <div style={{width:"100%",height:barH,borderRadius:4,transition:"height .4s",
+                      background:done?"#059669":wd.h>0?VIVID:wd.future?"rgba(0,0,0,.04)":"rgba(0,0,0,.07)",
+                      opacity:wd.h>0?1:.9}}/>
                   </div>
-                  <div style={{fontSize:9,color:wd.isToday?"#4F46E5":"var(--mut)",fontWeight:wd.isToday?700:400}}>{wd.name}</div>
+                  <div style={{fontSize:9.5,color:wd.isToday?IND:wd.future?"rgba(0,0,0,.25)":MUT,fontWeight:wd.isToday?700:400}}>{wd.name}</div>
                 </div>
               );
             })}
           </div>
         </div>
 
-        {/* KPI grid */}
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
           {[
-            {l:"Hodiny / měsíc",v:fmtH(mH),s:`${mDays} dní s výkazem${mBdH>0?` · BD ${fmtH(mBdH)}`:""}`,ok:mH>0},
-            {l:"Příchody",v:`${mAtt}`,s:"dní v kanceláři",ok:mAtt>0},
-            {l:"Streak",v:streak>0?`${streak} 🔥`:"—",s:"po sobě jdoucích dní",ok:streak>=3},
-            {l:"Splněno týden",v:`${weekDone}/${weekDays.length}`,s:"dní ≥ "+ASISTENT_DAILY_H+" h",ok:weekDone===weekDays.length&&weekDays.length>0},
+            {l:"Měsíc",     v:fmtH(mH),  s:`${mDays} ${mDays===1?"den":mDays<5?"dny":"dní"} s výkazem`},
+            {l:"Příchody",  v:`${mAtt}`, s:"dní v kanceláři"},
+            {l:"Série",     v:streak>0?`${streak}`:"—", s:"splněný cíl v řadě"},
+            {l:"Efektivita",v:(mH+mBdH)>0?`${Math.round(mH/(mH+mBdH)*100)} %`:"—", s:"klientské práce"},
           ].map(k=>(
-            <div key={k.l} style={{background:"#fff",borderRadius:12,padding:"14px 16px",boxShadow:`0 0 0 1px ${k.ok?"rgba(5,150,105,.15)":"rgba(0,0,0,.06)"}, 0 2px 8px rgba(0,0,0,.04)`}}>
-              <div style={{fontSize:8,letterSpacing:".1em",textTransform:"uppercase",color:"var(--mut)",marginBottom:5}}>{k.l}</div>
-              <div style={{fontFamily:"Fraunces,serif",fontWeight:300,fontSize:22,color:k.ok?"#059669":INK,lineHeight:1}}>{k.v}</div>
-              <div style={{fontSize:9,color:"var(--mut)",marginTop:4}}>{k.s}</div>
+            <div key={k.l} style={{background:"#fff",borderRadius:14,border:"1px solid rgba(0,0,0,.07)",padding:"14px 16px"}}>
+              <div style={{fontSize:8,letterSpacing:".18em",textTransform:"uppercase",color:MUT,fontWeight:600,marginBottom:7}}>{k.l}</div>
+              <div style={{fontFamily:"Fraunces,serif",fontWeight:300,fontSize:21,color:IND,lineHeight:1}}>{k.v}</div>
+              <div style={{fontSize:9,color:MUT,marginTop:5}}>{k.s}</div>
             </div>
           ))}
         </div>
@@ -13884,19 +13969,22 @@ function AsistentApp({ session, onLogout, previewMode }) {
         </div>
 
         {/* Pill tabs */}
-        <nav style={{display:"flex",background:"rgba(0,0,0,.04)",borderRadius:12,padding:3,gap:2}}>
-          {TABS.map(t=>(
-            <button key={t.key} onClick={()=>setMod(t.key)}
-              style={{display:"flex",alignItems:"center",gap:6,padding:"7px 18px",borderRadius:9,border:"none",cursor:"pointer",
-                fontSize:12.5,fontWeight:mod===t.key?600:400,letterSpacing:".01em",transition:"all .18s ease",
-                background:mod===t.key?"#fff":"transparent",
-                color:mod===t.key?"var(--ink)":"var(--mut)",
-                boxShadow:mod===t.key?"0 1px 6px rgba(0,0,0,.1)":"none",
-              }}>
-              <span style={{fontSize:10,opacity:.7}}>{t.icon}</span>
-              {t.label}
-            </button>
-          ))}
+        <nav style={{display:"flex",gap:6}}>
+          {TABS.map(t=>{
+            const on = mod===t.key;
+            return (
+              <button key={t.key} onClick={()=>setMod(t.key)}
+                style={{display:"flex",alignItems:"center",gap:8,padding:"10px 20px",borderRadius:11,cursor:"pointer",
+                  fontSize:13,fontWeight:on?600:500,letterSpacing:".01em",transition:"all .18s ease",
+                  background:on?"#2B2478":"#fff",
+                  color:on?"#fff":"var(--txt)",
+                  border:on?"1px solid #2B2478":"1px solid rgba(0,0,0,.11)",
+                }}>
+                <span style={{fontSize:12,opacity:on?.85:.5}}>{t.icon}</span>
+                {t.label}
+              </button>
+            );
+          })}
         </nav>
 
         {/* User + logout */}
@@ -13914,14 +14002,14 @@ function AsistentApp({ session, onLogout, previewMode }) {
       </header>
 
       {/* ── Content ── */}
-      <main style={{flex:1,minWidth:0,maxWidth:900,width:"100%",margin:"0 auto",padding:"0 0 40px"}}>
+      <main style={{flex:1,minWidth:0,maxWidth:1020,width:"100%",margin:"0 auto",padding:"0 0 40px"}}>
         {!ready ? (
           <div style={{display:"flex",alignItems:"center",justifyContent:"center",height:300,color:"var(--mut)",fontSize:13,gap:8}}>
             <span style={{fontFamily:"Fraunces,serif",fontSize:18,opacity:.4}}>◎</span> Načítám…
           </div>
         ) : (
           <>
-            {mod==="prehled"  && <AsistentPrehled logs={logs} attendance={attendance} />}
+            {mod==="prehled"  && <AsistentPrehled logs={logs} attendance={attendance} onGo={setMod} />}
             {mod==="vykaz"    && <AsistentVykazy email={email} clients={clients} onRefresh={refreshLogs} />}
             {mod==="dochazka" && <AsistentDochazka email={email} attendance={attendance} onRefreshAttendance={refreshAtt} />}
           </>
@@ -13938,7 +14026,7 @@ function AsistentPanel({ clients, onPreview }) {
   const [attendance, setAttendance] = useState([]);
   const [availability, setAvailability] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [tab, setTab] = useState("prehled");
+  const [tab, setTab] = useState("logs");
   // Admin docházka — inline edit
   const [editingAdminAtt, setEditingAdminAtt] = useState(null);
   const [editAdminDraft, setEditAdminDraft] = useState({});
@@ -13977,82 +14065,23 @@ function AsistentPanel({ clients, onPreview }) {
   const mBdH  = bdHoursOf(mLogs);
   const mDays = new Set(mLogs.map(l=>l.entry_date)).size;
   const mAtt  = attendance.filter(a=>a.date.startsWith(mKey)&&a.check_in).length;
-  const allLogsActive = logs.filter(l=>l.status!=="archived");
-  const totalH   = billableHoursOf(allLogsActive);
-  const totalBdH = bdHoursOf(allLogsActive);
-
-  // Týdenní přehled (shodný algoritmus s AsistentPrehled)
-  const weekMon = new Date(now); weekMon.setDate(now.getDate()-(now.getDay()===0?6:now.getDay()-1)); weekMon.setHours(0,0,0,0);
-  const weekDays = [];
-  for(let i=0;i<7;i++) {
-    const d=new Date(weekMon); d.setDate(weekMon.getDate()+i);
-    if(d>now) break;
-    const ds=localDs(d);
-    const dayLogs=logs.filter(l=>l.entry_date===ds&&l.status!=="archived");
-    weekDays.push({ ds, h:billableHoursOf(dayLogs), bdH:bdHoursOf(dayLogs), name:["Po","Út","St","Čt","Pá","So","Ne"][i], isToday:ds===today() });
-  }
-  const weekH    = weekDays.reduce((s,d)=>s+d.h,0);
-  const weekBdH  = weekDays.reduce((s,d)=>s+d.bdH,0);
-  const weekDone = weekDays.filter(d=>d.h>=ASISTENT_DAILY_H).length;
-
-  const TABS = [{k:"prehled",l:"Přehled"},{k:"logs",l:"Výkazy"},{k:"dochazka",l:"Docházka"},{k:"plan",l:`Plán ${monthNames[nmm-1]}`}];
+  const TABS = [{k:"logs",l:"Výkazy"},{k:"dochazka",l:"Docházka"},{k:"plan",l:`Plán ${monthNames[nmm-1]}`}];
 
   return (
     <div className="body">
       <div className="top" style={{marginBottom:0,display:"flex",alignItems:"flex-start",justifyContent:"space-between",flexWrap:"wrap",gap:12}}>
         <div>
           <h1 style={{fontFamily:"Fraunces,serif",fontWeight:300,fontSize:30}}>Josef · Asistent</h1>
-          <p style={{color:"var(--mut)",fontSize:13,marginTop:4}}>Interní přehled výkazů, docházky a výkonu — {email}</p>
+          <p style={{color:"var(--mut)",fontSize:13,marginTop:4}}>Administrace — archivace výkazů, editace docházky, export pro účetní. Výkon a přehled najdeš v Josefově pohledu.</p>
         </div>
         <button onClick={onPreview}
-          style={{marginTop:6,padding:"9px 18px",borderRadius:9,border:"1.5px solid var(--ink)",background:"var(--ink)",color:"#fff",fontSize:12.5,fontWeight:600,cursor:"pointer",display:"flex",alignItems:"center",gap:7,whiteSpace:"nowrap"}}>
-          👁 Zobrazit jako Josef →
+          style={{marginTop:6,padding:"12px 24px",borderRadius:12,border:"1.5px solid var(--ink)",background:"var(--ink)",color:"#fff",fontSize:13.5,fontWeight:600,cursor:"pointer",display:"flex",alignItems:"center",gap:8,whiteSpace:"nowrap"}}>
+          👁 Otevřít Josefův přehled →
         </button>
       </div>
 
-      {/* ── KPI řada ── */}
-      <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:12,margin:"20px 28px 0"}}>
-        {[
-          { label:"Tento měsíc (billable)",  val:fmtH(mH),    sub:`${mDays} dní s výkazem · cíl ${mDays*ASISTENT_DAILY_H} h${mBdH>0?` · BD ${fmtH(mBdH)} (0 Kč)`:""}`, ok:mH>=mDays*ASISTENT_DAILY_H&&mDays>0 },
-          { label:"Celkem hodin", val:fmtH(totalH), sub:`všechny záznamy${totalBdH>0?` · BD ${fmtH(totalBdH)}`:""}`,                       ok:totalH>0 },
-          { label:"Dny v kancelář", val:`${mAtt}`,  sub:`příchodů v ${monthNames[now.getMonth()]}`, ok:mAtt>0 },
-          { label:"Týden (billable)",        val:fmtH(weekH),  sub:`${weekDone}/${weekDays.length} dní splněno${weekBdH>0?` · BD ${fmtH(weekBdH)}`:""}`, ok:weekDone===weekDays.length&&weekDays.length>0 },
-        ].map(k=>(
-          <div key={k.label} style={{background:"#fff",border:`1px solid ${k.ok?"#BBF7D0":"var(--line)"}`,borderRadius:12,padding:"14px 18px"}}>
-            <div style={{fontSize:8.5,letterSpacing:".12em",textTransform:"uppercase",color:"var(--mut)",marginBottom:4}}>{k.label}</div>
-            <div style={{fontFamily:"Fraunces,serif",fontWeight:300,fontSize:22,color:k.ok?"#059669":"var(--ink)"}}>{k.val}</div>
-            <div style={{fontSize:9.5,color:"var(--mut)",marginTop:2}}>{k.sub}</div>
-          </div>
-        ))}
-      </div>
-
-      {/* ── Týdenní pruhový graf (mini) ── */}
-      <div style={{margin:"14px 28px 0",background:"#fff",border:"1px solid var(--line)",borderRadius:10,padding:"12px 16px"}}>
-        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
-          <div style={{fontSize:8,letterSpacing:".2em",textTransform:"uppercase",fontWeight:700,color:"var(--mut)"}}>VÝKON TENTO TÝDEN</div>
-          <div style={{fontSize:11,color:"var(--mut)"}}>cíl {ASISTENT_DAILY_H} h/den</div>
-        </div>
-        <div style={{display:"flex",gap:5,alignItems:"flex-end",height:50}}>
-          {weekDays.map(wd=>{
-            const barH=wd.h>0?Math.max(5,Math.min(40,Math.round(wd.h/ASISTENT_DAILY_H*36))):0;
-            const done=wd.h>=ASISTENT_DAILY_H;
-            return (
-              <div key={wd.ds} style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",gap:2}}>
-                <div style={{fontSize:8.5,color:wd.isToday?"#4F46E5":"var(--mut)",fontWeight:wd.isToday?700:400,minHeight:12}}>
-                  {wd.h>0?fmtH(wd.h):""}
-                </div>
-                <div style={{width:"100%",height:38,display:"flex",flexDirection:"column",justifyContent:"flex-end"}}>
-                  <div style={{width:"100%",height:barH,borderRadius:3,background:done?"#22C55E":wd.h>0?"#8A7FE0":"var(--line)"}} />
-                </div>
-                <div style={{fontSize:9,color:wd.isToday?"#4F46E5":"var(--mut)",fontWeight:wd.isToday?700:400}}>{wd.name}</div>
-              </div>
-            );
-          })}
-        </div>
-      </div>
-
       {/* ── Záložky ── */}
-      <div style={{display:"flex",gap:4,margin:"16px 28px 0",borderBottom:"1px solid var(--line)"}}>
+      <div style={{display:"flex",gap:4,margin:"22px 28px 0",borderBottom:"1px solid var(--line)"}}>
         {TABS.map(t=>(
           <button key={t.k} onClick={()=>setTab(t.k)}
             style={{padding:"8px 14px",border:"none",borderBottom:tab===t.k?"2px solid var(--ink)":"2px solid transparent",background:"none",cursor:"pointer",fontSize:12.5,fontWeight:tab===t.k?600:400,color:tab===t.k?"var(--ink)":"var(--mut)"}}>
@@ -14062,9 +14091,6 @@ function AsistentPanel({ clients, onPreview }) {
       </div>
 
       <div style={{padding:"18px 28px"}}>
-        {/* Přehled */}
-        {tab==="prehled" && <AsistentPrehled logs={logs} attendance={attendance} />}
-
         {/* Výkazy */}
         {tab==="logs" && (
           logs.length===0 ? <div style={{color:"var(--mut)",fontSize:13}}>Josef zatím nemá žádné záznamy.</div> : (
