@@ -6771,10 +6771,10 @@ function BackupReminderBanner({ onDone }) {
 /* ─── DASHBOARD ─── */
 // Drag-and-drop panel IDs — pořadí a viditelnost karet na dashboardu
 // Verze: zvýšit pokud chceme vynutit reset uloženého pořadí u všech uživatelů
-const PANEL_LAYOUT_VERSION = 9;
+const PANEL_LAYOUT_VERSION = 10;
 const DEFAULT_PANELS = [
   "finance","trigrafy","firma","josef","pulz",
-  "chart","klienti","navstevnost","xtb","ziskovost","claude"
+  "chart","meta","navstevnost","xtb","ziskovost","claude"
 ];
 function loadPanelState() {
   try {
@@ -8906,7 +8906,7 @@ function BpDelta({ value, suffix = "", size = 9.5 }) {
 // a jen tam, kde něco hoří. Klíče ponechány kvůli kompatibilitě volání.
 const PANEL_ACCENTS = {
   finance: "#4F46E5", uschovy: "#4F46E5", trigrafy: "#4F46E5", firma: "#4F46E5",
-  josef: "#4F46E5", pulz: "#4F46E5", chart: "#4F46E5", klienti: "#4F46E5",
+  josef: "#4F46E5", pulz: "#4F46E5", chart: "#4F46E5", meta: "#4F46E5",
   navstevnost: "#4F46E5", xtb: "#4F46E5", ziskovost: "#4F46E5", claude: "#4F46E5",
 };
 function Panel({ id, children }) {
@@ -9598,29 +9598,6 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
             {Object.keys(unbilledByClient).length>0 && <span style={{color:"var(--ink)",fontWeight:500}}>◆ {Object.keys(unbilledByClient).length} klientů čeká na fakturu</span>}
             {dphReserved>0 && <span style={{color:"#D97706",fontWeight:500}}>DPH spořák: {fmtKc(dphReserved)}</span>}
           </div>
-          <div style={{marginTop:9,display:"flex",alignItems:"baseline",gap:14,flexWrap:"wrap"}}>
-            <span style={{fontSize:9,letterSpacing:".14em",textTransform:"uppercase",color:"var(--mut)",fontWeight:700}}>Fakturováno {thisMonthName.toLowerCase()}</span>
-            <span style={{display:"flex",alignItems:"baseline",gap:5}}>
-              <span className="maux-num" style={{fontSize:16,fontWeight:600,color:"var(--ink)"}}>{fmtKc(mRev)}</span>
-              <span style={{fontSize:9.5,color:"var(--mut)"}}>bez DPH</span>
-            </span>
-            <span style={{fontSize:12,color:"var(--mut)",opacity:.4}}>/</span>
-            <span style={{display:"flex",alignItems:"baseline",gap:5}}>
-              <span className="maux-num" style={{fontSize:16,fontWeight:600,color:"var(--ink)"}}>{fmtKc(mRevWithVat)}</span>
-              <span style={{fontSize:9.5,color:"var(--mut)"}}>s DPH</span>
-            </span>
-            {onTheWayInv>0 && (
-              <>
-                <span style={{fontSize:12,color:"var(--mut)",opacity:.4}}>/</span>
-                <span style={{display:"flex",alignItems:"baseline",gap:5}} title="Vystavené faktury čekající na úhradu">
-                  <span style={{fontSize:11}}>💳</span>
-                  <span className="maux-num" style={{fontSize:16,fontWeight:600,color:overdueAmt>0?"#DC2626":"#D97706"}}>{fmtKc(onTheWayInv)}</span>
-                  <span style={{fontSize:9.5,color:overdueAmt>0?"#DC2626":"var(--mut)",fontWeight:overdueAmt>0?600:400}}>{overdueAmt>0?`na cestě · ⚠ ${fmtKc(overdueAmt)} po splatnosti`:"na cestě"}</span>
-                </span>
-              </>
-            )}
-            <span style={{fontSize:9,color:"var(--mut)",opacity:.6}}>(jen vlastní fakturace — bez úschov, bez přefakturací notáře/popl./prohlášení)</span>
-          </div>
         </div>
         <div style={{display:"flex",gap:8,alignItems:"center",flexShrink:0}}>
           {editLayout && (
@@ -9665,131 +9642,6 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
         );
       })()}
 
-      {/* Kontrola hranice 200 000 Kč/měs. (úschovy — čistý úrok + fakturace — vlastní odměna), s automatickým posunem mety a živým řádkem na příští měsíc */}
-      {(() => {
-        // Historie (od prvního dokladu po AKTUÁLNÍ měsíc, uzavřené měsíce) + posun mety počítá
-        // sdílená funkce computeMilestoneLadder — stejná, kterou používá i gamifikační lišta
-        // nahoře v hlavičce, ať se obě místa nikdy nerozejdou.
-        const ladder = computeMilestoneLadder(invoices, escrows, now);
-        // Živý řádek (příští měsíc): nevyfakturovaná práce bez DPH (unbilledAmt — stejné číslo jako karta
-        // "Příjmy na příští měsíc") + úrok z úschov splatný k 1. tohoto měsíce — ne čerstvý "od nuly"
-        // výpočet pro budoucí měsíc samotný.
-        // Úrok je zde HRUBÝ (před -15% srážkovou daní), ne čistý: sloupec "Fakturace" je taky "před
-        // daní z příjmu" (jen bez DPH, což je daň, kterou firma neplatí, ne její příjem) — pro
-        // konzistentní srovnání proti hranici 200 000 Kč musí být úrok na stejné bázi (hrubý výnos),
-        // jinak by se fakturace a úschovy měřily podle dvou různých definic "čistého". Proto se tento
-        // řádek může lišit od karty "Příjmy na příští měsíc" výš, která naopak ukazuje reálně přijatou
-        // (čistou, po srážkové dani) hotovost. Meta tohoto řádku je AKTIVNÍ meta po historii — živý
-        // řádek ji ještě nemůže posunout (uzavře se až s koncem měsíce).
-        // invAmt zde čistá práce bez DPH (unbilledWorkNetNoVat) — stejná báze jako invoice.subtotal,
-        // takže srovnatelná s uzavřenými měsíci v historii. (29.6.2026: unbilledAmt výš v Dashboardu
-        // byl dřív hrubý ×1,21 + poplatky — na žádost Toma teď taky čistý, obě čísla jsou tedy
-        // identická a vědomě duplicitní, ne náhoda.)
-        const lastY = now.getMonth() === 11 ? now.getFullYear() + 1 : now.getFullYear();
-        const lastM = (now.getMonth() + 1) % 12;
-        const nextYmStr = `${lastY}-${String(lastM+1).padStart(2,"0")}`;
-        const liveInvAmt = unbilledWorkNetNoVat(workEntries);
-        const liveEscAmt = Math.round(escrowGrossThisMonth);
-        const liveTotal = liveInvAmt + liveEscAmt;
-        const bestNext = (ladder.allRows || []).slice(-12).reduce((m, x) => Math.max(m, x.totalM), 0);
-        const rows = [...ladder.rows, { ym: nextYmStr, invAmt: liveInvAmt, escAmt: liveEscAmt, totalM: liveTotal, live: true, monIdx: lastM, goal: ladder.activeGoal, over: liveTotal > ladder.activeGoal, record: liveTotal > bestNext }];
-        const milestoneCount = ladder.milestoneCount;
-        const anyOver = ladder.anyOver;
-        const liveOver = liveTotal > ladder.activeGoal;
-        const activeGoal = ladder.activeGoal;
-        // Sbalený pruh smí říkat JEN to, co není v hero pásu nahoře (Tom 30.7.2026:
-        // "nerozumím, co ten banner má na první vteřinu říkat"). Hero už hlásí, jak stojí
-        // TENTO měsíc — tady tedy patří jen výhled dopředu: kam se posune meta a co je
-        // nejblíž k dalšímu stupni trofeje.
-        const projBest = Math.max(bestNext, liveTotal);
-        const projGoal = Math.max(200000, Math.round(projBest * 1.10 / 5000) * 5000);
-        return (
-          <>
-            <details id="maux-finance-detail" style={{marginTop:2}}>
-              <style>{`#maux-finance-detail > summary::-webkit-details-marker{display:none} #maux-finance-detail > summary{list-style:none}`}</style>
-              <summary style={{cursor:"pointer",outline:"none"}}>
-                <div style={{background:"#fff",borderRadius:14,boxShadow:"0 1px 2px rgba(16,12,60,.05), 0 8px 22px -14px rgba(16,12,60,.3)",
-                  display:"flex",overflow:"hidden",maxWidth:640,marginTop:6}}>
-                  <div style={{flex:1,padding:"13px 18px",minWidth:0}}>
-                    <div style={bpLabel()}>Po uzávěrce měsíce</div>
-                    <div style={{fontSize:12.5,color:"var(--txt)",marginTop:5}}>
-                      {projGoal > activeGoal
-                        ? <>Meta se zvedne na <strong style={{color:"var(--ink)"}}>{fmtKc(projGoal)}</strong></>
-                        : <>Meta zůstává <strong style={{color:"var(--ink)"}}>{fmtKc(activeGoal)}</strong></>}
-                    </div>
-                  </div>
-                  <div style={{padding:"13px 18px",display:"flex",alignItems:"center"}}>
-                    <span style={{fontSize:12,color:"#C4BFDA"}}>⌄</span>
-                  </div>
-                </div>
-              </summary>
-              {/* Žebřík mety — vodorovné pruhy místo tabulky (Tom 30.7.2026: tabulka byla "jak Windows 95").
-                  Šířka pruhu = podíl na společné škále, svislá linka = meta platná pro daný měsíc. */}
-              <div style={{marginTop:10, background:"#fff", borderRadius:BP.rInner, boxShadow:BP.shadow, padding:"22px 24px", maxWidth:640}}>
-                {(() => {
-                  const maxV = Math.max(activeGoal, ...rows.map(r => r.totalM)) * 1.06 || 1;
-                  const pctOf = v => Math.max(0, Math.min(100, (v / maxV) * 100));
-                  return (
-                    <>
-                      <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-end",marginBottom:16}}>
-                        <div>
-                          <div style={bpLabel()}>Meta příštího měsíce · fakturace + úschovy</div>
-                          <div style={{...bpHero(28), marginTop:5}}>{fmtKc(activeGoal)}</div>
-                          <div style={{fontSize:9,color:"var(--mut)",marginTop:4}}>nejlepší z 12 měsíců × 1,10 · zaokr. na 5 000 · min. 200 000</div>
-                        </div>
-                        <div style={{textAlign:"right"}}>
-                          <div style={bpLabel()}>Prolomeno</div>
-                          <div style={{...bpHero(28), marginTop:5, color: milestoneCount > 0 ? "#C0392B" : undefined}}>{milestoneCount}×</div>
-                        </div>
-                      </div>
-                      <div style={{display:"flex",gap:16,alignItems:"center",marginBottom:12,flexWrap:"wrap"}}>
-                        <span style={{fontSize:9,color:"var(--mut)"}}><span style={{display:"inline-block",width:6,height:6,borderRadius:"50%",background:BP.indigo,marginRight:5}} />Fakturace</span>
-                        <span style={{fontSize:9,color:"var(--mut)"}}><span style={{display:"inline-block",width:6,height:6,borderRadius:"50%",background:BP.sand,marginRight:5}} />Úschovy (hrubý úrok)</span>
-                        <span style={{fontSize:9,color:"var(--mut)"}}><span style={{display:"inline-block",width:2,height:9,background:"rgba(28,10,99,.55)",marginRight:5,verticalAlign:-1}} />Meta</span>
-                      </div>
-                      {rows.map(r => {
-                        const w1 = pctOf(r.invAmt), w2 = pctOf(r.escAmt), gp = pctOf(r.goal);
-                        return (
-                          <div key={r.ym} style={{display:"grid",gridTemplateColumns:"56px 1fr 92px",alignItems:"center",gap:12,padding:"3.5px 0"}}>
-                            <div style={{fontSize:10,lineHeight:1.15,color:r.live?"#3518A5":"var(--mut)",fontWeight:r.live?700:400}}>
-                              {r.ym}
-                              {r.live ? <div style={{fontSize:7,letterSpacing:".12em",fontWeight:700}}>PRŮBĚŽNÉ</div> : null}
-                            </div>
-                            <div style={{position:"relative",height:13,borderRadius:3,
-                              background: r.live ? "transparent" : "rgba(28,10,99,.045)",
-                              border: r.live ? "1px dashed #B9B3D6" : "none"}}>
-                              <div style={{position:"absolute",top:0,left:0,height:13,width:`${w1}%`,background:BP.indigo,borderRadius:"3px 0 0 3px",opacity:r.live?.5:1}} />
-                              <div style={{position:"absolute",top:0,left:`${w1}%`,height:13,width:`${w2}%`,background:BP.sand,borderRadius:"0 3px 3px 0",opacity:r.live?.5:1}} />
-                              <div style={{position:"absolute",top:-3,left:`${gp}%`,height:19,width:2,background:"rgba(28,10,99,.55)"}} />
-                              {(r.over || r.record) ? (() => {
-                                // Dlouhý pruh nemá kam štítek postavit — v tom případě si sedne
-                                // dovnitř k pravému okraji, místo aby lezl přes konec pruhu.
-                                const inside = (w1 + w2) > 74;
-                                return (
-                                  <span style={{position:"absolute",top:-1,fontSize:7.5,letterSpacing:".1em",textTransform:"uppercase",fontWeight:800,whiteSpace:"nowrap",borderRadius:3,padding:"1px 5px",
-                                    ...(inside ? {right:4} : {left:`calc(${w1+w2}% + 10px)`}),
-                                    color: r.over ? "#C0392B" : "#8A6E2E",
-                                    background: r.over ? (inside ? "rgba(255,255,255,.92)" : "#FCEEEC") : (inside ? "rgba(255,255,255,.92)" : "#F6F0E2")}}>
-                                    {r.over ? (r.milestoneNum ? `🏆 milník ${r.milestoneNum}` : "nad metou") : "rekord"}
-                                  </span>
-                                );
-                              })() : null}
-                            </div>
-                            <div style={{fontSize:10.5,textAlign:"right",color:r.over?"#C0392B":"var(--txt)",fontWeight:r.over?700:400,fontVariantNumeric:"tabular-nums"}}>{fmtKc(r.totalM)}</div>
-                          </div>
-                        );
-                      })}
-                    </>
-                  );
-                })()}
-              </div>
-              <div style={{fontSize:9.5,color:"var(--mut)",marginTop:6,maxWidth:600}}>
-                Úrok z úschov je zde hrubý (před -15% srážkovou daní) — stejná báze jako fakturace, která je taky bez DPH, ale ne po dani z příjmu. Proto se sloupec "Úschovy" může lišit od karty "Příjmy na příští měsíc" výš, která ukazuje reálně přijatou čistou hotovost (po srážkové dani). Sloupec "Fakturace" u řádku "průběžné" = nevyfakturovaná práce bez DPH (stejné číslo jako "nevyfakturováno" v kartě výš).
-              </div>
-            </details>
-          </>
-        );
-      })()}
 
       {editLayout && (
         <div style={{background:"linear-gradient(135deg,#EEF2FF,#E0E7FF)",border:"1px solid rgba(99,102,241,.25)",borderRadius:10,padding:"12px 18px",fontSize:12,color:"#3730A3",display:"flex",alignItems:"center",gap:10}}>
@@ -10488,142 +10340,73 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
       </Card>
       </Panel>
 
-      {/* TOP KLIENTI — Leaderboard + Trendy + Hvězdy */}
-      <Panel id="klienti">
-      <Card style={{padding:"18px 22px"}}>
+      {/* META — automatická laťka. Nahradila tabulku Top klienti (Tom 30.7.2026: "je absolutně
+          nic neříkající a nikdy se na to stejně nekoukám"). Dřív rozbalovací roletka ve Financích. */}
+      <Panel id="meta">
+      <div id="maux-finance-detail">
+      <Card style={{padding:"22px 26px 20px",position:"relative"}}>
+        <BpCorners />
         {(() => {
-          const sparkW = 64, sparkH = 22;
-          const MiniSparkline = ({data,color}) => {
-            const max = Math.max(...data,1);
-            const pts = data.map((v,i)=>`${(i/(data.length-1))*sparkW},${sparkH - (v/max)*sparkH}`).join(" ");
-            return (
-              <svg width={sparkW} height={sparkH} style={{display:"block"}}>
-                <polyline points={pts} fill="none" stroke={color||"#6366F1"} strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" />
-                <circle cx={(data.length-1)/(data.length-1)*sparkW} cy={sparkH-(data[data.length-1]/max)*sparkH} r={2.5} fill={color||"#6366F1"} />
-              </svg>
-            );
-          };
-          const DeltaBadge = ({delta}) => {
-            if(delta===0) return <span style={{fontSize:9,color:"var(--mut)",fontWeight:500}}>—</span>;
-            const up = delta > 0;
-            return (
-              <span style={{
-                display:"inline-flex",alignItems:"center",gap:2,fontSize:9,fontWeight:600,
-                color:up?"#059669":"#DC2626",
-                background:up?"rgba(5,150,105,.08)":"rgba(220,38,38,.08)",
-                padding:"2px 6px",borderRadius:99,
-              }}>
-                <span style={{fontSize:7}}>{up?"▲":"▼"}</span>
-                {Math.abs(Math.round(delta))}%
-              </span>
-            );
-          };
-          const ConfettiIcon = () => (
-            <span style={{fontSize:14,animation:"confettiPulse 2s ease-in-out infinite",display:"inline-block"}}>🏆</span>
-          );
-
+          const ladder = computeMilestoneLadder(invoices, escrows, now);
+          const lastY = now.getMonth() === 11 ? now.getFullYear() + 1 : now.getFullYear();
+          const lastM = (now.getMonth() + 1) % 12;
+          const nextYmStr = `${lastY}-${String(lastM+1).padStart(2,"0")}`;
+          // Zivy radek: nevyfakturovana prace bez DPH + HRUBY urok z uschov (pred -15% srazkovou
+          // dani) — stejna baze jako uzavrene mesice, jinak by se merilo dvema metry.
+          const liveInvAmt = unbilledWorkNetNoVat(workEntries);
+          const liveEscAmt = Math.round(escrowGrossThisMonth);
+          const liveTotal = liveInvAmt + liveEscAmt;
+          const bestNext = (ladder.allRows || []).slice(-12).reduce((m, x) => Math.max(m, x.totalM), 0);
+          const activeGoal = ladder.activeGoal;
+          const rows = [...ladder.rows, { ym: nextYmStr, totalM: liveTotal, live: true, goal: activeGoal, over: liveTotal > activeGoal }];
+          const projGoal = Math.max(200000, Math.round(Math.max(bestNext, liveTotal) * 1.10 / 5000) * 5000);
+          const shown = rows.slice(-9);
+          const maxV = Math.max(activeGoal, projGoal, ...shown.map(r => r.totalM)) * 1.06 || 1;
+          const pctOf = v => Math.max(0, Math.min(100, (v / maxV) * 100));
+          const lastOver = [...(ladder.rows || [])].reverse().find(r => r.over);
+          const mName = ym => `${ym.slice(5,7)}/${ym.slice(2,4)}`;
           return (
             <>
-              <style>{`
-                @keyframes confettiPulse { 0%,100%{transform:scale(1) rotate(0deg)} 25%{transform:scale(1.15) rotate(-5deg)} 50%{transform:scale(1.05) rotate(3deg)} 75%{transform:scale(1.12) rotate(-2deg)} }
-                @keyframes slideInLeader { from{opacity:0;transform:translateX(-12px)} to{opacity:1;transform:translateX(0)} }
-                @keyframes barGrow { from{width:0} }
-                @keyframes starGlow { 0%,100%{box-shadow:0 0 0 rgba(250,204,21,0)} 50%{box-shadow:0 0 12px rgba(250,204,21,.35)} }
-              `}</style>
-
-              {/* HEADER */}
-              <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:14}}>
-                <div style={{display:"flex",alignItems:"center",gap:8}}>
-                  <div style={{fontSize:9,letterSpacing:".2em",textTransform:"uppercase",color:"var(--mut)",fontWeight:600}}>Top klienti</div>
-                  <span style={{fontSize:8,color:"var(--mut)",opacity:.6}}>{year}</span>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:20,marginBottom:16,flexWrap:"wrap"}}>
+                <div>
+                  <div style={bpLabel()}>Meta · automatická laťka</div>
+                  <div style={{...bpHero(30), marginTop:6}}>{fmtKc(activeGoal)}</div>
+                  <div style={{fontSize:11,color:BP.indigoDeep,marginTop:5}}>
+                    {projGoal > activeGoal
+                      ? <>Po uzávěrce měsíce ↑ <strong style={{fontWeight:600}}>{fmtKc(projGoal)}</strong></>
+                      : <>Po uzávěrce zůstává <strong style={{fontWeight:600}}>{fmtKc(activeGoal)}</strong></>}
+                  </div>
+                  <div style={{fontSize:9,color:"var(--mut)",marginTop:5}}>nejlepší z 12 měsíců × 1,10 · zaokr. 5 000 · min. 200 000</div>
+                </div>
+                <div style={{textAlign:"right"}}>
+                  <div style={bpLabel()}>Překonáno</div>
+                  <div style={{...bpHero(26, BP.sandDeep), marginTop:6}}>{ladder.milestoneCount}×</div>
+                  {lastOver && <div style={{fontSize:9,color:"var(--mut)",marginTop:4}}>naposled {mName(lastOver.ym)}</div>}
                 </div>
               </div>
-
-              {/* LEADERBOARD */}
-              <div style={{display:"flex",flexDirection:"column",gap:2,marginBottom:16}}>
-                {topC.slice(0,8).map(({c,rev,spark,delta,thisM},i)=>{
-                  const barPct = Math.max((rev/maxC)*100, 8);
-                  const isChamp = i === 0;
-                  return (
-                    <div key={c.id} style={{
-                      display:"grid",gridTemplateColumns:"18px 1fr auto auto auto",alignItems:"center",gap:8,
-                      padding:"7px 10px",borderRadius:6,
-                      background:isChamp?"linear-gradient(135deg,#1E1B4B,#312E81)":"transparent",
-                      animation:`slideInLeader .4s ease-out ${i*0.06}s both`,
-                      transition:"background .3s",
-                    }}
-                    onMouseEnter={e=>{if(!isChamp)e.currentTarget.style.background="var(--bg2)"}}
-                    onMouseLeave={e=>{if(!isChamp)e.currentTarget.style.background="transparent"}}
-                    >
-                      {/* Rank */}
-                      <div style={{display:"flex",alignItems:"center",justifyContent:"center"}}>
-                        {isChamp ? <ConfettiIcon /> : (
-                          <span style={{fontSize:10,fontWeight:700,color:"var(--mut)",opacity:.6}}>{i+1}</span>
-                        )}
-                      </div>
-
-                      {/* Name + bar */}
-                      <div style={{minWidth:0}}>
-                        <div style={{fontSize:11,fontWeight:isChamp?600:500,color:isChamp?"#fff":"var(--txt)",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",marginBottom:2}}>{c.name}</div>
-                        <div style={{height:3,borderRadius:2,background:isChamp?"rgba(255,255,255,.15)":"var(--bg2)",overflow:"hidden"}}>
-                          <div style={{height:"100%",borderRadius:2,width:`${barPct}%`,background:isChamp?"linear-gradient(90deg,#818CF8,#C084FC)":"linear-gradient(90deg,#6366F1,#818CF8)",animation:"barGrow .6s ease-out"}} />
-                        </div>
-                      </div>
-
-                      {/* Sparkline */}
-                      <MiniSparkline data={spark} color={isChamp?"#A5B4FC":"#6366F1"} />
-
-                      {/* Delta */}
-                      <DeltaBadge delta={delta} />
-
-                      {/* Revenue */}
-                      <div className="maux-num" style={{fontSize:11,fontWeight:600,color:isChamp?"#C4B5FD":"var(--gold)",textAlign:"right",whiteSpace:"nowrap"}}>{fmtKc(rev)}</div>
+              <div style={{height:1,background:"rgba(0,0,0,.06)",marginBottom:14}} />
+              <div style={{display:"flex",flexDirection:"column",gap:7}}>
+                {shown.map(r => (
+                  <div key={r.ym} style={{display:"grid",gridTemplateColumns:"38px 1fr 92px",alignItems:"center",gap:10}}>
+                    <span style={{fontSize:9.5,letterSpacing:".06em",color:r.live?"var(--txt)":"var(--mut)",fontWeight:r.live?600:400}}>{mName(r.ym)}</span>
+                    <div style={{position:"relative",height:7,background:"rgba(0,0,0,.045)",borderRadius:99}}>
+                      <div style={{position:"absolute",left:0,top:0,bottom:0,width:`${pctOf(r.totalM)}%`,borderRadius:99,
+                        background: r.live ? BP.indigo : (r.over ? "rgba(91,82,240,.42)" : "rgba(91,82,240,.17)")}} />
+                      <div title={`Meta ${Math.round(r.goal || activeGoal).toLocaleString("cs-CZ")} Kč`}
+                        style={{position:"absolute",left:`${pctOf(r.goal || activeGoal)}%`,top:r.live?-3:-2,bottom:r.live?-3:-2,width:1.5,background:BP.sand,borderRadius:1}} />
                     </div>
-                  );
-                })}
-              </div>
-
-              {/* VYCHÁZEJÍCÍ HVĚZDY + KDO MIZÍ */}
-              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
-                {/* Rising Stars */}
-                {risingStars.length > 0 && (
-                  <div style={{padding:"10px 12px",borderRadius:8,background:"linear-gradient(135deg,rgba(5,150,105,.06),rgba(16,185,129,.04))",border:"1px solid rgba(5,150,105,.15)"}}>
-                    <div style={{fontSize:8,letterSpacing:".15em",textTransform:"uppercase",color:"#059669",fontWeight:700,marginBottom:8,display:"flex",alignItems:"center",gap:4}}>
-                      <span style={{fontSize:11}}>🌟</span> Hvězdy měsíce
-                    </div>
-                    {risingStars.map(({c,growth,delta},i) => (
-                      <div key={c.id} style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"3px 0",animation:`starGlow 3s ease-in-out ${i*.5}s infinite`,borderRadius:4}}>
-                        <span style={{fontSize:10,fontWeight:500,color:"var(--txt)"}}>{c.name}</span>
-                        <span style={{fontSize:9,fontWeight:600,color:"#059669"}}>+{fmtKc(growth)}</span>
-                      </div>
-                    ))}
+                    <span style={{fontSize:10.5,textAlign:"right",color:r.live?"var(--txt)":"var(--mut)",fontWeight:r.live?600:400}}>{fmtKc(r.totalM)}</span>
                   </div>
-                )}
-
-                {/* Falling */}
-                {falling.length > 0 && (
-                  <div style={{padding:"10px 12px",borderRadius:8,background:"rgba(220,38,38,.03)",border:"1px solid rgba(220,38,38,.1)"}}>
-                    <div style={{fontSize:8,letterSpacing:".15em",textTransform:"uppercase",color:"#DC2626",fontWeight:700,marginBottom:8,opacity:.7}}>
-                      📉 Tišší tento měsíc
-                    </div>
-                    {falling.map(({c,growth}) => (
-                      <div key={c.id} style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"3px 0"}}>
-                        <span style={{fontSize:10,fontWeight:500,color:"var(--txt)",opacity:.7}}>{c.name}</span>
-                        <span style={{fontSize:9,fontWeight:500,color:"#DC2626"}}>{fmtKc(growth)}</span>
-                      </div>
-                    ))}
-                  </div>
-                )}
+                ))}
               </div>
-
-              {/* Footer — sparkline legend */}
-              <div style={{fontSize:8,color:"var(--mut)",opacity:.5,marginTop:10,textAlign:"right",fontFamily:"'JetBrains Mono','SF Mono',Menlo,monospace"}}>
-                sparkline = posledních 6 měsíců · ▲▼ = změna oproti minulému měsíci
+              <div style={{fontSize:9,color:"var(--mut)",marginTop:12,opacity:.8,lineHeight:1.6}}>
+                Zlatá ryska = meta platná pro daný měsíc · plná barva = překonáno · poslední řádek běží živě (nevyfakturovaná práce + hrubý úrok z úschov)
               </div>
             </>
           );
         })()}
       </Card>
+      </div>
       </Panel>
 
       {/* ── NÁVŠTĚVNOST WEBU (GA4, živě) ── */}
@@ -15401,10 +15184,6 @@ export default function MauxCRM() {
   const [prefillDate, setPrefillDate] = useState(null);
   const navToNewWorkEntry = (ds) => { setModHistory(h => [...h, { mod, mode }]); setMod("vykaz"); setMode("new"); setSel(null); setEscrowMode("list"); setSelEscrow(null); setPrefillDate(ds); };
   const canGoBack = (mode !== "list" && mode !== "") || modHistory.length > 0;
-  const [monthlyGoal, setMonthlyGoal] = useState(() => { try { const v = localStorage.getItem("maux_monthly_goal"); return v ? Number(v) : 0; } catch { return 0; } });
-  const [editingGoal, setEditingGoal] = useState(false);
-  const [goalDraft, setGoalDraft] = useState("");
-  const saveGoal = () => { const v = Number(String(goalDraft).replace(/\s/g,"").replace(",",".")); if (v > 0) { setMonthlyGoal(v); try { localStorage.setItem("maux_monthly_goal", v); } catch {} } setEditingGoal(false); };
   const [sel, setSel] = useState(null);
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState(null);
@@ -15895,7 +15674,12 @@ export default function MauxCRM() {
           const _todayEsc = _dailyNetOnDate(escrows, _todayMid);
           const _todayAmt = _todayWork + _todayEsc;
           const _monthAmt = unbilledWorkNetNoVat(workEntries) + Math.round(escrowGrossForMonth(escrows, _now.getFullYear(), _now.getMonth()));
-          const _goal = monthlyGoal || 0;
+          // Jediny cil v cele appce = automaticka meta ze zebriku (Tom 30.7.2026: rucni cil
+          // v localStorage zrusen, byla to druha latka se stejnym jmenem — v srpnu by lista
+          // merila proti 200k a dlazdice proti 235k). Meta platna pro TENTO mesic = goal
+          // posledniho radku zebriku (nejlepsi z 12 predchozich x 1,10, zaokr. 5k, min 200k).
+          const ladder = computeMilestoneLadder(invoices, escrows, _now);
+          const _goal = ((ladder.allRows || []).slice(-1)[0] || {}).goal || 200000;
           const _rem = Math.max(0, _goal - _monthAmt);
           const _pct = _goal > 0 ? Math.min(1, _monthAmt / _goal) : 0;
           // Denní billing target — kolik ideálně dnes, aby tempo sedělo
@@ -15916,7 +15700,6 @@ export default function MauxCRM() {
           // hotových měsíčních součtů, fakturace bez DPH + hrubý úrok z úschov) + 1 živý sloupec na
           // konci se stejnou hodnotou jako _monthAmt výše, ať si "Tento měsíc" a poslední sloupec
           // grafu vždy odpovídají.
-          const ladder = computeMilestoneLadder(invoices, escrows, _now);
           const lastY = _now.getMonth() === 11 ? _now.getFullYear() + 1 : _now.getFullYear();
           const lastM = (_now.getMonth() + 1) % 12;
           const liveRow = { ym: `${lastY}-${String(lastM + 1).padStart(2,"0")}`, totalM: _monthAmt, live: true };
@@ -15970,23 +15753,7 @@ export default function MauxCRM() {
                       </>
                     )}
                     <span style={_sep}>·</span>
-                    {editingGoal ? (
-                      <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
-                        <input type="text" value={goalDraft} onChange={e=>setGoalDraft(e.target.value)}
-                          onKeyDown={e=>{if(e.key==="Enter")saveGoal();if(e.key==="Escape")setEditingGoal(false);}}
-                          placeholder="150000" autoFocus
-                          style={{width:84,padding:"3px 8px",borderRadius:8,border:`1px solid ${BP.indigo}`,fontSize:11,fontFamily:"var(--mono)",outline:"none"}} />
-                        <button onClick={saveGoal} style={{padding:"3px 9px",borderRadius:8,background:BP.indigo,border:"none",fontSize:10,fontWeight:700,cursor:"pointer",color:"#fff"}}>OK</button>
-                        <button onClick={()=>setEditingGoal(false)} style={{padding:"3px 6px",borderRadius:8,background:"none",border:"1px solid rgba(0,0,0,.1)",fontSize:11,cursor:"pointer",color:"var(--mut)"}}>✕</button>
-                      </span>
-                    ) : (
-                      <span onClick={()=>{setGoalDraft(_goal>0?String(_goal):"");setEditingGoal(true);}}
-                        style={{cursor:"pointer",transition:"color .15s"}}
-                        onMouseEnter={e=>{e.currentTarget.style.color=BP.indigo;}}
-                        onMouseLeave={e=>{e.currentTarget.style.color="var(--mut)";}}>
-                        {_goal>0 ? <>✏ Cíl <b style={_val}>{_fmt(_goal)}</b></> : "+ Nastavit měsíční cíl"}
-                      </span>
-                    )}
+                    <span title="Meta se počítá sama: nejlepší z 12 měsíců × 1,10, zaokr. na 5 000, min. 200 000">Meta <b style={_val}>{_fmt(_goal)}</b></span>
                     <span style={_sep}>·</span>
                     <span onClick={() => {
                         navTo("dashboard");
