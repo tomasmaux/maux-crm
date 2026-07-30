@@ -660,7 +660,7 @@ async function upsertAssistantAvailability(rec) {
   if (error) throw error;
 }
 async function fetchAssistantAttendance(email) {
-  const { data, error } = await supabase.from("assistant_attendance").select("*").eq("assistant_email", email).order("date", { ascending: false }).limit(60);
+  const { data, error } = await supabase.from("assistant_attendance").select("*").eq("assistant_email", email).order("date", { ascending: false }).limit(800);
   if (error) throw error;
   return data || [];
 }
@@ -12944,6 +12944,10 @@ function AsistentPrehled({ logs, attendance, clients, availability, onGo }) {
   const MONTHS_CS = ["leden","únor","březen","duben","květen","červen","červenec","srpen","září","říjen","listopad","prosinec"];
   const dnyWord = (n) => n===1?"den":n<5?"dny":"dní";
 
+  // Jediné okno pro celý přehled. Do jmenovatele jdou VÝHRADNĚ dny, kdy byl
+  // Josef reálně v práci (docházka nebo výkaz) — volno mu čísla nekazí.
+  const WIN_DAYS = 60;
+
   const todayStr  = localDs(now);
   // POZOR: archivace = "posláno účetní", ne smazání. Do Josefova výkonového
   // přehledu patří i archivované hodiny — jinak mu po archivaci zmizí celý měsíc.
@@ -13066,17 +13070,29 @@ function AsistentPrehled({ logs, attendance, clients, availability, onGo }) {
     return `${String(Math.floor(avg/60)).padStart(2,"0")}:${String(avg%60).padStart(2,"0")}`;
   })();
 
-  // ── ZACHYCENÝ ČAS — kolik z optimálního 8h dne je pokryto výkazem ──
-  const mLogged   = mH+mBdH;
-  const capDays   = Math.max(mAtt, new Set(mLogs.map(l=>l.entry_date)).size);   // dny, kdy Josef reálně byl v práci
-  const capGoal   = capDays*ASISTENT_DAY_CAPTURE_H;
-  const capBillF  = capGoal>0 ? Math.min(1, mH/capGoal) : 0;
-  const capBdF    = capGoal>0 ? Math.min(Math.max(0,1-capBillF), mBdH/capGoal) : 0;
-  const capF      = capBillF+capBdF;
-  const capPct    = capGoal>0 ? Math.round(capF*100) : null;
-  const capAvg    = capDays>0 ? mLogged/capDays : 0;                            // Ø vykázaných hodin na den
-  const capGapDay = Math.max(0, ASISTENT_DAY_CAPTURE_H-capAvg);
-  const mUnlogged = Math.max(0, mOffice-mLogged);                               // čas v kanceláři bez zápisu
+  // ── UTILIZACE — klouzavé 60denní okno ────────────────────────────────────
+  // Kalendářní měsíc se 1. dne vynuluje a ukazatel je pak dva týdny k ničemu.
+  // Okno posledních 60 dní má vždycky plný vzorek a mění se plynule každý den:
+  // ráno vypadne nejstarší den, přibude včerejšek.
+  const dsBack = (n) => { const d=new Date(now); d.setHours(0,0,0,0); d.setDate(d.getDate()-n); return localDs(d); };
+  const utilOf = (from, to) => {
+    const ls = activeLogs.filter(l=>l.entry_date && l.entry_date>=from && l.entry_date<=to);
+    const as = attendance.filter(a=>a.check_in && a.date>=from && a.date<=to);
+    const bill = billableHoursOf(ls), bd = bdHoursOf(ls), logged = bill+bd;
+    const days = Math.max(as.length, new Set(ls.map(l=>l.entry_date)).size);
+    const goal = days*ASISTENT_DAY_CAPTURE_H;
+    const office = as.reduce((acc,a)=>acc+(a.check_out?netAttHours(a.check_in,a.check_out):0),0);
+    const billF = goal>0 ? Math.min(1, bill/goal) : 0;
+    const bdF   = goal>0 ? Math.min(Math.max(0,1-billF), bd/goal) : 0;
+    return { bill, bd, logged, days, goal, office, billF, bdF, f:billF+bdF,
+             pct: goal>0 ? Math.round((billF+bdF)*100) : null,
+             avg: days>0 ? logged/days : 0,
+             unlogged: Math.max(0, office-logged) };
+  };
+  const ut     = utilOf(dsBack(WIN_DAYS-1), todayStr);
+  const utPrev = utilOf(dsBack(2*WIN_DAYS-1), dsBack(WIN_DAYS));
+  const utDelta  = (ut.pct!=null && utPrev.pct!=null && utPrev.days>=3) ? ut.pct-utPrev.pct : null;
+  const utGapDay = Math.max(0, ASISTENT_DAY_CAPTURE_H-ut.avg);
 
   // ── TEMPO MĚSÍCE ──
   const daysInMonth = new Date(cy, cm, 0).getDate();
@@ -13172,15 +13188,29 @@ function AsistentPrehled({ logs, attendance, clients, availability, onGo }) {
     while(y<cy||(y===cy&&mm<=cm)){ out.push(`${y}-${String(mm).padStart(2,"0")}`); mm++; if(mm>12){mm=1;y++;} if(out.length>60) break; }
     return out.slice(-12);
   })();
-  const series = allKeys.map(k=>{
-    const m=byMonth[k]||{key:k,bill:0,bd:0};
-    const tot=m.bill+m.bd; const [y,mm]=k.split("-").map(Number);
-    return {...m,key:k,tot,pct:tot>0?Math.round(m.bill/tot*100):0,label:MONTHS_CS[mm-1],year:y,running:k===mKey};
+
+  // ── UTILIZACE PO MĚSÍCÍCH ────────────────────────────────────────────────
+  // Jmenovatel = jen dny, kdy byl Josef v práci (docházka NEBO výkaz).
+  // Kalendářní dny, volno ani víkendy do toho nejdou.
+  const monthRows = allKeys.map(k=>{
+    const ls = activeLogs.filter(l=>(l.entry_date||"").startsWith(k));
+    const as = attendance.filter(a=>a.check_in && a.date.startsWith(k));
+    const bill = billableHoursOf(ls), bd = bdHoursOf(ls), logged = bill+bd;
+    const days = new Set(as.map(a=>a.date).concat(ls.map(l=>l.entry_date))).size;
+    const goal = days*ASISTENT_DAY_CAPTURE_H;
+    const office = as.reduce((acc,a)=>acc+(a.check_out?netAttHours(a.check_in,a.check_out):0),0);
+    const [yy,mm] = k.split("-").map(Number);
+    return { key:k, bill, bd, logged, days, goal, office,
+      pct: goal>0 ? Math.round(logged/goal*100) : null,
+      billF: goal>0 ? bill/goal : 0,
+      bdF:   goal>0 ? bd/goal   : 0,
+      label: MONTHS_CS[mm-1], year:yy, running:k===mKey };
   });
-  const closed = series.filter(m=>!m.running&&m.tot>0);
-  const maxTot = Math.max(1,...series.map(m=>m.tot));
-  const avgPct = closed.length ? Math.round(closed.reduce((s,m)=>s+m.pct,0)/closed.length) : null;
-  const bestM  = closed.length ? closed.reduce((a,b)=>b.pct>a.pct?b:a) : null;
+  const closedM  = monthRows.filter(m=>!m.running && m.days>0);
+  const utilAxis = Math.max(100, ...monthRows.map(m=>m.pct||0));
+  const avgUtil  = closedM.length ? Math.round(closedM.reduce((a,m)=>a+m.pct,0)/closedM.length) : null;
+  const runMonth = monthRows.find(m=>m.running);
+  const bestUtilM= closedM.length ? closedM.reduce((a,b)=>b.pct>a.pct?b:a) : null;
   const curPct = (mH+mBdH)>0 ? Math.round(mH/(mH+mBdH)*100) : null;   // vybrané období
   const runM = byMonth[mKey];
   const runPct = runM&&(runM.bill+runM.bd)>0 ? Math.round(runM.bill/(runM.bill+runM.bd)*100) : null;
@@ -13196,44 +13226,35 @@ function AsistentPrehled({ logs, attendance, clients, availability, onGo }) {
   // Nejlepší měsíc NEMĚŘÍME objemem hodin — ten závisí na tom, kolik dní Tom
   // Josefovi naplánuje, ne na jeho výkonu. Měříme utilizaci: kolik z 8h dne
   // reálně zapsal. To je na počtu dnů nezávislé.
-  const bestUtil=(()=>{
-    let best=null;
-    Object.keys(byMonth).forEach(k=>{
-      const m=byMonth[k], tot=m.bill+m.bd; if(tot<=0) return;
-      const days=Math.max(
-        attendance.filter(a=>a.date.startsWith(k)&&a.check_in).length,
-        new Set(activeLogs.filter(l=>(l.entry_date||"").startsWith(k)).map(l=>l.entry_date)).size);
-      if(!days) return;
-      const pct=Math.round(Math.min(1, tot/(days*ASISTENT_DAY_CAPTURE_H))*100);
-      if(!best||pct>best.pct) best={key:k,pct,days,label:MONTHS_CS[Number(k.slice(5,7))-1],year:k.slice(0,4)};
-    });
-    return best;
-  })();
-  // ── FORMA: klouzavé tříměsíční okno ──────────────────────────────────────
-  // Kumulativní součet jen roste a po roce nevypovídá o ničem. Okno posledních
-  // 90 dní umí klesnout — a proto něco říká. Rekord je nejlepší okno v historii.
-  // 90 dní ≈ 21 Josefových pracovních dnů: dost velký vzorek, aby jeden
-  // vynechaný týden neshodil číslo o pětinu.
-  const WIN = 90;
-  const WIN_LBL = "3 měsíce";
+  // ── FORMA: Ø klientské práce na PRACOVNÍ den, klouzavé okno ──────────────
+  // Nepočítáme součet hodin — ten klesne pokaždé, když Tom naplánuje míň dnů,
+  // a trestal by Josefa za cizí rozhodnutí. Počítáme průměr na den, kdy byl
+  // reálně v práci. Dny volna do jmenovatele nejdou vůbec.
   const startD = new Date(Number(JOSEF_LOG_START.slice(0,4)), Number(JOSEF_LOG_START.slice(5,7))-1, 1);
   const dIdx = (ds) => Math.round((new Date(ds+"T00:00:00") - startD)/864e5);
   const endI = Math.max(0, dIdx(todayStr));
-  const daily = new Array(endI+1).fill(0);
-  activeLogs.forEach(l=>{ if(!l.entry_date) return; const i=dIdx(l.entry_date); if(i>=0&&i<=endI) daily[i]+=(l.hours||0); });
-  const pre=[0]; daily.forEach((v,i)=>pre.push(pre[i]+v));
-  const winSum=(a2,b2)=>pre[Math.min(b2,endI)+1]-pre[Math.max(a2,0)];
-  const win60  = winSum(endI-WIN+1, endI);   // "60" v názvu zůstalo historicky — řídí se WIN
-  const prev60 = endI>=WIN ? winSum(endI-2*WIN+1, endI-WIN) : 0;
-  const best60 = (()=>{ let best=0; for(let e=0;e<=endI;e++){ const v=winSum(e-WIN+1,e); if(v>best) best=v; } return best; })();
-  const winDelta = prev60>0 ? win60-prev60 : null;
-  const winPctD  = prev60>0 ? Math.round((win60/prev60-1)*100) : null;
+  const aBill = new Array(endI+1).fill(0);
+  const aWork = new Array(endI+1).fill(0);          // 1 = Josef ten den byl v práci
+  activeLogs.forEach(l=>{ if(!l.entry_date) return; const i=dIdx(l.entry_date);
+    if(i>=0&&i<=endI){ if(!isBd(l)) aBill[i]+=(l.hours||0); aWork[i]=1; } });
+  attendance.forEach(a=>{ if(!a.check_in) return; const i=dIdx(a.date); if(i>=0&&i<=endI) aWork[i]=1; });
+  const pB=[0], pW=[0];
+  for(let i=0;i<=endI;i++){ pB.push(pB[i]+aBill[i]); pW.push(pW[i]+aWork[i]); }
+  const formOf=(a2,b2)=>{ const lo=Math.max(a2,0), hi=Math.min(b2,endI);
+    if(hi<lo) return {bill:0,days:0,avg:0};
+    const bill=pB[hi+1]-pB[lo], days=pW[hi+1]-pW[lo];
+    return {bill,days,avg:days>0?bill/days:0}; };
+  const form60   = formOf(endI-WIN_DAYS+1, endI);
+  const formPrev = formOf(endI-2*WIN_DAYS+1, endI-WIN_DAYS);
+  const bestForm = (()=>{ let best=0; for(let e=0;e<=endI;e++){ const r=formOf(e-WIN_DAYS+1,e); if(r.days>=3&&r.avg>best) best=r.avg; } return best; })();
+  const winDelta = formPrev.days>=3 ? form60.avg-formPrev.avg : null;
+  const winPctD  = formPrev.days>=3 && formPrev.avg>0 ? Math.round((form60.avg/formPrev.avg-1)*100) : null;
   const histDays = endI+1;
-  // Dokud je historie kratší než WIN+30 dní, je okno ≈ celá historie a "osobní
+  // Dokud je historie kratší než WIN_DAYS+30, je okno ≈ celá historie a "osobní
   // rekord" by svítil natrvalo. Do té doby jedeme na kumulativní milníky.
-  const winMature = histDays >= WIN + 30;
-  const isRecord  = winMature && best60>0 && win60>=best60-0.01;
-  const mileF     = best60>0 ? Math.min(1, win60/best60) : 0;
+  const winMature = histDays >= WIN_DAYS + 30;
+  const isRecord  = winMature && bestForm>0 && form60.avg>=bestForm-0.005;
+  const mileF     = bestForm>0 ? Math.min(1, form60.avg/bestForm) : 0;
   const MILE=[25,50,100,150,200,250,300,400,500,750,1000,1500,2000];
   const nextMile=MILE.find(x=>x>allTot)||Math.ceil((allTot+1)/500)*500;
   const prevMile=[0].concat(MILE).filter(x=>x<=allTot).pop()||0;
@@ -13390,6 +13411,86 @@ function AsistentPrehled({ logs, attendance, clients, availability, onGo }) {
         </div>
       </div>
 
+      {/* ── UTILIZACE — akcentovaný panel s vysvětlením ── */}
+      <div style={{...paper,padding:0,overflow:"hidden",display:"flex",position:"relative"}}>
+        <div style={{width:4,background:`linear-gradient(180deg, ${VIVID} 0%, ${SEC} 55%, ${SAND} 100%)`,flexShrink:0}}/>
+        <div style={{flex:1,minWidth:0,padding:"24px 28px 22px"}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",gap:12,flexWrap:"wrap",marginBottom:20}}>
+            <div style={{display:"flex",alignItems:"baseline",gap:11}}>
+              <div style={lbl}>Utilizace · posledních {WIN_DAYS} dní</div>
+              <span style={{fontSize:8,letterSpacing:".16em",fontWeight:700,color:VIVID,background:"rgba(91,82,240,.09)",borderRadius:5,padding:"3px 7px",textTransform:"uppercase"}}>Klíčový ukazatel</span>
+            </div>
+            <div style={{fontSize:10,color:MUT}}>
+              Cíl <b style={{color:"var(--txt)"}}>{ASISTENT_DAY_CAPTURE_H} h zapsaných denně</b>
+              {ut.days>0 && <> · {ut.days} {dnyWord(ut.days)} v práci</>}
+              {utDelta!=null && <> · <b style={{color:utDelta>=0?OK:SANDD}}>{utDelta>=0?"+":"−"}{Math.abs(utDelta)} b. proti předchozím {WIN_DAYS} dnům</b></>}
+            </div>
+          </div>
+
+          <div style={{display:"grid",gridTemplateColumns:"148px minmax(0,1fr) 300px",gap:26,alignItems:"center"}}>
+            {/* prstenec */}
+            <div style={{position:"relative",width:148,height:148}}>
+              <svg viewBox="0 0 42 42" style={{width:148,height:148,transform:"rotate(-90deg)"}}>
+                <circle cx="21" cy="21" r="15.9" fill="none" stroke="rgba(0,0,0,.06)" strokeWidth="5"/>
+                {ut.bdF>0.004 && <circle cx="21" cy="21" r="15.9" fill="none" stroke={SANDL} strokeWidth="5" strokeLinecap="round"
+                  strokeDasharray={`${ut.bdF*UC} ${UC}`} strokeDashoffset={-ut.billF*UC}/>}
+                {ut.billF>0.004 && <circle cx="21" cy="21" r="15.9" fill="none" stroke={ut.f>=1?OK:VIVID} strokeWidth="5" strokeLinecap="round"
+                  strokeDasharray={`${ut.billF*UC} ${UC}`} style={{transition:"stroke-dasharray .7s ease"}}/>}
+              </svg>
+              <div style={{position:"absolute",inset:0,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center"}}>
+                <div style={hero(ut.pct==null?"rgba(0,0,0,.2)":ut.f>=1?OK:IND,32)}>{ut.pct==null?"—":`${ut.pct} %`}</div>
+                <div style={{fontSize:9,color:MUT,marginTop:4}}>{ut.pct==null?"chybí docházka":`Ø ${fmtH(ut.avg)} / den`}</div>
+              </div>
+            </div>
+
+            {/* rozpad */}
+            <div style={{minWidth:0}}>
+              <div style={{display:"flex",height:11,borderRadius:6,overflow:"hidden",background:"rgba(0,0,0,.055)",marginBottom:9}}>
+                <div style={{width:`${ut.billF*100}%`,background:VIVID,transition:"width .6s"}}/>
+                <div style={{width:`${ut.bdF*100}%`,background:SANDL,transition:"width .6s"}}/>
+              </div>
+              <div style={{display:"grid",gridTemplateColumns:"repeat(3,minmax(0,1fr))",gap:10,marginTop:16}}>
+                <div>
+                  <div style={{fontSize:10,color:MUT,marginBottom:5}}><span style={dot(VIVID)}/>Klientská práce</div>
+                  <div style={hero(IND,19)}>{fmtH(ut.bill)}</div>
+                  <div style={{fontSize:9,color:MUT,marginTop:4}}>{ut.goal>0?`${Math.round(ut.billF*100)} % dne`:"—"}</div>
+                </div>
+                <div>
+                  <div style={{fontSize:10,color:MUT,marginBottom:5}}><span style={dot(SANDL)}/>Development</div>
+                  <div style={hero(SANDD,19)}>{fmtH(ut.bd)}</div>
+                  <div style={{fontSize:9,color:MUT,marginTop:4}}>{ut.goal>0?`${Math.round(ut.bdF*100)} % dne`:"—"}</div>
+                </div>
+                <div>
+                  <div style={{fontSize:10,color:MUT,marginBottom:5}}><span style={dot("rgba(0,0,0,.16)")}/>Zbývá zapsat</div>
+                  <div style={hero(ut.f>=1?OK:"rgba(0,0,0,.45)",19)}>{fmtH(Math.max(0,ut.goal-ut.logged))}</div>
+                  <div style={{fontSize:9,color:MUT,marginTop:4}}>{ut.f>=1?"nic — den je celý":`${fmtH(utGapDay)} denně`}</div>
+                </div>
+              </div>
+              {ut.unlogged>0.5 && (
+                <div style={{marginTop:16,paddingTop:11,borderTop:`1px solid ${LINE}`,fontSize:10,color:MUT,lineHeight:1.6}}>
+                  Podle docházky jsi byl v kanceláři <b style={{color:"var(--txt)"}}>{fmtH(ut.office)}</b>, ve výkazu je <b style={{color:"var(--txt)"}}>{fmtH(ut.logged)}</b>
+                  {" — "}<b style={{color:SANDD}}>{fmtH(ut.unlogged)}</b> zatím nemá popis.
+                </div>
+              )}
+            </div>
+
+            {/* vysvětlení */}
+            <div style={{background:"#F5F4FE",border:"1px solid rgba(91,82,240,.13)",borderRadius:14,padding:"16px 17px"}}>
+              <div style={{fontSize:8,letterSpacing:".2em",textTransform:"uppercase",color:VIVID,fontWeight:700,marginBottom:9}}>Co je utilizace</div>
+              <p style={{margin:0,fontSize:11,color:"var(--txt)",lineHeight:1.75}}>
+                Kolik z pracovního dne je <b>popsané ve výkazu</b> — klientská práce i development dohromady.
+              </p>
+              <p style={{margin:"10px 0 0",fontSize:10.5,color:MUT,lineHeight:1.75}}>
+                V advokacii je to nejsledovanější číslo vůbec: co není ve výkazu, to kancelář neumí vyfakturovat ani doložit klientovi. Není to kontrola — je to způsob, jak je celá tvoje práce vidět.
+              </p>
+              <p style={{margin:"10px 0 0",fontSize:10.5,color:MUT,lineHeight:1.75}}>
+                <b style={{color:"var(--txt)"}}>Cíl {ASISTENT_DAY_CAPTURE_H} h denně.</b> Zapisuj průběžně, ne až večer — zpětně se vždycky něco ztratí.
+              </p>
+            </div>
+          </div>
+        </div>
+      </div>
+
       {/* ── CO JEŠTĚ CHYBÍ POPSAT ── */}
       {todoRows.length>0 && (
         <div style={{...paper,padding:0,overflow:"hidden",display:"flex"}}>
@@ -13435,20 +13536,20 @@ function AsistentPrehled({ logs, attendance, clients, availability, onGo }) {
         <div style={{display:"grid",gridTemplateColumns:"minmax(0,1fr) 1px 1.15fr",gap:26,alignItems:"center"}}>
           <div style={{minWidth:0}}>
             <div style={{display:"flex",alignItems:"baseline",gap:10,flexWrap:"wrap",marginBottom:11}}>
-              <div style={lbl}>{winMature ? `Tvoje forma · poslední ${WIN_LBL}` : `Tvoje výsledky · od ${MONTHS_CS[Number(JOSEF_LOG_START.slice(5,7))-1]} ${JOSEF_LOG_START.slice(0,4)}`}</div>
-              {isRecord && win60>0 && (
+              <div style={lbl}>{winMature ? `Tvoje forma · posledních ${WIN_DAYS} dní` : `Tvoje výsledky · od ${MONTHS_CS[Number(JOSEF_LOG_START.slice(5,7))-1]} ${JOSEF_LOG_START.slice(0,4)}`}</div>
+              {isRecord && form60.avg>0 && (
                 <span style={{fontSize:8,letterSpacing:".16em",fontWeight:700,color:OK,background:"rgba(5,150,105,.09)",
                   borderRadius:5,padding:"3px 7px",textTransform:"uppercase"}}>Osobní rekord</span>
               )}
             </div>
             <div style={{display:"flex",alignItems:"baseline",gap:11,flexWrap:"wrap"}}>
-              <span style={hero(isRecord&&win60>0?OK:IND,40)}>{fmtH(winMature?win60:allTot)}</span>
+              <span style={hero(isRecord&&form60.avg>0?OK:IND,40)}>{fmtH(winMature?form60.avg:allTot)}</span>
               {winMature
                 ? (winDelta!=null
                     ? <span style={{fontSize:11.5,color:winDelta>=0?OK:SANDD,fontWeight:600}}>
-                        {winDelta>=0?"+":"−"}{fmtH(Math.abs(winDelta))} ({winPctD>=0?"+":"−"}{Math.abs(winPctD)} %) proti předchozím {WIN_LBL}m
+                        klientské práce na den · {winDelta>=0?"+":"−"}{fmtH(Math.abs(winDelta))} ({winPctD>=0?"+":"−"}{Math.abs(winPctD)} %) proti předchozím {WIN_DAYS} dnům
                       </span>
-                    : <span style={{fontSize:11.5,color:MUT}}>zapsáno za poslední {WIN_LBL}</span>)
+                    : <span style={{fontSize:11.5,color:MUT}}>klientské práce na pracovní den · cíl {String(ASISTENT_DAILY_H).replace(".",",")} h</span>)
                 : <span style={{fontSize:11.5,color:MUT}}>odpracováno celkem za {histDays} {dnyWord(histDays)}</span>}
             </div>
 
@@ -13457,9 +13558,9 @@ function AsistentPrehled({ logs, attendance, clients, availability, onGo }) {
                 {winMature
                   ? <>
                       <span>{isRecord
-                        ? <>Tohle je tvoje nejlepší tříměsíční období.</>
-                        : <>Osobní rekord <b style={{color:"var(--txt)"}}>{fmtH(best60)}</b></>}</span>
-                      {!isRecord && <span>zbývá <b style={{color:"var(--txt)"}}>{fmtH(Math.max(0,best60-win60))}</b></span>}
+                        ? <>Tvoje nejlepší {WIN_DAYS}denní období — {form60.days} {dnyWord(form60.days)} v práci.</>
+                        : <>Osobní rekord <b style={{color:"var(--txt)"}}>{fmtH(bestForm)}</b> / den</>}</span>
+                      {!isRecord && <span>zbývá <b style={{color:"var(--txt)"}}>{fmtH(Math.max(0,bestForm-form60.avg))}</b> denně</span>}
                     </>
                   : <>
                       <span>Další milník <b style={{color:"var(--txt)"}}>{nextMile} h</b></span>
@@ -13472,7 +13573,7 @@ function AsistentPrehled({ logs, attendance, clients, availability, onGo }) {
               </div>
               {!winMature && (
                 <div style={{fontSize:9.5,color:MUT,marginTop:8,lineHeight:1.6,opacity:.9}}>
-                  Až budeš mít {WIN+30} dní evidence, přepne se tenhle panel na tvou <b>formu za poslední {WIN_LBL}</b> — číslo, které se dá překonat.
+                  Až budeš mít {WIN_DAYS+30} dní evidence, přepne se tenhle panel na tvoji <b>formu za posledních {WIN_DAYS} dní</b> — průměr klientské práce na den, kdy jsi v práci. Dny volna se do něj nepočítají.
                 </div>
               )}
             </div>
@@ -13488,9 +13589,9 @@ function AsistentPrehled({ logs, attendance, clients, availability, onGo }) {
 
           <div style={{display:"grid",gridTemplateColumns:"repeat(2,minmax(0,1fr))",gap:10}}>
             <div style={tile}>
-              <div style={tlbl}>Nejlepší utilizace</div>
-              <div style={{...hero(IND,19),marginTop:6}}>{bestUtil?`${bestUtil.pct} %`:"—"}</div>
-              <div style={{fontSize:9,color:MUT,marginTop:4}}>{bestUtil?`${bestUtil.label} ${bestUtil.year}`:"zatím žádná"}</div>
+              <div style={tlbl}>Ø zápis / den</div>
+              <div style={{...hero(IND,19),marginTop:6}}>{allDays>0?fmtH(allTot/allDays):"—"}</div>
+              <div style={{fontSize:9,color:MUT,marginTop:4}}>na den v práci · cíl {ASISTENT_DAY_CAPTURE_H} h</div>
             </div>
             <div style={tile}>
               <div style={tlbl}>Nejsilnější den</div>
@@ -13506,82 +13607,6 @@ function AsistentPrehled({ logs, attendance, clients, availability, onGo }) {
               <div style={tlbl}>Klientů</div>
               <div style={{...hero(IND,19),marginTop:6}}>{allClients}</div>
               <div style={{fontSize:9,color:MUT,marginTop:4}}>na kterých jsi dělal</div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* ── UTILIZACE — akcentovaný panel s vysvětlením ── */}
-      <div style={{...paper,padding:0,overflow:"hidden",display:"flex",position:"relative"}}>
-        <div style={{width:4,background:`linear-gradient(180deg, ${VIVID} 0%, ${SEC} 55%, ${SAND} 100%)`,flexShrink:0}}/>
-        <div style={{flex:1,minWidth:0,padding:"24px 28px 22px"}}>
-          <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",gap:12,flexWrap:"wrap",marginBottom:20}}>
-            <div style={{display:"flex",alignItems:"baseline",gap:11}}>
-              <div style={lbl}>Utilizace · {pName}</div>
-              <span style={{fontSize:8,letterSpacing:".16em",fontWeight:700,color:VIVID,background:"rgba(91,82,240,.09)",borderRadius:5,padding:"3px 7px",textTransform:"uppercase"}}>Klíčový ukazatel</span>
-            </div>
-            <div style={{fontSize:10,color:MUT}}>Cíl <b style={{color:"var(--txt)"}}>{ASISTENT_DAY_CAPTURE_H} h zapsaných denně</b></div>
-          </div>
-
-          <div style={{display:"grid",gridTemplateColumns:"148px minmax(0,1fr) 300px",gap:26,alignItems:"center"}}>
-            {/* prstenec */}
-            <div style={{position:"relative",width:148,height:148}}>
-              <svg viewBox="0 0 42 42" style={{width:148,height:148,transform:"rotate(-90deg)"}}>
-                <circle cx="21" cy="21" r="15.9" fill="none" stroke="rgba(0,0,0,.06)" strokeWidth="5"/>
-                {capBdF>0.004 && <circle cx="21" cy="21" r="15.9" fill="none" stroke={SANDL} strokeWidth="5" strokeLinecap="round"
-                  strokeDasharray={`${capBdF*UC} ${UC}`} strokeDashoffset={-capBillF*UC}/>}
-                {capBillF>0.004 && <circle cx="21" cy="21" r="15.9" fill="none" stroke={capF>=1?OK:VIVID} strokeWidth="5" strokeLinecap="round"
-                  strokeDasharray={`${capBillF*UC} ${UC}`} style={{transition:"stroke-dasharray .7s ease"}}/>}
-              </svg>
-              <div style={{position:"absolute",inset:0,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center"}}>
-                <div style={hero(capPct==null?"rgba(0,0,0,.2)":capF>=1?OK:IND,32)}>{capPct==null?"—":`${capPct} %`}</div>
-                <div style={{fontSize:9,color:MUT,marginTop:4}}>{capPct==null?"chybí docházka":`Ø ${fmtH(capAvg)} / den`}</div>
-              </div>
-            </div>
-
-            {/* rozpad */}
-            <div style={{minWidth:0}}>
-              <div style={{display:"flex",height:11,borderRadius:6,overflow:"hidden",background:"rgba(0,0,0,.055)",marginBottom:9}}>
-                <div style={{width:`${capBillF*100}%`,background:VIVID,transition:"width .6s"}}/>
-                <div style={{width:`${capBdF*100}%`,background:SANDL,transition:"width .6s"}}/>
-              </div>
-              <div style={{display:"grid",gridTemplateColumns:"repeat(3,minmax(0,1fr))",gap:10,marginTop:16}}>
-                <div>
-                  <div style={{fontSize:10,color:MUT,marginBottom:5}}><span style={dot(VIVID)}/>Klientská práce</div>
-                  <div style={hero(IND,19)}>{fmtH(mH)}</div>
-                  <div style={{fontSize:9,color:MUT,marginTop:4}}>{capGoal>0?`${Math.round(capBillF*100)} % dne`:"—"}</div>
-                </div>
-                <div>
-                  <div style={{fontSize:10,color:MUT,marginBottom:5}}><span style={dot(SANDL)}/>Development</div>
-                  <div style={hero(SANDD,19)}>{fmtH(mBdH)}</div>
-                  <div style={{fontSize:9,color:MUT,marginTop:4}}>{capGoal>0?`${Math.round(capBdF*100)} % dne`:"—"}</div>
-                </div>
-                <div>
-                  <div style={{fontSize:10,color:MUT,marginBottom:5}}><span style={dot("rgba(0,0,0,.16)")}/>Zbývá zapsat</div>
-                  <div style={hero(capF>=1?OK:"rgba(0,0,0,.45)",19)}>{fmtH(Math.max(0,capGoal-mLogged))}</div>
-                  <div style={{fontSize:9,color:MUT,marginTop:4}}>{capF>=1?"nic — den je celý":`${fmtH(capGapDay)} denně`}</div>
-                </div>
-              </div>
-              {mUnlogged>0.5 && (
-                <div style={{marginTop:16,paddingTop:11,borderTop:`1px solid ${LINE}`,fontSize:10,color:MUT,lineHeight:1.6}}>
-                  Podle docházky jsi byl v kanceláři <b style={{color:"var(--txt)"}}>{fmtH(mOffice)}</b>, ve výkazu je <b style={{color:"var(--txt)"}}>{fmtH(mLogged)}</b>
-                  {" — "}<b style={{color:SANDD}}>{fmtH(mUnlogged)}</b> zatím nemá popis.
-                </div>
-              )}
-            </div>
-
-            {/* vysvětlení */}
-            <div style={{background:"#F5F4FE",border:"1px solid rgba(91,82,240,.13)",borderRadius:14,padding:"16px 17px"}}>
-              <div style={{fontSize:8,letterSpacing:".2em",textTransform:"uppercase",color:VIVID,fontWeight:700,marginBottom:9}}>Co je utilizace</div>
-              <p style={{margin:0,fontSize:11,color:"var(--txt)",lineHeight:1.75}}>
-                Kolik z pracovního dne je <b>popsané ve výkazu</b> — klientská práce i development dohromady.
-              </p>
-              <p style={{margin:"10px 0 0",fontSize:10.5,color:MUT,lineHeight:1.75}}>
-                V advokacii je to nejsledovanější číslo vůbec: co není ve výkazu, to kancelář neumí vyfakturovat ani doložit klientovi. Není to kontrola — je to způsob, jak je celá tvoje práce vidět.
-              </p>
-              <p style={{margin:"10px 0 0",fontSize:10.5,color:MUT,lineHeight:1.75}}>
-                <b style={{color:"var(--txt)"}}>Cíl {ASISTENT_DAY_CAPTURE_H} h denně.</b> Zapisuj průběžně, ne až večer — zpětně se vždycky něco ztratí.
-              </p>
             </div>
           </div>
         </div>
@@ -13669,44 +13694,66 @@ function AsistentPrehled({ logs, attendance, clients, availability, onGo }) {
         </div>
       </div>
 
-      {/* ── UZAVŘENÉ MĚSÍCE · EFEKTIVITA ── */}
+      {/* ── UTILIZACE PO MĚSÍCÍCH ── */}
       <div style={{...paper,padding:"22px 26px 18px"}}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",gap:12,flexWrap:"wrap"}}>
-          <div style={lbl}>Uzavřené měsíce · efektivita</div>
+          <div style={lbl}>Utilizace po měsících</div>
           <div style={{display:"flex",gap:16,fontSize:10,color:MUT}}>
             <span><span style={dot(VIVID)}/>Klientská práce</span>
-            <span><span style={dot(SAND)}/>Development</span>
+            <span><span style={dot(SANDL)}/>Development</span>
+            <span style={{opacity:.8}}>Cíl {ASISTENT_DAY_CAPTURE_H} h na den v práci</span>
           </div>
         </div>
-        {series.every(m=>m.tot===0) ? (
+
+        {monthRows.every(m=>m.days===0) ? (
           <div style={{padding:"40px 0 34px",textAlign:"center",color:MUT,fontSize:12.5}}>Zatím nejsou žádné vykázané hodiny.</div>
         ) : (
           <>
-            <div style={{display:"flex",alignItems:"flex-end",gap:18,marginTop:20}}>
-              {series.map(m=>{
-                const totH = m.tot>0 ? Math.max(10, Math.round(m.tot/maxTot*CH)) : 4;
-                const bdH  = m.tot>0 ? Math.round(totH*(m.bd/m.tot)) : 0;
-                const biH  = totH-bdH;
-                return (
-                  <div key={m.key} style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",gap:8,minWidth:0}}>
-                    <div style={hero(m.tot===0?"rgba(0,0,0,.18)":m.running?MUT:IND,19)}>{m.tot>0?`${m.pct} %`:"—"}</div>
-                    <div style={{width:"100%",height:CH,display:"flex",flexDirection:"column",justifyContent:"flex-end",
-                      borderRadius:7,overflow:"hidden",border:m.running?`1px dashed ${LIVE}`:"none"}}>
-                      {bdH>0 && <div style={{height:bdH,background:m.running?"#EDE6D4":SANDL}}/>}
-                      <div style={{height:biH,background:m.tot===0?"rgba(0,0,0,.06)":m.running?LIVE:VIVID}}/>
+            <div style={{position:"relative",marginTop:22}}>
+              {/* linka 100 % */}
+              <div style={{position:"absolute",left:0,right:0,bottom:38+CH*(100/utilAxis),
+                borderTop:`1px dashed rgba(0,0,0,.16)`,pointerEvents:"none"}}>
+                <span style={{position:"absolute",right:0,top:-14,fontSize:8.5,letterSpacing:".14em",
+                  textTransform:"uppercase",color:MUT,fontWeight:600,background:"#fff",padding:"0 4px"}}>cíl 100 %</span>
+              </div>
+
+              <div style={{display:"flex",alignItems:"flex-end",gap:18}}>
+                {monthRows.map(m=>{
+                  const totH = m.pct!=null && m.pct>0 ? Math.max(8, Math.round(m.pct/utilAxis*CH)) : 4;
+                  const bdH  = m.pct>0 ? Math.round(totH*(m.bdF/(m.billF+m.bdF||1))) : 0;
+                  const biH  = totH-bdH;
+                  const full = m.pct!=null && m.pct>=100;
+                  return (
+                    <div key={m.key} style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",gap:8,minWidth:0}}>
+                      <div style={hero(m.days===0?"rgba(0,0,0,.18)":m.running?MUT:full?OK:IND,19)}>
+                        {m.days>0?`${m.pct} %`:"—"}
+                      </div>
+                      <div style={{width:"100%",height:CH,display:"flex",flexDirection:"column",justifyContent:"flex-end",
+                        borderRadius:7,overflow:"hidden",border:m.running?`1px dashed ${LIVE}`:"none"}}>
+                        {bdH>0 && <div style={{height:bdH,background:m.running?"#EDE6D4":SANDL}}/>}
+                        <div style={{height:biH,background:m.days===0?"rgba(0,0,0,.06)":m.running?LIVE:full?OK:VIVID}}/>
+                      </div>
+                      <div style={{fontSize:10,color:m.running?"var(--txt)":MUT,fontWeight:m.running?600:400,
+                        textAlign:"center",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",maxWidth:"100%"}}>
+                        {m.label}{m.running?" · běží":""}
+                      </div>
+                      <div style={{fontSize:9.5,color:MUT,opacity:.75,textAlign:"center",lineHeight:1.45}}>
+                        {m.days>0 ? <>{m.days} {dnyWord(m.days)}<br/>{fmtH(m.logged)}</> : "—"}
+                      </div>
                     </div>
-                    <div style={{fontSize:10,color:m.running?"var(--txt)":MUT,fontWeight:m.running?600:400,textAlign:"center",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",maxWidth:"100%"}}>{m.label}</div>
-                    <div style={{fontSize:9.5,color:MUT,opacity:.75}}>{m.running?"běží":m.tot>0?`${fmtH(m.bill)} · ${fmtH(m.bd)}`:"—"}</div>
-                  </div>
-                );
-              })}
+                  );
+                })}
+              </div>
             </div>
-            <div style={{borderTop:`1px solid ${LINE}`,marginTop:16,paddingTop:12,fontSize:11,color:MUT}}>
-              {avgPct!=null
-                ? <>Průměr {closed.length} uzavřen{closed.length===1?"ého měsíce":"ých měsíců"} <b style={{color:"var(--txt)",fontWeight:600}}>{avgPct} % klientské práce</b>
-                    {bestM?<> · nejlepší {bestM.label} <b style={{color:"var(--txt)",fontWeight:600}}>{bestM.pct} %</b></>:null}
-                    {runPct!=null?<> · {MONTHS_CS[cm-1]} zatím <b style={{color:runPct>=avgPct?OK:SANDD,fontWeight:600}}>{runPct>=avgPct?"+":"−"}{Math.abs(runPct-avgPct)} b. {runPct>=avgPct?"nad":"pod"} průměrem</b></>:null}</>
+
+            <div style={{borderTop:`1px solid ${LINE}`,marginTop:16,paddingTop:12,fontSize:11,color:MUT,lineHeight:1.7}}>
+              {avgUtil!=null
+                ? <>Průměr {closedM.length} uzavřen{closedM.length===1?"ého měsíce":"ých měsíců"} <b style={{color:"var(--txt)",fontWeight:600}}>{avgUtil} %</b>
+                    {bestUtilM?<> · nejlepší {bestUtilM.label} <b style={{color:"var(--txt)",fontWeight:600}}>{bestUtilM.pct} %</b></>:null}
+                    {runMonth&&runMonth.days>0?<> · {MONTHS_CS[cm-1]} zatím <b style={{color:runMonth.pct>=avgUtil?OK:SANDD,fontWeight:600}}>{runMonth.pct>=avgUtil?"+":"−"}{Math.abs(runMonth.pct-avgUtil)} b. {runMonth.pct>=avgUtil?"nad":"pod"} průměrem</b></>:null}</>
                 : <>Evidence běží od {MONTHS_CS[Number(JOSEF_LOG_START.slice(5,7))-1]} {JOSEF_LOG_START.slice(0,4)} — první uzavřený měsíc se objeví po skončení tohoto měsíce.</>}
+              <br/>
+              <span style={{opacity:.85}}>Počítá se jen z dnů, kdy jsi byl v práci — volno ani víkendy se do toho nepromítají.</span>
             </div>
           </>
         )}
