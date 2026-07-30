@@ -15922,104 +15922,113 @@ export default function MauxCRM() {
           const liveRow = { ym: `${lastY}-${String(lastM + 1).padStart(2,"0")}`, totalM: _monthAmt, live: true };
           const sparkRows = [...ladder.rows.slice(-9), liveRow];
           const maxTotal = Math.max(...sparkRows.map(r => r.totalM), _goal, 1);
-          const barW = 12, gap = 5, chartH = 32, TOPPAD = 12;
+          const barW = 10, gap = 4, chartH = 42;
           const svgW = Math.max(1, sparkRows.length * (barW + gap) - gap);
-          // Jediná vodorovná čára = aktuální cíl (appka historii minulých cílů nesleduje, jen jedno
-          // číslo v localStorage — záměrně jednodušší než dřívější krokový žebříček).
-          const yGoal = _goal > 0 ? (chartH - Math.min(1, _goal / maxTotal) * chartH + 6 + TOPPAD) : null;
+          const _peak = Math.max(...sparkRows.map(r => r.totalM));
+          // Jediná vodorovná cara = aktualni cil (appka historii minulych cilu nesleduje, jen jedno
+          // cislo v localStorage). Zlata = cil, napric barem i sparkline.
+          const yGoal = _goal > 0 ? (chartH - Math.min(1, _goal / maxTotal) * chartH + 4) : null;
+          const _sep = { margin: "0 9px", opacity: .35 };
+          const _val = { color: "var(--txt)", fontWeight: 600 };
+          const _scale = Math.max(_monthAmt, _goal, 1);
 
           return (
-            <div style={{padding:"20px 40px 16px",borderBottom:"1px solid rgba(0,0,0,.06)",background:"#fff"}}>
-              <div style={{display:"flex",alignItems:"flex-end",justifyContent:"space-between",gap:28,flexWrap:"wrap"}}>
+            <div style={{padding:"18px 40px 15px",borderBottom:"1px solid rgba(0,0,0,.06)",background:"#fff"}}>
+              <div style={{display:"flex",alignItems:"flex-start",justifyContent:"space-between",gap:36,flexWrap:"wrap"}}>
 
-                {/* Metriky — tiché sloupce oddělené vlasovou linkou, žádný barevný podklad */}
-                <div style={{display:"flex",alignItems:"flex-end",flexWrap:"wrap"}}>
-                  {[
-                    { l: "Dnes", v: _fmt(_todayAmt) },
-                    { l: "Tento měsíc", v: _fmt(_monthAmt) },
-                    ...(_goal > 0 ? [{ l: "Do cíle zbývá", v: _rem === 0 ? "✓ splněno" : _fmt(_rem), accent: _rem === 0 }] : []),
-                    ...(_dailyTarget > 0 ? [{
-                      l: _dailyDone ? "Dnešní tempo" : "Dnes ideálně",
-                      v: _dailyDone ? "✓ na tahu" : _fmt(_dailyTarget),
-                      sub: _dailyDone ? null : `zbývá ${_wdLeft} prac. dní`,
-                      accent: _dailyDone,
-                    }] : []),
-                  ].map((k, i) => (
-                    <div key={i} style={{ paddingRight: 32, paddingLeft: i > 0 ? 32 : 0, borderLeft: i > 0 ? "1px solid rgba(0,0,0,.07)" : "none", marginBottom: 2 }}>
-                      <div style={bpLabel({ marginBottom: 8 })}>{k.l}</div>
-                      <div style={bpHero(23, k.accent ? BP.indigo : "var(--txt)")}>{k.v}</div>
-                      {k.sub && <div style={{ fontSize: 9.5, color: "var(--mut)", marginTop: 5, opacity: .75 }}>{k.sub}</div>}
+                {/* Jedno hlavni cislo. Vse ostatni klesa do jednoho drobneho radku pod barem —
+                    Tom, 30.7.2026: puvodni pas se tremi hero cisly a popisky nad kazdym sloupcem
+                    sparkline se necetl ("hnusne, divne, necitelne"). */}
+                <div style={{flex:"1 1 360px",minWidth:290}}>
+                  <div style={bpLabel({ marginBottom: 7 })}>Tento měsíc</div>
+                  <div style={{display:"flex",alignItems:"baseline",gap:12,flexWrap:"wrap"}}>
+                    <span style={bpHero(34, "var(--txt)")}>{_fmt(_monthAmt)}</span>
+                    {_goal > 0 && (
+                      <span style={{background:_rem===0?"rgba(91,82,240,.10)":"rgba(0,0,0,.04)",color:_rem===0?BP.indigoDeep:"var(--mut)",fontSize:10.5,padding:"3px 10px",borderRadius:99,whiteSpace:"nowrap",letterSpacing:".01em"}}>
+                        {_rem === 0 ? `cíl splněn · +${_fmt(_monthAmt - _goal)}` : `zbývá ${_fmt(_rem)}`}
+                      </span>
+                    )}
+                  </div>
+
+                  {/* Vlasovy bar. Skala jde az na dosazenou hodnotu, takze presah nad cil je videt;
+                      zlata ryska drzi pozici cile. Zadna zelena — jedina barva je indigo + zlata. */}
+                  {_goal > 0 && (
+                    <div style={{position:"relative",height:3,background:"rgba(0,0,0,.07)",borderRadius:99,margin:"14px 0 10px"}}>
+                      <div style={{position:"absolute",left:0,top:0,bottom:0,width:`${Math.min(1,_monthAmt/_scale)*100}%`,background:BP.indigo,borderRadius:99,transition:"width .6s cubic-bezier(.16,1,.3,1)"}} />
+                      <div title={`Cíl ${_goal.toLocaleString("cs-CZ")} Kč`} style={{position:"absolute",left:`${Math.min(1,_goal/_scale)*100}%`,top:-3.5,bottom:-3.5,width:1.5,background:BP.sand,borderRadius:1}} />
                     </div>
-                  ))}
+                  )}
+
+                  <div style={{display:"flex",alignItems:"center",flexWrap:"wrap",fontSize:10.5,color:"var(--mut)",letterSpacing:".01em",rowGap:4}}>
+                    <span>Dnes <b style={_val}>{_fmt(_todayAmt)}</b></span>
+                    {_dailyTarget > 0 && (
+                      <>
+                        <span style={_sep}>·</span>
+                        <span>{_dailyDone
+                          ? <b style={{color:BP.indigo,fontWeight:600}}>✓ na tahu</b>
+                          : <>Dnes ideálně <b style={_val}>{_fmt(_dailyTarget)}</b> <span style={{opacity:.7}}>({_wdLeft} prac. dní)</span></>}</span>
+                      </>
+                    )}
+                    <span style={_sep}>·</span>
+                    {editingGoal ? (
+                      <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
+                        <input type="text" value={goalDraft} onChange={e=>setGoalDraft(e.target.value)}
+                          onKeyDown={e=>{if(e.key==="Enter")saveGoal();if(e.key==="Escape")setEditingGoal(false);}}
+                          placeholder="150000" autoFocus
+                          style={{width:84,padding:"3px 8px",borderRadius:8,border:`1px solid ${BP.indigo}`,fontSize:11,fontFamily:"var(--mono)",outline:"none"}} />
+                        <button onClick={saveGoal} style={{padding:"3px 9px",borderRadius:8,background:BP.indigo,border:"none",fontSize:10,fontWeight:700,cursor:"pointer",color:"#fff"}}>OK</button>
+                        <button onClick={()=>setEditingGoal(false)} style={{padding:"3px 6px",borderRadius:8,background:"none",border:"1px solid rgba(0,0,0,.1)",fontSize:11,cursor:"pointer",color:"var(--mut)"}}>✕</button>
+                      </span>
+                    ) : (
+                      <span onClick={()=>{setGoalDraft(_goal>0?String(_goal):"");setEditingGoal(true);}}
+                        style={{cursor:"pointer",transition:"color .15s"}}
+                        onMouseEnter={e=>{e.currentTarget.style.color=BP.indigo;}}
+                        onMouseLeave={e=>{e.currentTarget.style.color="var(--mut)";}}>
+                        {_goal>0 ? <>✏ Cíl <b style={_val}>{_fmt(_goal)}</b></> : "+ Nastavit měsíční cíl"}
+                      </span>
+                    )}
+                    <span style={_sep}>·</span>
+                    <span onClick={() => {
+                        navTo("dashboard");
+                        setTimeout(() => {
+                          const el = document.getElementById("maux-finance-detail");
+                          if (el) { el.open = true; el.scrollIntoView({ behavior: "smooth", block: "start" }); }
+                        }, 80);
+                      }}
+                      style={{color:BP.indigo,cursor:"pointer",fontWeight:600}}
+                      title={'Tento měsíc = nevyfakturované výkazy (bez DPH, po slevě) + hrubý úrok z úschov'}>
+                      Detail →
+                    </span>
+                  </div>
                 </div>
 
-                {/* Spark historie + cíl */}
-                <div style={{ display: "flex", alignItems: "flex-end", gap: 18, marginBottom: 2 }}>
-                  {sparkRows.length > 1 && (
-                    <svg width={svgW} height={chartH + 14} style={{ flexShrink: 0, overflow: "visible" }}>
-                      {yGoal !== null && <line x1={0} y1={yGoal - TOPPAD} x2={svgW} y2={yGoal - TOPPAD} stroke="rgba(91,82,240,.35)" strokeWidth="1" strokeDasharray="3,3" />}
+                {/* Spark historie — bez popisku nad sloupci, hodnota jen v tooltipu.
+                    Sparkline ma ukazovat tvar, ne cist cisla. */}
+                {sparkRows.length > 1 && (
+                  <div style={{textAlign:"right",flexShrink:0,marginTop:4}}>
+                    <svg width={svgW} height={chartH + 8} style={{display:"block",overflow:"visible"}}>
+                      {yGoal !== null && <line x1={-3} y1={yGoal} x2={svgW + 3} y2={yGoal} stroke="rgba(198,168,107,.6)" strokeWidth="1" strokeDasharray="3,3" />}
                       {sparkRows.map((r, idx) => {
                         const h = Math.max(2, (r.totalM / maxTotal) * chartH);
                         const x = idx * (barW + gap);
-                        const y = chartH - h + 6;
+                        const y = chartH - h + 4;
                         const overGoal = _goal > 0 && r.totalM >= _goal;
-                        const color = r.live ? BP.live : (overGoal ? BP.indigo : "rgba(91,82,240,.22)");
+                        const color = r.live ? BP.indigo : (overGoal ? "rgba(91,82,240,.42)" : "rgba(91,82,240,.17)");
                         const mmYY = `${r.ym.slice(5,7)}/${r.ym.slice(2,4)}`;
                         return (
                           <g key={r.ym} className="spark-g">
                             <title>{`${mmYY}${r.live ? " (živě)" : ""}: ${Math.round(r.totalM).toLocaleString("cs-CZ")} Kč${_goal>0?` · cíl ${_goal.toLocaleString("cs-CZ")} Kč`:""}`}</title>
-                            <text className="spark-label" x={x + barW/2} y={Math.max(7, y - 4)} textAnchor="middle" fontSize="7.5" fontWeight="700" fill="var(--txt)">{_kc(r.totalM)}</text>
-                            <rect className="spark-bar" x={x} y={y} width={barW} height={h} rx={3} fill={color}
-                              stroke={r.live ? BP.liveEdge : "none"} strokeWidth={r.live ? 1 : 0} strokeDasharray={r.live ? "2,2" : undefined} />
+                            <rect className="spark-bar" x={x} y={y} width={barW} height={h} rx={3} fill={color} />
                           </g>
                         );
                       })}
                     </svg>
-                  )}
-                  <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                    {editingGoal ? (
-                      <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
-                        <input type="text" value={goalDraft} onChange={e=>setGoalDraft(e.target.value)}
-                          onKeyDown={e=>{if(e.key==="Enter")saveGoal();if(e.key==="Escape")setEditingGoal(false);}}
-                          placeholder="150000" autoFocus
-                          style={{width:88,padding:"5px 9px",borderRadius:9,border:`1px solid ${BP.indigo}`,fontSize:12,fontFamily:"var(--mono)",outline:"none"}} />
-                        <button onClick={saveGoal} style={{padding:"5px 11px",borderRadius:9,background:BP.indigo,border:"none",fontSize:11,fontWeight:700,cursor:"pointer",color:"#fff"}}>OK</button>
-                        <button onClick={()=>setEditingGoal(false)} style={{padding:"5px 8px",borderRadius:9,background:"none",border:"1px solid rgba(0,0,0,.1)",fontSize:12,cursor:"pointer",color:"var(--mut)"}}>✕</button>
-                      </div>
-                    ) : (
-                      <button onClick={()=>{setGoalDraft(_goal>0?String(_goal):"");setEditingGoal(true);}}
-                        style={{padding:"6px 13px",borderRadius:99,background:"none",border:"1px solid rgba(0,0,0,.1)",color:"var(--mut)",fontSize:10.5,cursor:"pointer",letterSpacing:".02em",whiteSpace:"nowrap",transition:"all .15s"}}
-                        onMouseEnter={e=>{e.currentTarget.style.borderColor="rgba(91,82,240,.4)";e.currentTarget.style.color=BP.indigo;}}
-                        onMouseLeave={e=>{e.currentTarget.style.borderColor="rgba(0,0,0,.1)";e.currentTarget.style.color="var(--mut)";}}>
-                        {_goal>0?`✏ Cíl ${_fmt(_goal)}`:"+ Nastavit měsíční cíl"}
-                      </button>
-                    )}
+                    <div style={{fontSize:9,letterSpacing:".14em",color:"var(--mut)",textTransform:"uppercase",marginTop:8,opacity:.8,whiteSpace:"nowrap"}}>
+                      {sparkRows.length} měsíců · max {_kc(_peak)}
+                    </div>
                   </div>
-                </div>
+                )}
               </div>
-
-              {/* Vlasová linka pokroku přes celou šířku — jediný barevný prvek */}
-              {_goal > 0 && (
-                <div style={{marginTop:16,display:"flex",alignItems:"center",gap:14}}>
-                  <div style={{flex:1,height:2,background:"rgba(0,0,0,.06)",borderRadius:99,overflow:"hidden"}}>
-                    <div style={{width:`${_pct*100}%`,height:"100%",background:_pct>=1?BP.up:BP.indigo,borderRadius:99,transition:"width .6s cubic-bezier(.16,1,.3,1)"}} />
-                  </div>
-                  <span style={{fontSize:10,color:"var(--mut)",whiteSpace:"nowrap",letterSpacing:".02em"}}>
-                    <b style={{color:_pct>=1?BP.up:"var(--txt)",fontWeight:600}}>{Math.round(_pct*100)} %</b> měsíčního cíle
-                  </span>
-                  <span onClick={() => {
-                      navTo("dashboard");
-                      setTimeout(() => {
-                        const el = document.getElementById("maux-finance-detail");
-                        if (el) { el.open = true; el.scrollIntoView({ behavior: "smooth", block: "start" }); }
-                      }, 80);
-                    }}
-                    style={{fontSize:10,color:BP.indigo,cursor:"pointer",whiteSpace:"nowrap",fontWeight:600,letterSpacing:".02em"}}
-                    title={'"Tento měsíc" = nevyfakturované výkazy (bez DPH, po slevě) + hrubý úrok z úschov'}>
-                    Detail →
-                  </span>
-                </div>
-              )}
             </div>
           );
         })()}
