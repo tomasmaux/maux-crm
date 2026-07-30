@@ -8990,68 +8990,78 @@ function computeTrophies({ ladder, invoices, workEntries, clients, firmaRez, res
   const recordCount = rows.filter(r => r.record).length;
   const year12 = rows.slice(-12).reduce((s, r) => s + r.totalM, 0);
   const escTotal = rows.reduce((s, r) => s + (r.escAmt || 0), 0);
+  // Nejdelší série měsíců po sobě nad metou — zatím nedosažitelné, a to je záměr:
+  // sbírka potřebuje strop, ne jen podlahu (Tom 30.7.2026).
+  let streak = 0, bestStreak = 0;
+  rows.forEach(r => { if (r.over) { streak++; bestStreak = Math.max(bestStreak, streak); } else streak = 0; });
   const entries = workEntries || [];
   const flatCount = entries.filter(e => e.billing_type === "flat_rate").length;
   const overdueCount = (invoices || []).filter(i => invoiceStatus(i) === "po_splatnosti").length;
   const billedClients = new Set((invoices || []).map(i => i.client_id).filter(Boolean)).size;
-  // Disciplína: nevyfakturovaná práce z UZAVŘENÝCH měsíců (tedy starší než tenhle měsíc)
+  const issued = (invoices || []).filter(i => invoiceStatus(i) !== "pripravena");
+  const settled = issued.filter(i => ["uhrazena", "dph_odvedeno"].includes(invoiceStatus(i))).length;
+  const collectRate = issued.length ? settled / issued.length : 0;
+  const perMonth = {};
+  entries.forEach(e => { const k = (e.entry_date || "").slice(0, 7); if (k) perMonth[k] = (perMonth[k] || 0) + 1; });
+  const busiestMonth = Object.values(perMonth).reduce((m, v) => Math.max(m, v), 0);
   const thisYm = new Date().toISOString().slice(0, 7);
   const staleUnbilled = entries.filter(e => !e.invoice_id && (e.entry_date || "") < thisYm + "-01").length;
-  // Řemeslo: záznamy, kde sis vedl i reálně odpracovaný čas
   const withReal = entries.filter(e => (e.real_hours || 0) > 0).length;
   const realShare = entries.length ? withReal / entries.length : 0;
 
   const T = [];
-  const add = (id, icon, name, unitFn, steps, value, kind) => {
+  const kc = v => fmtKc(Math.round(v));
+  const add = (id, icon, name, kind, steps, value, doneFn, remainFn) => {
     const st = trophyStep(value, steps);
     T.push({
       id, icon, name, kind,
-      done: st.level > 0,
-      complete: st.done,
-      level: st.level,
-      progress: st.level > 0 && !st.done ? st.progress : (st.level === 0 ? st.progress : 1),
-      desc: st.level > 0 && st.done ? unitFn(steps[steps.length - 1], true)
-        : st.level > 0 ? `${unitFn(steps[st.level - 1], true)} · dál ${unitFn(st.next, false)}`
-        : `${unitFn(st.next, false)}`,
+      done: st.level > 0, complete: st.done, level: st.level,
+      progress: st.done ? 1 : st.progress,
+      value, next: st.next,
+      desc: st.done ? doneFn(steps[steps.length - 1]) : (st.level > 0 ? doneFn(steps[st.level - 1]) : remainFn(st.next, value)),
+      remain: st.done ? null : remainFn(st.next, value),
     });
   };
-  const kc = v => fmtKc(v);
 
   // — VÝKON —
-  add("mesic", "📈", "Nejlepší měsíc", (v, d) => d ? `překonáno ${kc(v)}` : `cíl ${kc(v)}`,
-      [100000, 200000, 250000], best, "vykon");
-  add("rekord", "🏆", "Rekordman", (v, d) => d ? `${v}× osobní rekord` : `${v} rekordů`,
-      [3, 10, 25], recordCount, "vykon");
-  add("rok", "🌍", "Rok práce", (v, d) => d ? `za 12 měsíců ${kc(v)}` : `za 12 měsíců ${kc(v)}`,
-      [1000000, 2000000, 3000000], year12, "vykon");
-  add("uschovy", "🔐", "Správce cizích peněz", (v, d) => d ? `${kc(v)} na úrocích` : `${kc(v)} na úrocích`,
-      [100000, 250000, 500000], escTotal, "vykon");
+  add("mesic", "📈", "Nejlepší měsíc", "vykon", [100000, 250000, 400000], best,
+      v => `překonáno ${kc(v)}`, (n, v) => `do ${kc(n)} chybí ${kc(n - v)}`);
+  add("rekord", "🏆", "Rekordman", "vykon", [3, 12, 30], recordCount,
+      v => `${v}× osobní rekord`, (n, v) => `ještě ${n - v} rekordů do ${n}`);
+  add("rok", "🌍", "Rok práce", "vykon", [1000000, 2000000, 4000000], year12,
+      v => `za 12 měsíců přes ${kc(v)}`, (n, v) => `do ${kc(n)} chybí ${kc(n - v)}`);
+  add("serie", "🔥", "Série", "vykon", [2, 4, 8], bestStreak,
+      v => `${v} měsíců v řadě nad metou`, (n, v) => `${n} měsíců v řadě nad metou (máš ${v})`);
+  add("uschovy", "🔐", "Správce cizích peněz", "vykon", [100000, 300000, 750000], escTotal,
+      v => `přes ${kc(v)} na úrocích`, (n, v) => `do ${kc(n)} chybí ${kc(n - v)}`);
 
   // — DISCIPLÍNA —
-  T.push({
-    id: "bezdluzniku", icon: "⚖️", name: "Bez dlužníků", kind: "disciplina",
+  T.push({ id: "bezdluzniku", icon: "⚖️", name: "Bez dlužníků", kind: "disciplina",
     done: overdueCount === 0, complete: overdueCount === 0, level: overdueCount === 0 ? 3 : 0,
     progress: overdueCount === 0 ? 1 : 0,
     desc: overdueCount === 0 ? "žádná faktura po splatnosti" : `${overdueCount}× po splatnosti`,
-  });
-  T.push({
-    id: "cistystul", icon: "🧾", name: "Čistý stůl", kind: "disciplina",
+    remain: overdueCount === 0 ? null : `srovnat ${overdueCount} faktur` });
+  T.push({ id: "cistystul", icon: "🧾", name: "Čistý stůl", kind: "disciplina",
     done: staleUnbilled === 0, complete: staleUnbilled === 0, level: staleUnbilled === 0 ? 3 : 0,
     progress: staleUnbilled === 0 ? 1 : Math.max(0, 1 - staleUnbilled / 20),
     desc: staleUnbilled === 0 ? "nic nevisí z minulých měsíců" : `${staleUnbilled} výkazů z minulých měsíců`,
-  });
-  add("rezerva", "🏛️", "Firemní rezerva", (v, d) => d ? `${kc(v)} v rezervě` : `cíl ${kc(v)}`,
-      [50000, 100000, reserveGoal || 150000], Math.max(0, firmaRez || 0), "disciplina");
+    remain: staleUnbilled === 0 ? null : `vyfakturovat ${staleUnbilled} výkazů` });
+  add("vybrano", "💳", "Vybráno", "disciplina", [0.8, 0.9, 0.98], collectRate,
+      v => `${Math.round(v * 100)} % faktur uhrazeno`, (n, v) => `${Math.round(n * 100)} % uhrazených (máš ${Math.round(v * 100)} %)`);
+  add("rezerva", "🏛️", "Firemní rezerva", "disciplina", [50000, reserveGoal || 150000, 400000], Math.max(0, firmaRez || 0),
+      v => `přes ${kc(v)} v rezervě`, (n, v) => `do ${kc(n)} chybí ${kc(n - v)}`);
 
   // — ŘEMESLO —
-  add("vykazy", "🗂️", "Kronikář", (v, d) => d ? `${v} zapsaných výkazů` : `${v} výkazů`,
-      [100, 250, 500], entries.length, "remeslo");
-  add("realhod", "⏱️", "Poctivé hodiny", (v, d) => d ? `${Math.round(v * 100)} % výkazů s reálným časem` : `${Math.round(v * 100)} % výkazů s reálným časem`,
-      [0.3, 0.6, 0.9], realShare, "remeslo");
-  add("pausal", "📐", "Paušálista", (v, d) => d ? `${v} paušálních výkazů` : `${v} paušálů`,
-      [5, 15, 40], flatCount, "remeslo");
-  add("klienti", "🤝", "Klientela", (v, d) => d ? `${v} fakturovaných klientů` : `${v} klientů`,
-      [10, 25, 50], billedClients, "remeslo");
+  add("vykazy", "🗂️", "Kronikář", "remeslo", [100, 300, 750], entries.length,
+      v => `přes ${v} zapsaných výkazů`, (n, v) => `ještě ${n - v} výkazů do ${n}`);
+  add("realhod", "⏱️", "Poctivé hodiny", "remeslo", [0.3, 0.6, 0.95], realShare,
+      v => `${Math.round(v * 100)} % výkazů s reálným časem`, (n, v) => `${Math.round(n * 100)} % výkazů s reálným časem (máš ${Math.round(v * 100)} %)`);
+  add("pilny", "📅", "Pilný měsíc", "remeslo", [15, 25, 40], busiestMonth,
+      v => `${v} výkazů v jednom měsíci`, (n, v) => `${n} výkazů za měsíc (nejlíp ${v})`);
+  add("pausal", "📐", "Paušálista", "remeslo", [5, 20, 50], flatCount,
+      v => `${v} paušálních výkazů`, (n, v) => `ještě ${n - v} paušálů do ${n}`);
+  add("klienti", "🤝", "Klientela", "remeslo", [10, 40, 100], billedClients,
+      v => `${v} fakturovaných klientů`, (n, v) => `ještě ${n - v} klientů do ${n}`);
 
   return T;
 }
@@ -9683,17 +9693,43 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
         const anyOver = ladder.anyOver;
         const liveOver = liveTotal > ladder.activeGoal;
         const activeGoal = ladder.activeGoal;
+        // Sbalený pruh smí říkat JEN to, co není v hero pásu nahoře (Tom 30.7.2026:
+        // "nerozumím, co ten banner má na první vteřinu říkat"). Hero už hlásí, jak stojí
+        // TENTO měsíc — tady tedy patří jen výhled dopředu: kam se posune meta a co je
+        // nejblíž k dalšímu stupni trofeje.
+        const projBest = Math.max(bestNext, liveTotal);
+        const projGoal = Math.max(200000, Math.round(projBest * 1.10 / 5000) * 5000);
+        const fr = computeFirmaRezerva(financeItems, invoices, dpfoMonths, loanTransactions, escrows);
+        const trophies = computeTrophies({ ladder, invoices, workEntries, clients, firmaRez: fr.firmaRez, reserveGoal: fr.planKap });
+        const nextTrophy = trophies.filter(t => !t.complete && t.remain).sort((a, b) => (b.progress || 0) - (a.progress || 0))[0] || null;
         return (
           <>
             <details id="maux-finance-detail" style={{marginTop:2}}>
-              {/* Souhrn musí brát v potaz i ŽIVÝ řádek — jinak tvrdí "nikdy překročeno", zatímco
-                  průběžný měsíc už metu přeskočil (Tom 30.7.2026: 214 883 vs. hlavička "nikdy"). */}
-              <summary style={{cursor:"pointer",fontSize:10.5,color:(anyOver||liveOver)?"#DC2626":"var(--mut)",fontWeight:(anyOver||liveOver)?700:500,letterSpacing:".02em"}}>
-                {anyOver
-                  ? `⚠ Meta ${fmtKc(activeGoal)}/měs. (úschovy + fakturace) — v historii překročeno ${milestoneCount}×${liveOver ? " · průběžný měsíc je nad metou" : ""}`
-                  : liveOver
-                    ? `⚠ Meta ${fmtKc(activeGoal)}/měs. (úschovy + fakturace) — průběžný měsíc je poprvé nad metou`
-                    : `Kontrola hranice ${fmtKc(activeGoal)}/měs. (úschovy + fakturace) — nikdy překročeno`}
+              <style>{`#maux-finance-detail > summary::-webkit-details-marker{display:none} #maux-finance-detail > summary{list-style:none}`}</style>
+              <summary style={{cursor:"pointer",outline:"none"}}>
+                <div style={{background:"#fff",borderRadius:14,boxShadow:"0 1px 2px rgba(16,12,60,.05), 0 8px 22px -14px rgba(16,12,60,.3)",
+                  display:"flex",overflow:"hidden",maxWidth:640,marginTop:6}}>
+                  <div style={{flex:1,padding:"13px 18px",minWidth:0}}>
+                    <div style={bpLabel()}>Po uzávěrce měsíce</div>
+                    <div style={{fontSize:12.5,color:"var(--txt)",marginTop:5}}>
+                      {projGoal > activeGoal
+                        ? <>Meta se zvedne na <strong style={{color:"var(--ink)"}}>{fmtKc(projGoal)}</strong></>
+                        : <>Meta zůstává <strong style={{color:"var(--ink)"}}>{fmtKc(activeGoal)}</strong></>}
+                    </div>
+                  </div>
+                  <div style={{flex:1.2,padding:"13px 18px",borderLeft:"1px solid rgba(0,0,0,.06)",
+                    display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,minWidth:0}}>
+                    <div style={{minWidth:0}}>
+                      <div style={bpLabel()}>Nejblíž k dalšímu stupni</div>
+                      <div style={{fontSize:12.5,color:"var(--txt)",marginTop:5,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>
+                        {nextTrophy
+                          ? <>{nextTrophy.icon} <strong style={{color:"var(--ink)"}}>{nextTrophy.name}</strong> <span style={{color:"var(--mut)"}}>— {nextTrophy.remain}</span></>
+                          : <span style={{color:"var(--mut)"}}>všechno na zlatě</span>}
+                      </div>
+                    </div>
+                    <span style={{fontSize:12,color:"#C4BFDA",flexShrink:0}}>⌄</span>
+                  </div>
+                </div>
               </summary>
               {/* Žebřík mety — vodorovné pruhy místo tabulky (Tom 30.7.2026: tabulka byla "jak Windows 95").
                   Šířka pruhu = podíl na společné škále, svislá linka = meta platná pro daný měsíc. */}
@@ -9758,20 +9794,9 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
               <div style={{fontSize:9.5,color:"var(--mut)",marginTop:6,maxWidth:600}}>
                 Úrok z úschov je zde hrubý (před -15% srážkovou daní) — stejná báze jako fakturace, která je taky bez DPH, ale ne po dani z příjmu. Proto se sloupec "Úschovy" může lišit od karty "Příjmy na příští měsíc" výš, která ukazuje reálně přijatou čistou hotovost (po srážkové dani). Sloupec "Fakturace" u řádku "průběžné" = nevyfakturovaná práce bez DPH (stejné číslo jako "nevyfakturováno" v kartě výš).
               </div>
+              <div style={{height:1,background:"rgba(0,0,0,.06)",margin:"16px 0 0",maxWidth:640}} />
+              <TrophyWall trophies={trophies} />
             </details>
-            {(() => {
-              const fr = computeFirmaRezerva(financeItems, invoices, dpfoMonths, loanTransactions, escrows);
-              const trophies = computeTrophies({ ladder, invoices, workEntries, clients, firmaRez: fr.firmaRez, reserveGoal: fr.planKap });
-              const doneN = trophies.filter(t => t.done).length;
-              return (
-                <details style={{marginTop:6}}>
-                  <summary style={{cursor:"pointer",fontSize:10.5,color:"var(--mut)",fontWeight:500,letterSpacing:".02em"}}>
-                    🏆 Trofejní síň — {doneN} z {trophies.length} odemčeno
-                  </summary>
-                  <TrophyWall trophies={trophies} />
-                </details>
-              );
-            })()}
           </>
         );
       })()}
