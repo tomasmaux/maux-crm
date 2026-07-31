@@ -882,6 +882,10 @@ function computeXtbPortfolio(positions = [], closedTrades = [], tranches = [], m
   return {
     vlozeno, hotovost, trzni, celkem, dividendy,
     porizovaciOtevrene, nerealizovano, realizovano,
+    // Zbytek, aby tři dlaždice vždy sečetly na "vydělaly ti peníze": dividendy po srážkové
+    // dani, úroky z volné hotovosti a poplatky. Dřív nikde nebyl a součet nesedělo o stovky
+    // korun — přesně ten typ nesrovnalosti, kterou Tom najde a přestane číslu věřit.
+    ostatni: (celkem - vlozeno) - realizovano - (trzni - porizovaciOtevrene),
     vydelaly: celkem - vlozeno,
     vydelalyPct: vlozeno > 0 ? (celkem - vlozeno) / vlozeno : 0,
     lots, tituly: titulySeznam, chybiCena,
@@ -1021,10 +1025,17 @@ async function upsertAssistantAttendance(rec) {
 }
 
 /* ─── HELPERS ─── */
+// Přefakturace (správní poplatek, prohlášení o pravosti podpisu) nesou `no_vat: true` —
+// do základu daně NEPATŘÍ a 21 % se z nich nepočítá. Stejná báze jako při vystavení faktury
+// (subtotal = jen zdanitelná práce po slevě, no_vat položky jdou samostatně do total).
+// Dřív tahle funkce sečetla úplně všechno a přidala DPH i na správní poplatek — stačilo
+// v editaci faktury sáhnout na jakoukoli položku a přepočet fakturu zdanil navíc. Audit 31.7.2026.
 function computeInvoiceTotals(items) {
-  const subtotal = items.reduce((s, it) => s + (Number(it.amount) || 0), 0);
+  const list = items || [];
+  const subtotal  = list.filter(it => !it.no_vat).reduce((s, it) => s + (Number(it.amount) || 0), 0);
+  const noVatSum  = list.filter(it =>  it.no_vat).reduce((s, it) => s + (Number(it.amount) || 0), 0);
   const vatAmount = Math.round(subtotal * 0.21);
-  const total = subtotal + vatAmount;
+  const total = subtotal + vatAmount + noVatSum;
   return { subtotal, vat_amount: vatAmount, total };
 }
 function nextInvoiceNumber(invoices) {
@@ -1094,6 +1105,14 @@ function ymd(y, m, d) {
 function lastDayPrevMonth(issueDateStr) {
   const d = issueDateStr ? new Date(issueDateStr) : new Date();
   return ymd(d.getFullYear(), d.getMonth(), 0);
+}
+// ZDAŇOVACÍ OBDOBÍ VYDANÉ FAKTURY — jediný zdroj pravdy pro celou appku.
+// Metodika účetní (Andrea Čechmanová): u VYDANÝCH faktur rozhoduje DUZP, ne datum vystavení.
+// Tom fakturuje 1. dne za měsíc zpětně, takže obojí padne do JINÉHO měsíce — Dashboard dřív
+// řadil podle vystavení a mluvil tak o jiném období než ona. Audit 31.7.2026.
+// (Pozor: u PŘIJATÝCH dokladů platí naopak datum vystavení — to řeší evidence účtenek.)
+function vatPeriodKey(i) {
+  return (((i && i.duzp) || lastDayPrevMonth(i && i.issue_date)) + "").slice(0, 7);
 }
 function nextDueDate(issueDateStr) {
   const d = issueDateStr ? new Date(issueDateStr) : new Date();
@@ -4424,7 +4443,7 @@ function escrowGrossForMonth(escrows, year, month) {
   }, 0);
 }
 
-// Žebřík mety (fakturace bez DPH + hrubý úrok z úschov). Sdílená logika pro gamifikační
+// Žebřík mety (fakturace bez DPH + čistý úrok z úschov). Sdílená logika pro gamifikační
 // lištu v hlavičce i detailní panel v Financích, ať se obě místa nikdy nerozejdou.
 // Vrací uzavřené měsíce od prvního dokladu po AKTUÁLNÍ měsíc (včetně) — BEZ živé projekce na
 // příští měsíc, tu si volající doplní sám (potřebuje unbilledAmt, který je jen v Dashboardu).
@@ -4457,7 +4476,9 @@ function computeMilestoneLadder(invoices, escrows, now) {
   while (cy < now.getFullYear() || (cy === now.getFullYear() && cm <= now.getMonth())) {
     const ym = `${cy}-${String(cm + 1).padStart(2, "0")}`;
     const invAmt = (invoices || []).filter(i => (i.issue_date || "").startsWith(ym)).reduce((s, i) => s + (i.subtotal || 0), 0);
-    const escAmt = Math.round(escrowGrossForMonth(escrows, cy, cm));
+    // ČISTÝ úrok (po 15% srážkové dani). Bilance i kalendář počítají čistý; žebřík dřív jediný
+    // bral hrubý, takže hero připisovalo Tomovi i peníze, které banka odvedla za něj. Audit 31.7.2026.
+    const escAmt = Math.round(escrowNetForMonth(escrows, cy, cm));
     const totalM = invAmt + escAmt;
     all.push({ ym, invAmt, escAmt, totalM, monIdx: cm, isCurrent: ym === thisYm });
     cm++; if (cm > 11) { cm = 0; cy++; }
@@ -4541,8 +4562,23 @@ function escrowTotalTax(escrows) {
 //     (log v fi_dph_odpocet — stejný zdroj jako dlaždice v Daních),
 //   • jakmile 25. zaplatíš a faktury se přepnou na "dph_odvedeno", období z obálky samo zmizí,
 //     nové období se s novými uhrazenými fakturami samo objeví.
+// ⚠️ NESAHAT NA FILTR `status === "uhrazena"`. Potvrzeno Tomem 31.7.2026.
+// Obálka přesně kopíruje reálný pohyb peněz na spořicím účtu:
+//   • klient zaplatí → Tom klikne "Uhrazena" → v tu chvíli PŘEVEDE DPH na spořák
+//     → zůstatek nahoru A obálka nahoru → Firemní rezerva se nemění ✓
+//   • 25. odvede FÚ → klikne "DPH odvedeno" → obálka dolů A zůstatek dolů
+//     → Firemní rezerva se zase nemění ✓
+// Stav faktury tedy NENÍ nespolehlivý ruční krok, ale přesný záznam převodu.
+//
+// Když je obálka nula, není to chyba — je to DNO CYKLU: faktury za minulé období už jsou
+// "dph_odvedeno" a nové ještě nevznikly (Tom vystavuje 1. dne měsíce). Mezi ~15. a 25. dnem
+// je obálka plná, zbytek měsíce nízká.
+//
+// Zkusil jsem to dvakrát "opravit" — jednou na období se splatností u FÚ, podruhé na datum
+// splatnosti faktury. Obojí špatně: rezervovalo by to peníze, které na spořáku ještě nejsou,
+// a Firemní rezerva by skákala nahoru a dolů bez důvodu.
 function dphObalkaUnsettled(invoices, financeItems) {
-  const periodKey = (i) => ((i.duzp || lastDayPrevMonth(i.issue_date)) + "").slice(0, 7);
+  const periodKey = vatPeriodKey;
   const vatByPeriod = {};
   (invoices || []).filter(i => i.status === "uhrazena").forEach(i => {
     const k = periodKey(i);
@@ -4643,7 +4679,11 @@ function escrowNetForMonthRows(escrows, year, month) {
     ivs.forEach(iv => {
       const isRunning = iv.ongoing || iv.to.getFullYear() >= 9000;
       const endsThisMonth = !isRunning && iv.to >= mStart && iv.to <= mEnd;
-      if (!isRunning && !endsThisMonth) return; // mimo měsíc → přeskočit
+      // Rozhoduje PŘEKRYV s měsícem, ne to, jestli interval zrovna v tom měsíci končí.
+      // Dřív se uzavřený interval, který měsíc jen protnul (vklad v květnu, výplata v září),
+      // v rozpadu vůbec nezobrazil — ale do KPI nad tabulkou se počítal. Tabulka pak
+      // nesečetla na číslo, které stálo nad ní. Audit 31.7.2026.
+      if (iv.from > mEnd || iv.to < mStart) return; // mimo měsíc → přeskočit
 
       const effFrom = new Date(Math.max(iv.from.getTime(), mStart.getTime()));
       const effTo   = cap
@@ -4668,10 +4708,12 @@ function escrowNetForMonthRows(escrows, year, month) {
         hrubý:     Math.round(gross),
         daň:       Math.round(gross * 0.15),
         čistý:     Math.round(gross * 0.85),
-        typ:       isRunning ? 'průběžné' : 'jisté',
-        note:      isRunning
-          ? (isCurrent ? 'akumuluje se (do dnes)' : 'projekce celého měsíce')
-          : `konec ${effTo.getDate()}.${month + 1}.`,
+        typ:       endsThisMonth ? 'jisté' : 'průběžné',
+        note:      endsThisMonth
+          ? `konec ${effTo.getDate()}.${month + 1}.`
+          : isRunning
+            ? (isCurrent ? 'akumuluje se (do dnes)' : 'projekce celého měsíce')
+            : 'běží dál do dalšího měsíce',
         // — pro tlačítko "✓ Provedl jsem výplatu" přímo ze souhrnu (jen když je jednoznačně jeden oprávněný)
         escrowId:  e.id,
         tranche:   opr.length === 1 ? opr[0] : null,
@@ -7683,7 +7725,9 @@ function TitulLogo({ yahoo, symbol, size = 34 }) {
     );
   }
   return (
-    <img src={zdroje[krok]} alt="" loading="lazy" onError={() => setKrok(k => k + 1)}
+    // ⚠️ Bez loading="lazy". S ním se v Brave request nikdy nespustil — obrázek
+    // zůstal navždy complete=false a na dlaždici byla prázdná plocha. Ověřeno měřením.
+    <img src={zdroje[krok]} alt="" referrerPolicy="no-referrer" onError={() => setKrok(k => k + 1)}
       style={{ ...spol, objectFit: "contain", background: "#F6F5FB" }} />
   );
 }
@@ -7736,6 +7780,27 @@ function AkcieGraf({ serie, stav = "idle", onNacti }) {
   const A = rada[a], B = rada[b];
 
   // Řady podle optiky. s1 = ty, s2 = index, s3 = vložený kapitál (jen u Hodnoty).
+  // ── INDEX PŘEPOČTENÝ NA ZAČÁTEK OKNA ────────────────────────────────────────
+  // `r.benchmark` je simulace od úplného počátku (všechny vklady od 2025 v indexu).
+  // Pro okno „1R" nebo „YTD" se s ní nedá počítat: index má na začátku okna jiný kapitál
+  // než reálné portfolio, takže rozdíl na konci neměří výkonnost, ale tu starou mezeru.
+  // Přesně proto svítilo „Porážíš index o 21 922 Kč" nad hlavičkou TWR +15,9 % vs. index
+  // +18,8 %, což si odporovalo. Tady se index rozjede ze STEJNÉ částky jako portfolio
+  // k prvnímu dni okna a dostane STEJNÉ vklady ve stejné dny. Audit 31.7.2026.
+  const benchRe = (() => {
+    const out = [];
+    let bv = A.hodnota;
+    for (let i = 0; i < usek.length; i++) {
+      if (i > 0) {
+        const p0 = usek[i - 1].indexCena, p1 = usek[i].indexCena;
+        const g = (p0 && p1) ? p1 / p0 : 1;
+        bv = bv * g + (usek[i].vlozeno - usek[i - 1].vlozeno);
+      }
+      out.push(bv);
+    }
+    return out;
+  })();
+
   let s1 = [], s2 = [], s3 = [], popis1 = "", popis2 = "", popis3 = "";
   if (optika === "Procenta") {
     s1 = usek.map(r => (r.jednotka / A.jednotka - 1) * 100);
@@ -7743,11 +7808,11 @@ function AkcieGraf({ serie, stav = "idle", onNacti }) {
     popis1 = "Tvoje portfolio (TWR)"; popis2 = "Světový index";
   } else if (optika === "Koruny") {
     s1 = usek.map(r => r.hodnota - A.hodnota - (r.vlozeno - A.vlozeno));
-    s2 = usek.map(r => (r.benchmark || 0) - (A.benchmark || 0) - (r.vlozeno - A.vlozeno));
+    s2 = usek.map((r, i) => benchRe[i] - A.hodnota - (r.vlozeno - A.vlozeno));
     popis1 = "Kolik vydělalo tvoje"; popis2 = "Kolik by vydělal index";
   } else {
     s1 = usek.map(r => r.hodnota);
-    s2 = usek.map(r => r.benchmark || 0);
+    s2 = benchRe.slice();
     s3 = usek.map(r => r.vlozeno);
     popis1 = "Hodnota portfolia"; popis2 = "Kdyby to celé šlo do indexu"; popis3 = "Vložený kapitál";
   }
@@ -7772,7 +7837,7 @@ function AkcieGraf({ serie, stav = "idle", onNacti }) {
   const ixPct = A.indexCena && B.indexCena ? (B.indexCena / A.indexCena - 1) * 100 : 0;
   const tok = B.vlozeno - A.vlozeno;
   const korun = B.hodnota - A.hodnota - tok;
-  const korunIx = (B.benchmark || 0) - (A.benchmark || 0) - tok;
+  const korunIx = (benchRe[benchRe.length - 1] || A.hodnota) - A.hodnota - tok;
   const rozdil = korun - korunIx;
   const dnu = Math.round((new Date(B.datum) - new Date(A.datum)) / 86400000);
 
@@ -7927,6 +7992,15 @@ function AkcieModule({ xtbTranches = [], onTrancheSave, onTrancheDelete, xtbTitl
     } catch (e) { setTickOver({ stav: "chyba", zprava: "Ověření se nepovedlo." }); }
   };
 
+  // ⚠️ LEKCE (31. 7. 2026): tohle býval `confirm()` — dvě tlačítka pro tři významy.
+  // "Zrušit" tam znamenalo "ne, vklad nezapisuj, ale nákup ulož". Tom to přečetl jako
+  // "nic nedělej", potvrdil dvakrát a měl Visu v evidenci 2× → hotovost spadla na
+  // −74 613 Kč. Nativní confirm se sem už nikdy nevrací: každé tlačítko musí říct,
+  // co udělá, a zrušení musí znamenat, že se neuloží nic.
+  const [cashAsk, setCashAsk] = useState(null);   // {sym, ks, odhadCzk, chybi, dup, res}
+  const zeptejSeNaNakup = (info) => new Promise((res) => setCashAsk({ ...info, res }));
+  const odpovezNaNakup = (volba) => { const c = cashAsk; setCashAsk(null); if (c) c.res(volba); };
+
   const ulozPozici = async () => {
     const sym = posDraft.symbol.trim().toUpperCase();
     const ks = cislo(posDraft.volume), cena = cislo(posDraft.price);
@@ -7937,16 +8011,19 @@ function AkcieModule({ xtbTranches = [], onTrancheSave, onTrancheDelete, xtbTitl
     // zvedá vložený kapitál — bez téhle otázky by se výnos tiše nafoukl.
     const kurzOdhad = posDraft.currency === "CZK" ? 1 : ((market && market.kurzy && market.kurzy[posDraft.currency]) || null);
     const odhadCzk = kurzOdhad ? ks * cena * kurzOdhad : null;
+    // Duplicita: stejný titul, stejný den, stejný počet kusů. Nákup se opravdu může
+    // opakovat, proto to není zákaz — jen se na to appka zeptá dřív, než uloží.
+    const dup = xtbPositions.find(p =>
+      String(p.symbol || "").toUpperCase() === sym &&
+      String(p.trade_date) === posDraft.trade_date &&
+      Math.abs((Number(p.volume) || 0) - ks) < 1e-9
+    ) || null;
+    const chybiNaNakup = odhadCzk && odhadCzk > pf.hotovost + 1 ? Math.round(odhadCzk - pf.hotovost) : 0;
     let novyVklad = 0;
-    if (odhadCzk && odhadCzk > pf.hotovost + 1) {
-      const chybi = Math.round(odhadCzk - pf.hotovost);
-      const ano = confirm(
-        `Na tenhle nákup nemáš na účtu dost hotovosti — chybí ${fmtKc(chybi)}.\n\n` +
-        `Poslal jsi na XTB nové peníze?\n\n` +
-        `OK = ano, zapiš vklad ${fmtKc(chybi)} (zvedne vložený kapitál)\n` +
-        `Zrušit = ne, jen ulož nákup`
-      );
-      if (ano) novyVklad = chybi;
+    if (chybiNaNakup > 0 || dup) {
+      const volba = await zeptejSeNaNakup({ sym, ks, odhadCzk, chybi: chybiNaNakup, dup });
+      if (volba !== "vklad" && volba !== "ulozit") return;
+      if (volba === "vklad") novyVklad = chybiNaNakup;
     }
     setPosSaving(true);
     try {
@@ -8230,9 +8307,67 @@ function AkcieModule({ xtbTranches = [], onTrancheSave, onTrancheDelete, xtbTitl
 
   const label = { fontSize: 9, letterSpacing: ".14em", textTransform: "uppercase", color: "var(--mut)", fontWeight: 700 };
   const inputStyle = { font: "inherit", fontSize: 12.5, padding: "6px 9px", border: "1px solid var(--line2)", borderRadius: 7, outline: "none" };
+  const askBtn = { width: "100%", textAlign: "left", padding: "11px 14px", borderRadius: 10, border: "1px solid rgba(28,10,99,.16)", background: "#fff", fontSize: 13, fontFamily: "inherit", color: "var(--txt)", cursor: "pointer" };
+  const askSub = { display: "block", fontSize: 11, color: "var(--mut)", marginTop: 2 };
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+
+      {/* ── KONTROLA PŘED ULOŽENÍM NÁKUPU ────────────────────────────────────
+          Tři tlačítka, každé říká, co udělá. Zrušit = neuloží se nic. */}
+      {cashAsk && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(28,10,99,.35)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 9000, padding: 20 }}>
+          <div style={{ background: "#fff", borderRadius: 16, padding: "24px 28px", width: 440, maxWidth: "100%", boxShadow: BP.shadow }}>
+            <div style={bpLabel({ marginBottom: 14 })}>Nákup · kontrola</div>
+            <div style={{ ...bpHero(20, "var(--txt)"), lineHeight: 1.35, marginBottom: 6 }}>
+              {cashAsk.chybi === 0 && cashAsk.dup ? "Tenhle nákup už jednou zapsaný je."
+                : "Na tenhle nákup nemáš na účtu dost hotovosti."}
+            </div>
+            <div style={{ fontSize: 13, color: "var(--mut)", marginBottom: 16 }}>
+              {cashAsk.sym} · {cashAsk.ks} ks{cashAsk.odhadCzk ? ` · ${fmtKc(Math.round(cashAsk.odhadCzk))}` : ""}
+            </div>
+
+            {cashAsk.chybi > 0 && (
+              <div style={{ background: "var(--bg2)", borderRadius: 10, padding: "12px 14px", marginBottom: 8 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, padding: "3px 0" }}>
+                  <span style={{ color: "var(--mut)" }}>Hotovost na účtu</span>
+                  <span>{fmtKc(Math.round(pf.hotovost))}</span>
+                </div>
+                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, padding: "3px 0" }}>
+                  <span style={{ color: "var(--mut)" }}>Chybí</span>
+                  <span style={{ color: "#DC2626" }}>{fmtKc(cashAsk.chybi)}</span>
+                </div>
+              </div>
+            )}
+
+            {cashAsk.dup && (
+              <div style={{ borderLeft: `3px solid ${BP.sand}`, background: "rgba(198,168,107,.10)", padding: "9px 12px", marginBottom: 18, marginTop: 8 }}>
+                <div style={{ fontSize: 12, lineHeight: 1.55 }}>
+                  {cashAsk.dup.trade_date} už máš {cashAsk.sym} {cashAsk.ks} ks zapsaných. Není to omylem podruhé?
+                </div>
+              </div>
+            )}
+
+            <div style={{ display: "flex", flexDirection: "column", gap: 7, marginTop: cashAsk.dup ? 0 : 18 }}>
+              {cashAsk.chybi > 0 && (
+                <button onClick={() => odpovezNaNakup("vklad")} style={askBtn}>
+                  Poslal jsem na XTB nové peníze
+                  <span style={askSub}>Zapíše vklad {fmtKc(cashAsk.chybi)} · zvedne vložený kapitál</span>
+                </button>
+              )}
+              <button onClick={() => odpovezNaNakup("ulozit")} style={askBtn}>
+                {cashAsk.chybi > 0 ? "Kupoval jsem z hotovosti, vklad nezapisuj" : "Ano, kupoval jsem podruhé — ulož"}
+                <span style={askSub}>
+                  {cashAsk.chybi > 0 ? "Uloží nákup · hotovost půjde do minusu" : "Uloží druhý nákup jako samostatnou tranši"}
+                </span>
+              </button>
+              <button onClick={() => odpovezNaNakup("zrusit")} style={{ ...askBtn, color: "var(--mut)", borderColor: "var(--line)" }}>
+                Zrušit — nic neukládat
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ── ŽIVÉ PORTFOLIO — vložil jsi → máš teď → vydělaly ti peníze ──────────
           Dominantní je rozdíl, ne hodnota. Ceny se tahají při otevření listu. */}
@@ -8299,6 +8434,13 @@ function AkcieModule({ xtbTranches = [], onTrancheSave, onTrancheDelete, xtbTitl
               <div style={bpHero(19, "var(--txt)")}>{fmtKc(Math.round(pf.nerealizovano))}</div>
               <div style={{ fontSize: 10, color: "var(--mut)", marginTop: 3 }}>v otevřených pozicích</div>
             </div>
+            {Math.abs(Math.round(pf.ostatni)) >= 1 && (
+              <div>
+                <div style={bpLabel({ marginBottom: 5 })}>Dividendy a poplatky</div>
+                <div style={bpHero(19, "var(--txt)")}>{fmtSigned(Math.round(pf.ostatni))}</div>
+                <div style={{ fontSize: 10, color: "var(--mut)", marginTop: 3 }}>po srážkové dani, minus poplatky</div>
+              </div>
+            )}
             <div>
               <div style={bpLabel({ marginBottom: 5 })}>Hotovost</div>
               <div style={bpHero(19, "var(--txt)")}>{fmtKc(Math.round(pf.hotovost))}</div>
@@ -9715,15 +9857,21 @@ function JosefPanel({ logs, attendance: attendanceProp, availability, clients = 
             <span style={{ fontSize: 10, color: MUT }}>klientská práce</span>
           </div>
           <div style={{ fontSize: 9.5, color: MUT, marginTop: 4 }}>{fh(Math.round(billH * 10) / 10)} h fakturovatelných z {fh(Math.round(totLogH * 10) / 10)} h výkazů</div>
-          <div style={{ display: "flex", height: 6, margin: "12px 0 5px", borderRadius: 99, overflow: "hidden", background: HL }}>
-            <div style={{ width: `${billShare * 100}%`, background: IND }} />
-            <div style={{ width: 2 }} />
-            <div style={{ flex: 1, background: SND }} />
-          </div>
-          <div style={{ display: "flex", justifyContent: "space-between", fontSize: 9 }}>
-            <span style={{ color: "#3F35C7", fontWeight: 600 }}>Klient {Math.round(billShare * 100)} %</span>
-            <span style={{ color: SND, fontWeight: 600 }}>BD {Math.round((1 - billShare) * 100)} %</span>
-          </div>
+          {/* Bez jediné zapsané hodiny se poměr nekreslí — dřív tu z nuly svítilo "BD 100 %",
+              což vypadalo, že Josef celý měsíc dělal jen development. Audit 31.7.2026. */}
+          {totLogH > 0 && (
+            <>
+              <div style={{ display: "flex", height: 6, margin: "12px 0 5px", borderRadius: 99, overflow: "hidden", background: HL }}>
+                <div style={{ width: `${billShare * 100}%`, background: IND }} />
+                <div style={{ width: 2 }} />
+                <div style={{ flex: 1, background: SND }} />
+              </div>
+              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 9 }}>
+                <span style={{ color: "#3F35C7", fontWeight: 600 }}>Klient {Math.round(billShare * 100)} %</span>
+                <span style={{ color: SND, fontWeight: 600 }}>BD {Math.round((1 - billShare) * 100)} %</span>
+              </div>
+            </>
+          )}
           <div style={{ marginTop: 11, paddingTop: 10, borderTop: `1px solid ${HL}`, display: "flex", justifyContent: "space-between", gap: 8 }}>
             <span style={{ fontSize: 10, color: MUT }}>Využití času <span style={{ color: INK, fontWeight: 600 }}>{totalHours > 0 ? `${Math.round(util * 100)} %` : "—"}</span></span>
             <span style={{ fontSize: 10, color: MUT }}>Efekt. náklad <span style={{ color: INK, fontWeight: 600 }}>{effCost != null ? `${effCost} Kč/h` : "—"}</span></span>
@@ -10369,7 +10517,7 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
   // Úschovy — výpočty pro dashboard
   const escrowNetThisMonth = escrowNetForMonth(escrows, now.getFullYear(), now.getMonth());
   const escrowNetNextMonth = escrowNetForMonth(escrows, now.getFullYear(), now.getMonth() + 1);
-  const escrowGrossThisMonth = escrowGrossForMonth(escrows, now.getFullYear(), now.getMonth());
+  const escrowGrossThisMonth = escrowNetForMonth(escrows, now.getFullYear(), now.getMonth()); // čistý — viz computeMilestoneLadder
   const escrowTaxTotal = escrowTotalTax(escrows);
 
   // Příjmy měsíční
@@ -10485,7 +10633,8 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
   // vyplatí až v příštím měsíci. Použít minulý měsíc by bylo už "usazené" v aktuálním měsíci, ne v projekci.
   // dphFaktury (za tento měsíc) − odpočet z účtenek (za tento měsíc) = reálně uhrazeno Čechmanové;
   // co je z odpočtu "navíc", to zůstává jako příjem příštího měsíce.
-  const dphFakturyMesic = invoices.filter(i => (i.issue_date||"").startsWith(thisMonth)).reduce((s,i)=>s+(i.vat_amount||0),0);
+  // Podle DUZP (metodika účetní), ne podle data vystavení — viz vatPeriodKey.
+  const dphFakturyMesic = invoices.filter(i => vatPeriodKey(i) === thisMonth).reduce((s,i)=>s+(i.vat_amount||0),0);
   const dphOdpItem = (financeItems||[]).find(i => i.id === "fi_dph_odpocet");
   const dphOdpMeta = (() => {
     try { const p = JSON.parse(dphOdpItem?.notes || "{}"); return { log: Array.isArray(p.log) ? p.log : [] }; }
@@ -10493,7 +10642,11 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
   })();
   const dphOdpocetLogVse = dphOdpMeta.log;
   const dphOdpocet = dphOdpocetLogVse.filter(e => (e.date||"").startsWith(thisMonth)).reduce((s,e)=>s+(e.vat||0),0);
-  const nadmernyOdpocet = Math.min(dphOdpocet, dphFakturyMesic);
+  // Kolik ti odpočet PŘÍŠTÍ MĚSÍC ušetří = celý odpočet za tenhle měsíc. Nic se nestropuje:
+  // když odpočet přesáhne DPH z faktur, přesah se nevypaří — vrátí ho finančák jako nadměrný
+  // odpočet. Starý `Math.min(odpočet, DPH z faktur)` ten přesah tiše zahazoval a navíc mezi
+  // 1. dnem měsíce a vystavením faktur srovnával s nulou. Audit 31.7.2026.
+  const nadmernyOdpocet = dphOdpocet;
   // "Finance v následujícím měsíci" — SOUČET položek skutečně zobrazených v "Příjmy měsíční"
   // (manuální příjmy + nevyfakturováno + čistý úrok z úschov + nadměrný odpočet DPH) MÍNUS výdaje zobrazené v Cash flow.
   // Záporný výsledek je v pořádku — říká, kolik je potřeba dovydělat na nulu.
@@ -11421,22 +11574,28 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
         <BpCorners />
         {(() => {
           const ladder = computeMilestoneLadder(invoices, escrows, now);
-          const lastY = now.getMonth() === 11 ? now.getFullYear() + 1 : now.getFullYear();
-          const lastM = (now.getMonth() + 1) % 12;
-          const nextYmStr = `${lastY}-${String(lastM+1).padStart(2,"0")}`;
-          // Zivy radek: nevyfakturovana prace bez DPH + HRUBY urok z uschov (pred -15% srazkovou
-          // dani) — stejna baze jako uzavrene mesice, jinak by se merilo dvema metry.
+          // Živý řádek je BĚŽÍCÍ měsíc, ne příští — dřív se značkoval `now.getMonth()+1`, takže
+          // 31. července svítil jako "08/26" a červenec byl v seznamu dvakrát (jednou vyfakturovaný,
+          // jednou živý). Audit 31.7.2026.
+          const liveYmStr = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,"0")}`;
+          const closedRows = (ladder.rows || []).filter(r => !r.isCurrent);
+          const thisGoal = ((ladder.allRows || []).slice(-1)[0] || {}).goal || 200000;
+          // Zivy radek: nevyfakturovana prace bez DPH + CISTY urok z uschov (po -15% srazkove
+          // dani) — stejna baze jako uzavrene mesice i jako Bilance a kalendar.
           const liveInvAmt = unbilledWorkNetNoVat(workEntries);
           const liveEscAmt = Math.round(escrowGrossThisMonth);
           const liveTotal = liveInvAmt + liveEscAmt;
           const bestNext = (ladder.allRows || []).slice(-12).reduce((m, x) => Math.max(m, x.totalM), 0);
           const activeGoal = ladder.activeGoal;
-          const rows = [...ladder.rows, { ym: nextYmStr, totalM: liveTotal, live: true, goal: activeGoal, over: liveTotal > activeGoal }];
+          const rows = [...closedRows, { ym: liveYmStr, totalM: liveTotal, live: true, goal: thisGoal, over: liveTotal > thisGoal }];
           const projGoal = Math.max(200000, Math.round(Math.max(bestNext, liveTotal) * 1.10 / 5000) * 5000);
           const shown = rows.slice(-9);
           const maxV = Math.max(activeGoal, projGoal, ...shown.map(r => r.totalM)) * 1.06 || 1;
           const pctOf = v => Math.max(0, Math.min(100, (v / maxV) * 100));
-          const lastOver = [...(ladder.rows || [])].reverse().find(r => r.over);
+          // Počítá se i BĚŽÍCÍ měsíc. Dřív se braly jen uzavřené, takže vedle hera hlásícího
+          // "metu jsi překročil" svítilo "Překonáno 0×". Audit 31.7.2026.
+          const overCount = rows.filter(r => r.over).length;
+          const lastOver = [...rows].reverse().find(r => r.over);
           const mName = ym => `${ym.slice(5,7)}/${ym.slice(2,4)}`;
           return (
             <>
@@ -11453,8 +11612,8 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
                 </div>
                 <div style={{textAlign:"right"}}>
                   <div style={bpLabel()}>Překonáno</div>
-                  <div style={{...bpHero(26, BP.sandDeep), marginTop:6}}>{ladder.milestoneCount}×</div>
-                  {lastOver && <div style={{fontSize:9,color:"var(--mut)",marginTop:4}}>naposled {mName(lastOver.ym)}</div>}
+                  <div style={{...bpHero(26, BP.sandDeep), marginTop:6}}>{overCount}×</div>
+                  {lastOver && <div style={{fontSize:9,color:"var(--mut)",marginTop:4}}>{lastOver.live ? "právě teď" : `naposled ${mName(lastOver.ym)}`}</div>}
                 </div>
               </div>
               <div style={{height:1,background:"rgba(0,0,0,.06)",marginBottom:14}} />
@@ -11473,7 +11632,7 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
                 ))}
               </div>
               <div style={{fontSize:9,color:"var(--mut)",marginTop:12,opacity:.8,lineHeight:1.6}}>
-                Zlatá ryska = meta platná pro daný měsíc · plná barva = překonáno · poslední řádek běží živě (nevyfakturovaná práce + hrubý úrok z úschov)
+                Zlatá ryska = meta platná pro daný měsíc · plná barva = překonáno · poslední řádek běží živě (nevyfakturovaná práce + čistý úrok z úschov)
               </div>
             </>
           );
@@ -13593,8 +13752,27 @@ function DaneModule({ year, taxRecords, financeItems, invoices, dpfoMonths, escr
   const now = new Date();
   const monthsElapsed = (year === now.getFullYear()) ? now.getMonth() + 1 : 12;
 
-  const dphAuto = invoices.filter(i => i.status === "uhrazena" && (i.issue_date||"").startsWith(String(year)))
-                          .reduce((s,i) => s + (i.vat_amount||0), 0);
+  // DPH ZAPLACENÁ ZA ROK — vlastní daň (ř. 64) za období, jejichž termín už uplynul.
+  // Dřív se tu sčítaly faktury se stavem "uhrazena", což je úplně jiná věc: stav znamená
+  // "klient zaplatil", ne "odvedl jsem FÚ". Tom navíc faktury přepíná rovnou na "dph_odvedeno",
+  // takže tenhle součet ukazoval napořád 0 Kč, i když každý měsíc platil desetitisíce.
+  // Metodika účetní: výstup podle DUZP, odpočet podle data dokladu, splatnost 25. dne M+1.
+  const dphAuto = (() => {
+    const logY = (() => {
+      try { const p = JSON.parse(((financeItems||[]).find(x => x.id === "fi_dph_odpocet")?.notes) || "{}");
+            return Array.isArray(p.log) ? p.log : []; } catch { return []; }
+    })();
+    let sum = 0;
+    for (let m = 0; m < 12; m++) {
+      const key = `${year}-${String(m+1).padStart(2,"0")}`;
+      // Období je vypořádané, až uplynul 25. den následujícího měsíce.
+      if (new Date(year, m + 1, 25) > now) break;
+      const out = invoices.filter(i => vatPeriodKey(i) === key).reduce((s,i) => s + (i.vat_amount||0), 0);
+      const inp = logY.filter(e => (e.date||"").startsWith(key)).reduce((s,e) => s + (e.vat||0), 0);
+      sum += Math.max(out - inp, 0);
+    }
+    return sum;
+  })();
   const dpfoYear = (dpfoMonths||[]).filter(m => m.year === year);
   const dpfoPaid = dpfoYear.filter(m => m.is_paid);
   // `|| 0`, nikdy `|| 8050` — fantomový fallback nafukoval součet u měsíce s prázdnou částkou
@@ -13606,7 +13784,9 @@ function DaneModule({ year, taxRecords, financeItems, invoices, dpfoMonths, escr
   // za uplynulé měsíce. Až budou mít vlastní tracker, stačí tu vyměnit zdroj dat.
   const findMonthly = (re) => (financeItems||[]).filter(i => (i.category === "nutne" || i.category === "luxus") && re.test(i.label||""))
                                                  .reduce((s,i) => s + Math.abs(i.amount||0), 0);
-  const socialMonthly = findMonthly(/sociáln/i);
+  // Pozor na kmen: Tomova položka se jmenuje "Sociálka", ne "Sociální" — vzor /sociáln/
+  // ji nikdy nenašel a přehled hlásil 0 Kč místo 7 × 12 045 Kč (audit 31.7.2026).
+  const socialMonthly = findMonthly(/sociál|socialk|sociáln/i);
   const zdravMonthly  = findMonthly(/zdravot|vzp/i);
   const socialEst = Math.round(socialMonthly * monthsElapsed);
   const zdravEst  = Math.round(zdravMonthly * monthsElapsed);
@@ -13620,20 +13800,27 @@ function DaneModule({ year, taxRecords, financeItems, invoices, dpfoMonths, escr
   // Dashboardu někdy změní, je třeba změnit i tento blok.
   const dmKeyOf = (d) => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`;
   const dmThisMonth = dmKeyOf(now);
-  const dmFakturyMesic = invoices.filter(i => (i.issue_date||"").startsWith(dmThisMonth)).reduce((s,i)=>s+(i.vat_amount||0),0);
+  const dmFakturyMesic = invoices.filter(i => vatPeriodKey(i) === dmThisMonth).reduce((s,i)=>s+(i.vat_amount||0),0);
   const dmOdpItem = (financeItems||[]).find(i => i.id === "fi_dph_odpocet");
   const dmOdpocetLogVse = (() => {
     try { const p = JSON.parse(dmOdpItem?.notes || "{}"); return Array.isArray(p.log) ? p.log : []; }
     catch { return []; }
   })();
   const dmOdpocet = dmOdpocetLogVse.filter(e => (e.date||"").startsWith(dmThisMonth)).reduce((s,e)=>s+(e.vat||0),0);
-  const dashNadmernyOdpocet = Math.min(dmOdpocet, dmFakturyMesic);
+  const dashNadmernyOdpocet = dmOdpocet; // zrcadlo Dashboardu — bez stropu, viz komentář tam
+
+  // DPFO: `dpfoAcc` je ZŮSTATEK obálky (naspořeno minus odvedeno FÚ), ne "zaplacené zálohy".
+  // Starý popisek "N / 12 měsíců × 8 050 Kč" sliboval jiné číslo, než pod ním stálo, a navíc
+  // do N počítal i řádky plateb na FÚ (mají is_paid = true a zápornou částku). Audit 31.7.2026.
+  const dpfoSavedRows = dpfoPaid.filter(m => (m.amount || 0) >= 0);
+  const dpfoSavedSum  = dpfoSavedRows.reduce((s, m) => s + (m.amount || 0), 0);
+  const dpfoOdvedeno  = dpfoPaid.filter(m => (m.amount || 0) < 0).reduce((s, m) => s + Math.abs(m.amount || 0), 0);
 
   const AUTO = {
-    dpfo:      { paid: dpfoAcc,   basis: `${dpfoPaid.length} / 12 měsíců zaplaceno × ${fmtKc(dpfoYear[0]?.amount||8050)}`, hasData: true },
+    dpfo:      { paid: dpfoAcc,   basis: `naspořeno ${dpfoSavedRows.length}× ${fmtKc(dpfoSavedSum)} · odvedeno FÚ ${fmtKc(dpfoOdvedeno)} · zbývá na spořáku`, hasData: true },
     socialni:  { paid: socialEst, basis: socialMonthly > 0 ? `odhad: ${monthsElapsed} měs. × ${fmtKc(socialMonthly)} z evidence výdajů` : "položku jsem v appce nenašel — doplň skutečnost ručně", hasData: socialMonthly > 0 },
     zdravotni: { paid: zdravEst,  basis: zdravMonthly > 0 ? `odhad: ${monthsElapsed} měs. × ${fmtKc(zdravMonthly)} z evidence výdajů` : "položku jsem v appce nenašel — doplň skutečnost ručně", hasData: zdravMonthly > 0 },
-    dph:       { paid: dphAuto,   basis: "součet DPH z uhrazených faktur", hasData: true },
+    dph:       { paid: dphAuto,   basis: "vlastní daň za vypořádaná období (výstup dle DUZP − odpočet)", hasData: true },
   };
 
   const records = useMemo(() => {
@@ -16238,7 +16425,7 @@ export default function MauxCRM() {
     const nM = (nowD.getMonth() + 1) % 12;
     const liveYm = `${nY}-${String(nM + 1).padStart(2, "0")}`;
     const liveInv = unbilledWorkNetNoVat(workEntries);
-    const liveEsc = Math.round(escrowGrossForMonth(escrows, nowD.getFullYear(), nowD.getMonth()));
+    const liveEsc = Math.round(escrowNetForMonth(escrows, nowD.getFullYear(), nowD.getMonth()));
     const liveTotal = liveInv + liveEsc;
     if (liveTotal > l.activeGoal && milestoneLiveAck !== liveYm) {
       return {
@@ -16258,7 +16445,7 @@ export default function MauxCRM() {
     const nY = nowD.getMonth() === 11 ? nowD.getFullYear() + 1 : nowD.getFullYear();
     const nM = (nowD.getMonth() + 1) % 12;
     const ym = `${nY}-${String(nM + 1).padStart(2, "0")}`;
-    const total = unbilledWorkNetNoVat(workEntries) + Math.round(escrowGrossForMonth(escrows, nowD.getFullYear(), nowD.getMonth()));
+    const total = unbilledWorkNetNoVat(workEntries) + Math.round(escrowNetForMonth(escrows, nowD.getFullYear(), nowD.getMonth()));
     const prev = (l.allRows || []).slice(-12).reduce((m, x) => Math.max(m, x.totalM), 0);
     // Razítko je na měsíc, ne na částku — jinak by pečeť naskočila po každém dalším výkazu.
     if (total >= 100000 && prev > 0 && total > prev && recordAck !== ym) return { amount: total, prev, ym };
@@ -16810,13 +16997,13 @@ export default function MauxCRM() {
           // co reálně přibyly i ve dnech bez zapsaného výkazu) — stejná logika jako kalendář "Zapsaná práce".
           // "Tento měsíc"/cíl = nevyfakturované výkazy (bez DPH, po slevě, BEZ ohledu na to, kdy byly
           // zapsané — to je dluh, co čeká na fakturaci) + HRUBÝ úrok z úschov za aktuální měsíc
-          // (escrowGrossForMonth, capnutý na dnešek).
+          // (escrowNetForMonth — ČISTÝ, po srážkové dani, capnutý na dnešek).
           const _entryAmtNet = (e) => Math.max((e.amount||0) - (Number(e.discount_amount)||0), 0);
           const _todayMid = new Date(_now.getFullYear(), _now.getMonth(), _now.getDate());
           const _todayWork = workEntries.filter(e => e.entry_date === _todayStr).reduce((s,e) => s + _entryAmtNet(e), 0);
           const _todayEsc = _dailyNetOnDate(escrows, _todayMid);
           const _todayAmt = _todayWork + _todayEsc;
-          const _monthAmt = unbilledWorkNetNoVat(workEntries) + Math.round(escrowGrossForMonth(escrows, _now.getFullYear(), _now.getMonth()));
+          const _monthAmt = unbilledWorkNetNoVat(workEntries) + Math.round(escrowNetForMonth(escrows, _now.getFullYear(), _now.getMonth()));
           // Jediny cil v cele appce = automaticka meta ze zebriku (Tom 30.7.2026: rucni cil
           // v localStorage zrusen, byla to druha latka se stejnym jmenem — v srpnu by lista
           // merila proti 200k a dlazdice proti 235k). Meta platna pro TENTO mesic = goal
@@ -16840,13 +17027,15 @@ export default function MauxCRM() {
           const _kc = v => privacyMode ? "···" : (Math.abs(v) >= 1000 ? `${Math.round(v / 1000)}k` : String(Math.round(v)));
 
           // Graf historie — posledních ~9 uzavřených měsíců (computeMilestoneLadder jen jako zdroj
-          // hotových měsíčních součtů, fakturace bez DPH + hrubý úrok z úschov) + 1 živý sloupec na
+          // hotových měsíčních součtů, fakturace bez DPH + čistý úrok z úschov) + 1 živý sloupec na
           // konci se stejnou hodnotou jako _monthAmt výše, ať si "Tento měsíc" a poslední sloupec
           // grafu vždy odpovídají.
-          const lastY = _now.getMonth() === 11 ? _now.getFullYear() + 1 : _now.getFullYear();
-          const lastM = (_now.getMonth() + 1) % 12;
-          const liveRow = { ym: `${lastY}-${String(lastM + 1).padStart(2,"0")}`, totalM: _monthAmt, live: true };
-          const sparkRows = [...ladder.rows.slice(-9), liveRow];
+          // Živý sloupec = BĚŽÍCÍ měsíc. Dřív se značkoval jako příští (`getMonth()+1`) a zároveň
+          // se do sparkline dostal i řádek téhož měsíce ze žebříku — červenec byl v grafu dvakrát.
+          // `_closedRows` = jen UZAVŘENÉ měsíce, běžící drží `liveRow`. Audit 31.7.2026.
+          const _closedRows = (ladder.rows || []).filter(r => !r.isCurrent);
+          const liveRow = { ym: `${_now.getFullYear()}-${String(_now.getMonth() + 1).padStart(2,"0")}`, totalM: _monthAmt, live: true };
+          const sparkRows = [..._closedRows.slice(-9), liveRow];
           const maxTotal = Math.max(...sparkRows.map(r => r.totalM), _goal, 1);
           const barW = 10, gap = 4, chartH = 42;
           const svgW = Math.max(1, sparkRows.length * (barW + gap) - gap);
@@ -16861,13 +17050,15 @@ export default function MauxCRM() {
           // Stín minulého měsíce (Tom 30.7.2026, varianta B): hero drží kalendářní měsíc, ale
           // nesmí být fotka dneška — potřebuje kontext, kam se dostal naposledy. Bere se poslední
           // UZAVŘENÝ měsíc ze žebříku, žádná nová definice čísla.
-          const _prevRow = (ladder.rows || []).slice(-1)[0] || null;
+          // POSLEDNÍ UZAVŘENÝ měsíc. `ladder.rows` má na konci vždy běžící měsíc (filtr `isCurrent`),
+          // takže `slice(-1)` vracel tenhle měsíc a lišta hlásila jako "minulý měsíc" sama sebe.
+          const _prevRow = _closedRows.slice(-1)[0] || null;
           const _prevTot = _prevRow ? _prevRow.totalM : 0;
-          const _closedMax = (ladder.rows || []).length ? Math.max(...(ladder.rows || []).map(r => r.totalM)) : 0;
+          const _closedMax = _closedRows.length ? Math.max(..._closedRows.map(r => r.totalM)) : 0;
           // Věta MLČÍ, když je zpráva špatná (Tom: "mlčí"). Pod metou zůstane holé číslo + bar.
           const _sentence = _rem > 0 ? null
             : (_closedMax > 0 && _monthAmt >= _closedMax)
-              ? `Nejsilnější měsíc za posledních ${(ladder.rows || []).length + 1}. Metu jsi překročil o ${_fmt(_monthAmt - _goal)}.`
+              ? `Nejsilnější měsíc za posledních ${_closedRows.length + 1}. Metu jsi překročil o ${_fmt(_monthAmt - _goal)}.`
               : `Metu jsi překročil o ${_fmt(_monthAmt - _goal)}.`;
 
           return (
@@ -16928,7 +17119,7 @@ export default function MauxCRM() {
                         }, 80);
                       }}
                       style={{color:BP.indigo,cursor:"pointer",fontWeight:600}}
-                      title={'Tento měsíc = nevyfakturované výkazy (bez DPH, po slevě) + hrubý úrok z úschov'}>
+                      title={'Tento měsíc = nevyfakturované výkazy (bez DPH, po slevě) + čistý úrok z úschov'}>
                       Detail →
                     </span>
                   </div>
