@@ -7950,9 +7950,10 @@ function AkcieModule({ xtbTranches = [], onTrancheSave, onTrancheDelete, xtbTitl
   );
   const hasClosedTrades = sortedClosedTrades.length > 0;
   const totalRealizedProfit = sortedClosedTrades.reduce((s, t) => s + (t.profit || 0), 0);
-  const winCount = sortedClosedTrades.filter(t => (t.profit || 0) > 0).length;
-  const winRate = hasClosedTrades ? (winCount / sortedClosedTrades.length) * 100 : 0;
   const returnPct = netDeposited > 0 ? (totalRealizedProfit / netDeposited) * 100 : 0;
+  // Panel „Historie obchodů — podle titulu" Tom zrušil (31. 7. 2026): žebříček titulů
+  // podle realizovaného zisku je pohled do zpětného zrcátka, nic mu neříká. S ním padl
+  // i win rate — úspěšnost obchodů je metrika tradera, ne dlouhodobého investora.
 
   const symbolBreakdown = useMemo(() => {
     const map = {};
@@ -8347,57 +8348,6 @@ function AkcieModule({ xtbTranches = [], onTrancheSave, onTrancheDelete, xtbTitl
         </div>
       )}
 
-      {/* HISTORIE OBCHODŮ — uzavřené pozice, jednorázový import z XTB výpisu (read-only) */}
-      {hasClosedTrades && (
-        <div style={{ background: "#fff", border: "1px solid var(--line)", borderRadius: 14, padding: "18px 24px" }}>
-          <div style={{ ...label, marginBottom: 4 }}>Historie obchodů — podle titulu</div>
-          <div style={{ fontSize: 9.5, color: "var(--mut)", marginBottom: 14 }}>Realizovaný zisk/ztráta po jednotlivých titulech, ze všech {sortedClosedTrades.length} uzavřených obchodů v historii účtu.</div>
-          <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 16 }}>
-            {symbolBreakdown.map(s => (
-              <div key={s.symbol} style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                <div style={{ width: 80, fontSize: 11.5, fontWeight: 700, color: "var(--ink)", flexShrink: 0 }}>{s.symbol}</div>
-                <div style={{ flex: 1, position: "relative", height: 16, background: "#F5F3FF", borderRadius: 4, overflow: "hidden" }}>
-                  <div style={{
-                    position: "absolute", top: 0, bottom: 0,
-                    left: s.profit >= 0 ? "50%" : `${50 - (Math.abs(s.profit) / maxAbsProfit) * 50}%`,
-                    width: `${(Math.abs(s.profit) / maxAbsProfit) * 50}%`,
-                    background: s.profit >= 0 ? "#34D399" : "#F87171", borderRadius: 4,
-                  }} />
-                  <div style={{ position: "absolute", left: "50%", top: 0, bottom: 0, width: 1, background: "var(--line2)" }} />
-                </div>
-                <div style={{ width: 110, textAlign: "right", fontSize: 11.5, fontWeight: 600, color: s.profit >= 0 ? "#059669" : "#DC2626", flexShrink: 0 }}>
-                  {s.profit >= 0 ? "+" : ""}{fmtMoney(s.profit, currency)}
-                </div>
-                <div style={{ width: 50, textAlign: "right", fontSize: 10, color: "var(--mut)", flexShrink: 0 }}>{s.count}×</div>
-              </div>
-            ))}
-          </div>
-
-          <details>
-            <summary style={{ fontSize: 11, color: "var(--mut)", cursor: "pointer", marginBottom: 10 }}>Zobrazit všech {sortedClosedTrades.length} jednotlivých obchodů</summary>
-            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11.5 }}>
-              <thead><tr style={{ background: "#F5F3FF", borderBottom: "1px solid var(--line)" }}>
-                <th style={{ textAlign: "left", padding: "7px 10px", fontSize: 9, letterSpacing: ".1em", textTransform: "uppercase", color: "var(--mut)", fontWeight: 500 }}>Titul</th>
-                <th style={{ textAlign: "left", padding: "7px 10px", fontSize: 9, letterSpacing: ".1em", textTransform: "uppercase", color: "var(--mut)", fontWeight: 500 }}>Otevřeno</th>
-                <th style={{ textAlign: "left", padding: "7px 10px", fontSize: 9, letterSpacing: ".1em", textTransform: "uppercase", color: "var(--mut)", fontWeight: 500 }}>Uzavřeno</th>
-                <th style={{ textAlign: "right", padding: "7px 10px", fontSize: 9, letterSpacing: ".1em", textTransform: "uppercase", color: "var(--mut)", fontWeight: 500 }}>Objem</th>
-                <th style={{ textAlign: "right", padding: "7px 10px", fontSize: 9, letterSpacing: ".1em", textTransform: "uppercase", color: "var(--mut)", fontWeight: 500 }}>Zisk/ztráta</th>
-              </tr></thead>
-              <tbody>
-                {sortedClosedTrades.map(t => (
-                  <tr key={t.id} style={{ borderBottom: "1px solid var(--line)" }}>
-                    <td style={{ padding: "7px 10px", fontWeight: 600, color: "var(--ink)" }}>{t.symbol}</td>
-                    <td style={{ padding: "7px 10px", color: "var(--mut)", whiteSpace: "nowrap" }}>{t.open_time ? fmtDate(t.open_time.slice(0,10)) : "—"}</td>
-                    <td style={{ padding: "7px 10px", color: "var(--mut)", whiteSpace: "nowrap" }}>{t.close_time ? fmtDate(t.close_time.slice(0,10)) : "—"}</td>
-                    <td style={{ padding: "7px 10px", textAlign: "right", color: "var(--mut)" }}>{t.volume}</td>
-                    <td style={{ padding: "7px 10px", textAlign: "right", fontWeight: 600, color: (t.profit || 0) >= 0 ? "#059669" : "#DC2626" }}>{(t.profit || 0) >= 0 ? "+" : ""}{fmtMoney(t.profit, currency)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </details>
-        </div>
-      )}
 
       {/* TRANŠE — ruční ledger vkladů/výběrů hotovosti */}
       <div style={{ background: "#fff", border: "1px solid var(--line)", borderRadius: 14, padding: "18px 24px" }}>
