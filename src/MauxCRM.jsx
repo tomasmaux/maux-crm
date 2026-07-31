@@ -542,6 +542,17 @@ async function fetchXtbClosedTrades() {
   if (error) throw error;
   return data || [];
 }
+// Prodej z tranše. Uzavření se zapisuje jako fakt (kolik kusů, za kolik, jaký kurz)
+// a zároveň se o ten objem zvedne `closed_volume` na konkrétní nákupní tranši —
+// tím appka ví, KTERÝ lot je zavřený, a nemusí nic hádat FIFO.
+async function upsertXtbClosedTrade(t) {
+  const { error } = await supabase.from("xtb_closed_trades").upsert(t);
+  if (error) throw error;
+}
+async function deleteXtbClosedTrade(id) {
+  const { error } = await supabase.from("xtb_closed_trades").delete().eq("id", id);
+  if (error) throw error;
+}
 // Ostatní peněžní operace na účtu XTB — dividendy, srážková daň, úroky, poplatky.
 // Jsou to skutečné pohyby hotovosti, bez nich by zůstatek nikdy nesedl na XTB.
 async function fetchXtbCashOps() {
@@ -7845,7 +7856,7 @@ function AkcieGraf({ serie, stav = "idle", onNacti }) {
   );
 }
 
-function AkcieModule({ xtbTranches = [], onTrancheSave, onTrancheDelete, xtbTitles = [], onTitleSave, onTitleDelete, xtbClosedTrades = [], xtbPositions = [], xtbCashOps = [], xtbSerie = null, serieState = "idle", onNactiHistorii, onPositionSave, onPositionDelete, market = null, marketState = "idle", onRefreshPrices }) {
+function AkcieModule({ xtbTranches = [], onTrancheSave, onTrancheDelete, xtbTitles = [], onTitleSave, onTitleDelete, xtbClosedTrades = [], xtbPositions = [], xtbCashOps = [], xtbSerie = null, serieState = "idle", onNactiHistorii, onPositionSave, onPositionDelete, onClosedTradeSave, onClosedTradeDelete, market = null, marketState = "idle", onRefreshPrices }) {
   // Portfolio — jediný zdroj pravdy, žádný výpočet inline v komponentě.
   const pf = useMemo(
     () => computeXtbPortfolio(xtbPositions, xtbClosedTrades, xtbTranches, market, xtbCashOps),
@@ -7871,25 +7882,166 @@ function AkcieModule({ xtbTranches = [], onTrancheSave, onTrancheDelete, xtbTitl
   const [posSaving, setPosSaving] = useState(false);
   const cislo = (s) => Number(String(s).replace(/\s/g, "").replace(",", "."));
   const posMena = { US: "USD", DE: "EUR", NL: "EUR", NO: "NOK", UK: "USD", FR: "EUR", IT: "EUR" };
+  // Ověření tickeru proti Yahoo. Bez toho se překlep projeví až tím, že titul nemá
+  // cenu a tiše spadne do pořizovací hodnoty — chyba, která se hledá týdny.
+  const [tickOver, setTickOver] = useState(null);   // null | "hleda" | {ok} | {chyba}
+  const overTicker = async (sym) => {
+    const s = String(sym || "").trim().toUpperCase();
+    if (!s) { setTickOver(null); return; }
+    setTickOver({ stav: "hleda" });
+    try {
+      const d = await fetchXtbCeny([s]);
+      const c = (d.ceny || [])[0];
+      if (!c || c.chyba) { setTickOver({ stav: "chyba", zprava: "Yahoo tenhle ticker nezná." }); return; }
+      setTickOver({ stav: "ok", nazev: c.nazev, burza: c.burza, mena: c.mena, cena: c.cena });
+      setPosDraft(d2 => ({
+        ...d2,
+        instrument_name: d2.instrument_name || c.nazev || "",
+        currency: c.mena || d2.currency,
+        price: d2.price || (c.cena != null ? String(c.cena).replace(".", ",") : ""),
+      }));
+    } catch (e) { setTickOver({ stav: "chyba", zprava: "Ověření se nepovedlo." }); }
+  };
+
   const ulozPozici = async () => {
     const sym = posDraft.symbol.trim().toUpperCase();
     const ks = cislo(posDraft.volume), cena = cislo(posDraft.price);
     if (!sym) { alert("Zadej ticker, například MSFT.US"); return; }
     if (!ks || ks <= 0) { alert("Zadej počet kusů."); return; }
     if (!cena || cena <= 0) { alert("Zadej cenu za kus."); return; }
+    // Pravidlo 5: když na nákup není hotovost, muselo přijít nové. Teprve nový vklad
+    // zvedá vložený kapitál — bez téhle otázky by se výnos tiše nafoukl.
+    const kurzOdhad = posDraft.currency === "CZK" ? 1 : ((market && market.kurzy && market.kurzy[posDraft.currency]) || null);
+    const odhadCzk = kurzOdhad ? ks * cena * kurzOdhad : null;
+    let novyVklad = 0;
+    if (odhadCzk && odhadCzk > pf.hotovost + 1) {
+      const chybi = Math.round(odhadCzk - pf.hotovost);
+      const ano = confirm(
+        `Na tenhle nákup nemáš na účtu dost hotovosti — chybí ${fmtKc(chybi)}.\n\n` +
+        `Poslal jsi na XTB nové peníze?\n\n` +
+        `OK = ano, zapiš vklad ${fmtKc(chybi)} (zvedne vložený kapitál)\n` +
+        `Zrušit = ne, jen ulož nákup`
+      );
+      if (ano) novyVklad = chybi;
+    }
     setPosSaving(true);
     try {
+      if (novyVklad > 0) {
+        await onTrancheSave({
+          id: `xtb_tr_${Date.now()}`, tranche_date: posDraft.trade_date, type: "vklad",
+          amount: novyVklad, currency: "CZK", symbol: null, note: "doplněno u nákupu",
+        });
+      }
       await onPositionSave({
         id: `xtbpos_${Date.now()}`, symbol: sym,
-        instrument_name: posDraft.instrument_name.trim() || sym,
+        instrument_name: posDraft.instrument_name.trim() || (tickOver && tickOver.nazev) || sym,
         trade_date: posDraft.trade_date, volume: ks, price: cena,
         currency: posDraft.currency,
       });
       setPosDraft({ symbol: "", instrument_name: "", trade_date: today(), volume: "", price: "", currency: "USD" });
+      setTickOver(null);
       setPosForm(false);
     } catch (e) { alert("Chyba: " + e.message); }
     setPosSaving(false);
   };
+  // ── PRODEJ Z TRANŠE ────────────────────────────────────────────────────────
+  // Prodej je fakt: kolik kusů z KTERÉ tranše, za kolik a jaký byl ten den kurz.
+  // Pořizovací cena prodaných kusů se bere poměrem z té konkrétní tranše — proto
+  // se appka nikdy nemusí ptát FIFO, který lot to vlastně byl.
+  const lotBtn = (akt) => ({
+    fontSize: 10, padding: "3px 8px", borderRadius: 7, fontFamily: "inherit", cursor: "pointer",
+    border: `1px solid ${akt ? BP.indigoDeep : "rgba(28,10,99,.14)"}`,
+    background: akt ? BP.indigoDeep : "#fff", color: akt ? "#fff" : BP.indigoDeep,
+  });
+  const poleStyl = { width: "100%", boxSizing: "border-box", border: "1px solid rgba(28,10,99,.14)", borderRadius: 8, padding: "8px 10px", fontSize: 13, fontFamily: "inherit" };
+  const [uzavRok, setUzavRok] = useState("Vše");
+  const [uzavVse, setUzavVse] = useState(false);
+  const uzavreneRoky = useMemo(
+    () => Array.from(new Set(xtbClosedTrades.map(c => String(c.close_time || "").slice(0, 4)).filter(Boolean))).sort(),
+    [xtbClosedTrades]
+  );
+  const [prodejLot, setProdejLot] = useState(null);
+  const [prodejDraft, setProdejDraft] = useState({ ks: "", cena: "", datum: today() });
+  const [prodejSaving, setProdejSaving] = useState(false);
+  const otevriProdej = (l) => {
+    setProdejLot(l);
+    setEditLot(null);
+    setProdejDraft({ ks: String(l.ks).replace(".", ","), cena: l.aktualni != null ? String(l.aktualni).replace(".", ",") : "", datum: today() });
+  };
+  const ulozProdej = async () => {
+    const l = prodejLot; if (!l) return;
+    const ks = cislo(prodejDraft.ks), cena = cislo(prodejDraft.cena);
+    if (!ks || ks <= 0) { alert("Zadej počet kusů."); return; }
+    if (ks > l.ks + 1e-9) { alert(`Z téhle tranše zbývá jen ${l.ks} ks.`); return; }
+    if (!cena || cena <= 0) { alert("Zadej prodejní cenu za kus."); return; }
+    const pos = xtbPositions.find(p => p.id === l.id);
+    if (!pos) { alert("Nákupní tranše se nenašla."); return; }
+    setProdejSaving(true);
+    try {
+      const fx = l.mena === "CZK" ? 1 : await kurzKeDni(l.mena, prodejDraft.datum);
+      if (!fx) throw new Error(`Kurz ${l.mena} k ${prodejDraft.datum} se nepodařilo načíst.`);
+      const vytezek = Math.round(ks * cena * fx * 100) / 100;
+      const naklad = Math.round((l.porizovaci * (ks / l.ks)) * 100) / 100;
+      await onClosedTradeSave({
+        id: `xtbct_${Date.now()}`, symbol: l.symbol, instrument_name: l.nazev,
+        trade_type: "BUY", volume: ks,
+        open_price: l.cena, open_time: `${l.datum} 00:00:00`,
+        close_price: cena, close_time: `${prodejDraft.datum} 00:00:00`,
+        profit: Math.round((vytezek - naklad) * 100) / 100,
+        amount_czk: vytezek, cost_czk: naklad, lot_id: l.id,
+      });
+      await onPositionSave({ ...pos, closed_volume: (Number(pos.closed_volume) || 0) + ks });
+      setProdejLot(null);
+    } catch (e) { alert("Chyba: " + e.message); }
+    setProdejSaving(false);
+  };
+
+  // ── EDITACE A MAZÁNÍ NÁKUPNÍ TRANŠE ───────────────────────────────────────
+  const [editLot, setEditLot] = useState(null);
+  const [editDraft, setEditDraft] = useState({ datum: "", ks: "", cena: "", mena: "USD" });
+  const [editSaving, setEditSaving] = useState(false);
+  const otevriEdit = (l) => {
+    const pos = xtbPositions.find(p => p.id === l.id); if (!pos) return;
+    setProdejLot(null);
+    setEditLot(l);
+    setEditDraft({ datum: pos.trade_date, ks: String(pos.volume).replace(".", ","), cena: String(pos.price).replace(".", ","), mena: pos.currency || "USD" });
+  };
+  const ulozEdit = async () => {
+    const l = editLot; if (!l) return;
+    const pos = xtbPositions.find(p => p.id === l.id); if (!pos) return;
+    const ks = cislo(editDraft.ks), cena = cislo(editDraft.cena);
+    const zavreno = Number(pos.closed_volume) || 0;
+    if (!ks || ks <= 0) { alert("Zadej počet kusů."); return; }
+    if (ks < zavreno - 1e-9) { alert(`Z téhle tranše je už ${zavreno} ks prodáno — pod tohle číslo jít nejde. Nejdřív zruš prodej.`); return; }
+    if (!cena || cena <= 0) { alert("Zadej cenu za kus."); return; }
+    setEditSaving(true);
+    try {
+      // fx_rate schválně na null — datum se mohlo změnit a kurz se musí zamrazit znovu.
+      await onPositionSave({ ...pos, trade_date: editDraft.datum, volume: ks, price: cena, currency: editDraft.mena, fx_rate: null });
+      setEditLot(null);
+    } catch (e) { alert("Chyba: " + e.message); }
+    setEditSaving(false);
+  };
+  const smazLot = async (l) => {
+    const pos = xtbPositions.find(p => p.id === l.id); if (!pos) return;
+    if ((Number(pos.closed_volume) || 0) > 0) {
+      alert("Z téhle tranše je něco prodáno. Nejdřív zruš ten prodej, pak jde smazat.");
+      return;
+    }
+    if (!confirm(`Smazat nákup ${l.symbol} z ${l.datum}? Hotovost se o tuhle částku zvedne zpátky.`)) return;
+    try { await onPositionDelete(l.id); } catch (e) { alert("Chyba: " + e.message); }
+  };
+  // Zrušení prodeje — vrátí kusy zpátky do tranše. Bez tohohle by šel překlep opravit
+  // jen v databázi a Tom by na to sám nedosáhl.
+  const zrusProdej = async (ct) => {
+    if (!confirm(`Zrušit prodej ${ct.volume} ks ${ct.symbol} z ${String(ct.close_time).slice(0, 10)}?`)) return;
+    try {
+      const pos = ct.lot_id ? xtbPositions.find(p => p.id === ct.lot_id) : null;
+      if (pos) await onPositionSave({ ...pos, closed_volume: Math.max(0, (Number(pos.closed_volume) || 0) - (Number(ct.volume) || 0)) });
+      await onClosedTradeDelete(ct.id);
+    } catch (e) { alert("Chyba: " + e.message); }
+  };
+
   const [addForm, setAddForm] = useState(false);
   const [newTranche, setNewTranche] = useState({ date: today(), type: "vklad", amount: "", symbol: "", note: "" });
   const [savingTranche, setSavingTranche] = useState(false);
@@ -8155,7 +8307,7 @@ function AkcieModule({ xtbTranches = [], onTrancheSave, onTrancheDelete, xtbTitl
         <div style={{ position: "relative", background: "#fff", border: "1px solid var(--line)", borderRadius: BP.r, padding: "22px 24px" }}>
           <BpCorners />
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-            <div style={bpLabel()}>Co držíš · {pf.lots.length} nákupních tranší</div>
+            <div style={bpLabel()}>Co držíš · {pf.lots.length} nákupů</div>
             <button
               onClick={() => setPosForm(v => !v)}
               style={{ fontSize: 11, padding: "5px 12px", borderRadius: 9, border: "1px solid rgba(53,24,164,.2)", background: posForm ? "#fff" : "#F4F2FC", color: BP.indigoDeep, cursor: "pointer", fontFamily: "inherit" }}>
@@ -8172,9 +8324,13 @@ function AkcieModule({ xtbTranches = [], onTrancheSave, onTrancheDelete, xtbTitl
                     onChange={e => {
                       const v = e.target.value.toUpperCase();
                       const cc = v.includes(".") ? v.split(".").pop() : "";
+                      setTickOver(null);
                       setPosDraft(d => ({ ...d, symbol: v, currency: posMena[cc] || d.currency }));
                     }}
-                    style={{ width: "100%", boxSizing: "border-box", border: "1px solid rgba(28,10,99,.14)", borderRadius: 8, padding: "8px 10px", fontSize: 13, fontFamily: "inherit" }} />
+                    onBlur={e => overTicker(e.target.value)}
+                    onKeyDown={e => { if (e.key === "Enter") overTicker(e.target.value); }}
+                    style={{ width: "100%", boxSizing: "border-box", borderRadius: 8, padding: "8px 10px", fontSize: 13, fontFamily: "inherit",
+                      border: `1px solid ${tickOver && tickOver.stav === "chyba" ? "#DC2626" : tickOver && tickOver.stav === "ok" ? BP.indigoDeep : "rgba(28,10,99,.14)"}` }} />
                 </div>
                 <div>
                   <div style={{ fontSize: 10, color: "var(--mut)", marginBottom: 5 }}>Datum nákupu</div>
@@ -8203,6 +8359,13 @@ function AkcieModule({ xtbTranches = [], onTrancheSave, onTrancheDelete, xtbTitl
                   </select>
                 </div>
               </div>
+              {tickOver && (
+                <div style={{ fontSize: 11.5, marginTop: 10, color: tickOver.stav === "chyba" ? "#B91C1C" : "var(--mut)" }}>
+                  {tickOver.stav === "hleda" && "Ověřuji ticker…"}
+                  {tickOver.stav === "chyba" && `${tickOver.zprava} Zkontroluj příponu — americké tituly mají .US, německé .DE, nizozemské .NL.`}
+                  {tickOver.stav === "ok" && <>Sedí: <b style={{ color: "var(--txt)" }}>{tickOver.nazev || posDraft.symbol}</b> · {tickOver.burza} · dnes {Number(tickOver.cena).toLocaleString("cs-CZ", { maximumFractionDigits: 2 })} {tickOver.mena}</>}
+                </div>
+              )}
               {cislo(posDraft.volume) > 0 && cislo(posDraft.price) > 0 && (
                 <div style={{ fontSize: 11.5, color: "var(--mut)", marginTop: 12, lineHeight: 1.6 }}>
                   Objem obchodu <b style={{ color: "var(--txt)" }}>
@@ -8257,22 +8420,130 @@ function AkcieModule({ xtbTranches = [], onTrancheSave, onTrancheDelete, xtbTitl
                 </div>
                 {openSym === t.symbol && (
                   <div style={{ padding: "4px 0 12px 0" }}>
-                    {t.lots.map(l => (
-                      <div key={l.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, padding: "7px 0 7px 14px", borderTop: "1px solid rgba(28,10,99,.04)" }}>
-                        <div style={{ fontSize: 11.5, color: "var(--mut)" }}>
-                          {l.datum} · {l.ks.toLocaleString("cs-CZ", { maximumFractionDigits: 4 })} ks @ {l.cena.toLocaleString("cs-CZ", { maximumFractionDigits: 2 })} {l.mena}
-                          {l.kurzNakup ? <span style={{ opacity: .7 }}> · kurz {l.kurzNakup.toLocaleString("cs-CZ", { maximumFractionDigits: 3 })}</span> : null}
+                    {t.lots.map(l => {
+                      const jeProdej = prodejLot && prodejLot.id === l.id;
+                      const jeEdit = editLot && editLot.id === l.id;
+                      return (
+                      <div key={l.id} style={{ borderTop: "1px solid rgba(28,10,99,.04)" }}>
+                        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, padding: "7px 0 7px 14px" }}>
+                          <div style={{ fontSize: 11.5, color: "var(--mut)" }}>
+                            {l.datum} · {l.ks.toLocaleString("cs-CZ", { maximumFractionDigits: 4 })} ks @ {l.cena.toLocaleString("cs-CZ", { maximumFractionDigits: 2 })} {l.mena}
+                            {l.kurzNakup ? <span style={{ opacity: .7 }}> · kurz {l.kurzNakup.toLocaleString("cs-CZ", { maximumFractionDigits: 3 })}</span> : null}
+                          </div>
+                          <div style={{ display: "flex", alignItems: "center", gap: 12, flexShrink: 0 }}>
+                            <span style={{ fontSize: 10.5, color: l.testSplnen ? BP.sandDeep : "var(--mut)" }}>
+                              {l.testSplnen ? "časový test splněn" : `do testu ${Math.ceil(l.dnyDoTestu / 30)} měs.`}
+                            </span>
+                            <span className="maux-num" style={{ fontSize: 12, color: l.zisk >= 0 ? BP.indigoDeep : "#DC2626", minWidth: 78, textAlign: "right" }}>
+                              {fmtSigned(Math.round(l.zisk))}
+                            </span>
+                            <span style={{ display: "flex", gap: 4 }}>
+                              <button onClick={() => jeProdej ? setProdejLot(null) : otevriProdej(l)} style={lotBtn(jeProdej)}>Prodat</button>
+                              <button onClick={() => jeEdit ? setEditLot(null) : otevriEdit(l)} style={lotBtn(jeEdit)}>Upravit</button>
+                              <button onClick={() => smazLot(l)} style={{ ...lotBtn(false), color: "#B91C1C" }}>Smazat</button>
+                            </span>
+                          </div>
                         </div>
-                        <div style={{ display: "flex", alignItems: "center", gap: 14, flexShrink: 0 }}>
-                          <span style={{ fontSize: 10.5, color: l.testSplnen ? BP.sandDeep : "var(--mut)" }}>
-                            {l.testSplnen ? "časový test splněn" : `do testu ${Math.ceil(l.dnyDoTestu / 30)} měs.`}
-                          </span>
-                          <span className="maux-num" style={{ fontSize: 12, color: l.zisk >= 0 ? BP.indigoDeep : "#DC2626", minWidth: 78, textAlign: "right" }}>
-                            {fmtSigned(Math.round(l.zisk))}
-                          </span>
-                        </div>
+
+                        {jeProdej && (
+                          <div style={{ background: "#F7F6FC", borderRadius: BP.rInner, padding: "14px 16px", margin: "2px 0 10px 14px" }}>
+                            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(110px, 1fr))", gap: 10 }}>
+                              <div>
+                                <div style={{ fontSize: 10, color: "var(--mut)", marginBottom: 5 }}>Kolik kusů (max {l.ks.toLocaleString("cs-CZ", { maximumFractionDigits: 4 })})</div>
+                                <input value={prodejDraft.ks} onChange={e => setProdejDraft(d => ({ ...d, ks: e.target.value }))} style={poleStyl} />
+                              </div>
+                              <div>
+                                <div style={{ fontSize: 10, color: "var(--mut)", marginBottom: 5 }}>Prodejní cena za kus ({l.mena})</div>
+                                <input value={prodejDraft.cena} onChange={e => setProdejDraft(d => ({ ...d, cena: e.target.value }))} style={poleStyl} />
+                              </div>
+                              <div>
+                                <div style={{ fontSize: 10, color: "var(--mut)", marginBottom: 5 }}>Datum prodeje</div>
+                                <input type="date" value={prodejDraft.datum} onChange={e => setProdejDraft(d => ({ ...d, datum: e.target.value }))} style={poleStyl} />
+                              </div>
+                            </div>
+                            {cislo(prodejDraft.ks) > 0 && cislo(prodejDraft.cena) > 0 && (() => {
+                              const ks = Math.min(cislo(prodejDraft.ks), l.ks);
+                              const kurz = l.mena === "CZK" ? 1 : ((market && market.kurzy && market.kurzy[l.mena]) || null);
+                              const vyt = kurz ? ks * cislo(prodejDraft.cena) * kurz : null;
+                              const nak = l.porizovaci * (ks / l.ks);
+                              return (
+                                <div style={{ fontSize: 11.5, color: "var(--mut)", marginTop: 12, lineHeight: 1.6 }}>
+                                  Pořizovací cena těch kusů <b style={{ color: "var(--txt)" }}>{fmtKc(Math.round(nak))}</b>
+                                  {vyt != null && <> · výtěžek zhruba <b style={{ color: "var(--txt)" }}>{fmtKc(Math.round(vyt))}</b>
+                                    {" · "}zisk <b style={{ color: vyt - nak >= 0 ? BP.indigoDeep : "#DC2626" }}>{fmtSigned(Math.round(vyt - nak))}</b></>}
+                                  . Přesný kurz ČNB ke dni prodeje se dotáhne při uložení. Prodej nesnižuje vložený kapitál —
+                                  peníze jen přejdou z pozice do hotovosti.
+                                </div>
+                              );
+                            })()}
+                            <div style={{ display: "flex", gap: 8, marginTop: 14 }}>
+                              <button onClick={ulozProdej} disabled={prodejSaving} style={{ fontSize: 12, padding: "7px 16px", borderRadius: 9, border: "none", background: BP.indigoDeep, color: "#fff", cursor: prodejSaving ? "default" : "pointer", fontFamily: "inherit" }}>
+                                {prodejSaving ? "Ukládám…" : "Uložit prodej"}
+                              </button>
+                              <button onClick={() => setProdejLot(null)} style={{ fontSize: 12, padding: "7px 14px", borderRadius: 9, border: "1px solid rgba(28,10,99,.14)", background: "#fff", color: "var(--txt)", cursor: "pointer", fontFamily: "inherit" }}>Zrušit</button>
+                            </div>
+                          </div>
+                        )}
+
+                        {jeEdit && (
+                          <div style={{ background: "#F7F6FC", borderRadius: BP.rInner, padding: "14px 16px", margin: "2px 0 10px 14px" }}>
+                            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(110px, 1fr))", gap: 10 }}>
+                              <div>
+                                <div style={{ fontSize: 10, color: "var(--mut)", marginBottom: 5 }}>Datum nákupu</div>
+                                <input type="date" value={editDraft.datum} onChange={e => setEditDraft(d => ({ ...d, datum: e.target.value }))} style={poleStyl} />
+                              </div>
+                              <div>
+                                <div style={{ fontSize: 10, color: "var(--mut)", marginBottom: 5 }}>Počet kusů</div>
+                                <input value={editDraft.ks} onChange={e => setEditDraft(d => ({ ...d, ks: e.target.value }))} style={poleStyl} />
+                              </div>
+                              <div>
+                                <div style={{ fontSize: 10, color: "var(--mut)", marginBottom: 5 }}>Cena za kus</div>
+                                <input value={editDraft.cena} onChange={e => setEditDraft(d => ({ ...d, cena: e.target.value }))} style={poleStyl} />
+                              </div>
+                              <div>
+                                <div style={{ fontSize: 10, color: "var(--mut)", marginBottom: 5 }}>Měna</div>
+                                <select value={editDraft.mena} onChange={e => setEditDraft(d => ({ ...d, mena: e.target.value }))} style={{ ...poleStyl, background: "#fff" }}>
+                                  {["USD", "EUR", "NOK", "GBP", "CZK"].map(m => <option key={m} value={m}>{m}</option>)}
+                                </select>
+                              </div>
+                            </div>
+                            <div style={{ fontSize: 11.5, color: "var(--mut)", marginTop: 12, lineHeight: 1.6 }}>
+                              Kurz se po uložení zamrazí znovu ke zvolenému datu — mění se tím korunová pořizovací cena
+                              i den, od kterého běží tříletý časový test.
+                            </div>
+                            <div style={{ display: "flex", gap: 8, marginTop: 14 }}>
+                              <button onClick={ulozEdit} disabled={editSaving} style={{ fontSize: 12, padding: "7px 16px", borderRadius: 9, border: "none", background: BP.indigoDeep, color: "#fff", cursor: editSaving ? "default" : "pointer", fontFamily: "inherit" }}>
+                                {editSaving ? "Ukládám…" : "Uložit změnu"}
+                              </button>
+                              <button onClick={() => setEditLot(null)} style={{ fontSize: 12, padding: "7px 14px", borderRadius: 9, border: "1px solid rgba(28,10,99,.14)", background: "#fff", color: "var(--txt)", cursor: "pointer", fontFamily: "inherit" }}>Zrušit</button>
+                            </div>
+                          </div>
+                        )}
                       </div>
-                    ))}
+                      );
+                    })}
+
+                    {/* Prodeje z tohohle titulu — ať jde překlep zrušit bez zásahu do databáze */}
+                    {(() => {
+                      const prodeje = sortedClosedTrades.filter(c => String(c.symbol).toUpperCase() === t.symbol);
+                      if (!prodeje.length) return null;
+                      return (
+                        <details style={{ marginLeft: 14, marginTop: 8 }}>
+                          <summary style={{ fontSize: 10.5, color: "var(--mut)", cursor: "pointer" }}>
+                            {prodeje.length} {prodeje.length === 1 ? "prodej" : prodeje.length < 5 ? "prodeje" : "prodejů"} z tohohle titulu
+                          </summary>
+                          {prodeje.map(c => (
+                            <div key={c.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, padding: "6px 0", fontSize: 11, color: "var(--mut)" }}>
+                              <span>{String(c.close_time).slice(0, 10)} · {Number(c.volume).toLocaleString("cs-CZ", { maximumFractionDigits: 4 })} ks @ {Number(c.close_price).toLocaleString("cs-CZ", { maximumFractionDigits: 2 })}</span>
+                              <span style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                                <span className="maux-num" style={{ color: (c.profit || 0) >= 0 ? BP.indigoDeep : "#DC2626" }}>{fmtSigned(Math.round(c.profit || 0))}</span>
+                                {c.lot_id && <button onClick={() => zrusProdej(c)} style={{ ...lotBtn(false), color: "#B91C1C" }}>Zrušit prodej</button>}
+                              </span>
+                            </div>
+                          ))}
+                        </details>
+                      );
+                    })()}
                   </div>
                 )}
               </div>
@@ -8281,6 +8552,99 @@ function AkcieModule({ xtbTranches = [], onTrancheSave, onTrancheDelete, xtbTitl
         </div>
       )}
 
+
+      {/* ── UZAVŘENÉ POZICE — nákup vedle svého prodeje ──────────────────────────
+          Ne žebříček titulů (ten Tom zrušil), ale ledger: co jsem koupil, kdy jsem to
+          prodal a co z toho bylo. Každý řádek je jeden pár nákup → prodej. */}
+      {sortedClosedTrades.length > 0 && (
+        <div style={{ position: "relative", background: "#fff", border: "1px solid var(--line)", borderRadius: BP.r, padding: "22px 24px", boxShadow: BP.shadow }}>
+          <BpCorners />
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+            <div>
+              <div style={bpLabel()}>Uzavřené pozice</div>
+              <div style={{ fontSize: 11, color: "var(--mut)", marginTop: 4 }}>
+                Každý řádek je jeden nákup a jeho prodej. Zisk je po přepočtu kurzem ke dni obchodu.
+              </div>
+            </div>
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+              {["Vše", ...uzavreneRoky].map(r => (
+                <button key={r} onClick={() => setUzavRok(r)} style={lotBtn(uzavRok === r)}>{r}</button>
+              ))}
+            </div>
+          </div>
+
+          {(() => {
+            const rows = sortedClosedTrades.filter(c => uzavRok === "Vše" || String(c.close_time).slice(0, 4) === uzavRok);
+            const zisk = rows.reduce((s, c) => s + (Number(c.profit) || 0), 0);
+            const trzby = rows.reduce((s, c) => s + (Number(c.amount_czk) || 0), 0);
+            const vidt = uzavVse ? rows : rows.slice(0, 20);
+            const bunka = { padding: "7px 8px", fontSize: 11.5, color: "var(--mut)", whiteSpace: "nowrap" };
+            const hl = { textAlign: "left", padding: "6px 8px", fontSize: 8.5, letterSpacing: ".18em", textTransform: "uppercase", color: "var(--mut)", fontWeight: 700, opacity: .7 };
+            return (
+              <>
+                <div style={{ display: "flex", gap: 26, flexWrap: "wrap", marginTop: 16, paddingBottom: 14, borderBottom: "1px solid rgba(28,10,99,.07)" }}>
+                  <div>
+                    <div style={bpLabel({ marginBottom: 5 })}>Realizovaný zisk</div>
+                    <div style={bpHero(19, zisk >= 0 ? BP.indigoDeep : "#DC2626")}>{fmtSigned(Math.round(zisk))}</div>
+                  </div>
+                  <div>
+                    <div style={bpLabel({ marginBottom: 5 })}>Tržby z prodeje</div>
+                    <div style={bpHero(19, "var(--txt)")}>{fmtKc(Math.round(trzby))}</div>
+                    <div style={{ fontSize: 10, color: "var(--mut)", marginTop: 3 }}>hrubé, do testu 100 000 Kč</div>
+                  </div>
+                  <div>
+                    <div style={bpLabel({ marginBottom: 5 })}>Obchodů</div>
+                    <div style={bpHero(19, "var(--txt)")}>{rows.length}</div>
+                  </div>
+                </div>
+
+                <div style={{ overflowX: "auto", marginTop: 4 }}>
+                  <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                    <thead><tr>
+                      <th style={hl}>Titul</th>
+                      <th style={hl}>Koupeno</th>
+                      <th style={hl}>Prodáno</th>
+                      <th style={{ ...hl, textAlign: "right" }}>Ks</th>
+                      <th style={{ ...hl, textAlign: "right" }}>Nákup</th>
+                      <th style={{ ...hl, textAlign: "right" }}>Prodej</th>
+                      <th style={{ ...hl, textAlign: "right" }}>Zisk</th>
+                      <th style={{ ...hl, textAlign: "right" }}>Držel</th>
+                    </tr></thead>
+                    <tbody>
+                      {vidt.map(c => {
+                        const od = c.open_time ? String(c.open_time).slice(0, 10) : null;
+                        const doD = c.close_time ? String(c.close_time).slice(0, 10) : null;
+                        const dnu = od && doD ? Math.round((new Date(doD) - new Date(od)) / 86400000) : null;
+                        const p = Number(c.profit) || 0;
+                        return (
+                          <tr key={c.id} style={{ borderTop: "1px solid rgba(28,10,99,.05)" }}>
+                            <td style={{ ...bunka, color: "var(--ink)", fontWeight: 600 }}>{c.symbol}</td>
+                            <td style={bunka}>{od || "—"}<span style={{ opacity: .6 }}> · {Number(c.open_price).toLocaleString("cs-CZ", { maximumFractionDigits: 2 })}</span></td>
+                            <td style={bunka}>{doD || "—"}<span style={{ opacity: .6 }}> · {Number(c.close_price).toLocaleString("cs-CZ", { maximumFractionDigits: 2 })}</span></td>
+                            <td style={{ ...bunka, textAlign: "right" }}>{Number(c.volume).toLocaleString("cs-CZ", { maximumFractionDigits: 4 })}</td>
+                            <td style={{ ...bunka, textAlign: "right" }}>{c.cost_czk != null ? fmtKc(Math.round(c.cost_czk)) : "—"}</td>
+                            <td style={{ ...bunka, textAlign: "right" }}>{c.amount_czk != null ? fmtKc(Math.round(c.amount_czk)) : "—"}</td>
+                            <td className="maux-num" style={{ ...bunka, textAlign: "right", color: p >= 0 ? BP.indigoDeep : "#DC2626", fontWeight: 600 }}>{fmtSigned(Math.round(p))}</td>
+                            <td style={{ ...bunka, textAlign: "right", color: dnu != null && dnu >= 1095 ? BP.sandDeep : "var(--mut)" }}>
+                              {dnu != null ? (dnu >= 365 ? `${(dnu / 365).toFixed(1).replace(".", ",")} r` : `${dnu} dní`) : "—"}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+
+                {rows.length > 20 && (
+                  <button onClick={() => setUzavVse(v => !v)} style={{ ...lotBtn(false), marginTop: 12 }}>
+                    {uzavVse ? "Zobrazit jen posledních 20" : `Zobrazit všech ${rows.length}`}
+                  </button>
+                )}
+              </>
+            );
+          })()}
+        </div>
+      )}
 
       {/* DAŇOVÝ PŘEHLED — časový test, hodnotový test 100k, odhad daně, termíny DPFO */}
       {hasClosedTrades && (
@@ -8356,10 +8720,10 @@ function AkcieModule({ xtbTranches = [], onTrancheSave, onTrancheDelete, xtbTitl
       <div style={{ background: "#fff", border: "1px solid var(--line)", borderRadius: 14, padding: "18px 24px" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 14, gap: 12 }}>
           <div>
-            <div style={{ ...label }}>Tranše — vklady a výběry hotovosti</div>
+            <div style={{ ...label }}>Převody peněz — vklady a výběry</div>
             <div style={{ fontSize: 9.5, color: "var(--mut)", marginTop: 4 }}>XTB tohle přes API nedává — vede se ručně, ať jde spočítat čistý zisk vs. principál.</div>
           </div>
-          <button className="btn pri" style={{ fontSize: 11, padding: "5px 12px", flexShrink: 0 }} onClick={() => setAddForm(p => !p)}>+ Přidat tranši</button>
+          <button className="btn pri" style={{ fontSize: 11, padding: "5px 12px", flexShrink: 0 }} onClick={() => setAddForm(p => !p)}>+ Přidat převod</button>
         </div>
 
         {addForm && (
@@ -8381,7 +8745,7 @@ function AkcieModule({ xtbTranches = [], onTrancheSave, onTrancheDelete, xtbTitl
         )}
 
         {sortedTranches.length === 0 ? (
-          <div style={{ fontSize: 12, color: "var(--mut)" }}>Zatím žádné tranše. Doplň historické vklady, ať appka spočítá čistý zisk od první koruny.</div>
+          <div style={{ fontSize: 12, color: "var(--mut)" }}>Zatím žádné převody. Doplň historické vklady, ať appka spočítá čistý zisk od první koruny.</div>
         ) : (
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
             <thead><tr style={{ background: "#F5F3FF", borderBottom: "1px solid var(--line)" }}>
@@ -16052,6 +16416,14 @@ export default function MauxCRM() {
     await deleteXtbPosition(id);
     setXtbPositions(p => p.filter(x => x.id !== id));
   };
+  const handleXtbClosedTradeSave = async (t) => {
+    await upsertXtbClosedTrade(t);
+    setXtbClosedTrades(await fetchXtbClosedTrades());
+  };
+  const handleXtbClosedTradeDelete = async (id) => {
+    await deleteXtbClosedTrade(id);
+    setXtbClosedTrades(c => c.filter(x => x.id !== id));
+  };
   const handleXtbTitleSave = async (t) => {
     await upsertXtbTitle(t);
     setXtbTitles(await fetchXtbTitles());
@@ -16703,6 +17075,8 @@ export default function MauxCRM() {
               onNactiHistorii={nactiXtbHistorii}
               onPositionSave={handleXtbPositionSave}
               onPositionDelete={handleXtbPositionDelete}
+              onClosedTradeSave={handleXtbClosedTradeSave}
+              onClosedTradeDelete={handleXtbClosedTradeDelete}
               market={xtbMarket}
               marketState={xtbMarketState}
               onRefreshPrices={nactiXtbCeny}
