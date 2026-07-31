@@ -596,6 +596,21 @@ async function kurzKeDni(mena, isoDatum) {
   const r = await fetchXtbCeny([], `${d}.${m}.${y}`);
   return (r && r.kurzy && r.kurzy[mena]) || null;
 }
+// ⚠️ XTB NEOBCHODUJE KURZEM ČNB. Do kurzu si zabuduje konverzní poplatek — změřeno
+// na Tomových vlastních datech: 29. 6. 2026 byl kurz ČNB 21,269, XTB účtoval 21,374
+// (+0,494 %). U dnů, kdy Tom nakupoval i prodával, vychází rozpětí mezi nákupním
+// a prodejním kurzem konzistentně 1,10–1,14 %, tedy zhruba půl procenta na každou stranu.
+//
+// Bez téhle korekce ručně zadaný obchod utíká od skutečného zůstatku na XTB o 0,5 % objemu.
+// Reálný dopad 31. 7. 2026: prodej ORCL + dokup Visy → appka hlásila hotovost 2 098 Kč,
+// na účtu bylo 1 628,95 Kč. Rozdíl 469 Kč, přesně 0,5 % z obou obchodů.
+//
+// Platí JEN pro ručně zadané obchody. Data z importu XTB nesou skutečný kurz z výpisu
+// a ta se nikdy nekorigují — proto po importu hotovost sedí na korunu.
+const XTB_FX_MARKUP = 0.005;
+const kurzXtb = (kurzCnb, smer) =>
+  kurzCnb == null ? null
+    : Math.round(kurzCnb * (smer === "nakup" ? 1 + XTB_FX_MARKUP : 1 - XTB_FX_MARKUP) * 1e6) / 1e6;
 
 /* ── JEDINÝ ZDROJ PRAVDY PRO PORTFOLIO ──────────────────────────────────────
    Nikde jinde v appce se hodnota akcií nepočítá. Čtyři pravidla, na kterých to stojí:
@@ -8009,7 +8024,7 @@ function AkcieModule({ xtbTranches = [], onTrancheSave, onTrancheDelete, xtbTitl
     if (!cena || cena <= 0) { alert("Zadej cenu za kus."); return; }
     // Pravidlo 5: když na nákup není hotovost, muselo přijít nové. Teprve nový vklad
     // zvedá vložený kapitál — bez téhle otázky by se výnos tiše nafoukl.
-    const kurzOdhad = posDraft.currency === "CZK" ? 1 : ((market && market.kurzy && market.kurzy[posDraft.currency]) || null);
+    const kurzOdhad = posDraft.currency === "CZK" ? 1 : kurzXtb((market && market.kurzy && market.kurzy[posDraft.currency]) || null, "nakup");
     const odhadCzk = kurzOdhad ? ks * cena * kurzOdhad : null;
     // Duplicita: stejný titul, stejný den, stejný počet kusů. Nákup se opravdu může
     // opakovat, proto to není zákaz — jen se na to appka zeptá dřív, než uloží.
@@ -8079,7 +8094,8 @@ function AkcieModule({ xtbTranches = [], onTrancheSave, onTrancheDelete, xtbTitl
     if (!pos) { alert("Nákupní tranše se nenašla."); return; }
     setProdejSaving(true);
     try {
-      const fx = l.mena === "CZK" ? 1 : await kurzKeDni(l.mena, prodejDraft.datum);
+      // Prodej = XTB směňuje zpátky do korun pod svým kurzem, tedy ČNB − 0,5 %.
+      const fx = l.mena === "CZK" ? 1 : kurzXtb(await kurzKeDni(l.mena, prodejDraft.datum), "prodej");
       if (!fx) throw new Error(`Kurz ${l.mena} k ${prodejDraft.datum} se nepodařilo načíst.`);
       const vytezek = Math.round(ks * cena * fx * 100) / 100;
       const naklad = Math.round((l.porizovaci * (ks / l.ks)) * 100) / 100;
@@ -8650,7 +8666,7 @@ function AkcieModule({ xtbTranches = [], onTrancheSave, onTrancheDelete, xtbTitl
                             </div>
                             {cislo(prodejDraft.ks) > 0 && cislo(prodejDraft.cena) > 0 && (() => {
                               const ks = Math.min(cislo(prodejDraft.ks), l.ks);
-                              const kurz = l.mena === "CZK" ? 1 : ((market && market.kurzy && market.kurzy[l.mena]) || null);
+                              const kurz = l.mena === "CZK" ? 1 : kurzXtb((market && market.kurzy && market.kurzy[l.mena]) || null, "prodej");
                               const vyt = kurz ? ks * cislo(prodejDraft.cena) * kurz : null;
                               const nak = l.porizovaci * (ks / l.ks);
                               return (
@@ -8658,8 +8674,9 @@ function AkcieModule({ xtbTranches = [], onTrancheSave, onTrancheDelete, xtbTitl
                                   Pořizovací cena těch kusů <b style={{ color: "var(--txt)" }}>{fmtKc(Math.round(nak))}</b>
                                   {vyt != null && <> · výtěžek zhruba <b style={{ color: "var(--txt)" }}>{fmtKc(Math.round(vyt))}</b>
                                     {" · "}zisk <b style={{ color: vyt - nak >= 0 ? BP.indigoDeep : "#DC2626" }}>{fmtSigned(Math.round(vyt - nak))}</b></>}
-                                  . Přesný kurz ČNB ke dni prodeje se dotáhne při uložení. Prodej nesnižuje vložený kapitál —
-                                  peníze jen přejdou z pozice do hotovosti.
+                                  . Počítáno kurzem ČNB ke dni prodeje mínus 0,5 % — o tolik si XTB při směně
+                                  zpátky do korun ukrojí. Prodej nesnižuje vložený kapitál — peníze jen přejdou
+                                  z pozice do hotovosti.
                                 </div>
                               );
                             })()}
@@ -16634,7 +16651,9 @@ export default function MauxCRM() {
   // korunová pořizovací cena se pak už nikdy nemění.
   const handleXtbPositionSave = async (p) => {
     let fx = p.fx_rate;
-    if (!fx) { try { fx = await kurzKeDni(p.currency, p.trade_date); } catch (e) { fx = null; } }
+    // Nákup = XTB kupuje cizí měnu nad svým kurzem, tedy ČNB + 0,5 %. Importovaná data
+    // už fx_rate mají (skutečný kurz z výpisu) a tou větví neprojdou.
+    if (!fx) { try { fx = kurzXtb(await kurzKeDni(p.currency, p.trade_date), "nakup"); } catch (e) { fx = null; } }
     const row = {
       ...p,
       fx_rate: fx || null,
