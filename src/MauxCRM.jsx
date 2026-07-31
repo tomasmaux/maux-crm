@@ -12669,23 +12669,28 @@ function VykazyCalendar({ workEntries, escrows, dense = false, onOpenFull, onAdd
               title="Následující měsíc">›</button>
           </div>
         </div>
-        <div style={{marginTop:dense?8:13,display:"flex",alignItems:"baseline",gap:8,flexWrap:"wrap"}}>
-          <span className="maux-num" style={{fontSize:dense?32:46,fontWeight:800,letterSpacing:"-.01em",color:(monthTotal+escMonthTotal)>0?PHOS:"var(--mut)",lineHeight:1,textShadow:(monthTotal+escMonthTotal)>0?`0 0 20px ${PHOS}40`:"none"}}>{(monthTotal+escMonthTotal)>0?"+":""}{fmtKc(monthTotal+escMonthTotal)}</span>
-          {!dense && <span style={{fontSize:12,color:"var(--mut)"}}>za měsíc, bez DPH</span>}
-        </div>
-        {!dense && (monthTotal > 0 || escMonthTotal > 0) && (
-          <div style={{marginTop:8,display:"flex",gap:16,flexWrap:"wrap"}}>
+        {/* Tom, 31.7.2026 (varianta B): hlavičku kalendáře jsme ODČÍSLOVALI. Velké +216 417 Kč
+            tady stálo přímo pod hero lištou, která ukazovala v podstatě totéž číslo — dvě
+            dominanty pod sebou. Velké číslo měsíce drží jen hero lišta nahoře; kalendář je
+            deník dnů. Zůstává jen tichá rozpiska (a součet, aby dávalo smysl i listování
+            do minulých měsíců, kde hero lišta neplatí). */}
+        {(monthTotal > 0 || escMonthTotal > 0) && (
+          <div style={{marginTop:dense?7:11,display:"flex",alignItems:"center",gap:dense?9:14,flexWrap:"wrap",fontSize:dense?10.5:12,color:"var(--mut)"}}>
+            {/* Součet jen při listování do jiných měsíců. V běžícím měsíci ho drží hero lišta —
+                a její úrok je capnutý na dnešek, kdežto dlaždice kalendáře projektují dopředu,
+                takže dvě mírně jiná čísla pod sebou by lhala. */}
+            {monthOffset !== 0 && <span style={{color:"var(--ink)",fontWeight:600}}>{fmtKc(monthTotal+escMonthTotal)}</span>}
             {monthTotal > 0 && (
-              <div style={{display:"flex",alignItems:"center",gap:5}}>
-                <span style={{width:7,height:7,borderRadius:"50%",background:PHOS}} />
-                <span style={{fontSize:11.5,color:PHOS,fontWeight:600}}>{fmtKc(monthTotal)} práce</span>
-              </div>
+              <span style={{display:"inline-flex",alignItems:"center",gap:5}}>
+                <span style={{width:6,height:6,borderRadius:"50%",background:PHOS}} />
+                {fmtKc(monthTotal)} práce
+              </span>
             )}
             {escMonthTotal > 0 && (
-              <div style={{display:"flex",alignItems:"center",gap:5}}>
-                <span style={{width:7,height:7,borderRadius:"50%",background:ESC}} />
-                <span style={{fontSize:11.5,color:ESC,fontWeight:600}}>{fmtKc(Math.round(escMonthTotal))} úschovy</span>
-              </div>
+              <span style={{display:"inline-flex",alignItems:"center",gap:5}}>
+                <span style={{width:6,height:6,borderRadius:"50%",background:ESC}} />
+                {fmtKc(Math.round(escMonthTotal))} úschovy
+              </span>
             )}
           </div>
         )}
@@ -17378,7 +17383,15 @@ export default function MauxCRM() {
           const _todayWork = workEntries.filter(e => e.entry_date === _todayStr).reduce((s,e) => s + _entryAmtNet(e), 0);
           const _todayEsc = _dailyNetOnDate(escrows, _todayMid);
           const _todayAmt = _todayWork + _todayEsc;
-          const _monthAmt = unbilledWorkNetNoVat(workEntries) + Math.round(escrowNetForMonth(escrows, _now.getFullYear(), _now.getMonth()));
+          // Tom, 31.7.2026: "Tento měsíc" je od teď TOK, ne zásoba. Dřív to byla všechna
+          // nevyfakturovaná práce bez ohledu na datum (zásoba) — kalendář pod tím přitom
+          // ukazoval práci ZAPSANOU v tomhle měsíci a čísla se lišila (214 417 vs 216 417).
+          // Jedna definice: práce s entry_date v běžícím měsíci (bez DPH, po slevě)
+          // + čistý úrok z úschov za ten měsíc. Nevyfakturovaná zásoba žije dál v dlaždici
+          // "Výkazy k vystavení" — o tu informaci nepřicházíme.
+          const _ymNow = `${_now.getFullYear()}-${String(_now.getMonth()+1).padStart(2,"0")}`;
+          const _monthWork = workEntries.filter(e => (e.entry_date || "").startsWith(_ymNow)).reduce((s,e) => s + _entryAmtNet(e), 0);
+          const _monthAmt = _monthWork + Math.round(escrowNetForMonth(escrows, _now.getFullYear(), _now.getMonth()));
           // Jediny cil v cele appce = automaticka meta ze zebriku (Tom 30.7.2026: rucni cil
           // v localStorage zrusen, byla to druha latka se stejnym jmenem — v srpnu by lista
           // merila proti 200k a dlazdice proti 235k). Meta platna pro TENTO mesic = goal
