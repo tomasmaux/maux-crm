@@ -4661,14 +4661,73 @@ function computeSporakEnvelopes(financeItems, invoices, dpfoMonths, loanTransact
   return { balance, envelopes, earmarked, free: balance - earmarked };
 }
 
+// ─── FIREMNÍ POLŠTÁŘ — automatická meta rezervy (Tom 31.7.2026) ──────────────
+// Zadání: "chci, aby to byl spíš cíl firemní polštář ... aby kancelář uhradila náklady
+// 3 měsíce dopředu. Zbytek si budu posílat na XTB a investovat nebo kupovat pozemky.
+// Já tam zase nechci miliardu, maximálně 500k, spíš 300."
+//
+// Meta se proto NENASTAVUJE RUČNĚ (ruční fi_plan_kapital je od 31.7.2026 mrtvý —
+// platí lekce "jeden cíl, nikdy dva"). Počítá se z reálných měsíčních nákladů,
+// roste sama s kanceláří a je stropnutá, protože nad polštář hotovost jen leží.
+const POLSTAR_MONTHS = 3;        // kolik měsíců provozu má rezerva pokrýt
+const POLSTAR_CAP    = 300000;   // strop — nad ním už peníze patří jinam než na spořák
+
+// Pepova mzda za konkrétní měsíc — stejná logika jako v Dashboardu (docházka × datovaná
+// sazba), aby se čísla nikdy nerozešla. Ruční override má přednost.
+function josefWageForYm(ym, assistantAttendance, financeItems) {
+  if (JOSEF_WAGE_MANUAL_OVERRIDES[ym] != null) return JOSEF_WAGE_MANUAL_OVERRIDES[ym];
+  let h = 0;
+  (assistantAttendance || []).forEach(a => {
+    if (!(a.date || "").startsWith(ym)) return;
+    if (!a.check_in || !a.check_out) return;
+    const x = netAttHours(a.check_in, a.check_out);
+    if (isFinite(x) && x > 0) h += x;
+  });
+  return Math.round(h * assistantRateForMonth(ym, assistantRateSchedule(financeItems)));
+}
+// Průměr z posledních UZAVŘENÝCH měsíců. Běžící měsíc se záměrně nebere — byl by
+// neúplný a meta by prvního v měsíci spadla dolů (viz past "toIS0String ukrojí den"
+// a lekce o dnu cyklu). Josef kolísá 9–18 tis., bez průměru by meta skákala o 30 tis.
+function josefAvgWage(assistantAttendance, financeItems, months = 3, now = new Date()) {
+  const vals = [];
+  for (let k = 1; k <= months; k++) {
+    const d = new Date(now.getFullYear(), now.getMonth() - k, 1);
+    const ym = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+    const w = josefWageForYm(ym, assistantAttendance, financeItems);
+    if (w > 0) vals.push(w);
+  }
+  if (!vals.length) return 0;
+  return Math.round(vals.reduce((s, v) => s + v, 0) / vals.length);
+}
+// Měsíční provoz = nutné + luxus + průměrná Pepova mzda. Tom 31.7.2026 zvolil základ
+// "všechno", ne jen kancelář: když vypadne příjem, běží i nájem domova, sociálka a VZP.
+function polstarMonthlyCost(financeItems, josefAvg) {
+  const sumCat = cat => Math.abs((financeItems || [])
+    .filter(i => i.category === cat)
+    .reduce((s, i) => s + (i.amount || 0), 0));
+  return sumCat("nutne") + sumCat("luxus") + Math.max(josefAvg || 0, 0);
+}
+function computePolstarGoal(financeItems, josefAvg) {
+  const monthly = polstarMonthlyCost(financeItems, josefAvg);
+  if (!(monthly > 0)) return 0;  // bez nákladů žádná meta — poměr z nuly se nekreslí
+  return Math.min(POLSTAR_CAP, Math.round(monthly * POLSTAR_MONTHS / 10000) * 10000);
+}
+
 // Firemní rezerva = co reálně leží volné na spořicím účtu po odečtení vyhrazených "obálek"
 // (DPH, DPFO, Bobnice, daň z úschov, ruční rezervy). Dřív duplikováno samostatně ve FirmaBar
 // i MajetekBar (riziko, že se čísla časem rozejdou) — od 29.6.2026 jeden zdroj pravdy.
-function computeFirmaRezerva(financeItems, invoices, dpfoMonths, loanTransactions, escrows) {
+function computeFirmaRezerva(financeItems, invoices, dpfoMonths, loanTransactions, escrows, josefAvg) {
   // Tenká slupka nad computeSporakEnvelopes — zachovává původní tvar návratu kvůli volajícím.
   const { balance, earmarked, free } = computeSporakEnvelopes(financeItems, invoices, dpfoMonths, loanTransactions, escrows);
   const planKapItem = (financeItems || []).find(i => i.id === "fi_plan_kapital");
-  return { sporBal: balance, totalEarF: earmarked, firmaRez: free, planKap: planKapItem?.amount || 130000, planKapItem };
+  const planKap = computePolstarGoal(financeItems, josefAvg);
+  return {
+    sporBal: balance, totalEarF: earmarked, firmaRez: free,
+    planKap, planKapItem,
+    polstarMonthly: polstarMonthlyCost(financeItems, josefAvg),
+    // Kolik je nad polštář — to je číslo, které smí odejít na XTB / pozemek.
+    polstarOver: planKap > 0 ? Math.max(0, free - planKap) : 0,
+  };
 }
 
 // ─── Breakdown row generators (balance-interval engine) ─────────────────────
@@ -6627,7 +6686,7 @@ function FinDonutChart({ segments, centerDefault, centerColor, size = 170 }) {
 
 /* ─── SPOŘICÍ ÚČET — samostatná čtvercová dlaždice (vedle Příjmy/Výdaje na Přehledu) ─── */
 /* ─── TRI GRAFY PANEL — Majetek + Rezerva jako interaktivní donut grafy (Spořák je teď samostatná dlaždice na Přehledu) ─── */
-function TriGrafyPanel({ financeItems, onSaveFinance, invoices, dpfoMonths, loanTransactions, escrows }) {
+function TriGrafyPanel({ financeItems, onSaveFinance, invoices, dpfoMonths, loanTransactions, escrows, josefAvg = 0 }) {
   // ── SPOŘÁK ──
   const sporaci    = (financeItems||[]).filter(i => i.category === "sporaci" && i.notes !== "SKIP_DISPLAY");
   const zItem      = sporaci.find(i => i.id === "fi_sp_99");
@@ -6664,8 +6723,9 @@ function TriGrafyPanel({ financeItems, onSaveFinance, invoices, dpfoMonths, loan
   ].filter(Boolean).filter(s => s.value > 0 || s.item);
   const totalMaj   = allMajSegs.reduce((s,a) => s+a.value, 0);
 
-  const planKapItem = (financeItems||[]).find(i => i.id === "fi_plan_kapital");
-  const planKap    = planKapItem?.amount || 130000;
+  // Meta rezervy = automatický firemní polštář (3 měsíce provozu, strop 300 tis.).
+  // Ruční fi_plan_kapital se od 31.7.2026 nepoužívá — jeden cíl, nikdy dva.
+  const planKap    = computePolstarGoal(financeItems, josefAvg);
   const rezSegs    = firmaRez >= 0
     ? [
         { label: "Rezerva",  value: firmaRez,           color: "#1D9E75" },
@@ -6805,12 +6865,16 @@ function TriGrafyPanel({ financeItems, onSaveFinance, invoices, dpfoMonths, loan
             <InteractiveRing segments={rezGlassSegs} size={180} thickness={22} glowColor={firmaRez < 0 ? R_WARN : R_COL} legendOnly
               centerTop={firmaRez >= 0 ? "Naplněno" : "Schodek"}
               centerMain={firmaRez >= 0 ? fmtKc(firmaRez) : `−${fmtKc(Math.abs(firmaRez))}`}
-              centerSub={firmaRez >= 0 ? `${Math.round(rezPct * 100)}% z cíle` : "pod cílem"} />
+              centerSub={planKap <= 0 ? "—" : firmaRez >= 0 ? `${Math.round(rezPct * 100)}% polštáře` : "pod nulou"} />
           </div>
           <div style={{ fontSize: 11, color: R_COL, opacity: 0.6, textAlign: "center", marginTop: 16 }}>
-            {firmaRez >= 0
-              ? `cíl ${fmtKc(planKap)}`
-              : `chybí ${fmtKc(planKap + Math.abs(firmaRez))} · cíl ${fmtKc(planKap)}`}
+            {planKap <= 0
+              ? "—"
+              : firmaRez >= planKap
+                ? `polštář hotový · ${fmtKc(firmaRez - planKap)} nad rámec`
+                : firmaRez >= 0
+                  ? `polštář ${fmtKc(planKap)} · 3 měsíce provozu`
+                  : `chybí ${fmtKc(planKap + Math.abs(firmaRez))} · polštář ${fmtKc(planKap)}`}
           </div>
         </div>
 
@@ -10277,7 +10341,7 @@ function computeTrophies({ ladder, invoices, workEntries, clients, firmaRez, res
     remain: staleUnbilled === 0 ? null : `vyfakturovat ${staleUnbilled} výkazů` });
   add("vybrano", "💳", "Vybráno", "disciplina", [0.8, 0.9, 0.98], collectRate,
       v => `${Math.round(v * 100)} % faktur uhrazeno`, (n, v) => `${Math.round(n * 100)} % uhrazených (máš ${Math.round(v * 100)} %)`);
-  add("rezerva", "🏛️", "Firemní rezerva", "disciplina", [50000, reserveGoal || 150000, 400000], Math.max(0, firmaRez || 0),
+  add("rezerva", "🏛️", "Firemní rezerva", "disciplina", [50000, reserveGoal || 220000, POLSTAR_CAP], Math.max(0, firmaRez || 0),
       v => `přes ${kc(v)} v rezervě`, (n, v) => `do ${kc(n)} chybí ${kc(n - v)}`);
 
   // — ŘEMESLO —
@@ -10615,6 +10679,10 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
   const _josefWageAuto = Math.round(_josefHoursSum * assistantRateForMonth(_josefYm, _josefRateSched));
   // pro měsíce před zavedením docházky v appce (viz JOSEF_WAGE_MANUAL_OVERRIDES) použij ruční částku
   const josefWage = JOSEF_WAGE_MANUAL_OVERRIDES[_josefYm] ?? _josefWageAuto;
+  // Průměrná Pepova mzda za poslední 3 UZAVŘENÉ měsíce — základ pro automatickou metu
+  // firemního polštáře. Bez průměru by meta skákala o desítky tisíc podle toho,
+  // kolik Pepa zrovna odpracoval (9 486 vs. 18 372 Kč mezi dvěma měsíci).
+  const josefAvg3m = josefAvgWage(assistantAttendance, financeItems, 3, _josefNow);
   const totalVydaje = totalNutne + totalLuxus - josefWage;
   // josefWageNext = Pepova mzda pro BILANCI PŘÍŠTÍHO MĚSÍCE.
   // Logika: v srpnu platím červencovou docházku → pro projekci příštího měsíce
@@ -10886,7 +10954,7 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
       <Panel id="trigrafy">
       <TriGrafyPanel financeItems={financeItems} onSaveFinance={onSaveFinance}
         invoices={invoices} dpfoMonths={dpfoMonths}
-        loanTransactions={loanTransactions} escrows={escrows} />
+        loanTransactions={loanTransactions} escrows={escrows} josefAvg={josefAvg3m} />
       </Panel>
 
       {/* FIRMA METRIKY — měsíční výdaje (vč. checklistu, přesunutého sem z Bilance 29.6.2026) */}
@@ -10992,8 +11060,7 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
         const pct = allExpItems.length > 0 ? Math.round((paidCount/allExpItems.length)*100) : 0;
         const totalPrijmy = (financeItems||[]).filter(i=>i.category==="prijem"&&i.notes!=="TBD").reduce((s,i)=>s+(i.amount||0),0)
           + unbilledAmt + Math.round(escrowNetThisMonth) + nadmernyOdpocet;
-        const { firmaRez, planKap, planKapItem } = computeFirmaRezerva(financeItems, invoices, dpfoMonths, loanTransactions, escrows);
-        const setPlanKap = (val) => onSaveFinance({ ...(planKapItem||{category:"plan",label:"Cíl — kapitál"}), id: "fi_plan_kapital", amount: val });
+        const { firmaRez, planKap, polstarOver } = computeFirmaRezerva(financeItems, invoices, dpfoMonths, loanTransactions, escrows, josefAvg3m);
         const mName = ["ledna","února","března","dubna","května","června","července","srpna","září","října","listopadu","prosince"];
         const positiveBalance = nextMonthBalance >= 0;
         return (
@@ -11126,12 +11193,16 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
                 {/* Firemní rezerva — uvolněné místo po přestěhování checklistu výš.
                     Tom, 29.6.2026: "Možná bych to propojil a v dolní části graf na FIRMA REZERVA?" */}
                 <div style={{borderTop:"1px solid rgba(53,24,165,.14)",paddingTop:14,display:"flex",alignItems:"center",gap:14}}>
-                  <LiquidTank pct={planKap > 0 ? firmaRez / planKap : 0} color="#8B5CF6" value={firmaRez} goal={planKap} onSetGoal={setPlanKap} size={54} />
+                  <LiquidTank pct={planKap > 0 ? firmaRez / planKap : 0} color="#8B5CF6" value={firmaRez} goal={planKap} size={54} />
                   <div style={{flex:1,minWidth:0}}>
                     <div style={{fontSize:12,letterSpacing:".1em",textTransform:"uppercase",color:"var(--ink)",fontWeight:700}}>Firemní rezerva</div>
                     <div className="maux-num" style={{fontSize:18,fontWeight:600,color:"#8B5CF6",marginTop:2}}>{fmtKc(firmaRez)}</div>
                     <div style={{fontSize:9.5,color:"var(--mut)",marginTop:2}}>
-                      {firmaRez >= planKap ? "🎉 cíl splněn" : `${Math.round((firmaRez/Math.max(planKap,1))*100)} % k cíli ${fmtKc(planKap)}`}
+                      {planKap <= 0
+                        ? "—"
+                        : polstarOver > 0
+                          ? `Polštář hotový · ${fmtKc(polstarOver)} můžeš poslat dál`
+                          : `${Math.round((firmaRez/Math.max(planKap,1))*100)} % z polštáře ${fmtKc(planKap)} · 3 měsíce provozu`}
                     </div>
                   </div>
                 </div>
@@ -11252,7 +11323,7 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
                         {/* Věta závěru — mlčí, když nezbývá nic volného. */}
                         {sFirmaRez > 0 && (
                           <div style={{fontSize:12,lineHeight:1.5,color:"var(--ink)",marginTop:9,opacity:.8}}>
-                            Sáhnout můžeš na {fmtKc(sFirmaRez)}. Zbytek už patří státu.
+                            {fmtKc(sFirmaRez)} buduje firemní rezervu. Zbytek už patří státu.
                           </div>
                         )}
                       </div>
