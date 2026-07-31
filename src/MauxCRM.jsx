@@ -11126,7 +11126,6 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
   // Falling — lost revenue this month vs last
   const falling = [...topC].filter(x=>x.growth<0).sort((a,b)=>a.growth-b.growth).slice(0,3);
 
-  const greeting = H<12?"Dobré ráno, Tomáši.":H<18?"Dobré odpoledne, Tomáši.":"Dobrý večer, Tomáši.";
 
   const Lbl = ({children, color}) => (
     <div style={{fontSize:9,letterSpacing:".28em",textTransform:"uppercase",fontWeight:600,color:color||"var(--mut)",marginBottom:6,opacity:.85}}>{children}</div>
@@ -11171,16 +11170,15 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
         );
       })()}
 
-      {/* Greeting */}
+      {/* Pozdrav "Dobrý večer, Tomáši" ZRUŠEN (Tom, 31.7.2026) — spolu s horním pruhem odešel,
+          aby obrazovka začínala rovnou vítězným kalendářem. Zbyl tenký servisní řádek:
+          vlevo signály, které mají hořet, vpravo ovládání layoutu. */}
       <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:12}}>
-        <div>
-          <div style={{fontFamily:"Fraunces,serif",fontSize:28,fontWeight:300,color:"var(--txt)",letterSpacing:"-.01em"}}>{greeting}</div>
-          <div style={{fontSize:12,color:"var(--mut)",marginTop:4,display:"flex",gap:14,flexWrap:"wrap"}}>
-            <span>{now.toLocaleDateString("cs-CZ",{weekday:"long",day:"numeric",month:"long"})}</span>
-            {overdue.length>0 && <span style={{color:"#DC2626",fontWeight:500}}>⚠ {overdue.length}× po splatnosti</span>}
-            {Object.keys(unbilledByClient).length>0 && <span style={{color:"var(--ink)",fontWeight:500}}>◆ {Object.keys(unbilledByClient).length} klientů čeká na fakturu</span>}
-            {dphReserved>0 && <span style={{color:"#D97706",fontWeight:500}}>DPH spořák: {fmtKc(dphReserved)}</span>}
-          </div>
+        <div style={{fontSize:12,color:"var(--mut)",display:"flex",gap:14,flexWrap:"wrap",alignItems:"center"}}>
+          <span>{now.toLocaleDateString("cs-CZ",{weekday:"long",day:"numeric",month:"long"})}</span>
+          {overdue.length>0 && <span style={{color:"#DC2626",fontWeight:500}}>⚠ {overdue.length}× po splatnosti</span>}
+          {Object.keys(unbilledByClient).length>0 && <span style={{color:"var(--ink)",fontWeight:500}}>◆ {Object.keys(unbilledByClient).length} klientů čeká na fakturu</span>}
+          {dphReserved>0 && <span style={{color:"#D97706",fontWeight:500}}>DPH spořák: {fmtKc(dphReserved)}</span>}
         </div>
         <div style={{display:"flex",gap:8,alignItems:"center",flexShrink:0}}>
           {editLayout && (
@@ -11359,7 +11357,12 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
 
             {/* KALENDÁŘ VÝKAZŮ — náhled, kolik práce (Kč) bylo který den zapsáno */}
             <div style={{aspectRatio:"1", minWidth:0}}>
-              <VykazyCalendar workEntries={workEntries} escrows={escrows} onOpenFull={() => onNav("vykaz")} onAddEntry={onAddWorkEntry} />
+              <VykazyCalendar workEntries={workEntries} escrows={escrows} invoices={invoices}
+                onOpenFull={() => onNav("vykaz")} onAddEntry={onAddWorkEntry}
+                onOpenDetail={() => {
+                  const el = document.getElementById("maux-finance-detail");
+                  if (el) { el.open = true; el.scrollIntoView({ behavior: "smooth", block: "start" }); }
+                }} />
             </div>
 
           </div>
@@ -12551,7 +12554,7 @@ function WorkEntryList({ entries, clients, invoices, onNew, onEdit, onDelete, on
 }
 
 /* ─── KALENDÁŘ FAKTUROVÁNÍ — měsíční náhled, kolik bylo který den vyfakturováno (zeleně "svítí"), s historií ─── */
-function VykazyCalendar({ workEntries, escrows, dense = false, onOpenFull, onAddEntry }) {
+function VykazyCalendar({ workEntries, escrows, invoices, dense = false, onOpenFull, onAddEntry, onOpenDetail }) {
   const [monthOffset, setMonthOffset] = useState(0);
   const [selectedDay, setSelectedDay] = useState(null);
   const [hoverDay, setHoverDay] = useState(null);
@@ -12642,6 +12645,35 @@ function VykazyCalendar({ workEntries, escrows, dense = false, onOpenFull, onAdd
 
   const circleSize = dense ? 24 : 42;
 
+  // ── VÍTĚZNÁ HLAVIČKA (Tom, 31.7.2026, varianta A) ────────────────────────────
+  // Horní bílý pruh Přehledu ("Tento měsíc" + meta + sparkline) i pozdrav "Dobrý večer,
+  // Tomáši" jsou ZRUŠENÉ. Pruh ukazoval v podstatě totéž velké číslo jako kalendář, jen
+  // o 2 000 Kč jinak spočítané (zásoba vs. tok) — dvě dominanty pod sebou.
+  // Jediné velké číslo appky je teď tohle a je to přesně součet dlaždic pod ním:
+  // práce zapsaná v zobrazeném měsíci (bez DPH, po slevě) + čistý úrok z úschov.
+  // Meta se kreslí jako laťka se ZLATĚ dokresleným přesahem, historie jako sparkline vpravo.
+  const heroTotal = monthTotal + escMonthTotal;
+  const hero = useMemo(() => {
+    if (dense || monthOffset !== 0 || !invoices) return null;
+    const now = new Date();
+    const ladder = computeMilestoneLadder(invoices, escrows, now);
+    const goal = ((ladder.allRows || []).slice(-1)[0] || {}).goal || 200000;
+    // `ladder.rows` má na konci vždy BĚŽÍCÍ měsíc — bez filtru by se v grafu objevil dvakrát
+    // a jako "minulý měsíc" by hlásil sám sebe.
+    const closed = (ladder.rows || []).filter(r => !r.isCurrent);
+    const prevTot = closed.length ? closed[closed.length - 1].totalM : 0;
+    const closedMax = closed.length ? Math.max(...closed.map(r => r.totalM)) : 0;
+    const rows = [...closed.slice(-9), { ym: `${y}-${String(m + 1).padStart(2, "0")}`, totalM: heroTotal, live: true }];
+    // Denní tempo — kolik ideálně dnes, aby meta vyšla do konce měsíce.
+    const rem = Math.max(0, goal - heroTotal);
+    let wdLeft = 0;
+    for (let d = now.getDate(); d <= daysInMonth; d++) {
+      const dow = new Date(y, m, d).getDay();
+      if (dow > 0 && dow < 6) wdLeft++;
+    }
+    return { goal, rem, wdLeft, prevTot, closedMax, rows, closedCount: closed.length };
+  }, [dense, monthOffset, invoices, escrows, y, m, daysInMonth, heroTotal]);
+
   return (
     <div style={{ background: "#fff", borderRadius: dense ? 12 : BP.rInner, overflow: "hidden", height: "100%", display: "flex", flexDirection: "column" }}>
       {/* Header */}
@@ -12669,31 +12701,100 @@ function VykazyCalendar({ workEntries, escrows, dense = false, onOpenFull, onAdd
               title="Následující měsíc">›</button>
           </div>
         </div>
-        {/* Tom, 31.7.2026 (varianta B): hlavičku kalendáře jsme ODČÍSLOVALI. Velké +216 417 Kč
-            tady stálo přímo pod hero lištou, která ukazovala v podstatě totéž číslo — dvě
-            dominanty pod sebou. Velké číslo měsíce drží jen hero lišta nahoře; kalendář je
-            deník dnů. Zůstává jen tichá rozpiska (a součet, aby dávalo smysl i listování
-            do minulých měsíců, kde hero lišta neplatí). */}
-        {(monthTotal > 0 || escMonthTotal > 0) && (
-          <div style={{marginTop:dense?7:11,display:"flex",alignItems:"center",gap:dense?9:14,flexWrap:"wrap",fontSize:dense?10.5:12,color:"var(--mut)"}}>
-            {/* Součet jen při listování do jiných měsíců. V běžícím měsíci ho drží hero lišta —
-                a její úrok je capnutý na dnešek, kdežto dlaždice kalendáře projektují dopředu,
-                takže dvě mírně jiná čísla pod sebou by lhala. */}
-            {monthOffset !== 0 && <span style={{color:"var(--ink)",fontWeight:600}}>{fmtKc(monthTotal+escMonthTotal)}</span>}
-            {monthTotal > 0 && (
-              <span style={{display:"inline-flex",alignItems:"center",gap:5}}>
-                <span style={{width:6,height:6,borderRadius:"50%",background:PHOS}} />
-                {fmtKc(monthTotal)} práce
-              </span>
-            )}
-            {escMonthTotal > 0 && (
-              <span style={{display:"inline-flex",alignItems:"center",gap:5}}>
-                <span style={{width:6,height:6,borderRadius:"50%",background:ESC}} />
-                {fmtKc(Math.round(escMonthTotal))} úschovy
-              </span>
-            )}
-          </div>
-        )}
+        {(() => {
+          const over = hero ? heroTotal - hero.goal : 0;
+          const won = hero && over >= 0;
+          const record = won && hero.closedMax > 0 && heroTotal >= hero.closedMax;
+          const scale = hero ? Math.max(heroTotal, hero.goal, 1) : 1;
+          const goalPct = hero ? Math.min(1, hero.goal / scale) * 100 : 0;
+          const donePct = hero ? Math.min(1, heroTotal / scale) * 100 : 0;
+          const todayAmt = (dayTotals[todayStr] || 0) + (escDayTotals[todayStr] || 0);
+          const dailyTarget = hero && hero.wdLeft > 0 && hero.rem > 0 ? Math.round(hero.rem / hero.wdLeft) : 0;
+          const sep = <span style={{margin:"0 9px",opacity:.35}}>·</span>;
+          // Sparkline
+          const barW = 10, gap = 4, chartH = 44;
+          const sr = hero ? hero.rows : [];
+          const maxTotal = hero ? Math.max(...sr.map(r => r.totalM), hero.goal, 1) : 1;
+          const svgW = Math.max(1, sr.length * (barW + gap) - gap);
+          const yGoal = hero && hero.goal > 0 ? (chartH - Math.min(1, hero.goal / maxTotal) * chartH + 4) : null;
+          return (
+            <div style={{marginTop:dense?8:14,display:"flex",alignItems:"flex-start",justifyContent:"space-between",gap:28}}>
+              <div style={{flex:"1 1 auto",minWidth:0}}>
+                <div style={{display:"flex",alignItems:"baseline",gap:12,flexWrap:"wrap"}}>
+                  <span className="maux-num" style={{fontSize:dense?32:50,fontWeight:800,letterSpacing:"-.015em",color:heroTotal>0?PHOS:"var(--mut)",lineHeight:1.05,textShadow:heroTotal>0?`0 0 20px ${PHOS}40`:"none"}}>{heroTotal>0?"+":""}{fmtKc(heroTotal)}</span>
+                  {!dense && !hero && <span style={{fontSize:12,color:"var(--mut)"}}>za měsíc, bez DPH</span>}
+                  {hero && (won
+                    ? <span style={{fontSize:12.5,background:"rgba(198,168,107,.16)",color:"#7A5C1F",padding:"5px 12px",borderRadius:99,whiteSpace:"nowrap"}}>+{fmtKc(over)} nad metu</span>
+                    : <span style={{fontSize:12,background:"rgba(0,0,0,.04)",color:"var(--mut)",padding:"5px 12px",borderRadius:99,whiteSpace:"nowrap"}}>zbývá {fmtKc(hero.rem)}</span>)}
+                </div>
+                {/* Věta MLČÍ, když je zpráva špatná — pod metou zůstane holé číslo a laťka. */}
+                {record && (
+                  <div style={{fontFamily:"Fraunces,serif",fontSize:16.5,fontWeight:300,color:"var(--ink)",marginTop:11,lineHeight:1.45}}>
+                    Nejsilnější měsíc za posledních {hero.closedCount + 1}.
+                  </div>
+                )}
+                {hero && (
+                  <div style={{position:"relative",height:8,background:"rgba(0,0,0,.05)",borderRadius:99,margin:record?"14px 0 11px":"16px 0 11px",maxWidth:460}}>
+                    <div style={{position:"absolute",left:0,top:0,bottom:0,width:`${Math.min(donePct,goalPct)}%`,background:PHOS,borderRadius:won?"99px 0 0 99px":99,transition:"width .6s cubic-bezier(.16,1,.3,1)"}} />
+                    {won && over > 0 && (
+                      <div title={`Přesah nad metu ${Math.round(over).toLocaleString("cs-CZ")} Kč`} style={{position:"absolute",left:`${goalPct}%`,top:0,bottom:0,width:`${Math.max(0,donePct-goalPct)}%`,background:BP.sand,borderRadius:"0 99px 99px 0",transition:"width .6s cubic-bezier(.16,1,.3,1)"}} />
+                    )}
+                    {!won && <div title={`Meta ${hero.goal.toLocaleString("cs-CZ")} Kč`} style={{position:"absolute",left:`${goalPct}%`,top:-3,bottom:-3,width:2,background:BP.sand,borderRadius:1}} />}
+                  </div>
+                )}
+                <div style={{display:"flex",alignItems:"center",flexWrap:"wrap",fontSize:dense?10:11,color:"var(--mut)",rowGap:4,marginTop:hero?0:8}}>
+                  {monthTotal > 0 && (
+                    <span style={{display:"inline-flex",alignItems:"center",gap:5}}>
+                      <span style={{width:6,height:6,borderRadius:"50%",background:PHOS}} />{fmtKc(monthTotal)} práce
+                    </span>
+                  )}
+                  {escMonthTotal > 0 && (
+                    <>{monthTotal > 0 && sep}
+                    <span style={{display:"inline-flex",alignItems:"center",gap:5}}>
+                      <span style={{width:6,height:6,borderRadius:"50%",background:ESC}} />{fmtKc(Math.round(escMonthTotal))} úschovy
+                    </span></>
+                  )}
+                  {hero && (
+                    <>
+                      {sep}<span>Dnes <b style={{color:"var(--txt)",fontWeight:600}}>{fmtKc(todayAmt)}</b></span>
+                      {dailyTarget > 0 && (<>{sep}<span>Dnes ideálně <b style={{color:"var(--txt)",fontWeight:600}}>{fmtKc(dailyTarget)}</b> <span style={{opacity:.7}}>({hero.wdLeft} prac. dní)</span></span></>)}
+                      {sep}<span title="Meta se počítá sama: nejlepší z 12 měsíců × 1,10, zaokr. na 5 000, min. 200 000">Meta <b style={{color:"var(--txt)",fontWeight:600}}>{fmtKc(hero.goal)}</b></span>
+                      {hero.prevTot > 0 && (<>{sep}<span>Minulý měsíc <b style={{color:"var(--txt)",fontWeight:600}}>{fmtKc(hero.prevTot)}</b></span></>)}
+                      {onOpenDetail && (<>{sep}<span onClick={onOpenDetail} style={{color:BP.indigo,cursor:"pointer",fontWeight:600}} title="Tento měsíc = práce zapsaná v tomto měsíci (bez DPH, po slevě) + čistý úrok z úschov">Detail →</span></>)}
+                    </>
+                  )}
+                </div>
+              </div>
+              {/* Sparkline historie — tvar, ne čísla. Hodnoty jen v tooltipu. */}
+              {hero && sr.length > 1 && (
+                <div style={{textAlign:"right",flexShrink:0,marginTop:6}}>
+                  <svg width={svgW} height={chartH + 8} style={{display:"block",overflow:"visible"}}>
+                    {yGoal !== null && <line x1={-3} y1={yGoal} x2={svgW + 3} y2={yGoal} stroke="rgba(198,168,107,.6)" strokeWidth="1" strokeDasharray="3,3" />}
+                    {hero.prevTot > 0 && (
+                      <line x1={-3} y1={chartH - Math.min(1, hero.prevTot / maxTotal) * chartH + 4} x2={svgW + 3}
+                        y2={chartH - Math.min(1, hero.prevTot / maxTotal) * chartH + 4}
+                        stroke="rgba(91,82,240,.30)" strokeWidth="1" strokeDasharray="2,4" />
+                    )}
+                    {sr.map((r, idx) => {
+                      const h = Math.max(2, (r.totalM / maxTotal) * chartH);
+                      const mmYY = `${r.ym.slice(5,7)}/${r.ym.slice(2,4)}`;
+                      return (
+                        <g key={r.ym} className="spark-g">
+                          <title>{`${mmYY}${r.live ? " (živě)" : ""}: ${Math.round(r.totalM).toLocaleString("cs-CZ")} Kč · meta ${hero.goal.toLocaleString("cs-CZ")} Kč`}</title>
+                          <rect className="spark-bar" x={idx * (barW + gap)} y={chartH - h + 4} width={barW} height={h} rx={3}
+                            fill={r.live ? PHOS : (r.totalM >= hero.goal ? "rgba(91,82,240,.42)" : "rgba(91,82,240,.17)")} />
+                        </g>
+                      );
+                    })}
+                  </svg>
+                  <div style={{fontSize:9,letterSpacing:".14em",color:"var(--mut)",textTransform:"uppercase",marginTop:8,opacity:.8,whiteSpace:"nowrap"}}>
+                    {sr.length} měsíců · zlatá = meta
+                  </div>
+                </div>
+              )}
+            </div>
+          );
+        })()}
       </div>
 
       {/* Grid — velká čitelná čísla, dny s výkazem mají jemnou indigo "kartu" pod sebou, ať to nepůsobí prázdně */}
@@ -17365,189 +17466,9 @@ export default function MauxCRM() {
         privacyMode={privacyMode} onTogglePrivacy={togglePrivacy} />
       <PixelNeko />
       <div className="main">
-        {(() => {
-          const _now = new Date();
-          const _todayStr = `${_now.getFullYear()}-${String(_now.getMonth()+1).padStart(2,"0")}-${String(_now.getDate()).padStart(2,"0")}`;
-          // Sloučená lišta (Tom, 29.6.2026): dřív tu byly DVĚ samostatné lišty, každá s vlastním %
-          // (vlastní cíl nahoře vs. automatická meta žebříčku dole) — matlo to ("97 nebo 82?").
-          // Teď JEDNO % a JEDEN cíl, vždy vztažený k tomu, co si Tom sám nastaví (✏ Cíl).
-          // Žebříček (computeMilestoneLadder, LEVEL/meta 200k→250k…) žije dál jen v detailu Financí —
-          // sem patří jen graf historie posledních měsíců + jeden srozumitelný cíl.
-          // "Dnes vydělal" = čistá klientská práce zapsaná dnes + denní čistý úrok z úschov (peníze,
-          // co reálně přibyly i ve dnech bez zapsaného výkazu) — stejná logika jako kalendář "Zapsaná práce".
-          // "Tento měsíc"/cíl = nevyfakturované výkazy (bez DPH, po slevě, BEZ ohledu na to, kdy byly
-          // zapsané — to je dluh, co čeká na fakturaci) + HRUBÝ úrok z úschov za aktuální měsíc
-          // (escrowNetForMonth — ČISTÝ, po srážkové dani, capnutý na dnešek).
-          const _entryAmtNet = (e) => Math.max((e.amount||0) - (Number(e.discount_amount)||0), 0);
-          const _todayMid = new Date(_now.getFullYear(), _now.getMonth(), _now.getDate());
-          const _todayWork = workEntries.filter(e => e.entry_date === _todayStr).reduce((s,e) => s + _entryAmtNet(e), 0);
-          const _todayEsc = _dailyNetOnDate(escrows, _todayMid);
-          const _todayAmt = _todayWork + _todayEsc;
-          // Tom, 31.7.2026: "Tento měsíc" je od teď TOK, ne zásoba. Dřív to byla všechna
-          // nevyfakturovaná práce bez ohledu na datum (zásoba) — kalendář pod tím přitom
-          // ukazoval práci ZAPSANOU v tomhle měsíci a čísla se lišila (214 417 vs 216 417).
-          // Jedna definice: práce s entry_date v běžícím měsíci (bez DPH, po slevě)
-          // + čistý úrok z úschov za ten měsíc. Nevyfakturovaná zásoba žije dál v dlaždici
-          // "Výkazy k vystavení" — o tu informaci nepřicházíme.
-          const _ymNow = `${_now.getFullYear()}-${String(_now.getMonth()+1).padStart(2,"0")}`;
-          const _monthWork = workEntries.filter(e => (e.entry_date || "").startsWith(_ymNow)).reduce((s,e) => s + _entryAmtNet(e), 0);
-          const _monthAmt = _monthWork + Math.round(escrowNetForMonth(escrows, _now.getFullYear(), _now.getMonth()));
-          // Jediny cil v cele appce = automaticka meta ze zebriku (Tom 30.7.2026: rucni cil
-          // v localStorage zrusen, byla to druha latka se stejnym jmenem — v srpnu by lista
-          // merila proti 200k a dlazdice proti 235k). Meta platna pro TENTO mesic = goal
-          // posledniho radku zebriku (nejlepsi z 12 predchozich x 1,10, zaokr. 5k, min 200k).
-          const ladder = computeMilestoneLadder(invoices, escrows, _now);
-          const _goal = ((ladder.allRows || []).slice(-1)[0] || {}).goal || 200000;
-          const _rem = Math.max(0, _goal - _monthAmt);
-          const _pct = _goal > 0 ? Math.min(1, _monthAmt / _goal) : 0;
-          // Denní billing target — kolik ideálně dnes, aby tempo sedělo
-          const _daysInM = new Date(_now.getFullYear(), _now.getMonth()+1, 0).getDate();
-          let _wdLeft = 0;
-          for (let _d = _now.getDate(); _d <= _daysInM; _d++) {
-            const _dow = new Date(_now.getFullYear(), _now.getMonth(), _d).getDay();
-            if (_dow > 0 && _dow < 6) _wdLeft++;
-          }
-          const _dailyTarget = _goal > 0 && _wdLeft > 0 && _rem > 0 ? Math.round(_rem / _wdLeft) : 0;
-          const _dailyDone = _todayAmt >= _dailyTarget && _dailyTarget > 0;
-          const _h = _now.getHours();
-          const _gr = _h < 12 ? "Dobré ráno" : _h < 18 ? "Dobré odpoledne" : "Dobrý večer";
-          const _fmt = v => privacyMode ? "·····" : Math.round(v).toLocaleString("cs-CZ") + " Kč";
-          const _kc = v => privacyMode ? "···" : (Math.abs(v) >= 1000 ? `${Math.round(v / 1000)}k` : String(Math.round(v)));
-
-          // Graf historie — posledních ~9 uzavřených měsíců (computeMilestoneLadder jen jako zdroj
-          // hotových měsíčních součtů, fakturace bez DPH + čistý úrok z úschov) + 1 živý sloupec na
-          // konci se stejnou hodnotou jako _monthAmt výše, ať si "Tento měsíc" a poslední sloupec
-          // grafu vždy odpovídají.
-          // Živý sloupec = BĚŽÍCÍ měsíc. Dřív se značkoval jako příští (`getMonth()+1`) a zároveň
-          // se do sparkline dostal i řádek téhož měsíce ze žebříku — červenec byl v grafu dvakrát.
-          // `_closedRows` = jen UZAVŘENÉ měsíce, běžící drží `liveRow`. Audit 31.7.2026.
-          const _closedRows = (ladder.rows || []).filter(r => !r.isCurrent);
-          const liveRow = { ym: `${_now.getFullYear()}-${String(_now.getMonth() + 1).padStart(2,"0")}`, totalM: _monthAmt, live: true };
-          const sparkRows = [..._closedRows.slice(-9), liveRow];
-          const maxTotal = Math.max(...sparkRows.map(r => r.totalM), _goal, 1);
-          const barW = 10, gap = 4, chartH = 42;
-          const svgW = Math.max(1, sparkRows.length * (barW + gap) - gap);
-          const _peak = Math.max(...sparkRows.map(r => r.totalM));
-          // Jediná vodorovná cara = aktualni cil (appka historii minulych cilu nesleduje, jen jedno
-          // cislo v localStorage). Zlata = cil, napric barem i sparkline.
-          const yGoal = _goal > 0 ? (chartH - Math.min(1, _goal / maxTotal) * chartH + 4) : null;
-          const _sep = { margin: "0 9px", opacity: .35 };
-          const _val = { color: "var(--txt)", fontWeight: 600 };
-          const _scale = Math.max(_monthAmt, _goal, 1);
-
-          // Stín minulého měsíce (Tom 30.7.2026, varianta B): hero drží kalendářní měsíc, ale
-          // nesmí být fotka dneška — potřebuje kontext, kam se dostal naposledy. Bere se poslední
-          // UZAVŘENÝ měsíc ze žebříku, žádná nová definice čísla.
-          // POSLEDNÍ UZAVŘENÝ měsíc. `ladder.rows` má na konci vždy běžící měsíc (filtr `isCurrent`),
-          // takže `slice(-1)` vracel tenhle měsíc a lišta hlásila jako "minulý měsíc" sama sebe.
-          const _prevRow = _closedRows.slice(-1)[0] || null;
-          const _prevTot = _prevRow ? _prevRow.totalM : 0;
-          const _closedMax = _closedRows.length ? Math.max(..._closedRows.map(r => r.totalM)) : 0;
-          // Věta MLČÍ, když je zpráva špatná (Tom: "mlčí"). Pod metou zůstane holé číslo + bar.
-          const _sentence = _rem > 0 ? null
-            : (_closedMax > 0 && _monthAmt >= _closedMax)
-              ? `Nejsilnější měsíc za posledních ${_closedRows.length + 1}. Metu jsi překročil o ${_fmt(_monthAmt - _goal)}.`
-              : `Metu jsi překročil o ${_fmt(_monthAmt - _goal)}.`;
-
-          return (
-            <div style={{padding:"18px 40px 15px",borderBottom:"1px solid rgba(0,0,0,.06)",background:"#fff"}}>
-              <div style={{display:"flex",alignItems:"flex-start",justifyContent:"space-between",gap:36,flexWrap:"wrap"}}>
-
-                {/* Jedno hlavni cislo. Vse ostatni klesa do jednoho drobneho radku pod barem —
-                    Tom, 30.7.2026: puvodni pas se tremi hero cisly a popisky nad kazdym sloupcem
-                    sparkline se necetl ("hnusne, divne, necitelne"). */}
-                <div style={{flex:"1 1 360px",minWidth:290}}>
-                  <div style={bpLabel({ marginBottom: 7 })}>Tento měsíc</div>
-                  <div style={{display:"flex",alignItems:"baseline",gap:12,flexWrap:"wrap"}}>
-                    <span style={bpHero(46, "var(--txt)")}>{_fmt(_monthAmt)}</span>
-                    {_goal > 0 && _rem > 0 && (
-                      <span style={{background:"rgba(0,0,0,.04)",color:"var(--mut)",fontSize:10.5,padding:"3px 10px",borderRadius:99,whiteSpace:"nowrap",letterSpacing:".01em"}}>
-                        zbývá {_fmt(_rem)}
-                      </span>
-                    )}
-                  </div>
-                  {/* Věta závěru místo holého stavu. Mlčí, když je měsíc pod metou. */}
-                  {_sentence && (
-                    <div style={{fontSize:13,lineHeight:1.5,color:"var(--txt)",marginTop:9,maxWidth:360}}>{_sentence}</div>
-                  )}
-
-                  {/* Vlasovy bar. Skala jde az na dosazenou hodnotu, takze presah nad cil je videt;
-                      zlata ryska drzi pozici cile. Zadna zelena — jedina barva je indigo + zlata. */}
-                  {_goal > 0 && (
-                    <div style={{position:"relative",height:3,background:"rgba(0,0,0,.07)",borderRadius:99,margin:"14px 0 10px"}}>
-                      <div style={{position:"absolute",left:0,top:0,bottom:0,width:`${Math.min(1,_monthAmt/_scale)*100}%`,background:BP.indigo,borderRadius:99,transition:"width .6s cubic-bezier(.16,1,.3,1)"}} />
-                      <div title={`Cíl ${_goal.toLocaleString("cs-CZ")} Kč`} style={{position:"absolute",left:`${Math.min(1,_goal/_scale)*100}%`,top:-3.5,bottom:-3.5,width:1.5,background:BP.sand,borderRadius:1}} />
-                    </div>
-                  )}
-
-                  <div style={{display:"flex",alignItems:"center",flexWrap:"wrap",fontSize:10.5,color:"var(--mut)",letterSpacing:".01em",rowGap:4}}>
-                    <span>Dnes <b style={_val}>{_fmt(_todayAmt)}</b></span>
-                    {_dailyTarget > 0 && (
-                      <>
-                        <span style={_sep}>·</span>
-                        <span>{_dailyDone
-                          ? <b style={{color:BP.indigo,fontWeight:600}}>✓ na tahu</b>
-                          : <>Dnes ideálně <b style={_val}>{_fmt(_dailyTarget)}</b> <span style={{opacity:.7}}>({_wdLeft} prac. dní)</span></>}</span>
-                      </>
-                    )}
-                    <span style={_sep}>·</span>
-                    <span title="Meta se počítá sama: nejlepší z 12 měsíců × 1,10, zaokr. na 5 000, min. 200 000">Meta <b style={_val}>{_fmt(_goal)}</b></span>
-                    {_prevTot > 0 && (
-                      <>
-                        <span style={_sep}>·</span>
-                        <span>Minulý měsíc <b style={_val}>{_fmt(_prevTot)}</b></span>
-                      </>
-                    )}
-                    <span style={_sep}>·</span>
-                    <span onClick={() => {
-                        navTo("dashboard");
-                        setTimeout(() => {
-                          const el = document.getElementById("maux-finance-detail");
-                          if (el) { el.open = true; el.scrollIntoView({ behavior: "smooth", block: "start" }); }
-                        }, 80);
-                      }}
-                      style={{color:BP.indigo,cursor:"pointer",fontWeight:600}}
-                      title={'Tento měsíc = nevyfakturované výkazy (bez DPH, po slevě) + čistý úrok z úschov'}>
-                      Detail →
-                    </span>
-                  </div>
-                </div>
-
-                {/* Spark historie — bez popisku nad sloupci, hodnota jen v tooltipu.
-                    Sparkline ma ukazovat tvar, ne cist cisla. */}
-                {sparkRows.length > 1 && (
-                  <div style={{textAlign:"right",flexShrink:0,marginTop:4}}>
-                    <svg width={svgW} height={chartH + 8} style={{display:"block",overflow:"visible"}}>
-                      {yGoal !== null && <line x1={-3} y1={yGoal} x2={svgW + 3} y2={yGoal} stroke="rgba(198,168,107,.6)" strokeWidth="1" strokeDasharray="3,3" />}
-                      {_prevTot > 0 && (
-                        <line x1={-3} y1={chartH - Math.min(1, _prevTot / maxTotal) * chartH + 4} x2={svgW + 3}
-                          y2={chartH - Math.min(1, _prevTot / maxTotal) * chartH + 4}
-                          stroke="rgba(91,82,240,.30)" strokeWidth="1" strokeDasharray="2,4" />
-                      )}
-                      {sparkRows.map((r, idx) => {
-                        const h = Math.max(2, (r.totalM / maxTotal) * chartH);
-                        const x = idx * (barW + gap);
-                        const y = chartH - h + 4;
-                        const overGoal = _goal > 0 && r.totalM >= _goal;
-                        const color = r.live ? BP.indigo : (overGoal ? "rgba(91,82,240,.42)" : "rgba(91,82,240,.17)");
-                        const mmYY = `${r.ym.slice(5,7)}/${r.ym.slice(2,4)}`;
-                        return (
-                          <g key={r.ym} className="spark-g">
-                            <title>{`${mmYY}${r.live ? " (živě)" : ""}: ${Math.round(r.totalM).toLocaleString("cs-CZ")} Kč${_goal>0?` · cíl ${_goal.toLocaleString("cs-CZ")} Kč`:""}`}</title>
-                            <rect className="spark-bar" x={x} y={y} width={barW} height={h} rx={3} fill={color} />
-                          </g>
-                        );
-                      })}
-                    </svg>
-                    <div style={{fontSize:9,letterSpacing:".14em",color:"var(--mut)",textTransform:"uppercase",marginTop:8,opacity:.8,whiteSpace:"nowrap"}}>
-                      {sparkRows.length} měsíců · zlatá = meta · tečkovaná = minulý měsíc
-                    </div>
-                  </div>
-                )}
-              </div>
-            </div>
-          );
-        })()}
+        {/* Horní pruh "Tento měsíc" ZRUŠEN (Tom, 31.7.2026). Ukazoval totéž velké číslo jako
+            hlavička kalendáře, jen jinak spočítané. Meta, věta, sparkline i řádek Dnes/Meta/
+            Minulý měsíc žijí od teď ve VykazyCalendar — jediná dominanta obrazovky. */}
         <div className="top" style={{display: mod==="dashboard" ? "none" : undefined}}>
           <div className="top-l">
             <div className="eyebrow">MAUX Legal · {curMod?.label}</div>
