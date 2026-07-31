@@ -22,7 +22,7 @@ const FIRMA = {
 const SERVICE_COLORS = {
   "Reality / transakce": "#3518A5",
   "Smlouvy o dílo / výstavba": "#5a3fd4",
-  "AML": "#B8923D",
+  "AML": "#A08350",
   "Spory / proces": "#c0392b",
   "Korporát": "#1a7a6e",
   "Zápůjčky / úvěry": "#7a5326",
@@ -164,7 +164,7 @@ const CSS = `
 @keyframes josefRing  { 0%{transform:scale(1);opacity:.45} 70%{transform:scale(2.4);opacity:0} 100%{transform:scale(2.4);opacity:0} }
 *{box-sizing:border-box;margin:0;padding:0}
 html,body,#root{height:100%;background:#FAFAFA}
-.mx{--ink:#3518A5;--ink2:#2810a0;--ink3:#4a2bc4;--gold:#B8923D;--gold2:#CF9B3E;--green:#059669;--red:#DC2626;
+.mx{--ink:#3518A5;--ink2:#2810a0;--ink3:#4a2bc4;--gold:#A08350;--gold2:#CF9B3E;--green:#4A7C59;--red:#A8443C;
     --bg:#F4F4F5;--surface:#FFFFFF;--line:#E4E4E7;--line2:#D4D4D8;--mut:#8A8A93;--txt:#16142A;
     --mono:'JetBrains Mono','SF Mono',Menlo,monospace;
     --num:'Inter',ui-sans-serif,system-ui,sans-serif;
@@ -173,8 +173,8 @@ html,body,#root{height:100%;background:#FAFAFA}
 .maux-num{font-family:var(--num);font-variant-numeric:tabular-nums;letter-spacing:-.01em}
 @keyframes mauxNumGlow{0%,100%{text-shadow:0 0 4px rgba(53,24,165,.28),0 0 12px rgba(53,24,165,.14)}50%{text-shadow:0 0 6px rgba(53,24,165,.4),0 0 16px rgba(53,24,165,.2)}}
 @keyframes mauxDotBlink{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.35;transform:scale(.8)}}
-.maux-glow{animation:mauxNumGlow 3s ease-in-out infinite}
-.maux-dot{display:inline-block;border-radius:50%;animation:mauxDotBlink 1.8s ease-in-out infinite}
+.maux-glow{}
+.maux-dot{display:inline-block;border-radius:50%;opacity:.75}
 @keyframes mxSlideUp{from{opacity:0;transform:translateY(24px) scale(.97)}to{opacity:1;transform:translateY(0) scale(1)}}
 @keyframes mxGrowX{from{transform:scaleX(0)}to{transform:scaleX(1)}}
 @keyframes mxShimmer{0%{background-position:200% center}100%{background-position:-200% center}}
@@ -227,7 +227,7 @@ html,body,#root{height:100%;background:#FAFAFA}
 .btn.pri:hover{background:var(--ink2);box-shadow:0 4px 12px rgba(53,24,165,.35)}
 .btn.gho{background:none;border-color:transparent;color:var(--mut)}
 .btn.gho:hover{color:var(--ink);background:#F3F0FF}
-.btn.dng{color:#DC2626;border-color:#FEE2E2}
+.btn.dng{color:#A8443C;border-color:#FEE2E2}
 .btn.dng:hover{background:#FFF5F5;border-color:#FECACA}
 .pill{font-size:11.5px;padding:6px 14px;border-radius:20px;border:1px solid var(--line2);background:var(--surface);color:var(--mut);cursor:pointer;transition:.15s;font-weight:400}
 .pill:hover{border-color:var(--ink);color:var(--ink)}
@@ -265,7 +265,7 @@ html,body,#root{height:100%;background:#FAFAFA}
 .b-late{background:#FEF2F2;color:#991B1B}.b-late::before{background:#EF4444}
 .b-vy{background:#EEF2FF;color:#3730A3}.b-vy::before{background:#6366F1}
 .b-prep{background:#FEF3C7;color:#92400E}.b-prep::before{background:#F59E0B}
-.b-dph{background:#ECFDF5;color:#065F46}.b-dph::before{background:#059669}
+.b-dph{background:#ECFDF5;color:#065F46}.b-dph::before{background:#4A7C59}
 .det{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:28px 32px;max-width:780px}
 .det-head{display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:8px}
 .det h2{font-family:'Fraunces',serif;font-size:26px;font-weight:300;color:var(--txt);line-height:1.2;display:flex;align-items:center;gap:10px;flex-wrap:wrap}
@@ -304,7 +304,7 @@ html,body,#root{height:100%;background:#FAFAFA}
 .item-row input:focus{border-color:var(--ink);box-shadow:0 0 0 2px rgba(53,24,165,.08)}
 .item-row .amt{font-family:'Fraunces',serif;font-size:14px;color:var(--txt);text-align:right;font-weight:300}
 .item-del{background:none;border:none;cursor:pointer;color:#DDD;font-size:18px;padding:0;display:flex;align-items:center;justify-content:center;transition:.12s;line-height:1}
-.item-del:hover{color:#DC2626}
+.item-del:hover{color:#A8443C}
 .totals{background:#FAFAFA;border:1px solid var(--line);border-radius:10px;padding:14px 18px;margin-bottom:14px}
 .tot-row{display:flex;justify-content:space-between;font-size:13px;color:var(--mut);padding:4px 0}
 .tot-row.final{font-size:14px;color:var(--txt);font-weight:600;border-top:1px solid var(--line2);margin-top:8px;padding-top:10px}
@@ -355,7 +355,7 @@ html,body,#root{height:100%;background:#FAFAFA}
 .lockcard .btn-login{width:100%;margin-top:8px;padding:12px;font-size:14px;font-weight:500;border-radius:9px;border:none;background:var(--ink);color:#fff;cursor:pointer;transition:.15s;font-family:inherit;box-shadow:0 2px 8px rgba(53,24,165,.3)}
 .lockcard .btn-login:hover{background:var(--ink2);box-shadow:0 4px 12px rgba(53,24,165,.4)}
 .lockcard .btn-login:disabled{opacity:.6;cursor:not-allowed;box-shadow:none}
-.lockcard .err{color:#DC2626;font-size:12px;margin-top:10px;min-height:14px}
+.lockcard .err{color:#A8443C;font-size:12px;margin-top:10px;min-height:14px}
 .ov{position:fixed;inset:0;background:rgba(15,10,40,.35);display:flex;align-items:center;justify-content:center;z-index:99;backdrop-filter:blur(2px)}
 .cf{background:var(--surface);border-radius:14px;padding:28px 32px;max-width:340px;text-align:center;border:1px solid var(--line);box-shadow:0 16px 48px rgba(0,0,0,.12)}
 .cf h3{font-size:17px;color:var(--txt);font-weight:600;margin-bottom:8px}
@@ -1771,9 +1771,9 @@ function EntryRow({ e, inv, clients, selectedIds, toggle, editing, openEdit, clo
       {/* delete confirm */}
       {isDeleting && (
         <div style={{ padding:"10px 14px", borderTop:"1px dashed #FCA5A5", background:"#FFF5F5", display:"flex", alignItems:"center", gap:10 }}>
-          <span style={{ flex:1, fontSize:12.5, color:"#DC2626" }}>Opravdu smazat tento výkaz?</span>
+          <span style={{ flex:1, fontSize:12.5, color:"#A8443C" }}>Opravdu smazat tento výkaz?</span>
           <button className="btn" style={{ fontSize:12 }} onClick={() => setConfirmDels(p => { const n={...p}; delete n[e.id]; return n; })}>Ne</button>
-          <button style={{ background:"#DC2626", color:"#fff", border:"none", borderRadius:8, padding:"6px 14px", fontSize:12, cursor:"pointer" }}
+          <button style={{ background:"#A8443C", color:"#fff", border:"none", borderRadius:8, padding:"6px 14px", fontSize:12, cursor:"pointer" }}
             disabled={isSaving} onClick={() => deleteEntry(e.id)}>
             {isSaving ? "…" : "Smazat"}
           </button>
@@ -2193,7 +2193,7 @@ function InvoiceEditModal({ inv, clients, workEntries, onPreview, onCancel, onSa
                 placeholder="Popis" style={{ flex:1, font:"inherit", fontSize:12.5, padding:"7px 10px", border:"1px solid var(--line2)", borderRadius:8 }} />
               <input value={it.amount || ""} onChange={e => updateCustomItem(it.id, "amount", e.target.value)}
                 placeholder="Kč" type="number" style={{ width:90, font:"inherit", fontSize:12.5, padding:"7px 10px", border:"1px solid var(--line2)", borderRadius:8 }} />
-              <button onClick={() => removeCustomItem(it.id)} style={{ background:"none", border:"1px solid #FCA5A5", borderRadius:8, color:"#DC2626", padding:"7px 10px", cursor:"pointer", fontSize:13 }}>✕</button>
+              <button onClick={() => removeCustomItem(it.id)} style={{ background:"none", border:"1px solid #FCA5A5", borderRadius:8, color:"#A8443C", padding:"7px 10px", cursor:"pointer", fontSize:13 }}>✕</button>
             </div>
           ))}
           <button className="btn gho" style={{ fontSize:12 }} onClick={addCustomItem}>+ Přidat položku bez DPH</button>
@@ -3090,7 +3090,7 @@ function PixelNeko() {
             <rect x="1" y="0" width="10" height="2" fill="#E0E7FF"/>
             <rect x="0" y="2" width="12" height="3" fill="#C7D2FE"/>
             <rect x="2" y="1" width="8" height="1" fill="#fff"/>
-            <rect x="1" y="5" width="10" height="1" fill="#A5B4FC"/>
+            <rect x="1" y="5" width="10" height="1" fill="#C3C0E4"/>
           </svg>
         </div>
       )}
@@ -3106,7 +3106,7 @@ function PixelNeko() {
         <rect x="10" y="1" width="2" height="2" fill="#6366F1"/>
         {/* head */}
         <rect x="2" y="3" width="10" height="4" fill="#818CF8"/>
-        <rect x="3" y="3" width="8" height="4" fill="#A5B4FC"/>
+        <rect x="3" y="3" width="8" height="4" fill="#C3C0E4"/>
         {/* eyes — different per state */}
         {state === "sleep" ? (
           <>
@@ -3143,13 +3143,13 @@ function PixelNeko() {
         {/* nose */}
         <rect x="7" y="5" width="1" height="1" fill="#C084FC"/>
         {/* body */}
-        <rect x="3" y="7" width="8" height="5" fill="#A5B4FC"/>
+        <rect x="3" y="7" width="8" height="5" fill="#C3C0E4"/>
         <rect x="4" y="7" width="6" height="5" fill="#C7D2FE"/>
         {/* paws — animate for walking */}
         <rect x={3} y={12 - legOffset} width="2" height={1 + legOffset} fill="#818CF8"/>
         <rect x={9} y={12 - (1-legOffset)} width="2" height={1 + (1-legOffset)} fill="#818CF8"/>
         {/* tail — wagging */}
-        <rect x="11" y={9 - (frame % 2)} width="1" height="1" fill="#A5B4FC"/>
+        <rect x="11" y={9 - (frame % 2)} width="1" height="1" fill="#C3C0E4"/>
         <rect x="12" y={8 - (frame % 2)} width="1" height="2" fill="#818CF8"/>
         <rect x="13" y={7 - (frame % 2)} width="1" height="2" fill="#6366F1"/>
       </svg>
@@ -3362,7 +3362,7 @@ function LoanDashTile({ tracker, transactions, onAddTransaction, onToggleTransac
   const monthsLeft = monthly>0&&remaining>0 ? Math.ceil(remaining/monthly) : 0;
   const finalDate = monthsLeft>0 ? new Date(Date.now()+monthsLeft*30*24*3600*1000).toLocaleDateString("cs-CZ",{month:"long",year:"numeric"}) : "splaceno";
 
-  const accent = isInv ? "#059669" : "#DC2626";
+  const accent = isInv ? "#4A7C59" : "#A8443C";
   const accentTint = isInv ? "rgba(5,150,105,.045)" : "rgba(220,38,38,.045)";
   const SEP = "1px solid rgba(0,0,0,.055)";
 
@@ -3389,15 +3389,15 @@ function LoanDashTile({ tracker, transactions, onAddTransaction, onToggleTransac
   .meta-item span{font-size:10pt;font-weight:300;}
   .kpi-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:4mm;margin-bottom:6mm;}
   .kpi{background:#f8f7ff;border-radius:8px;padding:5mm 6mm;border-left:3px solid #3518A5;}
-  .kpi.green{border-left-color:#059669;background:#f0fdf4;}
-  .kpi.red{border-left-color:#DC2626;background:#fef2f2;}
+  .kpi.green{border-left-color:#4A7C59;background:#f0fdf4;}
+  .kpi.red{border-left-color:#A8443C;background:#fef2f2;}
   .kpi label{font-size:6pt;letter-spacing:.28em;text-transform:uppercase;color:#9C96B5;display:block;margin-bottom:3px;font-weight:600;}
   .kpi .val{font-family:'Fraunces',serif;font-size:18pt;font-weight:300;color:#1a1530;}
   .kpi .sub{font-size:8pt;color:#9C96B5;margin-top:2px;}
   .progress-wrap{margin-bottom:6mm;}
   .progress-label{display:flex;justify-content:space-between;font-size:8.5pt;color:#6B7280;margin-bottom:2mm;}
   .progress-bar{height:6px;background:#E5E7EB;border-radius:3px;overflow:hidden;}
-  .progress-fill{height:100%;background:linear-gradient(90deg,#3518A5,#059669);border-radius:3px;}
+  .progress-fill{height:100%;background:linear-gradient(90deg,#3518A5,#4A7C59);border-radius:3px;}
   h2{font-size:8pt;letter-spacing:.3em;text-transform:uppercase;color:#9C96B5;font-weight:600;margin-bottom:3mm;border-bottom:1px solid #E5E7EB;padding-bottom:2mm;}
   table{width:100%;border-collapse:collapse;font-size:9pt;}
   thead th{font-size:6.5pt;letter-spacing:.28em;text-transform:uppercase;color:#9C96B5;font-weight:600;padding:0 4px 6px;border-bottom:1.5px solid #E5E7EB;text-align:left;}
@@ -3405,11 +3405,11 @@ function LoanDashTile({ tracker, transactions, onAddTransaction, onToggleTransac
   tbody tr:nth-child(even){background:#fafafa;}
   tbody td{padding:5px 4px;color:#374151;border-bottom:1px solid #F3F4F6;vertical-align:top;}
   tbody td.r{text-align:right;font-variant-numeric:tabular-nums;}
-  tbody td.pos{color:#059669;font-weight:600;}
-  tbody td.neg{color:#DC2626;}
+  tbody td.pos{color:#4A7C59;font-weight:600;}
+  tbody td.neg{color:#A8443C;}
   tbody td.bal{font-weight:600;color:#1a1530;}
   tbody td.done{text-align:center;}
-  .check{color:#059669;}
+  .check{color:#4A7C59;}
   .footer{margin-top:8mm;padding-top:4mm;border-top:1px solid #E5E7EB;display:flex;justify-content:space-between;font-size:7.5pt;color:#9C96B5;}
 </style>
 </head><body>
@@ -3595,7 +3595,7 @@ function LoanDashTile({ tracker, transactions, onAddTransaction, onToggleTransac
                 <tr key={tx.id} style={{ borderBottom:"1px solid var(--line)", opacity:tx.is_done?1:.6 }}>
                   <td style={{ padding:"8px 10px", color:"var(--mut)", whiteSpace:"nowrap" }}>{fmtDate(tx.transaction_date)}</td>
                   <td style={{ padding:"8px 10px", color:"var(--txt)" }}>{tx.description}</td>
-                  <td style={{ padding:"8px 10px", textAlign:"right", fontFamily:"Fraunces,serif", fontWeight:300, color:tx.amount<0?"#DC2626":"#059669" }}>
+                  <td style={{ padding:"8px 10px", textAlign:"right", fontFamily:"Fraunces,serif", fontWeight:300, color:tx.amount<0?"#A8443C":"#4A7C59" }}>
                     {tx.amount>0?"+":""}{fmtKc(tx.amount)}
                   </td>
                   <td style={{ padding:"8px 10px", textAlign:"right", fontFamily:"Fraunces,serif", fontWeight:300, color: tx.balance < 0 ? "#B45309" : undefined }}>{fmtKc(tx.balance)}</td>
@@ -3617,7 +3617,7 @@ function LoanDashTile({ tracker, transactions, onAddTransaction, onToggleTransac
 function DonutChart({ items, size = 160 }) {
   const total = items.reduce((s, i) => s + Math.abs(i.amount || 0), 0);
   if (total === 0) return null;
-  const colors = ["#3518A5", "#B8923D", "#059669", "#7C3AED", "#DC2626", "#0EA5E9"];
+  const colors = ["#3518A5", "#A08350", "#4A7C59", "#7C3AED", "#A8443C", "#0EA5E9"];
   let angle = -Math.PI / 2;
   const cx = size / 2, cy = size / 2, r = size * 0.38, ri = size * 0.22;
   const segments = items.map((item, i) => {
@@ -3681,7 +3681,7 @@ function DoubleRingChart({ outerItems, innerItems, size = 300 }) {
       <text x={cx} y={cy-14} textAnchor="middle" fontSize={8} fill="var(--mut)" fontFamily="Inter,sans-serif" letterSpacing="1">SPOŘÁK</text>
       <text x={cx} y={cy} textAnchor="middle" fontSize={11} fill="#3518A5" fontFamily="Fraunces,serif" fontWeight="300">{Math.round(iTotal/1000)}k</text>
       <text x={cx} y={cy+14} textAnchor="middle" fontSize={8} fill="var(--mut)" fontFamily="Inter,sans-serif" letterSpacing="1">MAJETEK</text>
-      <text x={cx} y={cy+26} textAnchor="middle" fontSize={11} fill="#059669" fontFamily="Fraunces,serif" fontWeight="300">{Math.round(oTotal/1000)}k</text>
+      <text x={cx} y={cy+26} textAnchor="middle" fontSize={11} fill="#4A7C59" fontFamily="Fraunces,serif" fontWeight="300">{Math.round(oTotal/1000)}k</text>
     </svg>
   );
 }
@@ -3788,7 +3788,7 @@ function WealthDonut({ outerItems, innerItems, outerLabel, innerLabel, outerTota
             <text x={cx} y={cy-20} textAnchor="middle" fontSize={7.5} fill="var(--mut)" fontFamily="Inter" letterSpacing="1.5">SPOŘÁK</text>
             <text x={cx} y={cy-6} textAnchor="middle" fontSize={13} fill="#3518A5" fontFamily="Fraunces,serif" fontWeight="300">{fmtN(innerTotal)} Kč</text>
             <text x={cx} y={cy+8} textAnchor="middle" fontSize={7.5} fill="var(--mut)" fontFamily="Inter" letterSpacing="1.5">MAJETEK</text>
-            <text x={cx} y={cy+22} textAnchor="middle" fontSize={13} fill="#059669" fontFamily="Fraunces,serif" fontWeight="300">{fmtN(outerTotal)} Kč</text>
+            <text x={cx} y={cy+22} textAnchor="middle" fontSize={13} fill="#4A7C59" fontFamily="Fraunces,serif" fontWeight="300">{fmtN(outerTotal)} Kč</text>
           </g>
         )}
 
@@ -3859,7 +3859,7 @@ function EditRow({ item, onSave, onDelete, valuePrefix = "", valueSuffix = " Kč
         </>
       ) : (
         <div style={{ fontSize: 13, fontFamily: "Fraunces,serif", fontWeight: 300, color: isCalculated ? "var(--mut)" : "var(--gold)", whiteSpace: "nowrap" }}>
-          {isCalculated ? <span style={{ fontSize: 11, color: "#059669" }}>auto</span> : ""} {valuePrefix}{maskNum(new Intl.NumberFormat("cs-CZ").format(Math.round(displayVal)))}{valueSuffix}
+          {isCalculated ? <span style={{ fontSize: 11, color: "#4A7C59" }}>auto</span> : ""} {valuePrefix}{maskNum(new Intl.NumberFormat("cs-CZ").format(Math.round(displayVal)))}{valueSuffix}
         </div>
       )}
       {!isCalculated && !editing && <span style={{ fontSize: 9, color: "var(--mut)", opacity: .4 }}>✎</span>}
@@ -3878,7 +3878,7 @@ function FinanceSection({ title, items, category, onSave, onDelete, accent, auto
   const manualTotal = items.filter(i => i.notes !== "TBD").reduce((s, i) => s + Math.abs(i.amount || 0), 0);
   const autoTotal = (autoItems||[]).reduce((s,i) => s+i.amount, 0);
   const total = manualTotal + autoTotal;
-  const amtColor = isIncome ? "#059669" : "#DC2626";
+  const amtColor = isIncome ? "#4A7C59" : "#A8443C";
   const signStr = isIncome ? "+" : "−";
 
   const startEdit = (item) => { setEditing(item.id); setEditVal({ label: item.label, amount: Math.abs(item.amount) }); };
@@ -3932,7 +3932,7 @@ function FinanceSection({ title, items, category, onSave, onDelete, accent, auto
                   onClick={e => e.stopPropagation()} />
                 <span style={{ fontSize: 11, color: "var(--mut)" }}>Kč</span>
                 <button onClick={e => { e.stopPropagation(); saveEdit(item); }} style={{ background: "var(--ink)", color: "#fff", border: "none", borderRadius: 6, padding: "5px 10px", fontSize: 11, cursor: "pointer" }}>✓</button>
-                <button onClick={e => { e.stopPropagation(); onDelete(item.id); }} style={{ background: "none", border: "none", color: "#DC2626", fontSize: 14, cursor: "pointer", padding: "0 4px" }}>✕</button>
+                <button onClick={e => { e.stopPropagation(); onDelete(item.id); }} style={{ background: "none", border: "none", color: "#A8443C", fontSize: 14, cursor: "pointer", padding: "0 4px" }}>✕</button>
               </>
             ) : (
               <>
@@ -3981,7 +3981,7 @@ function DpfoTracker({ months, onToggle, onAdd, onDelete, year }) {
 
   const A  = "#D97706";   // amber
   const AL = "#FFFBEB";
-  const R  = "#DC2626";   // red for payments
+  const R  = "#A8443C";   // red for payments
 
   const handleAddPayment = () => {
     if (payAmt > 0) {
@@ -4172,7 +4172,7 @@ function LoanTrackerCard({ tracker, transactions, onUpdateTracker, onAddTransact
   const monthsLeft = monthlyPmt > 0 && remaining > 0 ? Math.ceil(remaining / monthlyPmt) : 0;
   const finalDate = monthsLeft > 0 ? new Date(Date.now() + monthsLeft * 30 * 24 * 3600 * 1000).toLocaleDateString("cs-CZ", { month: "long", year: "numeric" }) : "—";
 
-  const colorAccent = isInvestment ? "#059669" : "#DC2626";
+  const colorAccent = isInvestment ? "#4A7C59" : "#A8443C";
 
   return (
     <div style={{ background: "#fff", border: `1px solid ${isInvestment ? "#BBF7D0" : "var(--line)"}`, borderRadius: 14, overflow: "hidden" }}>
@@ -4183,7 +4183,7 @@ function LoanTrackerCard({ tracker, transactions, onUpdateTracker, onAddTransact
               {isInvestment ? "Investiční úvěr" : "Osobní dluh"} · {tracker?.name}
             </div>
             {isInvestment ? (
-              <div style={{ fontFamily: "Fraunces,serif", fontSize: 18, fontWeight: 300, color: "#059669" }}>
+              <div style={{ fontFamily: "Fraunces,serif", fontSize: 18, fontWeight: 300, color: "#4A7C59" }}>
                 {fmtKc(Math.max(currentBalance, 0))} <span style={{ fontSize: 11, color: "var(--mut)", fontFamily: "Inter" }}>zbývá v kase</span>
               </div>
             ) : (
@@ -4197,7 +4197,7 @@ function LoanTrackerCard({ tracker, transactions, onUpdateTracker, onAddTransact
                     <span style={{ fontSize: 11, color: "var(--mut)" }}>Kč původní dluh</span>
                   </div>
                 ) : (
-                  <div style={{ fontFamily: "Fraunces,serif", fontSize: 18, fontWeight: 300, color: "#DC2626", cursor: "pointer" }}
+                  <div style={{ fontFamily: "Fraunces,serif", fontSize: 18, fontWeight: 300, color: "#A8443C", cursor: "pointer" }}
                     onClick={() => setEditAmount(true)}>
                     {original === 0 ? <span style={{ fontSize: 13, color: "var(--mut)" }}>Klikni — zadej původní částku</span> : fmtKc(remaining)}
                     {original > 0 && <span style={{ fontSize: 11, color: "var(--mut)", fontFamily: "Inter", marginLeft: 6 }}>zbývá · původně {fmtKc(original)}</span>}
@@ -4210,7 +4210,7 @@ function LoanTrackerCard({ tracker, transactions, onUpdateTracker, onAddTransact
             {isInvestment ? (
               <>Načerpáno: <strong>{fmtKc(transactions.filter(t=>t.amount>0).reduce((s,t)=>s+t.amount,0))}</strong><br/>
               Zaplaceno: <strong>{fmtKc(totalPaid)}</strong><br/>
-              <span style={{ color: "#059669" }}>Projekt: ~1M profit 🎯</span></>
+              <span style={{ color: "#4A7C59" }}>Projekt: ~1M profit 🎯</span></>
             ) : (
               <>Splaceno: <strong>{fmtKc(totalPaid)}</strong><br/>
               {monthsLeft > 0 && <><strong>{monthsLeft}</strong> splátek · {finalDate}</>}</>
@@ -4219,7 +4219,7 @@ function LoanTrackerCard({ tracker, transactions, onUpdateTracker, onAddTransact
         </div>
         {!isInvestment && original > 0 && (
           <div style={{ height: 4, background: "#FEE2E2", borderRadius: 2, marginTop: 8 }}>
-            <div style={{ height: "100%", width: `${Math.min((totalPaid/original)*100,100)}%`, background: "#059669", borderRadius: 2, transition: ".3s" }} />
+            <div style={{ height: "100%", width: `${Math.min((totalPaid/original)*100,100)}%`, background: "#4A7C59", borderRadius: 2, transition: ".3s" }} />
           </div>
         )}
       </div>
@@ -4273,7 +4273,7 @@ function LoanTrackerCard({ tracker, transactions, onUpdateTracker, onAddTransact
                 <tr key={tx.id} style={{ borderBottom: "1px solid var(--line)", opacity: tx.is_done ? 1 : .7 }}>
                   <td style={{ padding: "9px 12px", color: "var(--mut)", whiteSpace: "nowrap" }}>{fmtDate(tx.transaction_date)}</td>
                   <td style={{ padding: "9px 12px", color: "var(--txt)" }}>{tx.description}</td>
-                  <td style={{ padding: "9px 12px", textAlign: "right", fontFamily: "Fraunces,serif", fontWeight: 300, color: tx.amount < 0 ? "#DC2626" : "#059669" }}>
+                  <td style={{ padding: "9px 12px", textAlign: "right", fontFamily: "Fraunces,serif", fontWeight: 300, color: tx.amount < 0 ? "#A8443C" : "#4A7C59" }}>
                     {tx.amount > 0 ? "+" : ""}{fmtKc(tx.amount)}
                   </td>
                   <td style={{ padding: "9px 12px", textAlign: "right", fontFamily: "Fraunces,serif", fontWeight: 300, color: "var(--txt)" }}>{fmtKc(tx.balance)}</td>
@@ -4930,7 +4930,7 @@ function AutoTag({ title, style }) {
       title={title || "Automaticky dopočítáno — odhad, dokud nepřibude jistý údaj"}
       style={{
         fontSize: 8.5, fontWeight: 700, padding: "1px 4.5px", borderRadius: 3,
-        background: "#EEF2FF", color: "#A5B4FC", letterSpacing: "0.04em",
+        background: "#EEF2FF", color: "#C3C0E4", letterSpacing: "0.04em",
         textTransform: "uppercase", verticalAlign: "middle", marginLeft: 5,
         border: "1px solid #E0E7FF", lineHeight: 1.4, cursor: "default",
         ...style,
@@ -4998,7 +4998,7 @@ function KpiBreakdown({ rows, colSet, onClose, earnLabel, incLabel, onMarkPaid }
           Podrobný rozpis
           {earnLabel && incLabel && (
             <span style={{marginLeft:8,fontWeight:400,color:"var(--mut)"}}>
-              (úroky za <strong style={{color:"var(--ink)"}}>{earnLabel}</strong> → příjem <strong style={{color:"#059669"}}>{incLabel}</strong>)
+              (úroky za <strong style={{color:"var(--ink)"}}>{earnLabel}</strong> → příjem <strong style={{color:"#4A7C59"}}>{incLabel}</strong>)
             </span>
           )}
         </span>
@@ -5034,7 +5034,7 @@ function KpiBreakdown({ rows, colSet, onClose, earnLabel, incLabel, onMarkPaid }
                       {row.tranche && !row.tranche.is_paid && onMarkPaid && (
                         <button
                           onClick={(e)=>{ e.stopPropagation(); onMarkPaid(row.escrowId, row.tranche); }}
-                          style={{fontSize:10,fontWeight:700,color:"#fff",background:"#059669",border:"none",borderRadius:6,padding:"4px 9px",cursor:"pointer",whiteSpace:"nowrap"}}
+                          style={{fontSize:10,fontWeight:700,color:"#fff",background:"#4A7C59",border:"none",borderRadius:6,padding:"4px 9px",cursor:"pointer",whiteSpace:"nowrap"}}
                           title="Označí výplatu jako provedenou — promítne se do úroků v celé appce"
                         >
                           ✓ Provedl jsem výplatu
@@ -5200,7 +5200,7 @@ function PaymentWizard({ escrow, onClose, onSuccess }) {
           {alreadyPaid > 0 && (
             <div>
               <div style={{fontSize:10,color:"#5B21B6",marginBottom:2}}>Již vyplaceno</div>
-              <div style={{fontFamily:"Fraunces,serif",fontWeight:300,fontSize:16,color:"#059669"}}>{fmtKc(alreadyPaid)}</div>
+              <div style={{fontFamily:"Fraunces,serif",fontWeight:300,fontSize:16,color:"#4A7C59"}}>{fmtKc(alreadyPaid)}</div>
             </div>
           )}
         </div>
@@ -5284,7 +5284,7 @@ function MarkPaidBtn({ escrowId, tranche, onMarkPaid }) {
   return (
     <button
       onClick={(e)=>{ e.stopPropagation(); onMarkPaid(escrowId, tranche); }}
-      style={{fontSize:9,fontWeight:700,color:"#fff",background:"#059669",border:"none",borderRadius:5,padding:"2px 7px",cursor:"pointer",whiteSpace:"nowrap",marginLeft:6}}
+      style={{fontSize:9,fontWeight:700,color:"#fff",background:"#4A7C59",border:"none",borderRadius:5,padding:"2px 7px",cursor:"pointer",whiteSpace:"nowrap",marginLeft:6}}
       title="Označí výplatu jako provedenou — promítne se do úroků v celé appce"
     >
       ✓ Provedl jsem výplatu
@@ -5341,13 +5341,13 @@ function EscrowCard({ escrow, onEdit, onDelete, onMarkPaid, onPayment }) {
           <div style={{fontSize:12,color:"var(--mut)",lineHeight:1.6}}>
             {escrow.date_received && <span>Přijato: <strong>{fmtDate(escrow.date_received)}</strong> · </span>}
             {escrow.date_plomba_end && <span>Konec plomby: <strong style={{color:needsAlert?"#D97706":"inherit"}}>{fmtDate(escrow.date_plomba_end)}</strong> · </span>}
-            {escrow.date_paid && <span>Vyplaceno: <strong style={{color:"#059669"}}>{fmtDate(escrow.date_paid)}</strong></span>}
+            {escrow.date_paid && <span>Vyplaceno: <strong style={{color:"#4A7C59"}}>{fmtDate(escrow.date_paid)}</strong></span>}
           </div>
         </div>
         <div style={{textAlign:"right"}}>
           <div style={{fontFamily:"Fraunces,serif",fontSize:20,fontWeight:300,color:"var(--gold)"}}>{fmtKc(depositTotal)}</div>
           <div style={{fontSize:11,color:"var(--mut)"}}>v úschově · sazba {(escrow.interest_rate*100).toFixed(1)}%</div>
-          {isActive && interest.totalNet > 0 && <div style={{fontSize:11,color:"#059669",fontWeight:500,marginTop:2}}>Zisk: {fmtKc(interest.totalNet)} čistého</div>}
+          {isActive && interest.totalNet > 0 && <div style={{fontSize:11,color:"#4A7C59",fontWeight:500,marginTop:2}}>Zisk: {fmtKc(interest.totalNet)} čistého</div>}
         </div>
       </div>
       {escrow.notes && <div style={{padding:"8px 18px",fontSize:12,color:"var(--mut)",borderBottom:"1px solid var(--line)",background:"#FAFAFA"}}>{escrow.notes}</div>}
@@ -5462,7 +5462,7 @@ function EscrowCard({ escrow, onEdit, onDelete, onMarkPaid, onPayment }) {
                       <tr key={i} style={{borderTop:"1px solid #FDE68A"}}>
                         <td style={{padding:"5px 8px",color:"var(--mut)"}}>{m.label}</td>
                         <td className="r num" style={{padding:"5px 8px"}}>{fmtKc(m.gross)}</td>
-                        <td className="r num" style={{padding:"5px 8px",color:"#059669",fontWeight:500}}>{fmtKc(m.net)}</td>
+                        <td className="r num" style={{padding:"5px 8px",color:"#4A7C59",fontWeight:500}}>{fmtKc(m.net)}</td>
                         <td style={{padding:"5px 8px"}}>
                           <span style={{fontWeight:600,color:"#065F46"}}>{incNom} {cDate.getFullYear()}</span>
                           <span style={{color:"var(--mut)",fontSize:9,marginLeft:4}}>(1.{cDate.getMonth()+1}.)</span>
@@ -5473,7 +5473,7 @@ function EscrowCard({ escrow, onEdit, onDelete, onMarkPaid, onPayment }) {
                   <tr style={{borderTop:"2px solid #F59E0B",background:"#FFFBEB"}}>
                     <td style={{padding:"6px 8px",fontWeight:600}}>Celkem</td>
                     <td className="r num" style={{padding:"6px 8px",fontWeight:500}}>{fmtKc(interest.totalGross)}</td>
-                    <td className="r num" style={{padding:"6px 8px",color:"#059669",fontWeight:700}}>{fmtKc(interest.totalNet)}</td>
+                    <td className="r num" style={{padding:"6px 8px",color:"#4A7C59",fontWeight:700}}>{fmtKc(interest.totalNet)}</td>
                     <td></td>
                   </tr>
                 </tbody>
@@ -5777,8 +5777,8 @@ function EscrowForm({ init, onSave, onCancel, saving }) {
                         <label style={{ display: "inline-flex", alignItems: "center", gap: 5, cursor: "pointer" }}>
                           <input type="checkbox" checked={!!t.aml_done}
                             onChange={e => updateTranche(t.id, { aml_done: e.target.checked })}
-                            style={{ width: "auto", accentColor: "#059669" }} />
-                          <span style={{ fontSize: 9, fontWeight: 700, color: t.aml_done ? "#059669" : "#DC2626" }}>
+                            style={{ width: "auto", accentColor: "#4A7C59" }} />
+                          <span style={{ fontSize: 9, fontWeight: 700, color: t.aml_done ? "#4A7C59" : "#A8443C" }}>
                             {t.aml_done ? "✓" : "⚠"}
                           </span>
                         </label>
@@ -5822,7 +5822,7 @@ function EscrowForm({ init, onSave, onCancel, saving }) {
                       />
                       <div style={{ flex: 1, display: "flex", gap: 18, fontSize: 11, flexWrap: "wrap" }}>
                         <span style={{ color: "#374151" }}>Nárok: <strong style={{ fontFamily: "Fraunces,serif", fontSize: 13 }}>{fmtKc(totalNarok)}</strong></span>
-                        {totalPaid > 0 && <span style={{ color: "#059669" }}>Vyplaceno: <strong style={{ fontFamily: "Fraunces,serif", fontSize: 13 }}>{fmtKc(totalPaid)}</strong></span>}
+                        {totalPaid > 0 && <span style={{ color: "#4A7C59" }}>Vyplaceno: <strong style={{ fontFamily: "Fraunces,serif", fontSize: 13 }}>{fmtKc(totalPaid)}</strong></span>}
                         {remaining > 0.5 && <span style={{ color: "#B45309" }}>Zbývá: <strong style={{ fontFamily: "Fraunces,serif", fontSize: 13 }}>{fmtKc(remaining)}</strong></span>}
                       </div>
                       {/* AML per osoba — sdílené pro všechny tranše téhož jména */}
@@ -5834,10 +5834,10 @@ function EscrowForm({ init, onSave, onCancel, saving }) {
                               onChange={e => {
                                 rows.forEach(t => updateTranche(t.id, { aml_done: e.target.checked }));
                               }}
-                              style={{ width: "auto", accentColor: "#059669" }} />
+                              style={{ width: "auto", accentColor: "#4A7C59" }} />
                             <span style={{
                               fontSize: 9, fontWeight: 700, letterSpacing: ".08em",
-                              color: amlDone ? "#059669" : "#DC2626",
+                              color: amlDone ? "#4A7C59" : "#A8443C",
                               background: amlDone ? "#DCFCE7" : "#FEF2F2",
                               border: `1px solid ${amlDone ? "#A7F3D0" : "#FECACA"}`,
                               borderRadius: 4, padding: "2px 7px",
@@ -5877,14 +5877,14 @@ function EscrowForm({ init, onSave, onCancel, saving }) {
                             </td>
                             <td style={S.td}>
                               <label style={{ display: "flex", alignItems: "center", gap: 7, cursor: "pointer", userSelect: "none" }}>
-                                <input type="checkbox" checked={!!t.is_paid} style={{ width: "auto", accentColor: "#059669" }}
+                                <input type="checkbox" checked={!!t.is_paid} style={{ width: "auto", accentColor: "#4A7C59" }}
                                   onChange={e => updateTranche(t.id, {
                                     is_paid: e.target.checked,
                                     paid_date: e.target.checked ? (t.paid_date || today()) : null,
                                   })} />
                                 <span style={{
                                   fontSize: 9, fontWeight: 700, letterSpacing: ".1em",
-                                  color: t.is_paid ? "#059669" : "#B45309",
+                                  color: t.is_paid ? "#4A7C59" : "#B45309",
                                   background: t.is_paid ? "#DCFCE7" : "#FEF3C7",
                                   border: `1px solid ${t.is_paid ? "#A7F3D0" : "#FDE68A"}`,
                                   borderRadius: 4, padding: "2px 8px",
@@ -5903,7 +5903,7 @@ function EscrowForm({ init, onSave, onCancel, saving }) {
                     </table>
                     <div style={{ padding: "10px 14px", background: "#F9FAFB", borderTop: "1px solid #E5E7EB" }}>
                       <button onClick={() => addPaymentRow(personName)}
-                        style={{ fontSize: 11, fontWeight: 700, color: "#059669", background: "#F0FDF4", border: "1px solid #A7F3D0", borderRadius: 6, padding: "5px 14px", cursor: "pointer", letterSpacing: ".04em" }}>
+                        style={{ fontSize: 11, fontWeight: 700, color: "#4A7C59", background: "#F0FDF4", border: "1px solid #A7F3D0", borderRadius: 6, padding: "5px 14px", cursor: "pointer", letterSpacing: ".04em" }}>
                         + Přidat výplatu
                       </button>
                     </div>
@@ -5963,7 +5963,7 @@ function EscrowForm({ init, onSave, onCancel, saving }) {
       {toast && (
         <div style={{
           position: "fixed", top: 24, left: "50%", transform: "translateX(-50%)", zIndex: 9999,
-          background: toast.ok ? "#059669" : "#DC2626", color: "#fff",
+          background: toast.ok ? "#4A7C59" : "#A8443C", color: "#fff",
           padding: "12px 28px", borderRadius: 10, fontSize: 13, fontWeight: 600,
           boxShadow: "0 4px 20px rgba(0,0,0,.25)", letterSpacing: ".03em",
           animation: "fadeIn .3s",
@@ -6072,12 +6072,12 @@ function EscrowInsights({ escrows }) {
         </div>
         <div style={cardSt("#F0FDF4","#BBF7D0")}>
           <div style={lbl("#065F46")}>Za měsíc (30 dní)</div>
-          <div style={val(20,"#059669")}>{K(totalDaily * 30)}</div>
+          <div style={val(20,"#4A7C59")}>{K(totalDaily * 30)}</div>
           <div style={{fontSize:11,color:"#065F46",marginTop:3}}>průběžný odhad</div>
         </div>
         <div style={cardSt("#FEF2F2","#FECACA")}>
           <div style={lbl("#991B1B")}>Srážková daň / den</div>
-          <div style={val(20,"#DC2626")}>{Kd(totalDaily / 0.85 * 0.15)}</div>
+          <div style={val(20,"#A8443C")}>{Kd(totalDaily / 0.85 * 0.15)}</div>
           <div style={{fontSize:11,color:"#991B1B",marginTop:3}}>odvádí banka automaticky</div>
         </div>
       </div>
@@ -6104,7 +6104,7 @@ function EscrowInsights({ escrows }) {
                   }
                 </div>
                 <div style={{height:4,borderRadius:2,background:"var(--line)",overflow:"hidden"}}>
-                  <div style={{height:"100%",width:`${pct}%`,background:t.isRunning?"#D97706":"#059669",borderRadius:2,transition:"width 0.3s"}}></div>
+                  <div style={{height:"100%",width:`${pct}%`,background:t.isRunning?"#D97706":"#4A7C59",borderRadius:2,transition:"width 0.3s"}}></div>
                 </div>
               </div>
               <div style={{textAlign:"right",minWidth:90}}>
@@ -6131,7 +6131,7 @@ function EscrowInsights({ escrows }) {
               <div style={{fontSize:12,fontWeight:500,color:"var(--ink)"}}>{t.escrow} {t.name} — o měsíc déle</div>
               <div style={{fontSize:11,color:"var(--mut)",marginTop:2}}>+30 dní × {K(t.daily)}/den</div>
             </div>
-            <div style={{fontSize:15,fontWeight:500,color:"#059669",whiteSpace:"nowrap"}}>+ {K(t.daily * 30)}</div>
+            <div style={{fontSize:15,fontWeight:500,color:"#4A7C59",whiteSpace:"nowrap"}}>+ {K(t.daily * 30)}</div>
           </div>
         ))}
         {active.filter(t => t.isRunning).map((t, i) => (
@@ -6246,13 +6246,13 @@ function EscrowList({ escrows, onNew, onEdit, onDelete, onMarkPaid, onPayment, l
           )}
         </div>
         {/* Příjem 1. přespříštího měsíce — projekce */}
-        <div className="kpi" style={{background:"#F0FDF4",border:`1px solid ${openDetail==="m2"?"#059669":"#BBF7D0"}`,padding:0,overflow:"hidden",...kpiClickable}}
+        <div className="kpi" style={{background:"#F0FDF4",border:`1px solid ${openDetail==="m2"?"#4A7C59":"#BBF7D0"}`,padding:0,overflow:"hidden",...kpiClickable}}
              onClick={()=>toggleDetail("m2")}>
           <div style={{padding:"14px 18px 10px"}}>
             <div className="k" style={{color:"#065F46"}}>
               Příjem {next2Label} (odhad) {openDetail==="m2"?"▲":"▼"}
             </div>
-            <div className="v" style={{color:"#059669"}}>{netNextMonth2 > 0 ? fmtKc(Math.round(netNextMonth2)) : "–"}</div>
+            <div className="v" style={{color:"#4A7C59"}}>{netNextMonth2 > 0 ? fmtKc(Math.round(netNextMonth2)) : "–"}</div>
             <div className="s" style={{color:"#065F46"}}>
               za úroky z <strong>{earnLabel2}</strong> · projekce při zachování jistin
             </div>
@@ -6282,18 +6282,18 @@ function EscrowList({ escrows, onNew, onEdit, onDelete, onMarkPaid, onPayment, l
           {openDetail==="total" && <KpiBreakdown rows={rowsTotal} colSet="total" onClose={(e)=>{e.stopPropagation();setOpenDetail(null);}} />}
         </div>
         {/* Srážková daň */}
-        <div className="kpi" style={{background:"#FEF2F2",border:`1px solid ${openDetail==="tax"?"#DC2626":"#FECACA"}`,padding:0,overflow:"hidden",...kpiClickable}}
+        <div className="kpi" style={{background:"#FEF2F2",border:`1px solid ${openDetail==="tax"?"#A8443C":"#FECACA"}`,padding:0,overflow:"hidden",...kpiClickable}}
              onClick={()=>toggleDetail("tax")}>
           <div style={{padding:"14px 18px 10px"}}>
             <div className="k" style={{color:"#991B1B"}}>Srážková daň (stát) {openDetail==="tax"?"▲":"▼"}</div>
-            <div className="v" style={{color:"#DC2626",fontSize:18}}>{fmtKc(Math.round(escrowTotalTax(escrows)))}</div>
+            <div className="v" style={{color:"#A8443C",fontSize:18}}>{fmtKc(Math.round(escrowTotalTax(escrows)))}</div>
             <div className="s" style={{color:"#991B1B"}}>15 % z hrubého úroku · klikni pro rozpis</div>
           </div>
           {openDetail==="tax" && <KpiBreakdown rows={rowsTax} colSet="tax" onClose={(e)=>{e.stopPropagation();setOpenDetail(null);}} />}
         </div>
         <div className="kpi" style={{background:alerts.length>0?"#FEF3C7":"#F0FDF4",border:`1px solid ${alerts.length>0?"#FDE68A":"#BBF7D0"}`}}>
           <div className="k" style={{color:alerts.length>0?"#92400E":"#065F46"}}>Alerty</div>
-          <div className="v" style={{color:alerts.length>0?"#D97706":"#059669"}}>{alerts.length > 0 ? `${alerts.length}× ⚠` : "Vše OK"}</div>
+          <div className="v" style={{color:alerts.length>0?"#D97706":"#4A7C59"}}>{alerts.length > 0 ? `${alerts.length}× ⚠` : "Vše OK"}</div>
           <div className="s" style={{color:alerts.length>0?"#92400E":"#065F46"}}>
             {alerts.length > 0 ? alerts.map(e=>e.escrow_number).join(", ") : "Žádná plomba se neblíží"}
           </div>
@@ -6434,14 +6434,14 @@ function MajetekBar({ financeItems, onSaveFinance, invoices, dpfoMonths, loanTra
   ].filter(Boolean).filter(a => a.amount > 0 || a.editable);
 
   const barW = a => total > 0 ? (a.amount / total) * 100 : 0;
-  const btnStyle = {background:"#B8923D",color:"#fff",border:"none",borderRadius:16,padding:"5px 12px",fontSize:11,cursor:"pointer",fontWeight:700,whiteSpace:"nowrap"};
+  const btnStyle = {background:"#A08350",color:"#fff",border:"none",borderRadius:16,padding:"5px 12px",fontSize:11,cursor:"pointer",fontWeight:700,whiteSpace:"nowrap"};
 
   return (
-    <div style={{background:"#fff",border:"2px solid #B8923D",borderRadius:14,padding:"28px 36px",display:"flex",alignItems:"stretch",gap:24,flexWrap:"wrap"}}>
+    <div style={{background:"#fff",border:"2px solid #A08350",borderRadius:14,padding:"28px 36px",display:"flex",alignItems:"stretch",gap:24,flexWrap:"wrap"}}>
       {/* === CELKOVÝ MAJETEK === */}
       <div style={{minWidth:220,display:"flex",flexDirection:"column",justifyContent:"center"}}>
-        <div style={{fontSize:11,letterSpacing:".22em",textTransform:"uppercase",color:"#B8923D",fontWeight:700,marginBottom:10}}>OSOBNÍ MAJETEK</div>
-        <div style={{fontFamily:"Fraunces,serif",fontSize:44,fontWeight:300,color:"#B8923D",lineHeight:1,marginBottom:6}}>{fmtKc(total)}</div>
+        <div style={{fontSize:11,letterSpacing:".22em",textTransform:"uppercase",color:"#A08350",fontWeight:700,marginBottom:10}}>OSOBNÍ MAJETEK</div>
+        <div style={{fontFamily:"Fraunces,serif",fontSize:44,fontWeight:300,color:"#A08350",lineHeight:1,marginBottom:6}}>{fmtKc(total)}</div>
         <div style={{fontSize:12,color:"var(--mut)"}}>{allAssets.length} složky · celkem</div>
       </div>
 
@@ -6466,7 +6466,7 @@ function MajetekBar({ financeItems, onSaveFinance, invoices, dpfoMonths, loanTra
                   {!a.editable && <span style={{fontSize:9,background:"#EEF2FF",color:"#3730A3",padding:"1px 4px",borderRadius:3,fontWeight:700,marginLeft:5}}>auto</span>}
                   {a.autoNote && <span style={{fontSize:9,color:"var(--mut)",marginLeft:4,opacity:.7}}>{a.autoNote}</span>}
                   {a.liquid && (
-                    <span style={{fontSize:9,marginLeft:5,fontWeight:700,color: a.amount >= a.goal ? "#059669" : "#8B5CF6"}}>
+                    <span style={{fontSize:9,marginLeft:5,fontWeight:700,color: a.amount >= a.goal ? "#4A7C59" : "#8B5CF6"}}>
                       {a.amount >= a.goal ? "🎉 cíl splněn" : `· ${Math.round((a.amount/Math.max(a.goal,1))*100)} % k cíli`}
                     </span>
                   )}
@@ -6496,17 +6496,17 @@ function MajetekBar({ financeItems, onSaveFinance, invoices, dpfoMonths, loanTra
           {/* + PŘIDAT DALŠÍ */}
           {!adding ? (
             <div style={{display:"flex",alignItems:"center"}}>
-              <button onClick={() => setAdding(true)} style={{...btnStyle,background:"#B8923D",fontSize:12,padding:"7px 16px",borderRadius:20}}>
+              <button onClick={() => setAdding(true)} style={{...btnStyle,background:"#A08350",fontSize:12,padding:"7px 16px",borderRadius:20}}>
                 + Přidat složku
               </button>
             </div>
           ) : (
             <div style={{display:"flex",alignItems:"center",gap:6,flexWrap:"wrap"}}>
               <input placeholder="Název (např. Krypto)" value={newLabel} onChange={e => setNewLabel(e.target.value)}
-                style={{width:150,fontSize:13,padding:"5px 10px",border:"2px solid #B8923D",borderRadius:7,outline:"none"}} />
+                style={{width:150,fontSize:13,padding:"5px 10px",border:"2px solid #A08350",borderRadius:7,outline:"none"}} />
               <input type="number" placeholder="Částka" value={newAmount||""} onChange={e => setNewAmount(Number(e.target.value))}
                 onKeyDown={e => { if(e.key==="Enter") saveNew(); if(e.key==="Escape") setAdding(false); }}
-                style={{width:110,fontSize:13,padding:"5px 10px",border:"2px solid #B8923D",borderRadius:7,outline:"none"}} />
+                style={{width:110,fontSize:13,padding:"5px 10px",border:"2px solid #A08350",borderRadius:7,outline:"none"}} />
               <button onClick={saveNew} style={btnStyle}>✓ Uložit</button>
               <button onClick={() => setAdding(false)} style={{background:"none",border:"1px solid var(--line)",borderRadius:12,padding:"5px 10px",fontSize:12,cursor:"pointer",color:"var(--mut)"}}>✕</button>
             </div>
@@ -6758,7 +6758,7 @@ function TriGrafyPanel({ financeItems, onSaveFinance, invoices, dpfoMonths, loan
   const dphAuto    = dphObalkaUnsettled(invoices, financeItems); // vybrané DPH minus odpočet období
   // Jediný zdroj pravdy — viz computeSporakEnvelopes
   const _env       = computeSporakEnvelopes(financeItems, invoices, dpfoMonths, loanTransactions, escrows);
-  const ENV_COLOR  = { dph: "#2B2478", dpfo: "#5B52F0", bob: "#818CF8", danu: "#A5B4FC" };
+  const ENV_COLOR  = { dph: "#2B2478", dpfo: "#4A44B8", bob: "#818CF8", danu: "#C3C0E4" };
   const envSegs    = _env.envelopes.map((e, idx) => ({
     label: e.label, amount: e.amount,
     color: ENV_COLOR[e.key] || ["#5B4FCF","#9D93DD"][idx % 2],
@@ -6818,7 +6818,7 @@ function TriGrafyPanel({ financeItems, onSaveFinance, invoices, dpfoMonths, loan
 
   const S_COL = "#3518A5", M_COL = "#3518A5";
   const R_COL = "#4F46E5";
-  const R_WARN = "#DC2626";
+  const R_WARN = "#A8443C";
 
   const card = (accentColor, bgGrad) => ({
     flex: 1,
@@ -7135,7 +7135,7 @@ function FirmaBar({ financeItems, invoices, dpfoMonths, loanTransactions, escrow
           <div>
             <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:8,
               borderBottom:"1px solid rgba(53,24,165,.08)",paddingBottom:4}}>
-              <span style={{fontSize:8,letterSpacing:".25em",textTransform:"uppercase",color:"#3518A5",fontWeight:800}}>Nutné</span>
+              <span style={{fontSize:8,letterSpacing:".25em",textTransform:"uppercase",color:"#3A3494",fontWeight:600}}>Nutné</span>
               <span style={{fontSize:9,color:"var(--mut)",fontWeight:600}}>{fmtKc(totalNutne)}</span>
             </div>
             {nutne.map((i,idx) => <Row key={idx} item={i} color="#3518A5" />)}
@@ -7462,7 +7462,7 @@ function ZiskovostPanel({ workEntries, clients }) {
 
   const best  = [...rows].sort((a, b) => b.ratio - a.ratio)[0];
   const worst = [...rows].sort((a, b) => a.ratio - b.ratio)[0];
-  const pctColor = (r) => r >= 1.15 ? "#059669" : r >= 0.9 ? "#B8923D" : "#DC2626";
+  const pctColor = (r) => r >= 1.15 ? "#4A7C59" : r >= 0.9 ? "#A08350" : "#A8443C";
   const fmtH = (h) => `${(h || 0).toLocaleString("cs-CZ", { maximumFractionDigits: 1 })} h`;
 
   return (
@@ -7476,7 +7476,7 @@ function ZiskovostPanel({ workEntries, clients }) {
       <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 10, marginBottom: 18 }}>
         <div style={{ background: "#F0FDF4", border: "1px solid #BBF7D0", borderRadius: 12, padding: "12px 16px" }}>
           <div style={{ fontSize: 10, color: "#065F46", marginBottom: 3 }}>Efektivní hodinovka</div>
-          <div style={{ fontFamily: "Fraunces,serif", fontSize: 20, fontWeight: 300, color: "#059669" }}>{fmtKc(effRate)}/h</div>
+          <div style={{ fontFamily: "Fraunces,serif", fontSize: 20, fontWeight: 300, color: "#4A7C59" }}>{fmtKc(effRate)}/h</div>
           <div style={{ fontSize: 10, color: "#065F46", marginTop: 3 }}>výdělek na reálně odpracovanou hodinu</div>
         </div>
         <div style={{ background: "#F7F5FF", border: "1px solid #DDD6FE", borderRadius: 12, padding: "12px 16px" }}>
@@ -7486,7 +7486,7 @@ function ZiskovostPanel({ workEntries, clients }) {
         </div>
         <div style={{ background: ratioAll >= 1 ? "#F0FDF4" : "#FEF2F2", border: `1px solid ${ratioAll >= 1 ? "#BBF7D0" : "#FECACA"}`, borderRadius: 12, padding: "12px 16px" }}>
           <div style={{ fontSize: 10, color: ratioAll >= 1 ? "#065F46" : "#991B1B", marginBottom: 3 }}>Ziskovost (fakt. ÷ reálně)</div>
-          <div style={{ fontFamily: "Fraunces,serif", fontSize: 20, fontWeight: 300, color: ratioAll >= 1 ? "#059669" : "#DC2626" }}>{(ratioAll * 100).toFixed(0)} %</div>
+          <div style={{ fontFamily: "Fraunces,serif", fontSize: 20, fontWeight: 300, color: ratioAll >= 1 ? "#4A7C59" : "#A8443C" }}>{(ratioAll * 100).toFixed(0)} %</div>
           <div style={{ fontSize: 10, color: ratioAll >= 1 ? "#065F46" : "#991B1B", marginTop: 3 }}>{fmtH(totalBilled)} fakt. · {fmtH(totalReal)} reálně</div>
         </div>
       </div>
@@ -7618,7 +7618,7 @@ function PohledavkyPanel({ financeItems, onSaveFinance, onDeleteFinance }) {
             const daysLeft = dueDate ? Math.ceil((dueDate - new Date(today())) / 86400000) : null;
             const overdue = daysLeft != null && daysLeft < 0;
             const soon = daysLeft != null && daysLeft >= 0 && daysLeft <= 7;
-            const dotColor = overdue ? "#DC2626" : soon ? "#D97706" : "#059669";
+            const dotColor = overdue ? "#A8443C" : soon ? "#D97706" : "#4A7C59";
             return (
               <div key={item.id} style={{ display: "flex", alignItems: "center", gap: 16, padding: "14px 18px", borderRadius: 14, background: overdue ? "#FFF8F8" : "#FAFAFC", border: `1px solid ${overdue ? "#FECACA" : soon ? "#FDE68A" : "rgba(0,0,0,.05)"}`, transition: "all .15s" }}>
                 <div style={{ width: 8, height: 8, borderRadius: "50%", background: dotColor, flexShrink: 0, boxShadow: `0 0 0 3px ${dotColor}1A` }} />
@@ -7629,7 +7629,7 @@ function PohledavkyPanel({ financeItems, onSaveFinance, onDeleteFinance }) {
                 {dueDate && (
                   <div style={{ textAlign: "right", flexShrink: 0 }}>
                     <div style={{ fontSize: 10.5, color: "var(--mut)" }}>splatnost {fmtDate(meta.due)}</div>
-                    <div style={{ fontSize: 11, fontWeight: 600, color: overdue ? "#DC2626" : soon ? "#B45309" : "#059669", marginTop: 2 }}>
+                    <div style={{ fontSize: 11, fontWeight: 600, color: overdue ? "#A8443C" : soon ? "#B45309" : "#4A7C59", marginTop: 2 }}>
                       {overdue ? `po splatnosti ${Math.abs(daysLeft)} dní` : daysLeft === 0 ? "splatnost dnes" : `zbývá ${daysLeft} dní`}
                     </div>
                   </div>
@@ -7640,7 +7640,7 @@ function PohledavkyPanel({ financeItems, onSaveFinance, onDeleteFinance }) {
                 <button onClick={() => { if (confirm(`Smazat pohledávku „${item.label}"? (např. protože byla splacena)`)) onDeleteFinance(item.id); }}
                   title="Smazat (splaceno)"
                   style={{ width: 26, height: 26, borderRadius: 8, border: "1px solid rgba(0,0,0,.08)", background: "#fff", color: "var(--mut)", cursor: "pointer", fontSize: 11, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, transition: "all .12s" }}
-                  onMouseEnter={e => { e.currentTarget.style.borderColor = "#FECACA"; e.currentTarget.style.color = "#DC2626"; }}
+                  onMouseEnter={e => { e.currentTarget.style.borderColor = "#FECACA"; e.currentTarget.style.color = "#A8443C"; }}
                   onMouseLeave={e => { e.currentTarget.style.borderColor = "rgba(0,0,0,.08)"; e.currentTarget.style.color = "var(--mut)"; }}>✕</button>
               </div>
             );
@@ -7672,7 +7672,7 @@ function PohledavkyPanel({ financeItems, onSaveFinance, onDeleteFinance }) {
               <input type="date" value={form.due} onChange={e => setForm(f => ({ ...f, due: e.target.value }))} title="Splatnost (volitelně)" style={inputSt} />
               <input value={form.source} onChange={e => setForm(f => ({ ...f, source: e.target.value }))} placeholder="Zdroj peněz (volitelně)" style={inputSt} />
             </div>
-            {formErr && <div style={{ fontSize: 11, color: "#DC2626", fontWeight: 600, marginBottom: 10 }}>{formErr}</div>}
+            {formErr && <div style={{ fontSize: 11, color: "#A8443C", fontWeight: 600, marginBottom: 10 }}>{formErr}</div>}
             <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
               <button onClick={() => { setOpen(false); setFormErr(""); }}
                 style={{ padding: "8px 16px", borderRadius: 10, border: "1px solid rgba(0,0,0,.1)", background: "#fff", color: "var(--mut)", fontSize: 12, cursor: "pointer", fontFamily: "inherit" }}>Zrušit</button>
@@ -7738,7 +7738,7 @@ function WebsiteTrafficPanel() {
     return (
       <div style={{ background: "#fff", borderRadius: BP.rInner, padding: "22px 28px", boxShadow: "0 0 0 1px rgba(0,0,0,.06)" }}>
         <div style={{ ...label, marginBottom: 8 }}>Návštěvnost webu — maux.cz</div>
-        <div style={{ fontSize: 12.5, color: "#DC2626", lineHeight: 1.5 }}>{err}</div>
+        <div style={{ fontSize: 12.5, color: "#A8443C", lineHeight: 1.5 }}>{err}</div>
       </div>
     );
   }
@@ -8700,7 +8700,7 @@ function AkcieModule({ xtbTranches = [], onTrancheSave, onTrancheDelete, xtbTitl
                 </div>
                 <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, padding: "3px 0" }}>
                   <span style={{ color: "var(--mut)" }}>Chybí</span>
-                  <span style={{ color: "#DC2626" }}>{fmtKc(cashAsk.chybi)}</span>
+                  <span style={{ color: "#A8443C" }}>{fmtKc(cashAsk.chybi)}</span>
                 </div>
               </div>
             )}
@@ -8769,7 +8769,7 @@ function AkcieModule({ xtbTranches = [], onTrancheSave, onTrancheDelete, xtbTitl
             </div>
             <div style={{ paddingLeft: 28, borderLeft: "1px solid rgba(28,10,99,.1)" }}>
               <div style={bpLabel({ marginBottom: 4 })}>Vydělaly ti peníze</div>
-              <div style={bpHero(42, pf.vydelaly >= 0 ? BP.indigoDeep : "#DC2626")}>
+              <div style={bpHero(42, pf.vydelaly >= 0 ? BP.indigoDeep : "#A8443C")}>
                 {fmtSigned(Math.round(pf.vydelaly))}
               </div>
             </div>
@@ -8861,7 +8861,7 @@ function AkcieModule({ xtbTranches = [], onTrancheSave, onTrancheDelete, xtbTitl
                     onBlur={e => overTicker(e.target.value)}
                     onKeyDown={e => { if (e.key === "Enter") overTicker(e.target.value); }}
                     style={{ width: "100%", boxSizing: "border-box", borderRadius: 8, padding: "8px 10px", fontSize: 13, fontFamily: "inherit",
-                      border: `1px solid ${tickOver && tickOver.stav === "chyba" ? "#DC2626" : tickOver && tickOver.stav === "ok" ? BP.indigoDeep : "rgba(28,10,99,.14)"}` }} />
+                      border: `1px solid ${tickOver && tickOver.stav === "chyba" ? "#A8443C" : tickOver && tickOver.stav === "ok" ? BP.indigoDeep : "rgba(28,10,99,.14)"}` }} />
                 </div>
                 <div>
                   <div style={{ fontSize: 10, color: "var(--mut)", marginBottom: 5 }}>Datum nákupu</div>
@@ -8944,7 +8944,7 @@ function AkcieModule({ xtbTranches = [], onTrancheSave, onTrancheDelete, xtbTitl
                       {t.nazev} · {t.ks.toLocaleString("cs-CZ", { maximumFractionDigits: 4 })} ks
                     </div>
                     <div style={{ ...bpHero(19, "var(--txt)"), marginTop: 10 }}>{fmtKc(Math.round(t.hodnota))}</div>
-                    <div style={{ fontSize: 11, marginTop: 3, color: t.zisk >= 0 ? BP.indigoDeep : "#DC2626" }}>
+                    <div style={{ fontSize: 11, marginTop: 3, color: t.zisk >= 0 ? BP.indigoDeep : "#A8443C" }}>
                       {fmtSigned(Math.round(t.zisk))}
                     </div>
                     <div style={{ height: 3, borderRadius: 2, background: "#EEECF7", marginTop: 10, overflow: "hidden" }}>
@@ -8986,7 +8986,7 @@ function AkcieModule({ xtbTranches = [], onTrancheSave, onTrancheDelete, xtbTitl
                             <span style={{ fontSize: 10.5, color: l.testSplnen ? BP.sandDeep : "var(--mut)" }}>
                               {l.testSplnen ? "časový test splněn" : `do testu ${Math.ceil(l.dnyDoTestu / 30)} měs.`}
                             </span>
-                            <span className="maux-num" style={{ fontSize: 12, color: l.zisk >= 0 ? BP.indigoDeep : "#DC2626", minWidth: 78, textAlign: "right" }}>
+                            <span className="maux-num" style={{ fontSize: 12, color: l.zisk >= 0 ? BP.indigoDeep : "#A8443C", minWidth: 78, textAlign: "right" }}>
                               {fmtSigned(Math.round(l.zisk))}
                             </span>
                             <span style={{ display: "flex", gap: 4 }}>
@@ -9022,7 +9022,7 @@ function AkcieModule({ xtbTranches = [], onTrancheSave, onTrancheDelete, xtbTitl
                                 <div style={{ fontSize: 11.5, color: "var(--mut)", marginTop: 12, lineHeight: 1.6 }}>
                                   Pořizovací cena těch kusů <b style={{ color: "var(--txt)" }}>{fmtKc(Math.round(nak))}</b>
                                   {vyt != null && <> · výtěžek zhruba <b style={{ color: "var(--txt)" }}>{fmtKc(Math.round(vyt))}</b>
-                                    {" · "}zisk <b style={{ color: vyt - nak >= 0 ? BP.indigoDeep : "#DC2626" }}>{fmtSigned(Math.round(vyt - nak))}</b></>}
+                                    {" · "}zisk <b style={{ color: vyt - nak >= 0 ? BP.indigoDeep : "#A8443C" }}>{fmtSigned(Math.round(vyt - nak))}</b></>}
                                   . Počítáno kurzem ČNB ke dni prodeje mínus 0,5 % — o tolik si XTB při směně
                                   zpátky do korun ukrojí. Prodej nesnižuje vložený kapitál — peníze jen přejdou
                                   z pozice do hotovosti.
@@ -9089,7 +9089,7 @@ function AkcieModule({ xtbTranches = [], onTrancheSave, onTrancheDelete, xtbTitl
                             <div key={c.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, padding: "6px 0", fontSize: 11, color: "var(--mut)" }}>
                               <span>{String(c.close_time).slice(0, 10)} · {Number(c.volume).toLocaleString("cs-CZ", { maximumFractionDigits: 4 })} ks @ {Number(c.close_price).toLocaleString("cs-CZ", { maximumFractionDigits: 2 })}</span>
                               <span style={{ display: "flex", alignItems: "center", gap: 12 }}>
-                                <span className="maux-num" style={{ color: (c.profit || 0) >= 0 ? BP.indigoDeep : "#DC2626" }}>{fmtSigned(Math.round(c.profit || 0))}</span>
+                                <span className="maux-num" style={{ color: (c.profit || 0) >= 0 ? BP.indigoDeep : "#A8443C" }}>{fmtSigned(Math.round(c.profit || 0))}</span>
                                 {c.lot_id && <button onClick={() => zrusProdej(c)} style={{ ...lotBtn(false), color: "#B91C1C" }}>Zrušit prodej</button>}
                               </span>
                             </div>
@@ -9138,7 +9138,7 @@ function AkcieModule({ xtbTranches = [], onTrancheSave, onTrancheDelete, xtbTitl
                 <div style={{ display: "flex", gap: 26, flexWrap: "wrap", marginTop: 16, paddingBottom: 14, borderBottom: "1px solid rgba(28,10,99,.07)" }}>
                   <div>
                     <div style={bpLabel({ marginBottom: 5 })}>Realizovaný zisk</div>
-                    <div style={bpHero(19, zisk >= 0 ? BP.indigoDeep : "#DC2626")}>{fmtSigned(Math.round(zisk))}</div>
+                    <div style={bpHero(19, zisk >= 0 ? BP.indigoDeep : "#A8443C")}>{fmtSigned(Math.round(zisk))}</div>
                   </div>
                   <div>
                     <div style={bpLabel({ marginBottom: 5 })}>Tržby z prodeje</div>
@@ -9177,7 +9177,7 @@ function AkcieModule({ xtbTranches = [], onTrancheSave, onTrancheDelete, xtbTitl
                             <td style={{ ...bunka, textAlign: "right" }}>{Number(c.volume).toLocaleString("cs-CZ", { maximumFractionDigits: 4 })}</td>
                             <td style={{ ...bunka, textAlign: "right" }}>{c.cost_czk != null ? fmtKc(Math.round(c.cost_czk)) : "—"}</td>
                             <td style={{ ...bunka, textAlign: "right" }}>{c.amount_czk != null ? fmtKc(Math.round(c.amount_czk)) : "—"}</td>
-                            <td className="maux-num" style={{ ...bunka, textAlign: "right", color: p >= 0 ? BP.indigoDeep : "#DC2626", fontWeight: 600 }}>{fmtSigned(Math.round(p))}</td>
+                            <td className="maux-num" style={{ ...bunka, textAlign: "right", color: p >= 0 ? BP.indigoDeep : "#A8443C", fontWeight: 600 }}>{fmtSigned(Math.round(p))}</td>
                             <td style={{ ...bunka, textAlign: "right", color: dnu != null && dnu >= 1095 ? BP.sandDeep : "var(--mut)" }}>
                               {dnu != null ? (dnu >= 365 ? `${(dnu / 365).toFixed(1).replace(".", ",")} r` : `${dnu} dní`) : "—"}
                             </td>
@@ -9214,10 +9214,10 @@ function AkcieModule({ xtbTranches = [], onTrancheSave, onTrancheDelete, xtbTitl
               border: `1px solid ${nextDeadline.daysLeft <= 14 ? "#FCA5A5" : "var(--line)"}`,
               display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, flexWrap: "wrap",
             }}>
-              <div style={{ fontSize: 12, fontWeight: 600, color: nextDeadline.daysLeft <= 14 ? "#DC2626" : "var(--ink)" }}>
+              <div style={{ fontSize: 12, fontWeight: 600, color: nextDeadline.daysLeft <= 14 ? "#A8443C" : "var(--ink)" }}>
                 Termín DPFO za rok 2025 — {nextDeadline.label}: {fmtDate(nextDeadline.date)}
               </div>
-              <div style={{ fontSize: 11.5, fontWeight: 700, color: nextDeadline.daysLeft <= 14 ? "#DC2626" : "var(--mut)" }}>
+              <div style={{ fontSize: 11.5, fontWeight: 700, color: nextDeadline.daysLeft <= 14 ? "#A8443C" : "var(--mut)" }}>
                 {nextDeadline.daysLeft === 0 ? "dnes!" : `zbývá ${nextDeadline.daysLeft} ${nextDeadline.daysLeft === 1 ? "den" : "dní"}`}
               </div>
             </div>
@@ -9242,14 +9242,14 @@ function AkcieModule({ xtbTranches = [], onTrancheSave, onTrancheDelete, xtbTitl
                 <tr key={y.year} style={{ borderBottom: "1px solid var(--line)" }}>
                   <td style={{ padding: "9px 12px", fontWeight: 700, color: "var(--ink)" }}>{y.year}{y.year === new Date().getFullYear() ? " (k dnešku)" : ""}</td>
                   <td style={{ padding: "9px 12px", textAlign: "right", color: "var(--mut)" }}>{fmtMoney(y.saleValue, currency)}</td>
-                  <td style={{ padding: "9px 12px", textAlign: "right", fontWeight: 600, color: y.profit >= 0 ? "#059669" : "#DC2626" }}>{y.profit >= 0 ? "+" : ""}{fmtMoney(y.profit, currency)}</td>
+                  <td style={{ padding: "9px 12px", textAlign: "right", fontWeight: 600, color: y.profit >= 0 ? "#4A7C59" : "#A8443C" }}>{y.profit >= 0 ? "+" : ""}{fmtMoney(y.profit, currency)}</td>
                   <td style={{ padding: "9px 12px" }}>
                     {y.exemptByTime ? (
-                      <span style={{ color: "#059669", fontWeight: 600 }}>časový test (3 r.)</span>
+                      <span style={{ color: "#4A7C59", fontWeight: 600 }}>časový test (3 r.)</span>
                     ) : y.exemptByValue ? (
-                      <span style={{ color: "#059669", fontWeight: 600 }}>do 100 000 Kč</span>
+                      <span style={{ color: "#4A7C59", fontWeight: 600 }}>do 100 000 Kč</span>
                     ) : (
-                      <span style={{ color: "#DC2626", fontWeight: 600 }}>nesplněno — limit 100k překročen</span>
+                      <span style={{ color: "#A8443C", fontWeight: 600 }}>nesplněno — limit 100k překročen</span>
                     )}
                   </td>
                   <td style={{ padding: "9px 12px", textAlign: "right", color: "var(--mut)" }}>
@@ -9313,7 +9313,7 @@ function AkcieModule({ xtbTranches = [], onTrancheSave, onTrancheDelete, xtbTitl
               {sortedTranches.map(t => (
                 <tr key={t.id} style={{ borderBottom: "1px solid var(--line)" }}>
                   <td style={{ padding: "9px 12px", color: "var(--mut)", whiteSpace: "nowrap" }}>{fmtDate(t.tranche_date)}</td>
-                  <td style={{ padding: "9px 12px", color: t.type === "výběr" ? "#DC2626" : "#059669", fontWeight: 600 }}>{t.type === "výběr" ? "Výběr" : "Vklad"}</td>
+                  <td style={{ padding: "9px 12px", color: t.type === "výběr" ? "#A8443C" : "#4A7C59", fontWeight: 600 }}>{t.type === "výběr" ? "Výběr" : "Vklad"}</td>
                   <td style={{ padding: "9px 12px", textAlign: "right", fontWeight: 600, color: "var(--txt)" }}>{t.type === "výběr" ? "−" : "+"}{fmtMoney(t.amount, t.currency || currency)}</td>
                   <td style={{ padding: "9px 12px", color: "var(--mut)" }}>{t.symbol || "—"}</td>
                   <td style={{ padding: "9px 12px", color: "var(--mut)" }}>{t.note || "—"}</td>
@@ -9366,7 +9366,7 @@ function AkcieModule({ xtbTranches = [], onTrancheSave, onTrancheDelete, xtbTitl
               {sortedTitles.map(t => (
                 <tr key={t.id} style={{ borderBottom: "1px solid var(--line)" }}>
                   <td style={{ padding: "9px 12px", color: "var(--txt)", fontWeight: 700 }}>{t.symbol}</td>
-                  <td style={{ padding: "9px 12px", color: t.status === "prodano" ? "var(--mut)" : "#059669", fontWeight: 600 }}>{t.status === "prodano" ? "Prodáno" : "Držím"}</td>
+                  <td style={{ padding: "9px 12px", color: t.status === "prodano" ? "var(--mut)" : "#4A7C59", fontWeight: 600 }}>{t.status === "prodano" ? "Prodáno" : "Držím"}</td>
                   <td style={{ padding: "9px 12px", color: "var(--mut)" }}>{t.note || "—"}</td>
                   <td style={{ padding: "9px 4px", textAlign: "center" }}>
                     <button onClick={() => onTitleDelete(t.id)} style={{ background: "none", border: "none", color: "#DDD", cursor: "pointer", fontSize: 12 }}>✕</button>
@@ -9776,8 +9776,8 @@ function RejstrikyModule({ onNav, clients }) {
                   </div>
                 </div>
                 <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
-                  {r.dphStatus === "AKTIVNI" && <span style={{ fontSize: 9, padding: "3px 8px", borderRadius: 99, background: "#ECFDF5", color: "#059669", fontWeight: 700, letterSpacing: ".04em" }}>DPH</span>}
-                  {r.insolvence === "ANO" && <span style={{ fontSize: 9, padding: "3px 8px", borderRadius: 99, background: "#FEF2F2", color: "#DC2626", fontWeight: 700, letterSpacing: ".04em" }}>INS</span>}
+                  {r.dphStatus === "AKTIVNI" && <span style={{ fontSize: 9, padding: "3px 8px", borderRadius: 99, background: "#ECFDF5", color: "#4A7C59", fontWeight: 700, letterSpacing: ".04em" }}>DPH</span>}
+                  {r.insolvence === "ANO" && <span style={{ fontSize: 9, padding: "3px 8px", borderRadius: 99, background: "#FEF2F2", color: "#A8443C", fontWeight: 700, letterSpacing: ".04em" }}>INS</span>}
                   <span style={{ fontSize: 12, fontFamily: "var(--mono)", color: "var(--mut)", background: "#F9FAFB", padding: "4px 10px", borderRadius: 8 }}>{r.ico}</span>
                 </div>
               </div>
@@ -10000,7 +10000,7 @@ function JosefPanel({ logs, attendance: attendanceProp, availability, clients = 
   useEffect(() => { fetchAssistantAttendance("asistent@maux.cz").then(setFreshAtt).catch(() => setFreshAtt([])); }, []);
   const attendance = freshAtt !== null ? freshAtt : (attendanceProp || []);
 
-  const INK = "#2B2478", IND = "#3518A5", INDV = "#5B52F0", MUT = "#8B87A8", SND = "#B8923D", UP = "#059669", HL = "rgba(53,24,165,.08)";
+  const INK = "#2B2478", IND = "#3518A5", INDV = "#4A44B8", MUT = "#8B87A8", SND = "#A08350", UP = "#4A7C59", HL = "rgba(53,24,165,.08)";
 
   // Efektivně datovaná sazba — prázdný rozvrh => 170 (žádná změna čísel)
   const rateSched = assistantRateSchedule(financeItems);
@@ -10057,7 +10057,7 @@ function JosefPanel({ logs, attendance: attendanceProp, availability, clients = 
   const isIn = !!(todayAtt?.check_in && !todayAtt?.check_out);
   const isOut = !!(todayAtt?.check_in && todayAtt?.check_out);
   const statusLabel = isIn ? "Přítomen" : isOut ? "Odhlášen" : "Nezaznamenán";
-  const statusColor = isIn ? "#059669" : isOut ? "#6B7280" : "#D97706";
+  const statusColor = isIn ? "#4A7C59" : isOut ? "#6B7280" : "#D97706";
   const statusBg = isIn ? "rgba(5,150,105,.08)" : isOut ? "rgba(107,114,128,.06)" : "rgba(217,119,6,.06)";
   const checkInStr = todayAtt?.check_in ? new Date(todayAtt.check_in).toLocaleTimeString("cs-CZ", { hour: "2-digit", minute: "2-digit" }) : null;
   const todayHours = todayAtt?.check_in ? (todayAtt.check_out ? netAttHours(todayAtt.check_in, todayAtt.check_out) : Math.max(0, (now - new Date(todayAtt.check_in)) / 36e5)) : 0;
@@ -10122,9 +10122,9 @@ function JosefPanel({ logs, attendance: attendanceProp, availability, clients = 
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <button onClick={() => { setNewRate(rateNow); setEffMonth(nextYm); setRateOpen(o => !o); }}
-            style={{ display: "flex", alignItems: "center", gap: 6, background: "rgba(91,82,240,.07)", border: "1px solid rgba(91,82,240,.18)", borderRadius: 8, padding: "6px 10px", cursor: "pointer" }}>
-            <span style={{ fontSize: 12, fontWeight: 600, color: "#3F35C7" }}>{rateNow} Kč/h</span>
-            <span style={{ fontSize: 9, color: INDV, fontWeight: 600, borderLeft: "1px solid rgba(91,82,240,.25)", paddingLeft: 6 }}>upravit</span>
+            style={{ display: "flex", alignItems: "center", gap: 6, background: "rgba(74,68,184,.07)", border: "1px solid rgba(74,68,184,.18)", borderRadius: 8, padding: "6px 10px", cursor: "pointer" }}>
+            <span style={{ fontSize: 12, fontWeight: 600, color: "#3A3494" }}>{rateNow} Kč/h</span>
+            <span style={{ fontSize: 9, color: INDV, fontWeight: 600, borderLeft: "1px solid rgba(74,68,184,.25)", paddingLeft: 6 }}>upravit</span>
           </button>
           <div style={{ display: "flex", alignItems: "center", gap: 5, background: statusBg, borderRadius: 8, padding: "6px 10px" }}>
             <span style={{ width: 6, height: 6, borderRadius: "50%", background: statusColor, boxShadow: isIn ? `0 0 6px ${statusColor}` : "none" }} />
@@ -10135,19 +10135,19 @@ function JosefPanel({ logs, attendance: attendanceProp, availability, clients = 
 
       {/* Editor sazby */}
       {rateOpen && (
-        <div style={{ margin: "0 22px 6px", padding: "12px 14px", background: "rgba(91,82,240,.04)", border: "1px solid rgba(91,82,240,.16)", borderRadius: BP.rInner, display: "flex", alignItems: "flex-end", gap: 12, flexWrap: "wrap" }}>
+        <div style={{ margin: "0 22px 6px", padding: "12px 14px", background: "rgba(74,68,184,.04)", border: "1px solid rgba(74,68,184,.16)", borderRadius: BP.rInner, display: "flex", alignItems: "flex-end", gap: 12, flexWrap: "wrap" }}>
           <div>
             <div style={lbl({ marginBottom: 5 })}>Nová sazba</div>
             <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
               <input type="number" value={newRate} onChange={e => setNewRate(e.target.value)}
-                style={{ width: 74, padding: "6px 8px", fontSize: 14, fontWeight: 600, color: "#3F35C7", border: "1px solid rgba(91,82,240,.3)", borderRadius: 7, outline: "none" }} />
+                style={{ width: 74, padding: "6px 8px", fontSize: 14, fontWeight: 600, color: "#3A3494", border: "1px solid rgba(74,68,184,.3)", borderRadius: 7, outline: "none" }} />
               <span style={{ fontSize: 11, color: MUT }}>Kč/h</span>
             </div>
           </div>
           <div>
             <div style={lbl({ marginBottom: 5 })}>Platí od</div>
             <input type="month" value={effMonth} onChange={e => setEffMonth(e.target.value)}
-              style={{ padding: "6px 8px", fontSize: 12, color: INK, border: "1px solid rgba(91,82,240,.3)", borderRadius: 7, outline: "none" }} />
+              style={{ padding: "6px 8px", fontSize: 12, color: INK, border: "1px solid rgba(74,68,184,.3)", borderRadius: 7, outline: "none" }} />
           </div>
           <div style={{ fontSize: 9.5, color: INDV, fontWeight: 600, flex: 1, minWidth: 140, paddingBottom: 6 }}>
             {rateNow} → {Number(newRate) || rateNow} Kč/h · minulé měsíce beze změny
@@ -10166,7 +10166,7 @@ function JosefPanel({ logs, attendance: attendanceProp, availability, clients = 
           <div style={{ display: "flex", alignItems: "baseline", gap: 10, flexWrap: "wrap" }}>
             <span style={hero(32, INK)}>{missingCheckout ? "—" : fmtKc(wageToDate)}</span>
             {projWage > wageToDate && (
-              <span style={{ fontSize: 10.5, color: INDV, fontWeight: 600, background: "rgba(91,82,240,.08)", border: "1px dashed rgba(91,82,240,.35)", borderRadius: 20, padding: "3px 9px" }}>→ {fmtKc(projWage)} projekce</span>
+              <span style={{ fontSize: 10.5, color: INDV, fontWeight: 600, background: "rgba(74,68,184,.08)", border: "1px dashed rgba(74,68,184,.35)", borderRadius: 20, padding: "3px 9px" }}>→ {fmtKc(projWage)} projekce</span>
             )}
           </div>
           <div style={{ fontSize: 10.5, color: MUT, marginTop: 8 }}>{fh(Math.round(totalHours * 10) / 10)} h × {rateNow} Kč{projPlannedDays > 0 ? ` · do konce měsíce plán ${Math.round(projHours)} h` : ""}</div>
@@ -10192,13 +10192,13 @@ function JosefPanel({ logs, attendance: attendanceProp, availability, clients = 
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
           <span style={lbl()}>Náklady za minulé měsíce</span>
           {costDeltaPct != null && (
-            <span style={{ fontSize: 9.5, fontWeight: 600, color: costDeltaPct <= 0 ? UP : "#DC2626" }}>{costDeltaPct <= 0 ? "▼" : "▲"} {costDeltaPct > 0 ? "+" : ""}{costDeltaPct} % vs. minulý</span>
+            <span style={{ fontSize: 9.5, fontWeight: 600, color: costDeltaPct <= 0 ? UP : "#A8443C" }}>{costDeltaPct <= 0 ? "▼" : "▲"} {costDeltaPct > 0 ? "+" : ""}{costDeltaPct} % vs. minulý</span>
           )}
         </div>
         <div style={{ display: "flex", alignItems: "flex-end", gap: 12, height: 96 }}>
           {costMonths.map(c => {
             const barH = Math.max(4, Math.round(c.cost / maxCost * 82));
-            const col = c.running ? "rgba(91,82,240,.28)" : c.manual ? SND : IND;
+            const col = c.running ? "rgba(74,68,184,.28)" : c.manual ? SND : IND;
             const tcol = c.running ? INDV : c.manual ? SND : INK;
             return (
               <div key={c.m} style={{ flex: 1, textAlign: "center", minWidth: 0 }}>
@@ -10233,7 +10233,7 @@ function JosefPanel({ logs, attendance: attendanceProp, availability, clients = 
                 <div style={{ flex: 1, background: SND }} />
               </div>
               <div style={{ display: "flex", justifyContent: "space-between", fontSize: 9 }}>
-                <span style={{ color: "#3F35C7", fontWeight: 600 }}>Klient {Math.round(billShare * 100)} %</span>
+                <span style={{ color: "#3A3494", fontWeight: 600 }}>Klient {Math.round(billShare * 100)} %</span>
                 <span style={{ color: SND, fontWeight: 600 }}>BD {Math.round((1 - billShare) * 100)} %</span>
               </div>
             </>
@@ -10432,14 +10432,14 @@ const PanelCtx = createContext(null);
 const BP = {
   // Tom 27.7.: "barvy nepatrně sytější, okraje apple kulaté" — o stupeň víc chroma,
   // ale pořád daleko od neonu; poloměry v apple měřítku (22/20/18).
-  indigo: "#5B52F0", indigoDeep: "#3F35C7", indigoInk: "#2B2478",
+  indigo: "#4A44B8", indigoDeep: "#3A3494", indigoInk: "#2B2478",
   sand: "#C6A86B", sandDeep: "#96773C",
-  live: "#C3CCFF", liveEdge: "#7A6BF5",
-  up: "#059669", down: "#DC2626",
-  corner: "#8B7BFF",
-  frame: "1.5px solid rgba(53,24,165,.2)",
+  live: "#DAD8EF", liveEdge: "#6E68C4",
+  up: "#4A7C59", down: "#A8443C",
+  corner: "#ABA6DA",
+  frame: "1px solid rgba(74,68,184,.13)",
   r: 22, rInner: 18,
-  shadow: "0 1px 3px rgba(16,12,60,.05), 0 14px 36px -14px rgba(16,12,60,.14)",
+  shadow: "0 1px 2px rgba(16,12,60,.03), 0 12px 30px -16px rgba(16,12,60,.10)",
 };
 // Rohové značky — technický "blueprint" rám, podpis celé estetiky
 function BpCorners({ color = BP.corner, inset = 11, size = 13, radius = 9 }) {
@@ -10524,7 +10524,7 @@ function Panel({ id, children }) {
           </div>
           <button
             onClick={() => toggleHide(id)}
-            style={{position:"absolute",top:6,right:6,zIndex:10,background:hidden?"#059669":"#DC2626",color:"#fff",border:"none",borderRadius:"50%",width:22,height:22,fontSize:13,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",fontWeight:700,boxShadow:"0 1px 4px rgba(0,0,0,.25)",transition:"transform .15s"}}
+            style={{position:"absolute",top:6,right:6,zIndex:10,background:hidden?"#4A7C59":"#A8443C",color:"#fff",border:"none",borderRadius:"50%",width:22,height:22,fontSize:13,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",fontWeight:700,boxShadow:"0 1px 4px rgba(0,0,0,.25)",transition:"transform .15s"}}
             title={hidden ? "Zobrazit" : "Skrýt"}
             onMouseEnter={e=>e.currentTarget.style.transform="scale(1.15)"}
             onMouseLeave={e=>e.currentTarget.style.transform="scale(1)"}
@@ -10741,7 +10741,7 @@ function MilestoneCelebration({ row, nextGoal, variant = "closed", onClose }) {
     const cvs = cvsRef.current;
     if (!cvs) return;
     const ctx = cvs.getContext("2d");
-    const cols = ["#5B52F0", "#C6A86B", "#3518A4", "#E3D6B8", "#ffffff"];
+    const cols = ["#4A44B8", "#C6A86B", "#3518A4", "#E3D6B8", "#ffffff"];
     let raf = null;
     const t0 = performance.now();
     const size = () => { cvs.width = window.innerWidth; cvs.height = window.innerHeight; };
@@ -11176,13 +11176,13 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
       <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:12}}>
         <div style={{fontSize:12,color:"var(--mut)",display:"flex",gap:14,flexWrap:"wrap",alignItems:"center"}}>
           <span>{now.toLocaleDateString("cs-CZ",{weekday:"long",day:"numeric",month:"long"})}</span>
-          {overdue.length>0 && <span style={{color:"#DC2626",fontWeight:500}}>⚠ {overdue.length}× po splatnosti</span>}
+          {overdue.length>0 && <span style={{color:"#A8443C",fontWeight:500}}>⚠ {overdue.length}× po splatnosti</span>}
           {Object.keys(unbilledByClient).length>0 && <span style={{color:"var(--ink)",fontWeight:500}}>◆ {Object.keys(unbilledByClient).length} klientů čeká na fakturu</span>}
           {dphReserved>0 && <span style={{color:"#D97706",fontWeight:500}}>DPH spořák: {fmtKc(dphReserved)}</span>}
         </div>
         <div style={{display:"flex",gap:8,alignItems:"center",flexShrink:0}}>
           {editLayout && (
-            <button className="btn gho" style={{fontSize:11,padding:"6px 12px",color:"#DC2626",border:"1px solid #FECACA"}} onClick={resetLayout}>
+            <button className="btn gho" style={{fontSize:11,padding:"6px 12px",color:"#A8443C",border:"1px solid #FECACA"}} onClick={resetLayout}>
               ↺ Reset
             </button>
           )}
@@ -11228,7 +11228,7 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
         <div style={{background:"linear-gradient(135deg,#EEF2FF,#E0E7FF)",border:"1px solid rgba(99,102,241,.25)",borderRadius:10,padding:"12px 18px",fontSize:12,color:"#3730A3",display:"flex",alignItems:"center",gap:10}}>
           <span style={{fontSize:18}}>✨</span>
           <div>
-            <strong>Režim úprav</strong> — přetáhni karty pro změnu pořadí · <span style={{color:"#DC2626"}}>✕</span> skryje · <span style={{color:"#059669"}}>+</span> zobrazí · pořadí se automaticky ukládá
+            <strong>Režim úprav</strong> — přetáhni karty pro změnu pořadí · <span style={{color:"#A8443C"}}>✕</span> skryje · <span style={{color:"#4A7C59"}}>+</span> zobrazí · pořadí se automaticky ukládá
           </div>
         </div>
       )}
@@ -11265,11 +11265,11 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
           const expPaid = expAll.filter(i => (expenseChecks||[]).find(c => c.item_id === i.id && c.paid)).length;
           const sPlatby = expAll.length > 0 ? Math.round((expPaid/expAll.length)*25) : 18;
           const score = sCash + sRunway + sNext + sPlatby;
-          const verdict = score >= 85 ? { t: "Firma jede na plné obrátky", e: "🚀", c: "#059669" }
+          const verdict = score >= 85 ? { t: "Firma jede na plné obrátky", e: "🚀", c: "#4A7C59" }
                         : score >= 65 ? { t: "Pevně na nohou", e: "💪", c: "#16A34A" }
                         : score >= 45 ? { t: "Stabilní — jen hlídej tempo", e: "👀", c: "#D97706" }
                         : score >= 25 ? { t: "Vyžaduje pozornost", e: "⚠️", c: "#EA580C" }
-                        :               { t: "Čas zpomalit a přeskupit síly", e: "🧭", c: "#DC2626" };
+                        :               { t: "Čas zpomalit a přeskupit síly", e: "🧭", c: "#A8443C" };
           const Bar = ({label, val, max, color}) => (
             <div style={{minWidth:108}}>
               <div style={{fontSize:9,color:"var(--mut)",marginBottom:3,display:"flex",justifyContent:"space-between"}}>
@@ -11307,10 +11307,10 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
               </div>
               <div style={{width:1,alignSelf:"stretch",background:"var(--line)",margin:"0 2px",flexShrink:0}} />
               <div style={{display:"flex",gap:18,flexWrap:"wrap",flex:1}}>
-                <Bar label="Cash flow tento měsíc" val={sCash} max={25} color="#059669" />
+                <Bar label="Cash flow tento měsíc" val={sCash} max={25} color="#4A7C59" />
                 <Bar label={`Běh na rezervách (${runwayMPulz} měs.)`} val={sRunway} max={25} color="#7C3AED" />
                 <Bar label="Projekce příští měsíc" val={sNext} max={25} color="#0EA5E9" />
-                <Bar label="Odškrtnuté platby" val={sPlatby} max={25} color="#B8923D" />
+                <Bar label="Odškrtnuté platby" val={sPlatby} max={25} color="#A08350" />
               </div>
             </div>
           );
@@ -11336,7 +11336,7 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
         // (pct/paidCount níž se počítají dál, jen se nerozbalují do checklistu) a uvolněné místo
         // dole vyplnila Firemní rezerva (viz computeFirmaRezerva níž).
         const isPaid = (id) => !!(expenseChecks||[]).find(c => c.item_id === id && c.paid);
-        const allExpItems = [...nutne.map(i=>({...i,_c:"#DC2626"})), {id:"josef_wage",_c:"#3518A5"}, ...luxus.map(i=>({...i,_c:"#9333EA"}))];
+        const allExpItems = [...nutne.map(i=>({...i,_c:"#A8443C"})), {id:"josef_wage",_c:"#3518A5"}, ...luxus.map(i=>({...i,_c:"#9333EA"}))];
         const paidItems = allExpItems.filter(i => isPaid(i.id));
         const paidCount = paidItems.length;
         const paidSum   = paidItems.reduce((s,i)=>s+Math.abs(i.amount||0),0);
@@ -11378,12 +11378,12 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
               <div style={{padding:"22px 24px 0",textAlign:"center"}}>
                 <div style={{display:"flex",alignItems:"center",justifyContent:"center",gap:6,marginBottom:10}}>
                   <span className="maux-dot" style={{width:6,height:6,background:"#3518A5",boxShadow:"0 0 4px rgba(53,24,165,.5)"}} />
-                  <div style={{fontSize:10,letterSpacing:".22em",textTransform:"uppercase",color:"#3518A5",fontWeight:800}}>Bilance příštího měsíce</div>
+                  <div style={{fontSize:10,letterSpacing:".22em",textTransform:"uppercase",color:"#3A3494",fontWeight:600}}>Bilance příštího měsíce</div>
                 </div>
-                <div className="maux-num maux-glow" style={{
-                  fontSize:46, fontWeight:800,
-                  color: "#3518A5",
-                  lineHeight:1,
+                <div style={{
+                  fontFamily:"Fraunces,serif", fontSize:46, fontWeight:300,
+                  color: "#3A3494",
+                  lineHeight:1.05, letterSpacing:"-.015em",
                   whiteSpace:"nowrap",
                 }}>
                   {positiveBalance?"+":"−"}{fmtKc(Math.abs(nextMonthBalance))}
@@ -11401,7 +11401,7 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
                 <div style={{borderTop:"1px solid rgba(53,24,165,.14)",paddingTop:12}}>
                   <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",cursor:"pointer"}} onClick={()=>setPrijmyOpen(v=>!v)}>
                     <span style={{fontSize:12,letterSpacing:".1em",textTransform:"uppercase",color:"var(--ink)",fontWeight:700}}>Příjmy {prijmyOpen?"▲":"▾"}</span>
-                    <span className="maux-num" style={{fontSize:21,fontWeight:600,color:"#059669"}}>{fmtKc(totalPrijmy)}</span>
+                    <span className="maux-num" style={{fontSize:21,fontWeight:600,color:"#4A7C59"}}>{fmtKc(totalPrijmy)}</span>
                   </div>
                   {prijmyOpen && (
                     <div style={{marginTop:8,display:"flex",flexDirection:"column",gap:2}}>
@@ -11441,7 +11441,7 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
                       {nadmernyOdpocet!==0 && (
                         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"4px 0"}}>
                           <span style={{fontSize:10,color:"var(--mut)",letterSpacing:".02em"}}>Odpočet DPH za {thisMonthName.toLowerCase()}{nadmernyOdpocet<0 ? " (doplatek)" : ""}</span>
-                          <span className="maux-num" style={{fontSize:11.5,fontWeight:500,color:nadmernyOdpocet<0?"#DC2626":"var(--ink)"}}>{nadmernyOdpocet<0 ? `−${fmtKc(Math.abs(nadmernyOdpocet))}` : fmtKc(nadmernyOdpocet)}</span>
+                          <span className="maux-num" style={{fontSize:11.5,fontWeight:500,color:nadmernyOdpocet<0?"#A8443C":"var(--ink)"}}>{nadmernyOdpocet<0 ? `−${fmtKc(Math.abs(nadmernyOdpocet))}` : fmtKc(nadmernyOdpocet)}</span>
                         </div>
                       )}
                       {escrowNetThisMonth>0 && (
@@ -11500,7 +11500,7 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
                   // Jediný zdroj pravdy — viz computeSporakEnvelopes
                   const _envS = computeSporakEnvelopes(financeItems, invoices, dpfoMonths, loanTransactions, escrows);
                   const sporBalS = _envS.balance;
-                  const S_ENV_COLOR = { dph: "#2B2478", dpfo: "#5B52F0", bob: "#7A6BF5", danu: "#A79BFF" };
+                  const S_ENV_COLOR = { dph: "#2B2478", dpfo: "#4A44B8", bob: "#6E68C4", danu: "#A79BFF" };
                   const sEnvSegs = _envS.envelopes.map((e, idx) => ({
                     label: e.key === "dpfo" ? "DPFO" : e.label,
                     value: e.amount,
@@ -11508,7 +11508,7 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
                   }));
                   const sTotalEar = _envS.earmarked;
                   const sFirmaRez = _envS.free;
-                  const sFullSegs = [...sEnvSegs, ...(sFirmaRez > 0 ? [{ label: "Volné", value: sFirmaRez, color: "#5B52F0" }] : [])];
+                  const sFullSegs = [...sEnvSegs, ...(sFirmaRez > 0 ? [{ label: "Volné", value: sFirmaRez, color: "#4A44B8" }] : [])];
                   const sTotalAll = sFullSegs.reduce((s,e)=>s+e.value,0) || 1;
                   const boundPct  = Math.round((sTotalEar / Math.max(sporBalS,1)) * 100);
                   // SVG donut — r=34
@@ -11735,7 +11735,7 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
                   return (
                     <g style={{ pointerEvents: "none" }}>
                       <rect x={padL} y={padT} width={W-padL-padR} height={Math.max(costY-padT,0)}
-                        fill="#059669" opacity={0.04} />
+                        fill="#4A7C59" opacity={0.04} />
                       <line x1={padL} x2={W-padR} y1={costY} y2={costY}
                         stroke="#9CA3AF" strokeWidth={1} strokeDasharray="2,3" opacity={0.55} />
                       <text x={W-padR} y={costY-4} textAnchor="end" fontSize={7} fontFamily="Inter" fill="#9CA3AF">
@@ -11753,9 +11753,9 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
                     <g>
                       <polyline
                         points={trendPts.map(p=>p.join(",")).join(" ")}
-                        fill="none" stroke="#5B4FE5" strokeWidth={1.6} strokeDasharray="4,4" opacity={0.6}
+                        fill="none" stroke="#4A44B8" strokeWidth={1.6} strokeDasharray="4,4" opacity={0.6}
                       />
-                      <circle cx={last[0]} cy={last[1]} r={5} fill="#5B4FE5" opacity={0.18} />
+                      <circle cx={last[0]} cy={last[1]} r={5} fill="#4A44B8" opacity={0.18} />
                       <circle cx={last[0]} cy={last[1]} r={2.6} fill="#3518A5" />
                     </g>
                   );
@@ -11869,7 +11869,7 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
                           x={x + barW/2} y={baseY - totalH - 28}
                           textAnchor="middle" fontSize={7}
                           fontFamily="Inter" fontWeight="700"
-                          fill={isLive ? "#7C3AED" : (delta > 0 ? "#059669" : delta < 0 ? "#DC2626" : "var(--mut)")}
+                          fill={isLive ? "#7C3AED" : (delta > 0 ? "#4A7C59" : delta < 0 ? "#A8443C" : "var(--mut)")}
                         >
                           {isLive
                             ? (delta < 0 ? `ještě ${Math.round(Math.abs(delta)/1000)}k do mety` : `+${Math.round(delta/1000)}k navrch — máš to!`)
@@ -11956,9 +11956,12 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
           const liveYmStr = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,"0")}`;
           const closedRows = (ladder.rows || []).filter(r => !r.isCurrent);
           const thisGoal = ((ladder.allRows || []).slice(-1)[0] || {}).goal || 200000;
-          // Zivy radek: nevyfakturovana prace bez DPH + CISTY urok z uschov (po -15% srazkove
-          // dani) — stejna baze jako uzavrene mesice i jako Bilance a kalendar.
-          const liveInvAmt = unbilledWorkNetNoVat(workEntries);
+          // Živý řádek = TOK, ne zásoba (Tom 31.7.2026). Práce ZAPSANÁ v běžícím měsíci
+          // (bez DPH, po slevě) + čistý úrok z úschov. Dřív to byla nevyfakturovaná zásoba
+          // bez ohledu na datum zápisu, takže žebřík hlásil za červenec 214 417 Kč, zatímco
+          // hlavička kalendáře na téže obrazovce 216 417 Kč. Jedna definice pro celou appku.
+          const liveInvAmt = (workEntries || []).filter(e => (e.entry_date || "").startsWith(liveYmStr))
+            .reduce((s, e) => s + Math.max((e.amount || 0) - (Number(e.discount_amount) || 0), 0), 0);
           const liveEscAmt = Math.round(escrowGrossThisMonth);
           const liveTotal = liveInvAmt + liveEscAmt;
           const bestNext = (ladder.allRows || []).slice(-12).reduce((m, x) => Math.max(m, x.totalM), 0);
@@ -11999,7 +12002,7 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
                     <span style={{fontSize:9.5,letterSpacing:".06em",color:r.live?"var(--txt)":"var(--mut)",fontWeight:r.live?600:400}}>{mName(r.ym)}</span>
                     <div style={{position:"relative",height:7,background:"rgba(0,0,0,.045)",borderRadius:99}}>
                       <div style={{position:"absolute",left:0,top:0,bottom:0,width:`${pctOf(r.totalM)}%`,borderRadius:99,
-                        background: r.live ? BP.indigo : (r.over ? "rgba(91,82,240,.42)" : "rgba(91,82,240,.17)")}} />
+                        background: r.live ? BP.indigo : (r.over ? "rgba(74,68,184,.42)" : "rgba(74,68,184,.17)")}} />
                       <div title={`Meta ${Math.round(r.goal || activeGoal).toLocaleString("cs-CZ")} Kč`}
                         style={{position:"absolute",left:`${pctOf(r.goal || activeGoal)}%`,top:r.live?-3:-2,bottom:r.live?-3:-2,width:1.5,background:BP.sand,borderRadius:1}} />
                     </div>
@@ -12008,7 +12011,7 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
                 ))}
               </div>
               <div style={{fontSize:9,color:"var(--mut)",marginTop:12,opacity:.8,lineHeight:1.6}}>
-                Zlatá ryska = meta platná pro daný měsíc · plná barva = překonáno · poslední řádek běží živě (nevyfakturovaná práce + čistý úrok z úschov)
+                Zlatá ryska = meta platná pro daný měsíc · plná barva = překonáno · poslední řádek běží živě (práce zapsaná v tomto měsíci + čistý úrok z úschov)
               </div>
             </>
           );
@@ -12426,7 +12429,7 @@ function WorkEntryList({ entries, clients, invoices, onNew, onEdit, onDelete, on
             <option key={c.id} value={c.id}>{c.name}</option>
           )}
         </select>
-        {filterClient && <button className="btn gho" style={{ fontSize: 12, color: "#DC2626" }} onClick={() => setFilterClient("")}>Zrušit ×</button>}
+        {filterClient && <button className="btn gho" style={{ fontSize: 12, color: "#A8443C" }} onClick={() => setFilterClient("")}>Zrušit ×</button>}
         <input
           type="text"
           value={search}
@@ -12434,7 +12437,7 @@ function WorkEntryList({ entries, clients, invoices, onNew, onEdit, onDelete, on
           placeholder="Hledat v popisu / klientovi…"
           style={{ font: "inherit", fontSize: 13, padding: "8px 12px", border: "1px solid var(--line2)", borderRadius: 8, color: "var(--ink)", background: "#fff", minWidth: 220 }}
         />
-        {search && <button className="btn gho" style={{ fontSize: 12, color: "#DC2626" }} onClick={() => setSearch("")}>Zrušit ×</button>}
+        {search && <button className="btn gho" style={{ fontSize: 12, color: "#A8443C" }} onClick={() => setSearch("")}>Zrušit ×</button>}
         <button className="btn pri" onClick={onNew} style={{ marginLeft: "auto" }}>+ Nový záznam</button>
       </div>
 
@@ -12509,7 +12512,7 @@ function WorkEntryList({ entries, clients, invoices, onNew, onEdit, onDelete, on
                     </td>
                     <td className="t-amt">{maskNum(new Intl.NumberFormat("cs-CZ").format(Math.max((e.amount||0)-(Number(e.discount_amount)||0),0) + (e.admin_fee||0) + (Number(e.sig_count)||0)*SIGNATURE_DECL_FEE))} Kč</td>
                     <td style={{ textAlign: "right" }} onClick={ev => ev.stopPropagation()}>
-                      <button className="btn gho" style={{ fontSize: 11, padding: "4px 8px", color: "#DC2626" }}
+                      <button className="btn gho" style={{ fontSize: 11, padding: "4px 8px", color: "#A8443C" }}
                         onClick={() => onDelete(e.id)}>✕</button>
                     </td>
                   </tr>
@@ -12563,8 +12566,8 @@ function VykazyCalendar({ workEntries, escrows, invoices, dense = false, onOpenF
   // Indigo phosphor — barva čísel z výkazů; ESC — zlatá pro denní úrok z úschov.
   // Pozn.: kalendář si záměrně DRŽÍ svit i barevné dlaždice, i když zbytek Přehledu je
   // "tichý papír" — Tom 26.7.2026: "tato část se mi líbila víc předtím".
-  const PHOS = "#5B4FE5";
-  const ESC = "#B8923D";
+  const PHOS = "#4A44B8";
+  const ESC = "#A08350";
 
   const base = new Date();
   const viewDate = new Date(base.getFullYear(), base.getMonth() - monthOffset, 1);
@@ -12652,7 +12655,11 @@ function VykazyCalendar({ workEntries, escrows, invoices, dense = false, onOpenF
   // Jediné velké číslo appky je teď tohle a je to přesně součet dlaždic pod ním:
   // práce zapsaná v zobrazeném měsíci (bez DPH, po slevě) + čistý úrok z úschov.
   // Meta se kreslí jako laťka se ZLATĚ dokresleným přesahem, historie jako sparkline vpravo.
-  const heroTotal = monthTotal + escMonthTotal;
+  // Úrok bereme ze SDÍLENÉ funkce escrowNetForMonth — stejné číslo jako žebřík mety, Bilance
+  // i sparkline. Součet dlaždic (escMonthTotal) projektuje i dny do konce měsíce, které ještě
+  // nenastaly; velké číslo má říkat, co je VYDĚLÁNO k dnešku, ne co se čeká.
+  const escMonthEarned = useMemo(() => Math.round(escrowNetForMonth(escrows, y, m)), [escrows, y, m]);
+  const heroTotal = monthTotal + escMonthEarned;
   const hero = useMemo(() => {
     if (dense || monthOffset !== 0 || !invoices) return null;
     const now = new Date();
@@ -12677,12 +12684,12 @@ function VykazyCalendar({ workEntries, escrows, invoices, dense = false, onOpenF
   return (
     <div style={{ background: "#fff", borderRadius: dense ? 12 : BP.rInner, overflow: "hidden", height: "100%", display: "flex", flexDirection: "column" }}>
       {/* Header */}
-      <div style={{ padding: dense ? "18px 20px 12px" : "26px 30px 18px", borderBottom: "1px solid rgba(0,0,0,.05)", flexShrink: 0 }}>
+      <div style={{ padding: dense ? "18px 20px 12px" : "32px 34px 24px", borderBottom: "1px solid rgba(0,0,0,.04)", flexShrink: 0 }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
           <div>
             {!dense && <div style={{fontSize:9,letterSpacing:".26em",textTransform:"uppercase",fontWeight:700,color:"var(--mut)",marginBottom:5}}>ZAPSANÁ PRÁCE — DEN PO DNI</div>}
             <div style={{display:"flex",alignItems:"baseline",gap:8}}>
-              <span style={{fontWeight:600,fontSize:dense?20:26,color:"var(--ink)",lineHeight:1}}>{monthNamesFull[m]} {y}</span>
+              <span style={{fontWeight:500,fontSize:dense?20:22,color:"var(--ink)",lineHeight:1,letterSpacing:"-.005em"}}>{monthNamesFull[m]} {y}</span>
               {monthOffset !== 0 && (
                 <span style={{fontSize:10.5,color:PHOS,cursor:"pointer",textDecoration:"underline"}} onClick={() => { setMonthOffset(0); setSelectedDay(null); }}>zpět na dnešek</span>
               )}
@@ -12721,25 +12728,29 @@ function VykazyCalendar({ workEntries, escrows, invoices, dense = false, onOpenF
             <div style={{marginTop:dense?8:14,display:"flex",alignItems:"flex-start",justifyContent:"space-between",gap:28}}>
               <div style={{flex:"1 1 auto",minWidth:0}}>
                 <div style={{display:"flex",alignItems:"baseline",gap:12,flexWrap:"wrap"}}>
-                  <span className="maux-num" style={{fontSize:dense?32:50,fontWeight:800,letterSpacing:"-.015em",color:heroTotal>0?PHOS:"var(--mut)",lineHeight:1.05,textShadow:heroTotal>0?`0 0 20px ${PHOS}40`:"none"}}>{heroTotal>0?"+":""}{fmtKc(heroTotal)}</span>
+                  {/* Klid (Tom 31.7.2026): svit pryč, tučný grotesk vystřídal Fraunces v lehkém
+                      řezu. Číslo má být přečtené, ne odpálené. */}
+                  <span style={bpHero(dense?30:52, heroTotal>0?PHOS:"var(--mut)", {letterSpacing:"-.015em"})}>{fmtKc(heroTotal)}</span>
                   {!dense && !hero && <span style={{fontSize:12,color:"var(--mut)"}}>za měsíc, bez DPH</span>}
                   {hero && (won
-                    ? <span style={{fontSize:12.5,background:"rgba(198,168,107,.16)",color:"#7A5C1F",padding:"5px 12px",borderRadius:99,whiteSpace:"nowrap"}}>+{fmtKc(over)} nad metu</span>
-                    : <span style={{fontSize:12,background:"rgba(0,0,0,.04)",color:"var(--mut)",padding:"5px 12px",borderRadius:99,whiteSpace:"nowrap"}}>zbývá {fmtKc(hero.rem)}</span>)}
+                    ? <span style={{fontSize:12,color:"#8A6D32",border:"0.5px solid rgba(198,168,107,.5)",padding:"4px 12px",borderRadius:99,whiteSpace:"nowrap"}}>+{fmtKc(over)} nad metu</span>
+                    : <span style={{fontSize:12,color:"var(--mut)",border:"0.5px solid rgba(0,0,0,.10)",padding:"4px 12px",borderRadius:99,whiteSpace:"nowrap"}}>zbývá {fmtKc(hero.rem)}</span>)}
                 </div>
                 {/* Věta MLČÍ, když je zpráva špatná — pod metou zůstane holé číslo a laťka. */}
                 {record && (
-                  <div style={{fontFamily:"Fraunces,serif",fontSize:16.5,fontWeight:300,color:"var(--ink)",marginTop:11,lineHeight:1.45}}>
+                  <div style={{fontFamily:"Fraunces,serif",fontSize:15.5,fontWeight:300,color:"var(--mut)",marginTop:15,lineHeight:1.45}}>
                     Nejsilnější měsíc za posledních {hero.closedCount + 1}.
                   </div>
                 )}
+                {/* Vlasová laťka — 2 px. Tlustý bar byl další křičící prvek; klid znamená, že
+                    graf jen podtrhává číslo, nesoupeří s ním. Zlatá = přesah nad metu. */}
                 {hero && (
-                  <div style={{position:"relative",height:8,background:"rgba(0,0,0,.05)",borderRadius:99,margin:record?"14px 0 11px":"16px 0 11px",maxWidth:460}}>
-                    <div style={{position:"absolute",left:0,top:0,bottom:0,width:`${Math.min(donePct,goalPct)}%`,background:PHOS,borderRadius:won?"99px 0 0 99px":99,transition:"width .6s cubic-bezier(.16,1,.3,1)"}} />
+                  <div style={{position:"relative",height:2,background:"rgba(74,68,184,.10)",margin:record?"24px 0 16px":"26px 0 16px",maxWidth:480}}>
+                    <div style={{position:"absolute",left:0,top:0,bottom:0,width:`${Math.min(donePct,goalPct)}%`,background:PHOS,transition:"width .6s cubic-bezier(.16,1,.3,1)"}} />
                     {won && over > 0 && (
-                      <div title={`Přesah nad metu ${Math.round(over).toLocaleString("cs-CZ")} Kč`} style={{position:"absolute",left:`${goalPct}%`,top:0,bottom:0,width:`${Math.max(0,donePct-goalPct)}%`,background:BP.sand,borderRadius:"0 99px 99px 0",transition:"width .6s cubic-bezier(.16,1,.3,1)"}} />
+                      <div title={`Přesah nad metu ${Math.round(over).toLocaleString("cs-CZ")} Kč`} style={{position:"absolute",left:`${goalPct}%`,top:0,bottom:0,width:`${Math.max(0,donePct-goalPct)}%`,background:BP.sand,transition:"width .6s cubic-bezier(.16,1,.3,1)"}} />
                     )}
-                    {!won && <div title={`Meta ${hero.goal.toLocaleString("cs-CZ")} Kč`} style={{position:"absolute",left:`${goalPct}%`,top:-3,bottom:-3,width:2,background:BP.sand,borderRadius:1}} />}
+                    {!won && <div title={`Meta ${hero.goal.toLocaleString("cs-CZ")} Kč`} style={{position:"absolute",left:`${goalPct}%`,top:-3,bottom:-3,width:1.5,background:BP.sand}} />}
                   </div>
                 )}
                 <div style={{display:"flex",alignItems:"center",flexWrap:"wrap",fontSize:dense?10:11,color:"var(--mut)",rowGap:4,marginTop:hero?0:8}}>
@@ -12748,10 +12759,10 @@ function VykazyCalendar({ workEntries, escrows, invoices, dense = false, onOpenF
                       <span style={{width:6,height:6,borderRadius:"50%",background:PHOS}} />{fmtKc(monthTotal)} práce
                     </span>
                   )}
-                  {escMonthTotal > 0 && (
+                  {escMonthEarned > 0 && (
                     <>{monthTotal > 0 && sep}
                     <span style={{display:"inline-flex",alignItems:"center",gap:5}}>
-                      <span style={{width:6,height:6,borderRadius:"50%",background:ESC}} />{fmtKc(Math.round(escMonthTotal))} úschovy
+                      <span style={{width:6,height:6,borderRadius:"50%",background:ESC}} />{fmtKc(escMonthEarned)} úschovy
                     </span></>
                   )}
                   {hero && (
@@ -12773,7 +12784,7 @@ function VykazyCalendar({ workEntries, escrows, invoices, dense = false, onOpenF
                     {hero.prevTot > 0 && (
                       <line x1={-3} y1={chartH - Math.min(1, hero.prevTot / maxTotal) * chartH + 4} x2={svgW + 3}
                         y2={chartH - Math.min(1, hero.prevTot / maxTotal) * chartH + 4}
-                        stroke="rgba(91,82,240,.30)" strokeWidth="1" strokeDasharray="2,4" />
+                        stroke="rgba(74,68,184,.30)" strokeWidth="1" strokeDasharray="2,4" />
                     )}
                     {sr.map((r, idx) => {
                       const h = Math.max(2, (r.totalM / maxTotal) * chartH);
@@ -12782,7 +12793,7 @@ function VykazyCalendar({ workEntries, escrows, invoices, dense = false, onOpenF
                         <g key={r.ym} className="spark-g">
                           <title>{`${mmYY}${r.live ? " (živě)" : ""}: ${Math.round(r.totalM).toLocaleString("cs-CZ")} Kč · meta ${hero.goal.toLocaleString("cs-CZ")} Kč`}</title>
                           <rect className="spark-bar" x={idx * (barW + gap)} y={chartH - h + 4} width={barW} height={h} rx={3}
-                            fill={r.live ? PHOS : (r.totalM >= hero.goal ? "rgba(91,82,240,.42)" : "rgba(91,82,240,.17)")} />
+                            fill={r.live ? PHOS : (r.totalM >= hero.goal ? "rgba(74,68,184,.42)" : "rgba(74,68,184,.17)")} />
                         </g>
                       );
                     })}
@@ -12798,7 +12809,7 @@ function VykazyCalendar({ workEntries, escrows, invoices, dense = false, onOpenF
       </div>
 
       {/* Grid — velká čitelná čísla, dny s výkazem mají jemnou indigo "kartu" pod sebou, ať to nepůsobí prázdně */}
-      <div style={{padding: dense ? "12px 14px 12px" : "20px 26px 24px", flex: 1, display: "flex", flexDirection: "column", minHeight: 0}}>
+      <div style={{padding: dense ? "12px 14px 12px" : "24px 32px 30px", flex: 1, display: "flex", flexDirection: "column", minHeight: 0}}>
         <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:dense?2:8,marginBottom:dense?6:12}}>
           {["Po","Út","St","Čt","Pá","So","Ne"].map(n => (
             <div key={n} style={{textAlign:"center",fontSize:dense?9.5:11,color:"var(--mut)",fontWeight:700,letterSpacing:".03em"}}>{n}</div>
@@ -12825,8 +12836,8 @@ function VykazyCalendar({ workEntries, escrows, invoices, dense = false, onOpenF
                     title={cellTitle}
                     style={{
                       border: "none",
-                      background: amt > 0 ? "rgba(91,79,229,.09)" : (escAmt > 0 ? "rgba(184,146,61,.08)" : (isHov ? "rgba(91,79,229,.06)" : "none")),
-                      borderRadius: dense ? 8 : 14, position:"relative",
+                      background: amt > 0 ? "rgba(74,68,184,.065)" : (escAmt > 0 ? "rgba(160,131,80,.05)" : (isHov ? "rgba(74,68,184,.04)" : "none")),
+                      borderRadius: dense ? 8 : 12, position:"relative",
                       display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:dense?1:3,
                       cursor: canAct ? "pointer" : "default",
                       padding: dense ? "3px 0" : "6px 0",
@@ -12835,20 +12846,19 @@ function VykazyCalendar({ workEntries, escrows, invoices, dense = false, onOpenF
                     {escAmt > 0 && escAuto && (
                       <span title="Odhad — úschova ještě nemá jistý konec" style={{
                         position:"absolute", top: dense?2:4, right: dense?3:6,
-                        width:4.5, height:4.5, borderRadius:"50%", background:"#A5B4FC",
+                        width:4.5, height:4.5, borderRadius:"50%", background:"#C3C0E4",
                       }}/>
                     )}
                     <span style={{
-                      minHeight: dense?11:17, fontSize:dense?9.5:15.5, fontWeight:800, letterSpacing:"-.01em",
+                      minHeight: dense?11:17, fontSize:dense?9.5:15, fontWeight:600, letterSpacing:"-.01em",
                       fontVariantNumeric:"tabular-nums", lineHeight:1, whiteSpace:"nowrap",
                       color: amt>0 ? PHOS : "transparent",
-                      textShadow: amt>0 ? `0 0 9px ${PHOS}55` : "none",
                     }}>
                       {amt>0 ? `+${fmtKc(amt)}` : "0"}
                     </span>
                     {!dense && (
                       <span style={{
-                        minHeight: 11, fontSize:9.5, fontWeight:700, letterSpacing:"-.01em",
+                        minHeight: 11, fontSize:9.5, fontWeight:500, letterSpacing:"-.01em",
                         fontVariantNumeric:"tabular-nums", lineHeight:1, whiteSpace:"nowrap",
                         color: escAmt>0 ? ESC : "transparent",
                       }}>
@@ -12858,8 +12868,8 @@ function VykazyCalendar({ workEntries, escrows, invoices, dense = false, onOpenF
                     <span style={{
                       width: circleSize, height: circleSize, borderRadius:"50%",
                       display:"flex", alignItems:"center", justifyContent:"center",
-                      fontSize: dense?11.5:16, fontWeight: isToday?700:500, lineHeight:1,
-                      background: isToday ? "#3518A5" : "transparent",
+                      fontSize: dense?11.5:15, fontWeight: isToday?600:400, lineHeight:1,
+                      background: isToday ? "#3A3494" : "transparent",
                       color: isToday ? "#fff" : "var(--ink)",
                       boxShadow: isSel && !isToday ? "inset 0 0 0 1.5px " + PHOS : "none",
                     }}>{d}</span>
@@ -13086,7 +13096,7 @@ function InvoiceList({ invoices, clients, workEntries, escrows, onOpen, onOpenCl
                       onClick={e => { e.stopPropagation(); onIssueExistingInvoice && onIssueExistingInvoice(inv); }}>
                       Vystavit fakturu →
                     </button>
-                    <button className="btn" style={{ fontSize: 11, flexShrink: 0, color: "#DC2626", borderColor: "#FCA5A5" }}
+                    <button className="btn" style={{ fontSize: 11, flexShrink: 0, color: "#A8443C", borderColor: "#FCA5A5" }}
                       title="Smazat ghost fakturu"
                       onClick={e => { e.stopPropagation(); if (window.confirm(`Smazat fakturu ${inv.invoice_number}? Výkazy zůstanou odpojeny.`)) onDeleteDraftInvoice && onDeleteDraftInvoice(inv.id); }}>
                       ✕
@@ -13260,7 +13270,7 @@ function InvoiceList({ invoices, clients, workEntries, escrows, onOpen, onOpenCl
           {showFilters ? "Skrýt filtry" : "Datum & stav ▾"}
         </button>
         {hasFilters && (
-          <button className="btn gho" style={{ fontSize: 12, color: "#DC2626" }}
+          <button className="btn gho" style={{ fontSize: 12, color: "#A8443C" }}
             onClick={() => { setSearch(""); setFilterClient(""); setFilterStatus("vse"); setDateFrom(""); setDateTo(""); }}>
             Zrušit filtry ×
           </button>
@@ -13335,7 +13345,7 @@ function InvoiceList({ invoices, clients, workEntries, escrows, onOpen, onOpenCl
                       title="Vrátit do nevystavených"
                       onClick={() => onRevertInvoice && onRevertInvoice(inv)}>↩ Vrátit</button>
                   )}
-                  <button className="btn gho" style={{ fontSize: 11, padding: "4px 8px", color: "#DC2626" }}
+                  <button className="btn gho" style={{ fontSize: 11, padding: "4px 8px", color: "#A8443C" }}
                     onClick={() => onOpen(inv.id, "delete")}>✕</button>
                 </td>
               </tr>
@@ -13608,12 +13618,12 @@ function SroOptimizationPanel({ year, invoices }) {
       <div style={{display:"flex",gap:28,flexWrap:"wrap",marginBottom:12}}>
         <div>
           <div style={{fontSize:10,color:"var(--mut)"}}>OSVČ — DPFO (15 % / 23 %)</div>
-          <div style={{fontFamily:"Fraunces,serif",fontSize:22,fontWeight:300,color:triggered?"#DC2626":"var(--txt)"}}>{fmtKc(taxOsvc)}</div>
+          <div style={{fontFamily:"Fraunces,serif",fontSize:22,fontWeight:300,color:triggered?"#A8443C":"var(--txt)"}}>{fmtKc(taxOsvc)}</div>
           <div style={{fontSize:9.5,color:"var(--mut)"}}>efektivně {effOsvcPct.toFixed(1)} % z obratu</div>
         </div>
         <div>
           <div style={{fontSize:10,color:"var(--mut)"}}>s.r.o. — zisk zůstává ve firmě (21 %)</div>
-          <div style={{fontFamily:"Fraunces,serif",fontSize:22,fontWeight:300,color:"#059669"}}>{fmtKc(taxSroRetained)}</div>
+          <div style={{fontFamily:"Fraunces,serif",fontSize:22,fontWeight:300,color:"#4A7C59"}}>{fmtKc(taxSroRetained)}</div>
           <div style={{fontSize:9.5,color:"var(--mut)"}}>efektivně 21,0 % z obratu</div>
         </div>
         <div>
@@ -13624,7 +13634,7 @@ function SroOptimizationPanel({ year, invoices }) {
         {triggered && (
           <div>
             <div style={{fontSize:10,color:"var(--mut)"}}>Možná úspora (zisk ve firmě vs. OSVČ)</div>
-            <div style={{fontFamily:"Fraunces,serif",fontSize:22,fontWeight:500,color:saving>0?"#059669":"#DC2626"}}>
+            <div style={{fontFamily:"Fraunces,serif",fontSize:22,fontWeight:500,color:saving>0?"#4A7C59":"#A8443C"}}>
               {saving>0?"až +":""}{fmtKc(Math.abs(saving))}
             </div>
             <div style={{fontSize:9.5,color:"var(--mut)"}}>ročně, orientačně</div>
@@ -13958,7 +13968,7 @@ function DphKalkulacka({ odpItem, onSaveFinance }) {
               základ {fmtKc(base)} · DPH <b style={{ color: "#3518A5" }}>{fmtKc(vat)}</b>
             </span>
           )}
-          <button onClick={add} title="Přičíst do odpočtu DPH" style={{ fontSize: 13, color: "#059669", border: "none", background: "none", cursor: "pointer", padding: "0 2px" }}>✓</button>
+          <button onClick={add} title="Přičíst do odpočtu DPH" style={{ fontSize: 13, color: "#4A7C59", border: "none", background: "none", cursor: "pointer", padding: "0 2px" }}>✓</button>
           <button onClick={() => setOpen(false)} title="Zrušit" style={{ fontSize: 12, color: "var(--mut)", border: "none", background: "none", cursor: "pointer", padding: "0 2px" }}>✕</button>
         </div>
       )}
@@ -14044,7 +14054,7 @@ function DphKalkulacka({ odpItem, onSaveFinance }) {
                         <span style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
                           {(e.vat || 0) === 0 && e.vat_original > 0 && (
                             <span title="DPH z tohoto dokladu se vrátilo přímo na účet mimo standardní vyúčtování — v odpočtu se proto neuplatňuje."
-                              style={{ fontSize: 8.5, fontWeight: 700, color: "#059669", background: "#ECFDF5", border: "1px solid #A7F3D0", borderRadius: 20, padding: "2px 8px", whiteSpace: "nowrap" }}>
+                              style={{ fontSize: 8.5, fontWeight: 700, color: "#4A7C59", background: "#ECFDF5", border: "1px solid #A7F3D0", borderRadius: 20, padding: "2px 8px", whiteSpace: "nowrap" }}>
                               vratka již obdržena
                             </span>
                           )}
@@ -14135,8 +14145,8 @@ function DphOdpocetTile({ invoices, financeItems, onSaveFinance, onNav, dashNadm
   const kpis = [
     { label: `DPH z faktur · ${prevMonthName}`, value: fmtKc(dphFakturyPrev), color: "var(--txt)", hint: "určuje, kolik dostaneš 25. " + CZM[now.getMonth()] },
     { label: `Odpočet z účtenek · ${prevMonthName}`, value: "−" + fmtKc(odpocetPrev), color: "#3518A5", hint: "uplatněný k tomuto vyúčtování" },
-    { label: "K úhradě Čechmanové do 25. " + CZM[now.getMonth()], value: kUhradePrev>0 ? fmtKc(kUhradePrev) : "✓ kryto", color: kUhradePrev>0 ? "#DC2626" : "#059669", hint: `vyúčtování za ${prevMonthName}`, big: true },
-    { label: `Odhad za ${CZM[now.getMonth()]} (do 25. ${dueMonthName})`, value: kUhrade>0 ? fmtKc(kUhrade) : "✓ kryto", color: kUhrade>0 ? "#B45309" : "#059669", hint: "orientační — měsíc se ještě tvoří" },
+    { label: "K úhradě Čechmanové do 25. " + CZM[now.getMonth()], value: kUhradePrev>0 ? fmtKc(kUhradePrev) : "✓ kryto", color: kUhradePrev>0 ? "#A8443C" : "#4A7C59", hint: `vyúčtování za ${prevMonthName}`, big: true },
+    { label: `Odhad za ${CZM[now.getMonth()]} (do 25. ${dueMonthName})`, value: kUhrade>0 ? fmtKc(kUhrade) : "✓ kryto", color: kUhrade>0 ? "#B45309" : "#4A7C59", hint: "orientační — měsíc se ještě tvoří" },
   ];
   if (prevodPrev > 0) kpis.push({ label: `Přesah odpočtu · ${prevMonthName}`, value: fmtKc(prevodPrev), color: "#7C3AED", hint: "nadměrný odpočet — převádí se dál" });
 
@@ -14151,13 +14161,13 @@ function DphOdpocetTile({ invoices, financeItems, onSaveFinance, onNav, dashNadm
           </span>
         </div>
         {paidPrev ? (
-          <span style={{ fontSize:9.5, fontWeight:700, color:"#059669", background:"#ECFDF5", border:"1px solid #A7F3D0", borderRadius:20, padding:"4px 12px", whiteSpace:"nowrap" }}>
+          <span style={{ fontSize:9.5, fontWeight:700, color:"#4A7C59", background:"#ECFDF5", border:"1px solid #A7F3D0", borderRadius:20, padding:"4px 12px", whiteSpace:"nowrap" }}>
             ✓ Čechmanové zaplaceno {fmtDate(paidPrev.date)}{paidPrev.amount ? ` · ${fmtKc(paidPrev.amount)}` : ""}
           </span>
         ) : (
           <button onClick={markPaidCechmanova}
             title="Označí, že jsi 25. dne uhradil Čechmanové DPH za uzavřený měsíc — appka si to zapamatuje"
-            style={{ fontSize:9.5, fontWeight:700, color:"#fff", background:"#059669", border:"none", borderRadius:20, padding:"6px 14px", cursor:"pointer", whiteSpace:"nowrap" }}>
+            style={{ fontSize:9.5, fontWeight:700, color:"#fff", background:"#4A7C59", border:"none", borderRadius:20, padding:"6px 14px", cursor:"pointer", whiteSpace:"nowrap" }}>
             ✓ Zaplatil jsem Čechmanové
           </button>
         )}
@@ -14342,7 +14352,7 @@ function DaneModule({ year, taxRecords, financeItems, invoices, dpfoMonths, escr
           {totalDiff != null && (
             <div style={{ background:"#fff", padding:"4px 16px" }}>
               <div style={{ fontSize: 9.5, color: "var(--mut)" }}>{totalDiff >= 0 ? "Přeplatek celkem" : "Nedoplatek celkem"}</div>
-              <div style={{ fontFamily: "Fraunces,serif", fontSize: 23, fontWeight: 500, color: totalDiff >= 0 ? "#059669" : "#DC2626", marginTop:3 }}>
+              <div style={{ fontFamily: "Fraunces,serif", fontSize: 23, fontWeight: 500, color: totalDiff >= 0 ? "#4A7C59" : "#A8443C", marginTop:3 }}>
                 {totalDiff >= 0 ? "+" : "−"}{fmtKc(Math.abs(totalDiff))}
               </div>
             </div>
@@ -14395,7 +14405,7 @@ function TaxRow({ rec, auto, onSave }) {
         {diff != null && (
           <span className="maux-num" style={{
             fontSize: 11.5, fontWeight: 700, padding: "3px 10px", borderRadius: 20,
-            color: diff >= 0 ? "#059669" : "#DC2626",
+            color: diff >= 0 ? "#4A7C59" : "#A8443C",
             background: diff >= 0 ? "#ECFDF5" : "#FEF2F2",
             border: `1px solid ${diff >= 0 ? "#A7F3D0" : "#FECACA"}`,
             whiteSpace: "nowrap",
@@ -14676,7 +14686,7 @@ function ClientForm({ init, onSave, onCancel, saving }) {
           ? <div className="frow"><label>Narozen</label><input type="date" value={d.birth_date || ""} onChange={e => set("birth_date", e.target.value)} /></div>
           : <div className="frow"><label>IČO</label><div style={{display:"flex",gap:4}}><input value={d.ico || ""} onChange={e => set("ico", e.target.value)} style={{flex:1}} /><button type="button" onClick={fillFromAres} disabled={aresLoading} style={{padding:"5px 10px",borderRadius:7,border:"1px solid #4F46E5",background:aresLoading?"#e0e7ff":"#EEF2FF",color:"#4F46E5",fontSize:10,fontWeight:700,cursor:"pointer",whiteSpace:"nowrap",letterSpacing:".04em"}}>{aresLoading?"···":"ARES ↓"}</button></div></div>}
       </div>
-      {aresMsg && <div style={{fontSize:11,color:aresMsg.startsWith("✓")?"#059669":"#DC2626",marginTop:-4,marginBottom:6,paddingLeft:2}}>{aresMsg}</div>}
+      {aresMsg && <div style={{fontSize:11,color:aresMsg.startsWith("✓")?"#4A7C59":"#A8443C",marginTop:-4,marginBottom:6,paddingLeft:2}}>{aresMsg}</div>}
       {/* Fyzická osoba podnikající (OSVČ) může mít IČO i DIČ stejně jako firma —
           na faktuře se pak datum narození NEZOBRAZUJE, použije se IČO (viz InvoicePrintPreview).
           Pokud osoba IČO nemá (nepodnikající spotřebitel), na faktuře se místo IČO ukáže datum narození + adresa. */}
@@ -14788,12 +14798,12 @@ function AsistentPrehled({ logs, attendance, clients, availability, onGo }) {
   // ── MAUX paleta ──
   const IND   = "#1C0A63";   // brand inkoust
   const SEC   = "#3518A4";   // brand sekundární
-  const VIVID = "#5B52F0";   // indigo — klientská práce
+  const VIVID = "#4A44B8";   // indigo — klientská práce
   const SAND  = "#C6A86B";   // písek — development
   const SANDL = "#E3D6B8";
   const SANDD = "#8A6E2E";
-  const LIVE  = "#C3CCFF";   // běžící měsíc
-  const OK    = "#059669";
+  const LIVE  = "#DAD8EF";   // běžící měsíc
+  const OK    = "#4A7C59";
   const MUT   = "var(--mut)";
   const LINE  = "rgba(0,0,0,.07)";
 
@@ -15116,7 +15126,7 @@ function AsistentPrehled({ logs, attendance, clients, availability, onGo }) {
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",gap:12,flexWrap:"wrap",marginBottom:20}}>
             <div style={{display:"flex",alignItems:"center",gap:12,flexWrap:"wrap"}}>
               <div style={lbl}>Utilizace</div>
-              <span style={{fontSize:8,letterSpacing:".16em",fontWeight:700,color:VIVID,background:"rgba(91,82,240,.09)",borderRadius:5,padding:"3px 7px",textTransform:"uppercase"}}>Klíčový ukazatel</span>
+              <span style={{fontSize:8,letterSpacing:".16em",fontWeight:700,color:VIVID,background:"rgba(74,68,184,.09)",borderRadius:5,padding:"3px 7px",textTransform:"uppercase"}}>Klíčový ukazatel</span>
               <div style={{display:"inline-flex",gap:3,background:"rgba(0,0,0,.045)",borderRadius:11,padding:3}}>
                 {[{k:"this",m:mKey},{k:"prev",m:prevKey,off:!hasPrev}].map(t=>{
                   const nm=MONTHS_CS[Number(t.m.slice(5,7))-1];
@@ -15188,7 +15198,7 @@ function AsistentPrehled({ logs, attendance, clients, availability, onGo }) {
             </div>
 
             {/* vysvětlení */}
-            <div style={{background:"#F5F4FE",border:"1px solid rgba(91,82,240,.13)",borderRadius:14,padding:"16px 17px"}}>
+            <div style={{background:"#F5F4FE",border:"1px solid rgba(74,68,184,.13)",borderRadius:14,padding:"16px 17px"}}>
               <div style={{fontSize:8,letterSpacing:".2em",textTransform:"uppercase",color:VIVID,fontWeight:700,marginBottom:9}}>Co je utilizace</div>
               <p style={{margin:0,fontSize:11,color:"var(--txt)",lineHeight:1.75}}>
                 Kolik z pracovního dne je <b>popsané ve výkazu</b> — klientská práce i development dohromady.
@@ -15585,7 +15595,7 @@ function AsistentVykazy({ email, clients, onRefresh }) {
                       {l.status==="archived"?"↩ vrátit":"✓ hotovo"}
                     </button>
                     <button onClick={()=>del(l.id)}
-                      style={{fontSize:9.5,padding:"3px 8px",borderRadius:6,border:"1px solid #FECACA",background:"#FEF2F2",cursor:"pointer",color:"#DC2626"}}>✕</button>
+                      style={{fontSize:9.5,padding:"3px 8px",borderRadius:6,border:"1px solid #FECACA",background:"#FEF2F2",cursor:"pointer",color:"#A8443C"}}>✕</button>
                   </div>
                 </div>
               </div>
@@ -15785,7 +15795,7 @@ function AsistentDochazka({ email, attendance, logs, onRefreshAttendance, onGo }
   body { font-family: 'Inter', sans-serif; color: #16142A; background: #fff; padding: 48px 56px; max-width: 720px; margin: 0 auto; }
   .brand { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 40px; }
   .brand-name { font-family: 'Fraunces', serif; font-size: 22px; font-weight: 400; color: #3518A5; letter-spacing: .06em; }
-  .brand-sub { font-size: 8px; letter-spacing: .42em; text-transform: uppercase; color: #B8923D; margin-top: 3px; font-weight: 600; }
+  .brand-sub { font-size: 8px; letter-spacing: .42em; text-transform: uppercase; color: #A08350; margin-top: 3px; font-weight: 600; }
   .brand-right { text-align: right; font-size: 10px; color: #8A8A93; line-height: 1.7; }
   h1 { font-family: 'Fraunces', serif; font-size: 28px; font-weight: 300; color: #3518A5; margin-bottom: 4px; }
   .subtitle { font-size: 11px; letter-spacing: .18em; text-transform: uppercase; color: #8A8A93; font-weight: 600; margin-bottom: 28px; }
@@ -16023,7 +16033,7 @@ function AsistentDochazka({ email, attendance, logs, onRefreshAttendance, onGo }
         <ToggleCard
           label="Přišel jsem"
           isOn={!!todayRec?.check_in}
-          color="#059669"
+          color="#4A7C59"
           subOn={fmtTime(todayRec?.check_in)}
           subOff="Klikněte po příchodu do kanceláře"
           onToggle={toggleCheckIn}
@@ -16044,9 +16054,9 @@ function AsistentDochazka({ email, attendance, logs, onRefreshAttendance, onGo }
         <div style={{background:"rgba(5,150,105,.05)",borderRadius:14,padding:"14px 20px",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
           <div style={{display:"flex",alignItems:"center",gap:8}}>
             <div style={{width:7,height:7,borderRadius:"50%",background:"#22C55E",boxShadow:"0 0 0 3px rgba(34,197,94,.2)"}}/>
-            <span style={{fontSize:11,fontWeight:600,color:"#059669",letterSpacing:".04em",textTransform:"uppercase"}}>Aktuálně v kanceláři</span>
+            <span style={{fontSize:11,fontWeight:600,color:"#4A7C59",letterSpacing:".04em",textTransform:"uppercase"}}>Aktuálně v kanceláři</span>
           </div>
-          <div style={{fontFamily:"Fraunces,serif",fontWeight:300,fontSize:24,color:"#059669",lineHeight:1}}>{fmtH(liveDur)}</div>
+          <div style={{fontFamily:"Fraunces,serif",fontWeight:300,fontSize:24,color:"#4A7C59",lineHeight:1}}>{fmtH(liveDur)}</div>
         </div>
       )}
 
@@ -16182,7 +16192,7 @@ function AsistentDochazka({ email, attendance, logs, onRefreshAttendance, onGo }
                           −{LUNCH_BREAK_H}h pauza
                         </span>
                       )}
-                      <span style={{fontSize:12,fontWeight:600,color:good?"#059669":"var(--mut)",minWidth:42,textAlign:"right"}}>
+                      <span style={{fontSize:12,fontWeight:600,color:good?"#4A7C59":"var(--mut)",minWidth:42,textAlign:"right"}}>
                         {net!=null?fmtH(net):"—"}
                       </span>
                     </div>
@@ -16334,11 +16344,11 @@ function UpdateNotice() {
         </div>
 
         {ASISTENT_BUILD_NOTE.length > 0 && (
-          <div style={{background:"#F5F4FE",border:"1px solid rgba(91,82,240,.13)",borderRadius:14,padding:"14px 16px",marginBottom:20}}>
-            <div style={{fontSize:8,letterSpacing:".2em",textTransform:"uppercase",color:"#5B52F0",fontWeight:700,marginBottom:8}}>Co je nového</div>
+          <div style={{background:"#F5F4FE",border:"1px solid rgba(74,68,184,.13)",borderRadius:14,padding:"14px 16px",marginBottom:20}}>
+            <div style={{fontSize:8,letterSpacing:".2em",textTransform:"uppercase",color:"#4A44B8",fontWeight:700,marginBottom:8}}>Co je nového</div>
             {ASISTENT_BUILD_NOTE.map((t,i)=>(
               <div key={i} style={{display:"flex",gap:8,fontSize:11,color:"var(--txt)",lineHeight:1.65,marginTop:i?6:0}}>
-                <span style={{color:"#5B52F0",flexShrink:0}}>·</span><span>{t}</span>
+                <span style={{color:"#4A44B8",flexShrink:0}}>·</span><span>{t}</span>
               </div>
             ))}
           </div>
@@ -16667,7 +16677,7 @@ function AsistentPanel({ clients, onPreview }) {
                             <td style={{padding:"10px 14px",fontSize:13,fontFamily:"JetBrains Mono,monospace"}}>{fmtTime(a.check_in)}</td>
                             <td style={{padding:"10px 14px",fontSize:13,fontFamily:"JetBrains Mono,monospace"}}>{fmtTime(a.check_out)}</td>
                             <td style={{padding:"10px 14px",fontSize:12,color:"var(--mut)"}}>{grossDur?fmtH(grossDur):"—"}</td>
-                            <td style={{padding:"10px 14px",fontSize:13,fontWeight:600,color:good?"#059669":"var(--ink)"}}>
+                            <td style={{padding:"10px 14px",fontSize:13,fontWeight:600,color:good?"#4A7C59":"var(--ink)"}}>
                               {net!=null?fmtH(net):"—"}
                               {lunchDeducted&&<span style={{marginLeft:4,fontSize:9,background:"#FEF9C3",color:"#854D0E",borderRadius:3,padding:"1px 4px"}}>−{LUNCH_BREAK_H}h</span>}
                             </td>
@@ -16734,7 +16744,7 @@ function AsistentPanel({ clients, onPreview }) {
                     return (
                       <div key={a.id} style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"7px 12px",background:"#F0FDF4",border:"1px solid #BBF7D0",borderRadius:8}}>
                         <span style={{fontSize:12.5,fontWeight:500,color:"var(--ink)"}}>{fmtDate(a.date)}</span>
-                        <span style={{fontSize:11.5,color:"#059669",fontWeight:600}}>{dur?fmtH(dur):fmtTime(a.check_in)+" →"}</span>
+                        <span style={{fontSize:11.5,color:"#4A7C59",fontWeight:600}}>{dur?fmtH(dur):fmtTime(a.check_in)+" →"}</span>
                       </div>
                     );
                   })}
