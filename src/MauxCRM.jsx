@@ -7306,10 +7306,13 @@ function BackupReminderBanner({ onDone }) {
 /* ─── DASHBOARD ─── */
 // Drag-and-drop panel IDs — pořadí a viditelnost karet na dashboardu
 // Verze: zvýšit pokud chceme vynutit reset uloženého pořadí u všech uživatelů
-const PANEL_LAYOUT_VERSION = 10;
+// v11 (31.7.2026) — Tom: "tohle celé mě nezajímá a nikdy na to nekoukám."
+// Zrušeny panely: meta (žebřík 12 měsíců), navstevnost (GA4), xtb (dlaždice Investice).
+// Meta jako taková ŽIJE DÁL v kalendáři (zlatá ryska + věta o rekordu) — zrušen jen výpis historie.
+const PANEL_LAYOUT_VERSION = 11;
 const DEFAULT_PANELS = [
   "finance","trigrafy","firma","josef","pulz",
-  "chart","meta","navstevnost","xtb","ziskovost","claude"
+  "chart","ziskovost","claude"
 ];
 function loadPanelState() {
   try {
@@ -11358,11 +11361,7 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
             {/* KALENDÁŘ VÝKAZŮ — náhled, kolik práce (Kč) bylo který den zapsáno */}
             <div style={{aspectRatio:"1", minWidth:0}}>
               <VykazyCalendar workEntries={workEntries} escrows={escrows} invoices={invoices}
-                onOpenFull={() => onNav("vykaz")} onAddEntry={onAddWorkEntry}
-                onOpenDetail={() => {
-                  const el = document.getElementById("maux-finance-detail");
-                  if (el) { el.open = true; el.scrollIntoView({ behavior: "smooth", block: "start" }); }
-                }} />
+                onOpenFull={() => onNav("vykaz")} onAddEntry={onAddWorkEntry} />
             </div>
 
           </div>
@@ -11940,94 +11939,6 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
           );
         })()}
       </Card>
-      </Panel>
-
-      {/* META — automatická laťka. Nahradila tabulku Top klienti (Tom 30.7.2026: "je absolutně
-          nic neříkající a nikdy se na to stejně nekoukám"). Dřív rozbalovací roletka ve Financích. */}
-      <Panel id="meta">
-      <div id="maux-finance-detail">
-      <Card style={{padding:"22px 26px 20px",position:"relative"}}>
-        <BpCorners />
-        {(() => {
-          const ladder = computeMilestoneLadder(invoices, escrows, now);
-          // Živý řádek je BĚŽÍCÍ měsíc, ne příští — dřív se značkoval `now.getMonth()+1`, takže
-          // 31. července svítil jako "08/26" a červenec byl v seznamu dvakrát (jednou vyfakturovaný,
-          // jednou živý). Audit 31.7.2026.
-          const liveYmStr = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,"0")}`;
-          const closedRows = (ladder.rows || []).filter(r => !r.isCurrent);
-          const thisGoal = ((ladder.allRows || []).slice(-1)[0] || {}).goal || 200000;
-          // Živý řádek = TOK, ne zásoba (Tom 31.7.2026). Práce ZAPSANÁ v běžícím měsíci
-          // (bez DPH, po slevě) + čistý úrok z úschov. Dřív to byla nevyfakturovaná zásoba
-          // bez ohledu na datum zápisu, takže žebřík hlásil za červenec 214 417 Kč, zatímco
-          // hlavička kalendáře na téže obrazovce 216 417 Kč. Jedna definice pro celou appku.
-          const liveInvAmt = (workEntries || []).filter(e => (e.entry_date || "").startsWith(liveYmStr))
-            .reduce((s, e) => s + Math.max((e.amount || 0) - (Number(e.discount_amount) || 0), 0), 0);
-          const liveEscAmt = Math.round(escrowGrossThisMonth);
-          const liveTotal = liveInvAmt + liveEscAmt;
-          const bestNext = (ladder.allRows || []).slice(-12).reduce((m, x) => Math.max(m, x.totalM), 0);
-          const activeGoal = ladder.activeGoal;
-          const rows = [...closedRows, { ym: liveYmStr, totalM: liveTotal, live: true, goal: thisGoal, over: liveTotal > thisGoal }];
-          const projGoal = Math.max(200000, Math.round(Math.max(bestNext, liveTotal) * 1.10 / 5000) * 5000);
-          const shown = rows.slice(-9);
-          const maxV = Math.max(activeGoal, projGoal, ...shown.map(r => r.totalM)) * 1.06 || 1;
-          const pctOf = v => Math.max(0, Math.min(100, (v / maxV) * 100));
-          // Počítá se i BĚŽÍCÍ měsíc. Dřív se braly jen uzavřené, takže vedle hera hlásícího
-          // "metu jsi překročil" svítilo "Překonáno 0×". Audit 31.7.2026.
-          const overCount = rows.filter(r => r.over).length;
-          const lastOver = [...rows].reverse().find(r => r.over);
-          const mName = ym => `${ym.slice(5,7)}/${ym.slice(2,4)}`;
-          return (
-            <>
-              <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:20,marginBottom:16,flexWrap:"wrap"}}>
-                <div>
-                  <div style={bpLabel()}>Meta · automatická laťka</div>
-                  <div style={{...bpHero(30), marginTop:6}}>{fmtKc(activeGoal)}</div>
-                  <div style={{fontSize:11,color:BP.indigoDeep,marginTop:5}}>
-                    {projGoal > activeGoal
-                      ? <>Po uzávěrce měsíce ↑ <strong style={{fontWeight:600}}>{fmtKc(projGoal)}</strong></>
-                      : <>Po uzávěrce zůstává <strong style={{fontWeight:600}}>{fmtKc(activeGoal)}</strong></>}
-                  </div>
-                  <div style={{fontSize:9,color:"var(--mut)",marginTop:5}}>nejlepší z 12 měsíců × 1,10 · zaokr. 5 000 · min. 200 000</div>
-                </div>
-                <div style={{textAlign:"right"}}>
-                  <div style={bpLabel()}>Překonáno</div>
-                  <div style={{...bpHero(26, BP.sandDeep), marginTop:6}}>{overCount}×</div>
-                  {lastOver && <div style={{fontSize:9,color:"var(--mut)",marginTop:4}}>{lastOver.live ? "právě teď" : `naposled ${mName(lastOver.ym)}`}</div>}
-                </div>
-              </div>
-              <div style={{height:1,background:"rgba(0,0,0,.06)",marginBottom:14}} />
-              <div style={{display:"flex",flexDirection:"column",gap:7}}>
-                {shown.map(r => (
-                  <div key={r.ym} style={{display:"grid",gridTemplateColumns:"38px 1fr 92px",alignItems:"center",gap:10}}>
-                    <span style={{fontSize:9.5,letterSpacing:".06em",color:r.live?"var(--txt)":"var(--mut)",fontWeight:r.live?600:400}}>{mName(r.ym)}</span>
-                    <div style={{position:"relative",height:7,background:"rgba(0,0,0,.045)",borderRadius:99}}>
-                      <div style={{position:"absolute",left:0,top:0,bottom:0,width:`${pctOf(r.totalM)}%`,borderRadius:99,
-                        background: r.live ? BP.indigo : (r.over ? "rgba(74,68,184,.42)" : "rgba(74,68,184,.17)")}} />
-                      <div title={`Meta ${Math.round(r.goal || activeGoal).toLocaleString("cs-CZ")} Kč`}
-                        style={{position:"absolute",left:`${pctOf(r.goal || activeGoal)}%`,top:r.live?-3:-2,bottom:r.live?-3:-2,width:1.5,background:BP.sand,borderRadius:1}} />
-                    </div>
-                    <span style={{fontSize:10.5,textAlign:"right",color:r.live?"var(--txt)":"var(--mut)",fontWeight:r.live?600:400}}>{fmtKc(r.totalM)}</span>
-                  </div>
-                ))}
-              </div>
-              <div style={{fontSize:9,color:"var(--mut)",marginTop:12,opacity:.8,lineHeight:1.6}}>
-                Zlatá ryska = meta platná pro daný měsíc · plná barva = překonáno · poslední řádek běží živě (práce zapsaná v tomto měsíci + čistý úrok z úschov)
-              </div>
-            </>
-          );
-        })()}
-      </Card>
-      </div>
-      </Panel>
-
-      {/* ── NÁVŠTĚVNOST WEBU (GA4, živě) ── */}
-      <Panel id="navstevnost">
-        <WebsiteTrafficPanel />
-      </Panel>
-
-      {/* ── INVESTICE (XTB — ruční evidence) ── */}
-      <Panel id="xtb">
-        <XtbPanel xtbTranches={xtbTranches} onNav={onNav} />
       </Panel>
 
       {/* ── ZISKOVOST ZAKÁZEK (nahradilo DPFO/úvěry — ty jsou teď v sekci Ostatní) ── */}
