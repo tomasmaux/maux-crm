@@ -7981,7 +7981,10 @@ function AkcieModule({ xtbTranches = [], onTrancheSave, onTrancheDelete, xtbTitl
       if (!map[year]) map[year] = { year, profit: 0, saleValue: 0, count: 0, maxHoldDays: 0 };
       const holdDays = t.open_time ? Math.round((new Date(t.close_time) - new Date(t.open_time)) / 86400000) : 0;
       map[year].profit += (t.profit || 0);
-      map[year].saleValue += (t.sale_value || 0);
+      // ⚠️ Sloupec se jmenuje amount_czk, ne sale_value. Se špatným názvem tu byla
+      // v obou letech nula → appka tvrdila „do 100 000 Kč, osvobozeno, daň 0 Kč",
+      // přitom limit je překročený 3× a 5,6×. Fallback drží starší data naživu.
+      map[year].saleValue += (Number(t.amount_czk) || Number(t.sale_value) || 0);
       map[year].count += 1;
       map[year].maxHoldDays = Math.max(map[year].maxHoldDays, holdDays);
     }
