@@ -623,12 +623,18 @@ const kurzXtb = (kurzCnb, smer) =>
 // Historické denní řady pro graf. Tahá se ze stejné Edge Function, jen s ?historie=.
 // Jeden dotaz vrátí ceny všech titulů i celý kurzovní lístek ČNB po dnech.
 // Drží se den v localStorage — druhé otevření listu už na síť nesahá.
-const XTB_BENCHMARK = "VWCE.DE"; // FTSE All-World, akumulační → total return
+// S&P 500, akumulační třída (iShares Core S&P 500 UCITS, XETRA, EUR) → total return.
+// Akumulační ETF má dividendy v ceně, takže se nic nedopočítává. Cenový index (^GSPC)
+// by Toma šidil o ~1,3 % ročně a neobsahoval by pohyb dolaru, který ho reálně potkává.
+const XTB_BENCHMARK = "SXR8.DE";
+const XTB_BENCHMARK_NAZEV = "S&P 500";
 async function fetchXtbHistorie(tickery, od) {
   const dnes = new Date().toISOString().slice(0, 10);
   // V klíči je i počet titulů — jinak by se po doplnění dalšího titulu do konce dne
   // servírovala stará, neúplná odpověď a graf by tiše počítal s pořizovací cenou.
-  const klic = `maux_xtb_hist_${dnes}_${(tickery || []).length}`;
+  // ⚠️ A taky benchmark: při přechodu VWCE → SXR8 se počet tickerů nezměnil, takže
+  // bez něj by se celý den servírovala stará řada světového indexu pod novým popiskem.
+  const klic = `maux_xtb_hist_${dnes}_${(tickery || []).length}_${XTB_BENCHMARK}`;
   try {
     const c = localStorage.getItem(klic);
     if (c) return JSON.parse(c);
@@ -679,6 +685,12 @@ function computeXtbSerie(positions = [], closedTrades = [], tranches = [], cashO
     for (const b of body) { if (b[0] <= den) v = b[1]; else break; }
     return v;
   };
+  // Totéž, ale z ceny očištěné o dividendy a splity — jen pro benchmark.
+  const posledniAdj = (body, den) => {
+    let v = null;
+    for (const b of body) { if (b[0] <= den) v = (b[2] != null ? b[2] : b[1]); else break; }
+    return v;
+  };
 
   const den = (x) => String(x || "").slice(0, 10);
   const dnySet = new Set();
@@ -698,6 +710,21 @@ function computeXtbSerie(positions = [], closedTrades = [], tranches = [], cashO
   const cNakup = bezi(positions, "trade_date", (r) => Number(r.amount_czk) || 0);
   const cProdej = bezi(closedTrades, "close_time", (r) => Number(r.amount_czk) || 0);
   const cOstat = bezi(cashOps, "op_time", (r) => Number(r.amount_czk) || 0);
+  // ── ROZKLAD ZISKU V ČASE ────────────────────────────────────────────────────
+  // Stojí na kontrolní rovnici z výpisu: Σ nákupy − Σ cost_czk uzavření = pořizovací
+  // cena otevřených pozic. Díky ní se pořizovací cena ke KAŽDÉMU dni dá odvodit ze
+  // dvou běžících součtů, aniž by se muselo párovat lot po lotu. `cost_czk` je fakt
+  // z výpisu, ne FIFO dopočet — a právě proto to sedí i u BKNG, kde XTB zavřelo
+  // nejnovější lot. Fallback (amount − profit) je jen pro data bez toho sloupce.
+  const cCost = bezi(closedTrades, "close_time", (r) => (
+    r && r.cost_czk != null ? Number(r.cost_czk) || 0
+      : (Number(r.amount_czk) || 0) - (Number(r.profit) || 0)
+  ));
+  const cProfit = bezi(closedTrades, "close_time", (r) => Number(r.profit) || 0);
+  const cDiv = bezi(cashOps, "op_time", (r) => {
+    const t = String((r && r.op_type) || "");
+    return t === "Dividend" || t === "Withholding tax" ? Number(r.amount_czk) || 0 : 0;
+  });
 
   const nakupy = {}, prodeje = {};
   for (const p of positions) {
@@ -721,7 +748,9 @@ function computeXtbSerie(positions = [], closedTrades = [], tranches = [], cashO
   const rada = [];
   let podily = 0, ti = 0, jednotka = 1, predchozi = null, bezCeny = new Set();
   for (const d of dny) {
-    const bCena = posledni(bench.body, d), bFx = fx(bench.mena, d);
+    // Benchmark se bere z adjclose (b[2]) — u akumulačního ETF je to totéž co close,
+    // ale kdyby se někdy vyměnil za distribuční třídu, zůstane to total return.
+    const bCena = posledniAdj(bench.body, d), bFx = fx(bench.mena, d);
     const bCzk = bCena != null && bFx != null ? bCena * bFx : null;
     while (ti < tokySer.length && tokySer[ti][0] <= d) {
       if (bCzk) podily += tokySer[ti][1] / bCzk;
@@ -745,12 +774,22 @@ function computeXtbSerie(positions = [], closedTrades = [], tranches = [], cashO
       if (q > 0) trzni += ks * (czk / q);
     }
     const vlozeno = cVklad(d);
-    const hodnota = trzni + vlozeno - cNakup(d) + cProdej(d) + cOstat(d);
+    const nakupD = cNakup(d), prodejD = cProdej(d), ostatD = cOstat(d);
+    const hodnota = trzni + vlozeno - nakupD + prodejD + ostatD;
     if (predchozi !== null) {
       const zaklad = predchozi + (toky[d] || 0);
       if (zaklad > 0) jednotka *= hodnota / zaklad;   // TWR — vklad jednotku nemění
     }
     predchozi = hodnota;
+    // Rozklad zisku ke dni. Součet čtyř složek se identicky rovná (hodnota − vloženo):
+    //   realizovaný  = prodeje − pořizovací cena prodaných
+    //   na papíře    = tržní hodnota otevřených − jejich pořizovací cena
+    //   dividendy    = hrubé dividendy − srážková daň
+    //   ostatní      = úroky z volné hotovosti a poplatky
+    // Ověřeno algebraicky: (prodej − cost) + (trzni − nakup + cost) + ostat = hodnota − vloženo.
+    const porizOtev = nakupD - cCost(d);
+    const realizovano = cProfit(d);
+    const dividendy = cDiv(d);
     rada.push({
       datum: d,
       hodnota: Math.round(hodnota),
@@ -758,6 +797,11 @@ function computeXtbSerie(positions = [], closedTrades = [], tranches = [], cashO
       benchmark: bCzk ? Math.round(podily * bCzk) : null,
       indexCena: bCzk,
       jednotka,
+      realizovano: Math.round(realizovano),
+      naPapire: Math.round(trzni - porizOtev),
+      dividendy: Math.round(dividendy),
+      ostatni: Math.round(ostatD - dividendy),
+      zisk: Math.round(hodnota - vlozeno),
     });
   }
   return { rada, bezCeny: Array.from(bezCeny), cas: hist.cas || null };
@@ -7815,10 +7859,9 @@ function TitulLogo({ yahoo, symbol, size = 34 }) {
 // Tři optiky, tři řady přepínačů. Default: Procenta · 1R — odpovídá na otázku
 // „jsem lepší než trh?". Verdiktová pilulka mluví VŽDY v korunách, protože bere
 // v úvahu, kdy peníze doopravdy přišly; TWR to schválně ignoruje.
-function AkcieGraf({ serie, stav = "idle", onNacti }) {
+function AkcieGraf({ serie, stav = "idle", onNacti, pf = null }) {
   const [okno, setOkno] = useState("1R");
   const [rok, setRok] = useState(null);
-  const [optika, setOptika] = useState("Procenta");
   const [kurzor, setKurzor] = useState(null);
 
   const rada = (serie && serie.rada) || [];
@@ -7880,142 +7923,316 @@ function AkcieGraf({ serie, stav = "idle", onNacti }) {
     return out;
   })();
 
-  let s1 = [], s2 = [], s3 = [], popis1 = "", popis2 = "", popis3 = "";
-  if (optika === "Procenta") {
-    s1 = usek.map(r => (r.jednotka / A.jednotka - 1) * 100);
-    s2 = usek.map(r => (r.indexCena && A.indexCena ? (r.indexCena / A.indexCena - 1) * 100 : 0));
-    popis1 = "Tvoje portfolio (TWR)"; popis2 = "Světový index";
-  } else if (optika === "Koruny") {
-    s1 = usek.map(r => r.hodnota - A.hodnota - (r.vlozeno - A.vlozeno));
-    s2 = usek.map((r, i) => benchRe[i] - A.hodnota - (r.vlozeno - A.vlozeno));
-    popis1 = "Kolik vydělalo tvoje"; popis2 = "Kolik by vydělal index";
-  } else {
-    s1 = usek.map(r => r.hodnota);
-    s2 = benchRe.slice();
-    s3 = usek.map(r => r.vlozeno);
-    popis1 = "Hodnota portfolia"; popis2 = "Kdyby to celé šlo do indexu"; popis3 = "Vložený kapitál";
-  }
-
-  const vse = s1.concat(s2, s3);
-  let lo = Math.min(...vse), hi = Math.max(...vse);
-  if (hi === lo) hi = lo + 1;
-  const rez = (hi - lo) * 0.12; lo -= rez; hi += rez;
-  const W = 900, H = 250, ml = 4, mr = 4, mt = 12, mb = 22;
-  const n = usek.length;
-  const px = (i) => ml + (W - ml - mr) * (n < 2 ? 0 : i / (n - 1));
-  const py = (v) => mt + (H - mt - mb) * (1 - (v - lo) / (hi - lo));
-  const cesta = (s) => s.map((v, i) => `${i ? "L" : "M"}${px(i).toFixed(1)} ${py(v).toFixed(1)}`).join(" ");
-
-  // Měsíční rysky — u dlouhých oken jen každý druhý měsíc, ať to není hřeben.
-  const rysky = [];
-  let prevM = "";
-  usek.forEach((r, i) => { const m = r.datum.slice(0, 7); if (m !== prevM) { prevM = m; rysky.push({ i, m }); } });
-  const krok = rysky.length > 9 ? 2 : 1;
+  // ── ŘADY V KORUNÁCH ─────────────────────────────────────────────────────────
+  // Všechno mluví v korunách. Procenta se nedají utratit a hlavně: dřív si velké
+  // procento (TWR) a verdiktová pilulka (koruny) odporovaly na jedné obrazovce —
+  // graf ukazoval, že jsem pod indexem, a nadpis tvrdil, že ho porážím. Obojí byla
+  // pravda, ale vedle sebe to bylo nečitelné. Teď je jedna optika a TWR se objevuje
+  // jen v bloku 3, kde má význam: jako měřítko výběru titulů.
+  const korunSer = usek.map(r => r.hodnota - A.hodnota - (r.vlozeno - A.vlozeno));
+  const korunIxSer = usek.map((r, i) => benchRe[i] - A.hodnota - (r.vlozeno - A.vlozeno));
+  const rozdilSer = korunSer.map((v, i) => v - korunIxSer[i]);
 
   const twr = (B.jednotka / A.jednotka - 1) * 100;
   const ixPct = A.indexCena && B.indexCena ? (B.indexCena / A.indexCena - 1) * 100 : 0;
-  const tok = B.vlozeno - A.vlozeno;
-  const korun = B.hodnota - A.hodnota - tok;
-  const korunIx = (benchRe[benchRe.length - 1] || A.hodnota) - A.hodnota - tok;
+  const korun = korunSer[korunSer.length - 1] || 0;
+  const korunIx = korunIxSer[korunIxSer.length - 1] || 0;
   const rozdil = korun - korunIx;
   const dnu = Math.round((new Date(B.datum) - new Date(A.datum)) / 86400000);
 
-  const velke = optika === "Procenta" ? (twr >= 0 ? "+" : "−") + Math.abs(twr).toFixed(1).replace(".", ",") + " %"
-    : optika === "Koruny" ? (korun >= 0 ? "+" : "−") + fmtKc(Math.abs(Math.round(korun)))
-      : fmtKc(Math.round(B.hodnota));
+  // ── ROZKLAD NÁSKOKU: výběr titulů vs. načasování vkladů ─────────────────────
+  // Náskok v korunách má dva zdroje a bez jejich oddělení se z grafu nedá nic naučit.
+  // (1) Selekce — moje tituly se hýbaly jinak než index. Měří ji rozdíl TWR, protože
+  //     TWR je očištěný o vklady. Přepočtený na koruny průměrnou hodnotou portfolia.
+  // (2) Načasování — v různých fázích období jsem měl ve hře různě velký kapitál,
+  //     takže se stejný procentní rozdíl násobil jinou částkou.
+  // Je to odhad, ne rozvaha. Ale odpovídá na jedinou otázku, kterou z grafu jinak
+  // nevyčtu: vydělal jsem to výběrem akcií, nebo tím, kdy jsem poslal peníze?
+  const prumHodnota = usek.reduce((s, r) => s + r.hodnota, 0) / Math.max(1, usek.length);
+  const selekce = ((twr - ixPct) / 100) * prumHodnota;
+  const timing = rozdil - selekce;
 
-  // Věta mlčí, když je zpráva špatná. Jediná výjimka v appce je benchmark —
-  // ten Tom chtěl slyšet na obě strany, ale věcně a bez omluv.
-  const vetaOK = rozdil > 0 && korun > 0;
+  // ── RIZIKO ──────────────────────────────────────────────────────────────────
+  // ⚠️ Propad se měří na TWR jednotce, NE na hodnotě účtu. Z hodnoty by ho každý
+  // vklad opticky zahojil a graf by tvrdil, že jsem nikdy neklesl.
+  const propad = (vals) => {
+    let vrchol = -Infinity, nej = 0;
+    for (const v of vals) {
+      if (v == null) continue;
+      if (v > vrchol) vrchol = v;
+      if (vrchol > 0) nej = Math.min(nej, v / vrchol - 1);
+    }
+    return nej * 100;
+  };
+  const vola = (vals) => {
+    const r = [];
+    for (let i = 1; i < vals.length; i++) {
+      if (vals[i - 1] > 0 && vals[i] > 0) r.push(vals[i] / vals[i - 1] - 1);
+    }
+    if (r.length < 3) return null;
+    const m = r.reduce((s, x) => s + x, 0) / r.length;
+    const v = r.reduce((s, x) => s + (x - m) * (x - m), 0) / (r.length - 1);
+    return Math.sqrt(v * 252) * 100;   // anualizovaná směrodatná odchylka
+  };
+  const jd = usek.map(r => r.jednotka), ic = usek.map(r => r.indexCena);
+  const ddPf = propad(jd), ddIx = propad(ic);
+  const volPf = vola(jd), volIx = vola(ic);
+  const dnuPod = rozdilSer.filter(v => v < 0).length;
+  const tituly = (pf && pf.tituly) || [];
+  const top4 = tituly.slice(0, 4).reduce((s, t) => s + (t.podil || 0), 0) * 100;
 
-  const pilulka = (txt, akt, klik, zlata) => (
+  // ── ROZKLAD ZISKU (blok 1) — vždy celá historie, okno se ho netýká ──────────
+  // „Kolik jsem nahromadil" je absolutní číslo. Kdyby se ořezávalo oknem, ptal bych
+  // se na něco jiného, než co chci vidět.
+  const P = rada[rada.length - 1];
+  const zisk = P.zisk, zRea = P.realizovano, zPap = P.naPapire, zDiv = P.dividendy, zOst = P.ostatni;
+
+  const kc = (v) => (v >= 0 ? "+" : "−") + fmtKc(Math.abs(Math.round(v)));
+  const pct = (v) => (v >= 0 ? "+" : "−") + Math.abs(v).toFixed(1).replace(".", ",") + " %";
+
+  // ── GEOMETRIE ───────────────────────────────────────────────────────────────
+  const W = 900, ml = 4, mr = 4, mt = 12, mb = 22;
+  const osa = (vals, H, nuluDoRamce) => {
+    const ok = vals.filter(v => v != null && isFinite(v));
+    let lo = Math.min(...ok), hi = Math.max(...ok);
+    if (nuluDoRamce) { lo = Math.min(lo, 0); hi = Math.max(hi, 0); }
+    if (hi === lo) hi = lo + 1;
+    const rez = (hi - lo) * 0.12; lo -= rez; hi += rez;
+    return {
+      py: (v) => mt + (H - mt - mb) * (1 - (v - lo) / (hi - lo)),
+      lo, hi,
+    };
+  };
+  const pxN = (n) => (i) => ml + (W - ml - mr) * (n < 2 ? 0 : i / (n - 1));
+  const cesta = (s, px, py) => s.map((v, i) => `${i ? "L" : "M"}${px(i).toFixed(1)} ${py(v).toFixed(1)}`).join(" ");
+
+  // Měsíční rysky — u dlouhých oken jen každý druhý měsíc, ať to není hřeben.
+  const ryskyZ = (pole) => {
+    const out = []; let prevM = "";
+    pole.forEach((r, i) => { const m = r.datum.slice(0, 7); if (m !== prevM) { prevM = m; out.push({ i, m }); } });
+    return out;
+  };
+  const MES = ["I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X", "XI", "XII"];
+  const n = usek.length;
+
+  const pilulka = (txt, akt, klik) => (
     <button key={txt} onClick={klik} style={{
       fontSize: 11, padding: "5px 11px", borderRadius: 999, cursor: "pointer", fontFamily: "inherit",
-      border: `1px solid ${akt ? (zlata ? BP.sand : BP.indigoInk) : "rgba(0,0,0,.08)"}`,
-      background: akt ? (zlata ? BP.sand : BP.indigoInk) : "#fff",
-      color: akt ? (zlata ? "#2C2208" : "#fff") : "#5C5770",
+      border: `1px solid ${akt ? BP.indigoInk : "rgba(0,0,0,.08)"}`,
+      background: akt ? BP.indigoInk : "#fff",
+      color: akt ? "#fff" : "#5C5770",
     }}>{txt}</button>
   );
+  const CIHLA = "#B4735A";   // barva pro „tady prohráváš" — tlumená, ne poplašná
+  const cara = { borderTop: "1px solid rgba(0,0,0,.07)", marginTop: 26, paddingTop: 22 };
+  const cislo = (v, barva) => ({ ...bpHero(21, barva || "var(--txt)"), fontWeight: 400 });
+
+  // ── BLOK 1 — hromadění zisku, celá historie ──────────────────────────────────
+  const H1 = 210;
+  const zTot = rada.map(r => r.zisk), zReaS = rada.map(r => r.realizovano);
+  const o1 = osa(zTot.concat(zReaS), H1, true);
+  const px1 = pxN(rada.length);
+  const dno1 = o1.py(0);   // osa má nulu vždy v rámci (nuluDoRamce), takže je kam plochu posadit
+  const rysky1 = ryskyZ(rada), krok1 = rysky1.length > 9 ? Math.ceil(rysky1.length / 8) : 1;
+
+  // ── BLOK 2 — křivka rozdílu proti indexu ─────────────────────────────────────
+  const H2 = 170;
+  const o2 = osa(rozdilSer, H2, true);
+  const px2 = pxN(n);
+  const y0 = o2.py(0);
+  const rysky2 = ryskyZ(usek), krok2 = rysky2.length > 9 ? 2 : 1;
+
+  const metrika = (popisek, hodnota, pod, sirka, barva, sirka2) => (
+    <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+      <span style={{ fontSize: 11, color: "var(--mut)" }}>{popisek}</span>
+      <span style={cislo(hodnota, barva)}>{hodnota}</span>
+      <span style={{ fontSize: 11, color: "var(--mut)", opacity: .8, marginBottom: 5 }}>{pod}</span>
+      <span style={{ display: "block", height: 5, borderRadius: 999, background: "rgba(28,10,99,.05)", overflow: "hidden" }}>
+        <i style={{ display: "block", height: "100%", width: `${Math.max(2, Math.min(100, sirka))}%`, background: barva || BP.indigoDeep, borderRadius: 999 }} />
+      </span>
+      <span style={{ display: "block", height: 5, borderRadius: 999, background: "rgba(28,10,99,.04)", overflow: "hidden", marginTop: 3 }}>
+        <i style={{ display: "block", height: "100%", width: `${Math.max(2, Math.min(100, sirka2))}%`, background: "rgba(28,10,99,.28)", borderRadius: 999 }} />
+      </span>
+    </div>
+  );
+
+  const radekRozkladu = (popisek, castka, sirka, barva, tucne) => (
+    <div style={{
+      display: "grid", gridTemplateColumns: "minmax(96px,140px) 1fr minmax(90px,112px)",
+      alignItems: "center", gap: 12, fontSize: 13,
+      ...(tucne ? { paddingTop: 10, borderTop: "1px solid rgba(0,0,0,.08)" } : null),
+    }}>
+      <span style={{ color: tucne ? "var(--txt)" : "#5C5770" }}>{popisek}</span>
+      <span style={{ display: "block", height: 9, borderRadius: 999, background: "rgba(28,10,99,.05)", overflow: "hidden" }}>
+        <i style={{ display: "block", height: "100%", borderRadius: 999, background: barva, width: `${Math.max(3, Math.min(100, sirka))}%` }} />
+      </span>
+      <span style={{ textAlign: "right", fontWeight: 650, fontVariantNumeric: "tabular-nums", color: barva === CIHLA ? CIHLA : (tucne ? "var(--txt)" : BP.indigoDeep) }}>
+        {kc(castka)}
+      </span>
+    </div>
+  );
+  const skala = Math.max(Math.abs(selekce), Math.abs(timing), Math.abs(rozdil)) || 1;
 
   return (
     <div style={{ marginTop: 6 }}>
-      <div style={{ display: "flex", flexDirection: "column", gap: 7, marginBottom: 16 }}>
-        <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-          {["1T", "1M", "3M", "YTD", "1R", "Vše"].map(k => pilulka(k, !rok && okno === k, () => { setOkno(k); setRok(null); }, false))}
-        </div>
-        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
-          <span style={bpLabel({ marginRight: 4 })}>kalendářní rok</span>
-          {["2025", "2026"].map(k => pilulka(k, rok === k, () => setRok(rok === k ? null : k), false))}
-        </div>
-        <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-          {["Procenta", "Koruny", "Hodnota"].map(k => pilulka(k, optika === k, () => setOptika(k), true))}
-        </div>
+
+      {/* ══ 1 · KOLIK MI MOJE PENÍZE VYDĚLALY ══════════════════════════════════ */}
+      <div style={bpLabel({ marginBottom: 10 })}>1 · Kolik mi moje peníze vydělaly</div>
+      <div style={{ ...bpHero(46) }}>{kc(zisk)}</div>
+      <div style={{ fontSize: 12.5, color: "var(--mut)", marginTop: 9 }}>
+        z vložených <b style={{ color: "var(--txt)" }}>{fmtKc(Math.round(P.vlozeno))}</b>
+        {P.vlozeno > 0 && <> · <b style={{ color: "var(--txt)" }}>{pct((zisk / P.vlozeno) * 100)}</b> na vloženém kapitálu</>}
+        {" "}· od {rada[0].datum.split("-").reverse().join(". ")}
       </div>
 
-      {vetaOK && (
-        <div style={{ fontSize: 14.5, lineHeight: 1.45, color: "#3A3550", maxWidth: "62ch", marginBottom: 4 }}>
-          Tvoje peníze rostly rychleji než celý svět dohromady.
-        </div>
-      )}
-      <div style={{ ...bpHero(46), marginTop: 6 }}>
-        {velke}
-        {optika === "Procenta" && (
-          <span style={{
-            display: "inline-block", marginLeft: 12, verticalAlign: "middle", fontSize: 9,
-            letterSpacing: ".18em", textTransform: "uppercase", fontWeight: 700,
-            padding: "5px 10px", borderRadius: 999, background: "rgba(198,168,107,.18)", color: BP.sandDeep,
-          }}>TWR · říká se nahlas</span>
-        )}
-      </div>
-      <div style={{ fontSize: 11, color: "var(--mut)", marginTop: 9, display: "flex", gap: 8, flexWrap: "wrap" }}>
-        <span>Období <b style={{ color: "var(--txt)" }}>{rok || okno}</b></span><span style={{ opacity: .35 }}>·</span>
-        <span>Index <b style={{ color: "var(--txt)" }}>{(ixPct >= 0 ? "+" : "−") + Math.abs(ixPct).toFixed(1).replace(".", ",")} %</b></span><span style={{ opacity: .35 }}>·</span>
-        <span>Vydělalo <b style={{ color: "var(--txt)" }}>{(korun >= 0 ? "+" : "−") + fmtKc(Math.abs(Math.round(korun)))}</b></span>
-        {kurzor && <><span style={{ opacity: .35 }}>·</span><span>{kurzor}</span></>}
-      </div>
-
-      <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" style={{ display: "block", width: "100%", height: 250, marginTop: 8, overflow: "visible" }}
-        onMouseLeave={() => setKurzor(null)}
-        onMouseMove={(e) => {
-          const r = e.currentTarget.getBoundingClientRect();
-          const i = Math.max(0, Math.min(n - 1, Math.round(((e.clientX - r.left) / r.width) * (n - 1))));
-          const u = usek[i];
-          setKurzor(`${u.datum} · ${fmtKc(Math.round(u.hodnota))}`);
-        }}>
-        {optika !== "Hodnota" && lo < 0 && hi > 0 && (
-          <line x1={ml} y1={py(0)} x2={W - mr} y2={py(0)} stroke="rgba(0,0,0,.14)" strokeWidth="1" />
-        )}
-        {rysky.filter((_, k) => k % krok === 0).map(r => (
-          <g key={r.i}>
-            <line x1={px(r.i)} y1={mt} x2={px(r.i)} y2={H - mb} stroke="rgba(0,0,0,.045)" strokeWidth="1" />
-            <text x={px(r.i) + 4} y={H - 7} fontSize="9" fill="#A8A4B5" letterSpacing=".08em">{["I","II","III","IV","V","VI","VII","VIII","IX","X","XI","XII"][+r.m.slice(5, 7) - 1]}</text>
+      <svg viewBox={`0 0 ${W} ${H1}`} preserveAspectRatio="none" style={{ display: "block", width: "100%", height: H1, marginTop: 16, overflow: "visible" }}>
+        {rysky1.filter((_, k) => k % krok1 === 0).map(r => (
+          <g key={"a" + r.i}>
+            <line x1={px1(r.i)} y1={mt} x2={px1(r.i)} y2={H1 - mb} stroke="rgba(0,0,0,.045)" strokeWidth="1" />
+            <text x={px1(r.i) + 4} y={H1 - 7} fontSize="9" fill="#A8A4B5" letterSpacing=".08em">{MES[+r.m.slice(5, 7) - 1]}</text>
           </g>
         ))}
-        <path d={`${cesta(s1)} L ${px(n - 1)} ${H - mb} L ${px(0)} ${H - mb} Z`} fill="rgba(142,130,224,.10)" stroke="none" />
-        {s3.length > 0 && <path d={cesta(s3)} fill="none" stroke={BP.indigoDeep} strokeWidth="1.6" strokeOpacity=".55" />}
-        <path d={cesta(s2)} fill="none" stroke={BP.sand} strokeWidth="2" strokeDasharray="5 4" />
-        <path d={cesta(s1)} fill="none" stroke="#8E82E0" strokeWidth="2.6" strokeLinejoin="round" />
-        <circle cx={px(n - 1)} cy={py(s1[n - 1])} r="4" fill="#8E82E0" />
+        {/* světlá plocha = celý zisk, tmavá = ta část, kterou už mám vybranou */}
+        <path d={`${cesta(zTot, px1, o1.py)} L ${px1(rada.length - 1)} ${dno1} L ${px1(0)} ${dno1} Z`} fill="rgba(142,130,224,.30)" />
+        <path d={`${cesta(zReaS, px1, o1.py)} L ${px1(rada.length - 1)} ${dno1} L ${px1(0)} ${dno1} Z`} fill={BP.indigoDeep} fillOpacity=".85" />
+        <path d={cesta(zTot, px1, o1.py)} fill="none" stroke="#8E82E0" strokeWidth="2.4" strokeLinejoin="round" />
+        <line x1={ml} y1={dno1} x2={W - mr} y2={dno1} stroke="rgba(0,0,0,.14)" strokeWidth="1" />
       </svg>
 
-      <div style={{ display: "flex", gap: 16, flexWrap: "wrap", fontSize: 10.5, color: "#5C5770", marginTop: 10, paddingTop: 10, borderTop: "1px solid rgba(0,0,0,.06)" }}>
-        <span><i style={{ display: "inline-block", width: 15, borderTop: "2.5px solid #8E82E0", verticalAlign: "middle", marginRight: 6 }} />{popis1}</span>
-        <span><i style={{ display: "inline-block", width: 15, borderTop: `2.5px dashed ${BP.sand}`, verticalAlign: "middle", marginRight: 6 }} />{popis2}</span>
-        {popis3 && <span><i style={{ display: "inline-block", width: 15, borderTop: `2.5px solid ${BP.indigoDeep}`, opacity: .6, verticalAlign: "middle", marginRight: 6 }} />{popis3}</span>}
+      <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 14, paddingTop: 13, borderTop: "1px solid rgba(0,0,0,.06)" }}>
+        {[
+          [BP.indigoDeep, "Realizovaný", zRea, "vybráno, trh ti to nevezme"],
+          ["#8E82E0", "Na papíře", zPap, "nezdaněno · drží ho trh, ne ty"],
+          [BP.sand, "Dividendy", zDiv + zOst, "čistého po srážkové dani, včetně úroků a poplatků"],
+        ].map(([b, nazev, castka, popis]) => (
+          <div key={nazev} style={{ display: "flex", alignItems: "baseline", gap: 9, fontSize: 12.5, flexWrap: "wrap" }}>
+            <i style={{ width: 11, height: 11, borderRadius: 3, background: b, flex: "0 0 auto", transform: "translateY(1px)" }} />
+            <b style={{ fontWeight: 650 }}>{nazev} {fmtKc(Math.round(castka))}</b>
+            <span style={{ fontSize: 11.5, color: "var(--mut)" }}>{popis}</span>
+          </div>
+        ))}
       </div>
 
-      <div style={{
-        display: "inline-block", fontSize: 11.5, padding: "6px 12px", borderRadius: 999,
-        border: "1px solid rgba(0,0,0,.06)", marginTop: 14, color: BP.indigoInk,
-      }}>
-        <span style={{ display: "inline-block", width: 6, height: 6, borderRadius: "50%", background: BP.sand, marginRight: 7, verticalAlign: "middle" }} />
-        {rozdil >= 0 ? <>Porážíš index o <b>{fmtKc(Math.round(rozdil))}</b></> : <>Za indexem o <b>{fmtKc(Math.round(-rozdil))}</b></>}
+      {/* ══ 2 · VYPLATILO SE MI VYBÍRAT SI SÁM ═════════════════════════════════ */}
+      <div style={cara}>
+        <div style={bpLabel({ marginBottom: 10 })}>2 · Vyplatilo se mi vybírat si sám?</div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 7, marginBottom: 18 }}>
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+            {["1M", "3M", "YTD", "1R", "Vše"].map(k => pilulka(k, !rok && okno === k, () => { setOkno(k); setRok(null); }))}
+          </div>
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+            <span style={bpLabel({ marginRight: 4 })}>kalendářní rok</span>
+            {["2025", "2026"].map(k => pilulka(k, rok === k, () => setRok(rok === k ? null : k)))}
+          </div>
+        </div>
+
+        <div style={{ display: "flex", alignItems: "baseline", gap: 14, flexWrap: "wrap" }}>
+          <span style={{ ...bpHero(34), color: rozdil >= 0 ? "var(--txt)" : CIHLA }}>{rozdil >= 0 ? "ANO" : "ZATÍM NE"}</span>
+          <span style={{ fontSize: 14, color: "#3A3550" }}>
+            {rozdil >= 0
+              ? <>o <b>{fmtKc(Math.round(rozdil))}</b> víc, než kdyby stejné vklady ležely v {XTB_BENCHMARK_NAZEV}</>
+              : <>{XTB_BENCHMARK_NAZEV} by ti ze stejných vkladů udělal o <b>{fmtKc(Math.round(-rozdil))}</b> víc</>}
+          </span>
+        </div>
+        <div style={{ fontSize: 11, color: "var(--mut)", marginTop: 8, display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <span>Období <b style={{ color: "var(--txt)" }}>{rok || okno}</b></span><span style={{ opacity: .35 }}>·</span>
+          <span>Tvoje <b style={{ color: "var(--txt)" }}>{kc(korun)}</b></span><span style={{ opacity: .35 }}>·</span>
+          <span>{XTB_BENCHMARK_NAZEV} <b style={{ color: "var(--txt)" }}>{kc(korunIx)}</b></span>
+          {kurzor && <><span style={{ opacity: .35 }}>·</span><span>{kurzor}</span></>}
+        </div>
+
+        <svg viewBox={`0 0 ${W} ${H2}`} preserveAspectRatio="none" style={{ display: "block", width: "100%", height: H2, marginTop: 14, overflow: "visible" }}
+          onMouseLeave={() => setKurzor(null)}
+          onMouseMove={(e) => {
+            const r = e.currentTarget.getBoundingClientRect();
+            const i = Math.max(0, Math.min(n - 1, Math.round(((e.clientX - r.left) / r.width) * (n - 1))));
+            setKurzor(`${usek[i].datum} · ${kc(rozdilSer[i])}`);
+          }}>
+          <defs>
+            <clipPath id="mauxNad"><rect x="0" y="0" width={W} height={Math.max(0, y0)} /></clipPath>
+            <clipPath id="mauxPod"><rect x="0" y={y0} width={W} height={Math.max(0, H2 - y0)} /></clipPath>
+          </defs>
+          {rysky2.filter((_, k) => k % krok2 === 0).map(r => (
+            <g key={"b" + r.i}>
+              <line x1={px2(r.i)} y1={mt} x2={px2(r.i)} y2={H2 - mb} stroke="rgba(0,0,0,.045)" strokeWidth="1" />
+              <text x={px2(r.i) + 4} y={H2 - 7} fontSize="9" fill="#A8A4B5" letterSpacing=".08em">{MES[+r.m.slice(5, 7) - 1]}</text>
+            </g>
+          ))}
+          {(() => {
+            const l = cesta(rozdilSer, px2, o2.py);
+            const a = `${l} L ${px2(n - 1)} ${y0.toFixed(1)} L ${px2(0)} ${y0.toFixed(1)} Z`;
+            return (
+              <>
+                <path d={a} fill="rgba(142,130,224,.22)" clipPath="url(#mauxNad)" />
+                <path d={a} fill="rgba(180,115,90,.16)" clipPath="url(#mauxPod)" />
+                <path d={l} fill="none" stroke="#5b4bc4" strokeWidth="2.4" strokeLinejoin="round" clipPath="url(#mauxNad)" />
+                <path d={l} fill="none" stroke={CIHLA} strokeWidth="2.4" strokeLinejoin="round" clipPath="url(#mauxPod)" />
+              </>
+            );
+          })()}
+          <line x1={ml} y1={y0} x2={W - mr} y2={y0} stroke="rgba(28,10,99,.5)" strokeWidth="1.1" />
+          <circle cx={px2(n - 1)} cy={o2.py(rozdilSer[n - 1])} r="4.5" fill={rozdil >= 0 ? "#5b4bc4" : CIHLA} />
+        </svg>
+        <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10.5, marginTop: 8, gap: 8, flexWrap: "wrap" }}>
+          <span style={{ color: "#5b4bc4", fontWeight: 600 }}>nad čarou = tvoje volba byla lepší</span>
+          <span style={{ color: CIHLA, fontWeight: 600 }}>pod čarou = index by udělal víc</span>
+        </div>
       </div>
 
-      <div style={{ fontSize: 11, color: "var(--mut)", marginTop: 12, lineHeight: 1.5 }}>
-        {dnu < 365
-          ? "Období kratší než rok — neannualizuje se."
-          : "Srovnává se se světovým indexem FTSE All-World, total return, přepočteným do korun."}
+      {/* ══ 3 · Z ČEHO TEN NÁSKOK JE ═══════════════════════════════════════════ */}
+      <div style={cara}>
+        <div style={bpLabel({ marginBottom: 10 })}>3 · Z čeho ten náskok je</div>
+        <div style={{ fontSize: 12.5, color: "var(--mut)", lineHeight: 1.55, marginBottom: 18, maxWidth: "70ch" }}>
+          Odděluje dovednost od štěstí. Bez tohohle nevíš, jestli jsi dobrý, nebo jsi jen vkládal ve správnou chvíli.
+        </div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 11 }}>
+          {radekRozkladu("Výběr titulů", selekce, Math.abs(selekce) / skala * 100, selekce >= 0 ? "#5b4bc4" : CIHLA, false)}
+          {radekRozkladu("Načasování vkladů", timing, Math.abs(timing) / skala * 100, timing >= 0 ? "#5b4bc4" : CIHLA, false)}
+          {radekRozkladu("Náskok celkem", rozdil, Math.abs(rozdil) / skala * 100, BP.indigoInk, true)}
+        </div>
+        <div style={{ fontSize: 12.5, lineHeight: 1.65, color: "#5C5770", marginTop: 16, paddingTop: 13, borderTop: "1px solid rgba(0,0,0,.06)", maxWidth: "72ch" }}>
+          {selekce >= 0 && timing >= 0 && <>Za období <b>{rok || okno}</b> ti sedělo obojí — tituly i načasování. Tvoje portfolio udělalo <b>{pct(twr)}</b> proti <b>{pct(ixPct)}</b> u indexu.</>}
+          {selekce < 0 && timing >= 0 && <>Za období <b>{rok || okno}</b> tě nedostal nahoru výběr akcií, ale to, <b>kdy jsi poslal peníze</b>. Tvoje tituly zaostaly za indexem o <b>{Math.abs(twr - ixPct).toFixed(1).replace(".", ",")} b. b.</b> — velké vklady ale dorazily před růstem.</>}
+          {selekce >= 0 && timing < 0 && <>Za období <b>{rok || okno}</b> tě drží nahoře <b>výběr titulů</b> ({pct(twr)} proti {pct(ixPct)} u indexu). Načasování vkladů ti naopak ubralo — peníze přicházely spíš před slabšími úseky.</>}
+          {selekce < 0 && timing < 0 && <>Za období <b>{rok || okno}</b> nesedělo ani jedno: tituly zaostaly o <b>{Math.abs(twr - ixPct).toFixed(1).replace(".", ",")} b. b.</b> a vklady dorazily v nevhodnou chvíli.</>}
+          {" "}Selekce se měří TWR, který je očištěný o vklady; zbytek náskoku připadá na načasování. Je to odhad, ne účetní rozvaha.
+        </div>
+      </div>
+
+      {/* ══ 4 · CO TĚ TO STÁLO ZA RIZIKO ═══════════════════════════════════════ */}
+      <div style={cara}>
+        <div style={bpLabel({ marginBottom: 10 })}>4 · Co tě to stálo za riziko</div>
+        <div style={{ fontSize: 12.5, color: "var(--mut)", lineHeight: 1.55, marginBottom: 18, maxWidth: "70ch" }}>
+          Výnos bez rizika není výsledek, je to jen číslo. Tohle je cena, kterou za ten náskok platíš. Tenčí proužek pod každým je {XTB_BENCHMARK_NAZEV}.
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(150px,1fr))", gap: "20px 26px" }}>
+          {metrika("Nejhorší propad", pct(ddPf), `${XTB_BENCHMARK_NAZEV}: ${pct(ddIx)}`,
+            100, CIHLA, ddPf ? Math.abs(ddIx / ddPf) * 100 : 0)}
+          {metrika("Kolísavost (roční)", volPf == null ? "—" : Math.abs(volPf).toFixed(1).replace(".", ",") + " %",
+            volIx == null ? "málo dat" : `${XTB_BENCHMARK_NAZEV}: ${Math.abs(volIx).toFixed(1).replace(".", ",")} %`,
+            100, "#8E82E0", volPf ? (volIx / volPf) * 100 : 0)}
+          {metrika("Dní pod indexem", `${dnuPod} z ${n}`,
+            dnuPod > n / 2 ? "většinu období jsi prohrával" : "menšinu období jsi prohrával",
+            (dnuPod / Math.max(1, n)) * 100, CIHLA, 100 - (dnuPod / Math.max(1, n)) * 100)}
+          {metrika("Koncentrace", `${tituly.length} ${tituly.length === 1 ? "titul" : tituly.length < 5 ? "tituly" : "titulů"}`,
+            tituly.length ? `${Math.round(top4)} % ve čtyřech největších` : "—",
+            top4, top4 > 70 ? CIHLA : BP.indigoDeep, 100)}
+        </div>
+        <div style={{ fontSize: 12.5, lineHeight: 1.65, color: "#5C5770", marginTop: 18, paddingTop: 13, borderTop: "1px solid rgba(0,0,0,.06)", maxWidth: "72ch" }}>
+          {volPf != null && volIx != null && volIx > 0 && (
+            <>Neseš <b>{(volPf / volIx).toFixed(1).replace(".", ",")}× větší kolísání než index</b>{rozdil >= 0 ? <> za náskok {fmtKc(Math.round(rozdil))}</> : null}. </>
+          )}
+          {top4 > 70 && <>Ten výsledek nepochází z {tituly.length} nezávislých rozhodnutí — <b>{Math.round(top4)} % máš ve čtyřech titulech</b>, takže je to jedna sázka v několika kabátech. </>}
+          {dnu < 365
+            ? <>Období je kratší než rok, takže se nic neanualizuje — a na závěr o dovednosti je to krátký vzorek.</>
+            : <>Vzorek je {Math.round(dnu / 30.4)} měsíců, což je na závěr o dovednosti pořád krátké.</>}
+        </div>
+      </div>
+
+      <div style={{ fontSize: 11, color: "var(--mut)", marginTop: 20, lineHeight: 1.55 }}>
+        Benchmark je {XTB_BENCHMARK_NAZEV} total return ({XTB_BENCHMARK}, akumulační — dividendy jsou v ceně),
+        přepočtený do korun. Do indexu vstupují tvoje skutečné vklady ve tvých skutečných termínech,
+        ne modelová jednorázová investice.
         {serie && serie.bezCeny && serie.bezCeny.length > 0 && (
           <> Tituly {serie.bezCeny.join(", ")} už na burze nejsou — po dobu držení jsou vedené v pořizovací ceně.</>
         )}
@@ -8541,11 +8758,11 @@ function AkcieModule({ xtbTranches = [], onTrancheSave, onTrancheDelete, xtbTitl
         </div>
       )}
 
-      {/* ── GRAF PROTI SVĚTOVÉMU INDEXU ── */}
+      {/* ── VÝKONNOST: hromadění zisku, srovnání s S&P 500, rozklad náskoku, riziko ── */}
       <div style={{ position: "relative", background: "#fff", border: "1px solid var(--line)", borderRadius: BP.r, padding: "22px 24px", boxShadow: BP.shadow }}>
         <BpCorners />
-        <div style={bpLabel({ marginBottom: 4 })}>Portfolio proti světovému indexu</div>
-        <AkcieGraf serie={xtbSerie} stav={serieState} onNacti={() => onNactiHistorii && onNactiHistorii()} />
+        <div style={bpLabel({ marginBottom: 4 })}>Výkonnost proti {XTB_BENCHMARK_NAZEV}</div>
+        <AkcieGraf serie={xtbSerie} stav={serieState} pf={pf} onNacti={() => onNactiHistorii && onNactiHistorii()} />
       </div>
 
       {/* ── TITULY A TRANŠE ── */}
