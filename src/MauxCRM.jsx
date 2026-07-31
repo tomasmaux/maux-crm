@@ -938,8 +938,28 @@ function computeXtbPortfolio(positions = [], closedTrades = [], tranches = [], m
 
   const celkem = trzni + hotovost;
   const nerealizovano = trzni - porizovaciOtevrene;
+
+  // ── DAŇOVÝ PODKLAD PO LETECH ────────────────────────────────────────────────
+  // Uzavřený obchod není „peníze v bezpečí" — Tom je obratem reinvestuje. Jediné,
+  // co se jím doopravdy mění, je daňová situace. Proto se sleduje zisk (základ)
+  // i tržba z prodejů: osvobození podle § 4 odst. 1 písm. w) ZDP se posuzuje
+  // z PŘÍJMU z prodeje, ne ze zisku, a na to se snadno zapomene.
+  // Appka čísla jen spočítá a ukáže. Posouzení patří daňaři — viz text v UI.
+  const podleRoku = {};
+  for (const t of closedTrades) {
+    const rok = String((t && t.close_time) || "").slice(0, 4);
+    if (!/^\d{4}$/.test(rok)) continue;
+    const r = podleRoku[rok] || (podleRoku[rok] = { rok, zisk: 0, trzba: 0, pocet: 0 });
+    r.zisk += Number(t.profit) || 0;
+    r.trzba += t.amount_czk != null
+      ? Number(t.amount_czk) || 0
+      : (Number(t.cost_czk) || 0) + (Number(t.profit) || 0);
+    r.pocet++;
+  }
+
   return {
     vlozeno, hotovost, trzni, celkem, dividendy,
+    roky: Object.values(podleRoku).sort((a, b) => a.rok.localeCompare(b.rok)),
     porizovaciOtevrene, nerealizovano, realizovano,
     // Zbytek, aby tři dlaždice vždy sečetly na "vydělaly ti peníze": dividendy po srážkové
     // dani, úroky z volné hotovosti a poplatky. Dřív nikde nebyl a součet nesedělo o stovky
@@ -8005,6 +8025,11 @@ function AkcieGraf({ serie, stav = "idle", onNacti, pf = null }) {
   };
   const pxN = (n) => (i) => ml + (W - ml - mr) * (n < 2 ? 0 : i / (n - 1));
   const cesta = (s, px, py) => s.map((v, i) => `${i ? "L" : "M"}${px(i).toFixed(1)} ${py(v).toFixed(1)}`).join(" ");
+  // Cesta zpátky zprava doleva — dohromady s `cesta` uzavře pás mezi dvěma řadami.
+  const cestaZpet = (s, px, py) => s.map((_, k) => {
+    const i = s.length - 1 - k;
+    return `L${px(i).toFixed(1)} ${py(s[i]).toFixed(1)}`;
+  }).join(" ");
 
   // Měsíční rysky — u dlouhých oken jen každý druhý měsíc, ať to není hřeben.
   const ryskyZ = (pole) => {
@@ -8092,17 +8117,25 @@ function AkcieGraf({ serie, stav = "idle", onNacti, pf = null }) {
             <text x={px1(r.i) + 4} y={H1 - 7} fontSize="9" fill="#A8A4B5" letterSpacing=".08em">{MES[+r.m.slice(5, 7) - 1]}</text>
           </g>
         ))}
-        {/* světlá plocha = celý zisk, tmavá = ta část, kterou už mám vybranou */}
-        <path d={`${cesta(zTot, px1, o1.py)} L ${px1(rada.length - 1)} ${dno1} L ${px1(0)} ${dno1} Z`} fill="rgba(142,130,224,.30)" />
-        <path d={`${cesta(zReaS, px1, o1.py)} L ${px1(rada.length - 1)} ${dno1} L ${px1(0)} ${dno1} Z`} fill={BP.indigoDeep} fillOpacity=".85" />
-        <path d={cesta(zTot, px1, o1.py)} fill="none" stroke="#8E82E0" strokeWidth="2.4" strokeLinejoin="round" />
+        {/* ⚠️ VRSTVY, NE PŘEKRYV. Dřív se kreslily dvě plochy od nuly přes sebe a tmavá
+            vylézala nad světlou křivku — oko nepoznalo, co je co. Teď dole sedí uzavřené
+            obchody a NA NICH leží pás otevřených pozic; horní hrana je celý zisk. */}
+        <path d={`${cesta(zReaS, px1, o1.py)} L ${px1(rada.length - 1)} ${dno1} L ${px1(0)} ${dno1} Z`} fill={BP.indigoDeep} fillOpacity=".88" />
+        <path d={`${cesta(zTot, px1, o1.py)} ${cestaZpet(zReaS, px1, o1.py)} Z`} fill="#B3AAEA" fillOpacity=".55" />
+        <path d={cesta(zReaS, px1, o1.py)} fill="none" stroke="#fff" strokeWidth="1.3" strokeOpacity=".7" />
+        <path d={cesta(zTot, px1, o1.py)} fill="none" stroke="#6F62D8" strokeWidth="2.2" strokeLinejoin="round" />
         <line x1={ml} y1={dno1} x2={W - mr} y2={dno1} stroke="rgba(0,0,0,.14)" strokeWidth="1" />
       </svg>
 
       <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 14, paddingTop: 13, borderTop: "1px solid rgba(0,0,0,.06)" }}>
+        {/* ⚠️ Popisky NESMÍ tvrdit, že realizovaný zisk je v bezpečí. Peníze z uzavřené
+            pozice nezůstávají ležet — obratem se z nich kupují nové tituly, takže je trh
+            může vzít úplně stejně. Jediné, co je na uzavřeném obchodu jisté, je to, že se
+            zpětně nezmění — a že je to daňová událost. Původní text „vybráno, trh ti to
+            nevezme" byl věcně nepravdivý. Opraveno 31. 7. 2026 na Tomovu připomínku. */}
         {[
-          [BP.indigoDeep, "Realizovaný", zRea, "vybráno, trh ti to nevezme"],
-          ["#8E82E0", "Na papíře", zPap, "nezdaněno · drží ho trh, ne ty"],
+          [BP.indigoDeep, "Z uzavřených obchodů", zRea, "hotová věc — ale peníze jsou zpátky ve hře"],
+          ["#B3AAEA", "Z otevřených pozic", zPap, "žije dál s trhem · daň zatím neběží"],
           [BP.sand, "Dividendy", zDiv + zOst, "čistého po srážkové dani, včetně úroků a poplatků"],
         ].map(([b, nazev, castka, popis]) => (
           <div key={nazev} style={{ display: "flex", alignItems: "baseline", gap: 9, fontSize: 12.5, flexWrap: "wrap" }}>
@@ -8112,6 +8145,41 @@ function AkcieGraf({ serie, stav = "idle", onNacti, pf = null }) {
           </div>
         ))}
       </div>
+
+      {/* ── DAŇOVÝ PODKLAD — patří k uzavřeným obchodům, ne k celkovému zisku ──── */}
+      {pf && pf.roky && pf.roky.length > 0 && (
+        <div style={{ marginTop: 18, padding: "15px 17px", border: "1px solid rgba(0,0,0,.09)", borderRadius: BP.rInner }}>
+          <div style={bpLabel({ marginBottom: 11 })}>z toho daňový podklad</div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 0 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr auto auto", gap: "0 18px", fontSize: 10.5, color: "var(--mut)", paddingBottom: 5 }}>
+              <span />
+              <span style={{ textAlign: "right" }}>zisk</span>
+              <span style={{ textAlign: "right", minWidth: 108 }}>tržba z prodejů</span>
+            </div>
+            {pf.roky.map((r) => (
+              <div key={r.rok} style={{
+                display: "grid", gridTemplateColumns: "1fr auto auto", gap: "0 18px",
+                fontSize: 12.5, padding: "7px 0", borderTop: "1px solid rgba(0,0,0,.06)", alignItems: "baseline",
+              }}>
+                <span>
+                  {r.rok}
+                  {r.rok === String(new Date().getFullYear()) && <span style={{ fontSize: 10, color: "var(--mut)", marginLeft: 6 }}>dosud</span>}
+                  {r.trzba > 100000 && (
+                    <span style={{ fontSize: 10.5, color: "#8a4f37", marginLeft: 8 }}>tržba nad 100 000</span>
+                  )}
+                </span>
+                <span style={{ textAlign: "right", fontWeight: 650, fontVariantNumeric: "tabular-nums" }}>{fmtKc(Math.round(r.zisk))}</span>
+                <span style={{ textAlign: "right", fontVariantNumeric: "tabular-nums", minWidth: 108, color: "#5C5770" }}>{fmtKc(Math.round(r.trzba))}</span>
+              </div>
+            ))}
+          </div>
+          <div style={{ fontSize: 11, color: "var(--mut)", marginTop: 11, lineHeight: 1.6 }}>
+            Osvobození podle § 4 odst. 1 písm. w) ZDP se posuzuje z <b>příjmu z prodeje</b>, ne ze zisku —
+            proto je vedle zisku i tržba. Časový test běží od data konkrétního nákupu, ne od prvního obchodu.
+            Appka čísla jen počítá; <b>posouzení patří tvému daňaři</b>.
+          </div>
+        </div>
+      )}
 
       {/* ══ 2 · VYPLATILO SE MI VYBÍRAT SI SÁM ═════════════════════════════════ */}
       <div style={cara}>
