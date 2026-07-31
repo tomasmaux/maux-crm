@@ -841,6 +841,7 @@ function computeXtbPortfolio(positions = [], closedTrades = [], tranches = [], m
     const k = q ? fx(q.mena) : null;
     if (q && k != null) {
       l.aktualni = q.cena;
+      l.yahoo = q.yahoo || null;      // symbol pro logo — Parqet/FMP znají Yahoo tvar, ne XTB
       l.menaTrhu = q.mena;
       l.kurzDnes = k;
       l.hodnota = l.ks * q.cena * k;
@@ -862,10 +863,11 @@ function computeXtbPortfolio(positions = [], closedTrades = [], tranches = [], m
   for (const l of lots) {
     const t = tituly[l.symbol] || (tituly[l.symbol] = {
       symbol: l.symbol, nazev: l.nazev, ks: 0, porizovaci: 0, hodnota: 0, zisk: 0,
-      mena: l.mena, aktualni: l.aktualni ?? null, lots: [], bezCeny: false,
+      mena: l.mena, aktualni: l.aktualni ?? null, yahoo: l.yahoo ?? null, lots: [], bezCeny: false,
     });
     t.ks += l.ks; t.porizovaci += l.porizovaci; t.hodnota += l.hodnota; t.zisk += l.zisk;
     if (l.aktualni != null) t.aktualni = l.aktualni;
+    if (l.yahoo) t.yahoo = l.yahoo;
     if (l.bezCeny) t.bezCeny = true;
     t.lots.push(l);
   }
@@ -7664,6 +7666,28 @@ function XtbPanel({ xtbTranches = [], onNav }) {
    přístup k API (ws.xtb.com vyřazeno 14.3.2025, náhradní ws.xapi.pro slouží jen klientům
    X Open Hub, ne běžným XTB účtům, viz chyba "account from a different platform").
    Nezbylo nic, co by šlo automaticky stahovat — modul vede jen ruční ledger tranší. */
+// Logo titulu. Dva veřejné zdroje za sebou, pak monogram — na obrazovce nikdy
+// nezůstane díra. Loga se adresují YAHOO symbolem (MSFT, NVD.DE), ne XTB tvarem.
+function TitulLogo({ yahoo, symbol, size = 34 }) {
+  const [krok, setKrok] = useState(0);
+  const zdroje = yahoo ? [
+    `https://assets.parqet.com/logos/symbol/${encodeURIComponent(yahoo)}`,
+    `https://images.financialmodelingprep.com/symbol/${encodeURIComponent(yahoo)}.png`,
+  ] : [];
+  const spol = { width: size, height: size, borderRadius: Math.round(size * 0.29), flexShrink: 0 };
+  if (krok >= zdroje.length) {
+    return (
+      <div style={{ ...spol, background: "#F0EEF9", color: BP.indigoDeep, display: "flex", alignItems: "center", justifyContent: "center", fontSize: Math.round(size * 0.35), fontWeight: 700 }}>
+        {String(symbol || "?").slice(0, 2)}
+      </div>
+    );
+  }
+  return (
+    <img src={zdroje[krok]} alt="" loading="lazy" onError={() => setKrok(k => k + 1)}
+      style={{ ...spol, objectFit: "contain", background: "#F6F5FB" }} />
+  );
+}
+
 // ── GRAF PORTFOLIA PROTI SVĚTOVÉMU INDEXU ───────────────────────────────────
 // Tři optiky, tři řady přepínačů. Default: Procenta · 1R — odpovídá na otázku
 // „jsem lepší než trh?". Verdiktová pilulka mluví VŽDY v korunách, protože bere
@@ -8394,31 +8418,52 @@ function AkcieModule({ xtbTranches = [], onTrancheSave, onTrancheDelete, xtbTitl
           )}
 
           <div style={{ marginTop: 12 }}>
-            {pf.tituly.map(t => (
-              <div key={t.symbol}>
-                <div
-                  onClick={() => setOpenSym(s => s === t.symbol ? null : t.symbol)}
-                  style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, padding: "11px 0", borderTop: "1px solid rgba(28,10,99,.06)", cursor: "pointer" }}>
-                  <div style={{ minWidth: 0 }}>
+            {/* Dlaždice titulů — logo napřed, ať se titul pozná okem. Rozbalení se
+                otevře pod mřížkou přes celou šířku, aby se tranše daly číst. */}
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(152px, 1fr))", gap: 10 }}>
+              {pf.tituly.map(t => {
+                const akt = openSym === t.symbol;
+                const maxHod = Math.max(...pf.tituly.map(x => x.hodnota), 1);
+                return (
+                  <div key={t.symbol} onClick={() => setOpenSym(s => s === t.symbol ? null : t.symbol)}
+                    style={{
+                      border: `1px solid ${akt ? "rgba(63,53,199,.32)" : "rgba(0,0,0,.06)"}`,
+                      borderRadius: BP.rInner, padding: 14, cursor: "pointer", background: "#fff",
+                      boxShadow: akt ? "0 2px 10px rgba(16,12,60,.07)" : "none",
+                    }}>
+                    <TitulLogo yahoo={t.yahoo} symbol={t.symbol} size={34} />
+                    <div style={{ fontSize: 12, color: "var(--ink)", fontWeight: 600, marginTop: 10 }}>{t.symbol}</div>
+                    <div style={{ fontSize: 10, color: "var(--mut)", marginTop: 1, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                      {t.nazev} · {t.ks.toLocaleString("cs-CZ", { maximumFractionDigits: 4 })} ks
+                    </div>
+                    <div style={{ ...bpHero(19, "var(--txt)"), marginTop: 10 }}>{fmtKc(Math.round(t.hodnota))}</div>
+                    <div style={{ fontSize: 11, marginTop: 3, color: t.zisk >= 0 ? BP.indigoDeep : "#DC2626" }}>
+                      {fmtSigned(Math.round(t.zisk))}
+                    </div>
+                    <div style={{ height: 3, borderRadius: 2, background: "#EEECF7", marginTop: 10, overflow: "hidden" }}>
+                      <div style={{ height: "100%", width: `${Math.round(t.hodnota / maxHod * 100)}%`, background: BP.indigoDeep }} />
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            {openSym && (() => {
+              const t = pf.tituly.find(x => x.symbol === openSym);
+              if (!t) return null;
+              return (
+                <div style={{ marginTop: 14, paddingTop: 14, borderTop: "1px solid rgba(28,10,99,.08)" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6 }}>
+                    <TitulLogo yahoo={t.yahoo} symbol={t.symbol} size={22} />
                     <div style={{ fontSize: 13, color: "var(--ink)" }}>
-                      {t.symbol}
-                      <span style={{ fontSize: 10.5, color: "var(--mut)", marginLeft: 8 }}>{t.nazev}</span>
+                      {t.symbol}<span style={{ fontSize: 10.5, color: "var(--mut)", marginLeft: 8 }}>{t.nazev}</span>
                     </div>
-                    <div style={{ fontSize: 10.5, color: "var(--mut)", marginTop: 2 }}>
-                      {t.ks.toLocaleString("cs-CZ", { maximumFractionDigits: 4 })} ks
-                      {t.aktualni != null && <> · {t.aktualni.toLocaleString("cs-CZ", { maximumFractionDigits: 2 })} {t.mena}</>}
-                      {" · "}{t.lots.length} {t.lots.length === 1 ? "tranše" : t.lots.length < 5 ? "tranše" : "tranší"}
-                      {" "}{openSym === t.symbol ? "▲" : "▾"}
+                    <div style={{ fontSize: 10.5, color: "var(--mut)" }}>
+                      {t.aktualni != null && <>{t.aktualni.toLocaleString("cs-CZ", { maximumFractionDigits: 2 })} {t.mena} · </>}
+                      {Math.round(t.podil * 100)} % portfolia
                     </div>
+                    <button onClick={() => setOpenSym(null)} style={{ ...lotBtn(false), marginLeft: "auto" }}>Zavřít</button>
                   </div>
-                  <div style={{ textAlign: "right", flexShrink: 0 }}>
-                    <div className="maux-num" style={{ fontSize: 14, color: "var(--ink)" }}>{fmtKc(Math.round(t.hodnota))}</div>
-                    <div style={{ fontSize: 11, color: t.zisk >= 0 ? BP.indigoDeep : "#DC2626", marginTop: 2 }}>
-                      {fmtSigned(Math.round(t.zisk))} · {Math.round(t.podil * 100)} %
-                    </div>
-                  </div>
-                </div>
-                {openSym === t.symbol && (
                   <div style={{ padding: "4px 0 12px 0" }}>
                     {t.lots.map(l => {
                       const jeProdej = prodejLot && prodejLot.id === l.id;
@@ -8545,9 +8590,9 @@ function AkcieModule({ xtbTranches = [], onTrancheSave, onTrancheDelete, xtbTitl
                       );
                     })()}
                   </div>
-                )}
-              </div>
-            ))}
+                </div>
+              );
+            })()}
           </div>
         </div>
       )}
