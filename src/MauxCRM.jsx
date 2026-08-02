@@ -2329,9 +2329,11 @@ function InvoicePrintPreview({ invoice, client, workEntries, onBack, onIssue, on
   // - DT (datum splatnosti) se do QR ZÁMĚRNĚ nedává. Kdyby tam bylo 15., bankovní appka
   //   klientovi předvyplní odloženou platbu na 15. a peníze přijdou nejpozději. Bez DT
   //   každá appka nabídne dnešek.
-  // - PT:IP je oficiální pole SPAYD 1.0 pro požadavek na okamžitou platbu. Banky, které to
-  //   umí (ČSOB, KB, Fio, Air Bank, Raiffeisen), rovnou zaškrtnou okamžitý převod;
-  //   ostatní pole ignorují a udělají běžný převod. Nikdy to platbu nerozbije.
+  // - PT:IP je oficiální pole SPAYD 1.0 pro požadavek na okamžitou platbu. Doloženo je to
+  //   u KB (jejich dokumentace: po načtení QR se checkbox 'okamžitá platba' zaškrtne sám).
+  //   U ostatních bank neověřeno — PT NENÍ v tabulce polí, která zpracují všechny banky.
+  //   Kdo ho neumí, ignoruje ho a udělá běžný převod. Nikdy to platbu nerozbije.
+  //   Hlavní přínos je stejně vypuštěné DT, ne PT.
   // Splatnost 15. zůstává na TIŠTĚNÉ faktuře — právní nárok se nemění, mění se jen výchozí
   // volba v bance. NEVRACET DT zpátky.
   const qrData = `SPD*1.0*ACC:${ibanRaw}*AM:${amountStr}*CC:CZK*PT:IP*X-VS:${vsStr}*MSG:${invoice.invoice_number}`;
@@ -15530,6 +15532,7 @@ function AsistentVykazy({ email, clients, onRefresh }) {
 function AsistentDochazka({ email, attendance, logs, onRefreshAttendance, onGo }) {
   const [availThis, setAvailThis] = useState(null);
   const [availNext, setAvailNext] = useState(null);
+  const [expYm, setExpYm]         = useState("");
   const [savingAvail, setSavingAvail] = useState(false);
   const thisMonth = (() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`; })();
   const nextMonth = (() => { const d = new Date(); d.setMonth(d.getMonth()+1); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`; })();
@@ -15688,6 +15691,8 @@ function AsistentDochazka({ email, attendance, logs, onRefreshAttendance, onGo }
     };
     const totalNet = rows.reduce((s, a) => s + netAttHours(a.check_in, a.check_out), 0);
     const totalWage = Math.round(totalNet * ASSISTANT_HOURLY_RATE);
+    const nowD = new Date();
+    const isRunning = ey === nowD.getFullYear() && em === nowD.getMonth() + 1;
 
     const rowsHtml = rows.map(a => {
       const gross = (new Date(a.check_out) - new Date(a.check_in)) / 36e5;
@@ -15753,7 +15758,7 @@ function AsistentDochazka({ email, attendance, logs, onRefreshAttendance, onGo }
 </div>
 
 <h1>Docházka — ${monthNames[em-1].charAt(0).toUpperCase()+monthNames[em-1].slice(1)} ${ey}</h1>
-<div class="subtitle">Uzavřený měsíc · ${rows.length} pracovních dní</div>
+<div class="subtitle">${isRunning ? `Probíhající měsíc · stav k ${new Date().toLocaleDateString("cs-CZ")}` : "Uzavřený měsíc"} · ${rows.length} pracovních dní</div>
 
 <table>
   <thead>
@@ -16057,19 +16062,36 @@ function AsistentDochazka({ email, attendance, logs, onRefreshAttendance, onGo }
         <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"18px 22px 12px"}}>
           <div style={{fontSize:7.5,letterSpacing:".25em",textTransform:"uppercase",fontWeight:700,color:"var(--mut)"}}>ZÁZNAMY DOCHÁZKY</div>
           <div style={{display:"flex",gap:8,alignItems:"center"}}>
-            {/* Export za předchozí uzavřený měsíc — Tom 1.7.2026 */}
+            {/* Export libovolného evidovaného měsíce — Tom 2.8.2026 */}
             {(() => {
-              const prev = new Date(); prev.setDate(1); prev.setMonth(prev.getMonth()-1);
-              const pym  = `${prev.getFullYear()}-${String(prev.getMonth()+1).padStart(2,"0")}`;
-              const pm   = prev.getMonth(); const py = prev.getFullYear();
-              const hasRecs = attendance.some(a => (a.date||"").startsWith(pym) && a.check_in && a.check_out);
-              return hasRecs ? (
-                <button className="btn" style={{fontSize:11,background:"#3518A505",borderColor:"#3518A5",color:"#3518A5"}}
-                  onClick={()=>exportDochazka(pym)}
-                  title={`Exportovat docházku za ${monthNames[pm]} ${py}`}>
-                  ↓ Export {monthNamesGen[pm]}
-                </button>
-              ) : null;
+              const now = new Date();
+              const curYm = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,"0")}`;
+              const months = [...new Set(attendance
+                .filter(a => a.check_in && a.check_out && (a.date||"").length >= 7)
+                .map(a => a.date.slice(0,7)))].sort().reverse();
+              if (months.length === 0) return null;
+              const prev = new Date(now.getFullYear(), now.getMonth()-1, 1);
+              const prevYm = `${prev.getFullYear()}-${String(prev.getMonth()+1).padStart(2,"0")}`;
+              const defYm = months.includes(prevYm) ? prevYm : months[0];
+              const sel = (expYm && months.includes(expYm)) ? expYm : defYm;
+              const [sy, sm] = sel.split("-").map(Number);
+              const label = (ym) => {
+                const [y,m] = ym.split("-").map(Number);
+                return `${monthNames[m-1].charAt(0).toUpperCase()+monthNames[m-1].slice(1)} ${y}${ym===curYm?" (probíhá)":""}`;
+              };
+              return (
+                <div style={{display:"flex",gap:6,alignItems:"center"}}>
+                  <select value={sel} onChange={e=>setExpYm(e.target.value)}
+                    style={{font:"inherit",fontSize:11,padding:"6px 8px",borderRadius:8,border:"1px solid var(--line2)",background:"#fff",color:"var(--ink)",cursor:"pointer"}}>
+                    {months.map(ym => <option key={ym} value={ym}>{label(ym)}</option>)}
+                  </select>
+                  <button className="btn" style={{fontSize:11,background:"#3518A505",borderColor:"#3518A5",color:"#3518A5"}}
+                    onClick={()=>exportDochazka(sel)}
+                    title={`Exportovat docházku za ${monthNames[sm-1]} ${sy}`}>
+                    ↓ Export
+                  </button>
+                </div>
+              );
             })()}
             <button className="btn gho" style={{fontSize:11}} onClick={()=>openNewAtt(todayStr)}>+ Přidat záznam</button>
           </div>
