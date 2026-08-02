@@ -2325,7 +2325,16 @@ function InvoicePrintPreview({ invoice, client, workEntries, onBack, onIssue, on
   // takže QR platba NESMÍ dělit /100, jinak banka navrhne 100× menší částku (47 060 Kč → 470,60 Kč).
   const amountStr = (invoice.total || 0).toFixed(2);
   const vsStr = invoice.var_symbol || invoice.notes || "";
-  const qrData = `SPD*1.0*ACC:${ibanRaw}*AM:${amountStr}*CC:CZK*X-VS:${vsStr}*MSG:${invoice.invoice_number}*DT:${(invoice.due_date || "").replace(/-/g, "")}`;
+  // POZOR: QR tlačí na OKAMŽITOU platbu, i když na faktuře je splatnost 15.
+  // - DT (datum splatnosti) se do QR ZÁMĚRNĚ nedává. Kdyby tam bylo 15., bankovní appka
+  //   klientovi předvyplní odloženou platbu na 15. a peníze přijdou nejpozději. Bez DT
+  //   každá appka nabídne dnešek.
+  // - PT:IP je oficiální pole SPAYD 1.0 pro požadavek na okamžitou platbu. Banky, které to
+  //   umí (ČSOB, KB, Fio, Air Bank, Raiffeisen), rovnou zaškrtnou okamžitý převod;
+  //   ostatní pole ignorují a udělají běžný převod. Nikdy to platbu nerozbije.
+  // Splatnost 15. zůstává na TIŠTĚNÉ faktuře — právní nárok se nemění, mění se jen výchozí
+  // volba v bance. NEVRACET DT zpátky.
+  const qrData = `SPD*1.0*ACC:${ibanRaw}*AM:${amountStr}*CC:CZK*PT:IP*X-VS:${vsStr}*MSG:${invoice.invoice_number}`;
 
   useEffect(() => {
     QRCode.toDataURL(qrData, { width: 600, margin: 2, color: { dark: "#3518A5", light: "#FDFCFA" } })
