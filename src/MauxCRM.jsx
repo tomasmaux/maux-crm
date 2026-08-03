@@ -11892,6 +11892,23 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
         const [sporHov, setSporHov] = useState(null);
         const [sporDrawn, setSporDrawn] = useState(false);
         useEffect(() => { const t = setTimeout(() => setSporDrawn(true), 90); return () => clearTimeout(t); }, []);
+        // Odpočet "TVOJE" od nuly — jednorázově při načtení, pak už se číslo nehne.
+        // Cíl se bere z computeSporakEnvelopes níž, proto ho sem předává _sporTarget.
+        const _sporTarget = Math.max(Math.round(computeSporakEnvelopes(financeItems, invoices, dpfoMonths, loanTransactions, escrows).free), 0);
+        const [sporCount, setSporCount] = useState(0);
+        useEffect(() => {
+          if (!_sporTarget) { setSporCount(0); return; }
+          // 22 kroků po 42 ms místo 60 fps — panel Finance je těžký (nese kalendář)
+          // a překreslovat ho šedesátkrát za vteřinu kvůli odpočtu by sekalo.
+          const STEPS = 22; let i = 0;
+          const id = setInterval(() => {
+            i++;
+            const p = i / STEPS;
+            setSporCount(Math.round(_sporTarget * (1 - Math.pow(1 - p, 3))));
+            if (i >= STEPS) clearInterval(id);
+          }, 42);
+          return () => clearInterval(id);
+        }, [_sporTarget]);
         // Editovatelný checklist nákladů (checkboxy, AddExpenseRow, mzda Josefa) se 29.6.2026 přesunul
         // do dlaždice "Měsíční výdaje" (FirmaBar, Panel id="firma") — Tom: "ta roletka u nákladů je
         // zcela zbytečná" (dělala tuhle dlaždici zbytečně vysokou). Tady zůstal jen souhrnný řádek
@@ -12141,12 +12158,60 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
                             onMouseLeave={e=>e.currentTarget.style.background="transparent"}
                             title="Klikni pro úpravu zůstatku"
                           >
-                            <span style={{fontFamily:"Inter,ui-sans-serif,system-ui,sans-serif",fontVariantNumeric:"tabular-nums",fontSize:29,fontWeight:600,color:"var(--txt)",letterSpacing:"-.015em",lineHeight:1,whiteSpace:"nowrap"}}>{fmtKc(sporBalS)}</span>
+                            <span style={{fontFamily:"Inter,ui-sans-serif,system-ui,sans-serif",fontVariantNumeric:"tabular-nums",fontSize:23,fontWeight:600,color:"var(--mut)",letterSpacing:"-.015em",lineHeight:1,whiteSpace:"nowrap"}}>{fmtKc(sporBalS)}</span>
                             <span style={{fontSize:11,color:"var(--mut)",lineHeight:1,opacity:.5}}>✎</span>
-                            <span style={{fontSize:10.5,color:"var(--mut)",marginLeft:3}}>zůstatek</span>
+                            <span style={{fontSize:10.5,color:"var(--mut)",marginLeft:3}}>zůstatek · {fmtKc(sTotalEar)} patří státu</span>
                           </div>
                         )}
                       </div>
+
+                      {/* ── TVOJE ── Nejoslavnější číslo v celé appce (Tom 3.8.2026). Vytažené
+                          ze středu koláče, plnohodnotně a barevně pod zůstatek. Kolem něj
+                          volně plující pixely — pomalé, všemi směry, dvě růžové mezi indigovými.
+                          Vše čistě CSS transformy (GPU), žádný requestAnimationFrame na pozadí. */}
+                      {!sporEditMode && sFirmaRez > 0 && (
+                        <div style={{position:"relative",marginTop:14,paddingTop:8,paddingBottom:4}}>
+                          <style>{`
+                            @keyframes mxD1{0%{transform:translate(0,0)}25%{transform:translate(18px,-14px)}50%{transform:translate(6px,-30px)}75%{transform:translate(-14px,-16px)}100%{transform:translate(0,0)}}
+                            @keyframes mxD2{0%{transform:translate(0,0)}25%{transform:translate(-16px,10px)}50%{transform:translate(-4px,26px)}75%{transform:translate(15px,12px)}100%{transform:translate(0,0)}}
+                            @keyframes mxD3{0%{transform:translate(0,0)}33%{transform:translate(22px,16px)}66%{transform:translate(-10px,24px)}100%{transform:translate(0,0)}}
+                            @keyframes mxD4{0%{transform:translate(0,0)}33%{transform:translate(-20px,-18px)}66%{transform:translate(12px,-26px)}100%{transform:translate(0,0)}}
+                            @keyframes mxFade{0%,100%{opacity:.18}50%{opacity:.75}}
+                            .mxpx{position:absolute;border-radius:50%;pointer-events:none;will-change:transform,opacity}
+                            @media (prefers-reduced-motion: reduce){.mxpx{animation:none!important;opacity:.35!important}}
+                          `}</style>
+                          {[
+                            {l:"2%", t:"16%", s:2.5, c:"#5B4FF0", d:"mxD1", dur:26, dl:0},
+                            {l:"13%",t:"72%", s:2,   c:"#3B2FD0", d:"mxD3", dur:31, dl:3},
+                            {l:"24%",t:"8%",  s:2,   c:"#6C5FF5", d:"mxD2", dur:23, dl:6},
+                            {l:"33%",t:"84%", s:3,   c:"#FF6BC1", d:"mxD4", dur:34, dl:1.5},
+                            {l:"44%",t:"22%", s:2,   c:"#5B4FF0", d:"mxD3", dur:28, dl:9},
+                            {l:"55%",t:"78%", s:2.5, c:"#6C5FF5", d:"mxD1", dur:25, dl:4.5},
+                            {l:"64%",t:"12%", s:2,   c:"#3B2FD0", d:"mxD2", dur:30, dl:12},
+                            {l:"74%",t:"70%", s:3,   c:"#FF6BC1", d:"mxD3", dur:36, dl:7.5},
+                            {l:"83%",t:"26%", s:2,   c:"#6C5FF5", d:"mxD4", dur:24, dl:15},
+                            {l:"92%",t:"80%", s:2.5, c:"#5B4FF0", d:"mxD1", dur:29, dl:10.5},
+                            {l:"8%", t:"46%", s:2,   c:"#A98CFF", d:"mxD2", dur:33, dl:18},
+                            {l:"38%",t:"52%", s:2,   c:"#6C5FF5", d:"mxD4", dur:27, dl:13.5},
+                            {l:"68%",t:"46%", s:2.5, c:"#5B4FF0", d:"mxD3", dur:32, dl:16.5},
+                            {l:"97%",t:"48%", s:2,   c:"#A98CFF", d:"mxD1", dur:35, dl:19.5},
+                          ].map((p,i)=>(
+                            <span key={i} className="mxpx" style={{
+                              left:p.l, top:p.t, width:p.s, height:p.s, background:p.c,
+                              boxShadow:`0 0 ${Math.round(p.s*3)}px ${p.c}`,
+                              animation:`${p.d} ${p.dur}s ease-in-out ${p.dl}s infinite, mxFade ${p.dur/2.5}s ease-in-out ${p.dl}s infinite`,
+                            }} />
+                          ))}
+                          <div style={{
+                            fontFamily:"Inter,ui-sans-serif,system-ui,sans-serif",fontVariantNumeric:"tabular-nums",
+                            fontSize:36,fontWeight:600,color:"#4A3FE0",lineHeight:1,letterSpacing:"-.02em",
+                            position:"relative",whiteSpace:"nowrap",
+                          }}>{fmtKc(sporCount)}</div>
+                          <div style={{fontSize:12,color:"var(--ink)",marginTop:7,position:"relative",opacity:.8}}>
+                            je tvoje — firemní rezerva, kterou sis vydělal
+                          </div>
+                        </div>
+                      )}
 
                       {/* ── VELKÝ KOLÁČ ── jeden oblouk na obálku, vnější vlasový prstenec = polštář.
                           Střed je živý: v klidu tvoje rezerva, při najetí ta výseč, na které jsi.
@@ -12200,24 +12265,23 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
                               style={{transition:"stroke-dasharray 1.4s cubic-bezier(.4,0,.2,1) .5s"}}
                             />
 
+                            {/* Střed převzal druhý příběh — naplnění polštáře. Rezerva se odsud
+                                3.8.2026 přestěhovala nahoru pod zůstatek, prázdný střed by
+                                vypadal jako chyba. Popiska pod koláčem tím zanikla. */}
                             <text x="145" y="130" textAnchor="middle" fontSize="10" letterSpacing="2.2" fill="var(--mut)">
-                              {hovSeg ? hovSeg.label.toUpperCase() : "TVOJE"}
+                              {hovSeg ? hovSeg.label.toUpperCase() : "POLŠTÁŘ"}
                             </text>
-                            <text x="145" y="158" textAnchor="middle" fontSize="25" fontFamily="Fraunces,serif" fontWeight="300"
+                            <text x="145" y="158" textAnchor="middle" fontSize="23"
+                              fontFamily="Inter,ui-sans-serif,system-ui,sans-serif" fontWeight="600"
                               fill={hovSeg && !hovSeg.mine ? "var(--txt)" : "#4A44B8"}>
-                              {fmtKc(hovSeg ? hovSeg.value : sFirmaRez)}
+                              {hovSeg ? fmtKc(hovSeg.value) : `${Math.round(polstarPct*100)} %`}
                             </text>
                             <text x="145" y="177" textAnchor="middle" fontSize="11" fill="var(--mut)">
-                              {hovSeg ? hovSeg.note : `${Math.round(sFirmaRez/sTotalAll*100)} % zůstatku`}
+                              {hovSeg
+                                ? hovSeg.note
+                                : (polstarZbyva > 0 ? `zbývá ${fmtKc(polstarZbyva)}` : `hotovo · ${fmtKc(sFirmaRez - planKap)} nad rámec`)}
                             </text>
                           </svg>
-                        </div>
-                      )}
-
-                      {!sporEditMode && planKap > 0 && (
-                        <div style={{textAlign:"center",fontSize:10,color:"var(--mut)",marginTop:2}}>
-                          vnější oblouk · polštář {Math.round(polstarPct*100)} % z {fmtKc(planKap)}
-                          {polstarZbyva > 0 ? ` · zbývá ${fmtKc(polstarZbyva)}` : ` · hotovo, ${fmtKc(sFirmaRez - planKap)} nad rámec`}
                         </div>
                       )}
 
