@@ -987,19 +987,61 @@ async function ensureTodaySnapshot(equity, balance, currency) {
 
 async function fetchEscrows() {
   // Try nested join first
-  let { data, error } = await supabase.from("escrows").select("*, escrow_tranches(*)").order("escrow_number");
+  let { data, error } = await supabase.from("escrows")
+    .select("*, escrow_tranches(*), escrow_aml_persons(*)").order("escrow_number");
   if (error) {
     console.error("fetchEscrows join error:", error.message, "— retrying without join");
     // Fallback: fetch separately
     const { data: esc, error: e2 } = await supabase.from("escrows").select("*").order("escrow_number");
     if (e2) { console.error("fetchEscrows fallback error:", e2.message); return []; }
     const { data: tr } = await supabase.from("escrow_tranches").select("*").order("sort_order");
-    return (esc || []).map(e => ({ ...e, escrow_tranches: (tr || []).filter(t => t.escrow_id === e.id) }));
+    const { data: ap } = await supabase.from("escrow_aml_persons").select("*").order("sort_order");
+    return (esc || []).map(e => ({
+      ...e,
+      escrow_tranches: (tr || []).filter(t => t.escrow_id === e.id),
+      escrow_aml_persons: (ap || []).filter(p => p.escrow_id === e.id),
+    }));
   }
   return data || [];
 }
+
+/* ─── AML osoby ─── */
+const AML_ROLES = ["strana", "SJM manžel/ka", "jednatel", "skutečný majitel", "zmocněnec", "jiná osoba"];
+
+async function upsertAmlPerson(p) {
+  const clean = { ...p };
+  clean.aml_done = !!clean.aml_done;
+  if (clean.aml_date === "") clean.aml_date = null;
+  const { error } = await supabase.from("escrow_aml_persons")
+    .upsert({ ...clean, updated_at: new Date().toISOString() });
+  if (error) throw error;
+}
+async function deleteAmlPerson(id) {
+  const { error } = await supabase.from("escrow_aml_persons").delete().eq("id", id);
+  if (error) throw error;
+}
+
+// Osoby k identifikaci pro danou úschovu.
+// Když ještě nemá vlastní záznamy (staré úschovy), odvodí je ze stran — aby banner nelhal.
+function amlPersonsFor(escrow) {
+  const saved = escrow.escrow_aml_persons || [];
+  if (saved.length) return saved;
+  const seen = new Set();
+  const out = [];
+  (escrow.escrow_tranches || []).forEach(t => {
+    const nm = (t.party_name || "").trim();
+    if (!nm || seen.has(nm)) return;
+    seen.add(nm);
+    out.push({
+      id: "virt_" + t.id, escrow_id: escrow.id, party_name: nm, party_type: t.party_type,
+      person_name: nm, role: "strana", aml_done: !!t.aml_done, aml_date: t.aml_date || null,
+      sort_order: t.sort_order || 0, _virtual: true,
+    });
+  });
+  return out;
+}
 async function upsertEscrow(e) {
-  const { escrow_tranches: _t, banka: _b, spis_aml: _s, ...rest } = e;
+  const { escrow_tranches: _t, escrow_aml_persons: _p, banka: _b, spis_aml: _s, ...rest } = e;
   // Convert empty strings to null for date columns (Postgres rejects "")
   const DATE_COLS = ["date_received","date_navrh_podan","date_plomba_end","date_paid"];
   DATE_COLS.forEach(k => { if (rest[k] === "") rest[k] = null; });
@@ -5342,9 +5384,9 @@ function EscrowCard({ escrow, onEdit, onDelete, onMarkPaid, onPayment }) {
             <span style={{fontFamily:"Fraunces,serif",fontSize:17,fontWeight:400,color:"var(--ink)"}}>{escrow.escrow_number}</span>
             <span style={{fontSize:10,padding:"2px 9px",borderRadius:20,background:sc.bg,color:sc.text,border:`1px solid ${sc.border}`,fontWeight:500}}>{statusLabel}</span>
             {(() => {
-              const tr = escrow.escrow_tranches || [];
-              const allAml = tr.length > 0 && tr.every(t => !!t.aml_done);
-              const missingNames = tr.filter(t => !t.aml_done).map(t => t.party_name).filter(Boolean);
+              const osoby = amlPersonsFor(escrow);
+              const allAml = osoby.length > 0 && osoby.every(p => !!p.aml_done);
+              const missingNames = osoby.filter(p => !p.aml_done).map(p => p.person_name).filter(Boolean);
               return allAml
                 ? <span style={{fontSize:9,padding:"2px 7px",borderRadius:4,background:"#F0FDF4",color:"#065F46",fontWeight:600}}>AML ✓</span>
                 : <span title={missingNames.length ? "Chybí AML: " + missingNames.join(", ") : "AML chybí"} style={{fontSize:9,padding:"2px 7px",borderRadius:4,background:"#FEF2F2",color:"#991B1B",fontWeight:600}}>AML ⚠</span>;
@@ -5544,13 +5586,59 @@ function EscrowForm({ init, onSave, onCancel, saving }) {
   const [newT, setNewT] = useState({ party_type: "složitel", party_name: "", amount: "", received_date: "" });
   const [editingNames, setEditingNames] = useState({});
 
+  // AML osoby — samostatná evidence, nezávislá na platebních řádcích
+  const [amlPersons, setAmlPersons] = useState(() => {
+    if (init) return (init.escrow_aml_persons || []).map(p => ({ ...p }));
+    try {
+      const draft = localStorage.getItem(ESCROW_DRAFT_KEY);
+      if (draft) {
+        const parsed = JSON.parse(draft);
+        if (parsed._amlPersons) return parsed._amlPersons;
+      }
+    } catch (_) {}
+    return [];
+  });
+
   const addTranche = () => {
     if (!newT.party_name.trim()) return;
     setTranches(p => [...p, { ...newT, amount: Number(newT.amount) || 0, id: uid(), escrow_id: d.id, sort_order: p.length }]);
     setNewT({ party_type: "složitel", party_name: "", amount: "", received_date: "" });
   };
   const removeTranche = (id) => setTranches(p => p.filter(t => t.id !== id));
-  const updateTranche = (id, patch) => setTranches(p => p.map(t => t.id === id ? { ...t, ...patch } : t));
+  const updateTranche = (id, patch) => {
+    // Přejmenování strany musí táhnout i AML osoby, jinak by se odpojily
+    if (patch.party_name !== undefined) {
+      const old = (tranches.find(t => t.id === id) || {}).party_name;
+      const nw = patch.party_name;
+      if (old && old !== nw) {
+        setAmlPersons(ps => ps.map(p => p.party_name === old
+          ? { ...p, party_name: nw, person_name: (p.role === "strana" && p.person_name === old) ? nw : p.person_name }
+          : p));
+      }
+    }
+    setTranches(p => p.map(t => t.id === id ? { ...t, ...patch } : t));
+  };
+
+  // Každá strana dostane aspoň jednu osobu k identifikaci (sama sebe)
+  useEffect(() => {
+    const seen = new Set();
+    const strany = [];
+    tranches.forEach(t => {
+      const nm = (t.party_name || "").trim();
+      if (!nm || seen.has(nm)) return;
+      seen.add(nm);
+      strany.push({ nm, type: t.party_type, done: !!t.aml_done, date: t.aml_date || null });
+    });
+    setAmlPersons(prev => {
+      const have = new Set(prev.map(p => p.party_name));
+      const add = strany.filter(s => !have.has(s.nm)).map((s, i) => ({
+        id: uid(), escrow_id: d.id, party_name: s.nm, party_type: s.type,
+        person_name: s.nm, role: "strana", aml_done: s.done, aml_date: s.date,
+        sort_order: prev.length + i, note: null,
+      }));
+      return add.length ? [...prev, ...add] : prev;
+    });
+  }, [tranches]);
 
   // Přidat nový řádek výplaty pro existující osobu
   const addPaymentRow = (personName) => {
@@ -5568,6 +5656,9 @@ function EscrowForm({ init, onSave, onCancel, saving }) {
   // Přejmenovat všechny tranše osoby najednou
   const renameOprPerson = (oldName, newName) => {
     if (!newName.trim() || newName === oldName) return;
+    setAmlPersons(ps => ps.map(p => p.party_name === oldName
+      ? { ...p, party_name: newName, person_name: (p.role === "strana" && p.person_name === oldName) ? newName : p.person_name }
+      : p));
     setTranches(prev => prev.map(t =>
       t.party_type === 'oprávněný' && t.party_name === oldName ? { ...t, party_name: newName } : t
     ));
@@ -5581,7 +5672,7 @@ function EscrowForm({ init, onSave, onCancel, saving }) {
 
   const saveDraft = () => {
     try {
-      localStorage.setItem(ESCROW_DRAFT_KEY, JSON.stringify({ _d: d, _tranches: tranches }));
+      localStorage.setItem(ESCROW_DRAFT_KEY, JSON.stringify({ _d: d, _tranches: tranches, _amlPersons: amlPersons }));
       showToast("Koncept uložen do prohlížeče");
       setTimeout(() => onCancel(), 800);
     } catch (_) {}
@@ -5630,13 +5721,26 @@ function EscrowForm({ init, onSave, onCancel, saving }) {
       await upsertEscrow({ ...d, status: finalStatus });
       const existing = init?.escrow_tranches || [];
       const removedIds = existing.filter(e => !expanded.find(t => t.id === e.id)).map(e => e.id);
+
+      // AML osoby — zahoď osiřelé (strana už neexistuje) a bezejmenné
+      const zijiciStrany = new Set(expanded.map(t => (t.party_name || "").trim()).filter(Boolean));
+      const personsToSave = amlPersons
+        .filter(p => zijiciStrany.has(p.party_name))
+        .filter(p => (p.person_name || "").trim())
+        .map(p => ({ ...p, escrow_id: d.id, _virtual: undefined }));
+      const existingPersons = init?.escrow_aml_persons || [];
+      const removedPersonIds = existingPersons
+        .filter(e => !personsToSave.find(p => p.id === e.id)).map(e => e.id);
+
       await Promise.all([
         ...removedIds.map(id => deleteEscrowTranche(id)),
-        ...expanded.map(t => upsertEscrowTranche({ ...t, escrow_id: d.id }))
+        ...expanded.map(t => upsertEscrowTranche({ ...t, escrow_id: d.id })),
+        ...removedPersonIds.map(id => deleteAmlPerson(id)),
+        ...personsToSave.map(p => { const { _virtual, ...c } = p; return upsertAmlPerson(c); }),
       ]);
       clearDraft();
       showToast(init ? "Úschova aktualizována" : "Úschova uložena");
-      setTimeout(() => onSave({ ...d, status: finalStatus, escrow_tranches: expanded }), 600);
+      setTimeout(() => onSave({ ...d, status: finalStatus, escrow_tranches: expanded, escrow_aml_persons: personsToSave }), 600);
     } catch (err) {
       showToast("Chyba: " + (err?.message || String(err)), false);
     }
@@ -5658,36 +5762,39 @@ function EscrowForm({ init, onSave, onCancel, saving }) {
   const sloz = tranches.filter(t => t.party_type === 'složitel');
   const opr  = tranches.filter(t => t.party_type === 'oprávněný');
 
-  // AML — jedna osoba = jedna fajfka, i když má víc tranší
-  const amlMap = {};
-  tranches.forEach(t => {
-    const key = (t.party_name || '').trim() || '(bez jména)';
-    if (!amlMap[key]) amlMap[key] = { name: key, rows: [], isSloz: false, isOpr: false, castka: 0 };
-    const g = amlMap[key];
-    g.rows.push(t);
-    if (t.party_type === 'složitel') g.isSloz = true; else g.isOpr = true;
-    g.castka += (t.amount || 0);
-  });
-  const amlPeople = Object.values(amlMap)
-    .map(g => ({
-      ...g,
-      done: g.rows.every(t => !!t.aml_done),
-      date: (g.rows.find(t => t.aml_date) || {}).aml_date || "",
-    }))
-    .sort((a, b) => (a.isSloz === b.isSloz ? a.name.localeCompare(b.name, 'cs') : (a.isSloz ? -1 : 1)));
-  const amlHotovo = amlPeople.filter(p => p.done).length;
+  // AML — strany (platební subjekty) a pod nimi konkrétní fyzické osoby
+  const amlStrany = [];
+  {
+    const map = {};
+    tranches.forEach(t => {
+      const key = (t.party_name || '').trim() || '(bez jména)';
+      if (!map[key]) {
+        map[key] = { name: key, isSloz: false, isOpr: false, castka: 0, sort: t.sort_order || 0 };
+        amlStrany.push(map[key]);
+      }
+      const g = map[key];
+      if (t.party_type === 'složitel') g.isSloz = true; else g.isOpr = true;
+      g.castka += (t.amount || 0);
+    });
+    amlStrany.sort((a, b) => (a.isSloz === b.isSloz ? a.name.localeCompare(b.name, 'cs') : (a.isSloz ? -1 : 1)));
+  }
 
-  const setAml = (person, checked) => {
-    const dnes = new Date();
-    const iso = `${dnes.getFullYear()}-${String(dnes.getMonth()+1).padStart(2,'0')}-${String(dnes.getDate()).padStart(2,'0')}`;
-    person.rows.forEach(t => updateTranche(t.id, {
-      aml_done: checked,
-      aml_date: checked ? (person.date || iso) : null,
-    }));
+  // Ke každé straně přiřaď osoby; straně bez osob se jedna vytvoří automaticky
+  const osobyStrany = (s) => amlPersons.filter(p => p.party_name === s.name);
+  const amlVsechnyOsoby = amlStrany.flatMap(osobyStrany);
+  const amlHotovo = amlVsechnyOsoby.filter(p => p.aml_done).length;
+
+  const dnesIso = () => {
+    const x = new Date();
+    return `${x.getFullYear()}-${String(x.getMonth()+1).padStart(2,'0')}-${String(x.getDate()).padStart(2,'0')}`;
   };
-  const setAmlDate = (person, v) => {
-    person.rows.forEach(t => updateTranche(t.id, { aml_date: v || null }));
-  };
+  const updatePerson = (id, patch) => setAmlPersons(prev => prev.map(p => p.id === id ? { ...p, ...patch } : p));
+  const addPerson = (s, role) => setAmlPersons(prev => [...prev, {
+    id: uid(), escrow_id: d.id, party_name: s.name, party_type: s.isSloz ? 'složitel' : 'oprávněný',
+    person_name: "", role: role || "SJM manžel/ka", aml_done: false, aml_date: null,
+    sort_order: prev.length, note: null,
+  }]);
+  const removePerson = (id) => setAmlPersons(prev => prev.filter(p => p.id !== id));
 
   // Seskupit oprávněné po osobách
   const oprGroups = {};
@@ -5748,64 +5855,88 @@ function EscrowForm({ init, onSave, onCancel, saving }) {
         </div>
       </div>
 
-      {/* Karta AML — identifikace stran */}
+      {/* Karta AML — identifikace osob */}
       <div style={S.card}>
         <div style={{ ...S.cardHead("#1c0a63"), justifyContent: "space-between" }}>
-          <span style={S.cht}>AML — identifikace stran</span>
+          <span style={S.cht}>AML — identifikace osob</span>
           <span style={{
             fontSize: 10, fontWeight: 700, letterSpacing: ".06em",
             padding: "3px 10px", borderRadius: 20,
-            background: amlPeople.length && amlHotovo === amlPeople.length ? "rgba(74,124,89,.35)" : "rgba(255,255,255,.14)",
+            background: amlVsechnyOsoby.length && amlHotovo === amlVsechnyOsoby.length ? "rgba(74,124,89,.35)" : "rgba(255,255,255,.14)",
             color: "#fff",
           }}>
-            {amlPeople.length ? `${amlHotovo} z ${amlPeople.length} hotovo` : "žádné strany"}
+            {amlVsechnyOsoby.length ? `${amlHotovo} z ${amlVsechnyOsoby.length} hotovo` : "žádné strany"}
           </span>
         </div>
         <div style={S.cardBody}>
-          {amlPeople.length === 0 && (
+          {amlStrany.length === 0 && (
             <div style={{ fontSize: 12, color: "#9CA3AF", padding: "6px 2px" }}>
               Zatím tu nejsou žádné strany. Přidej složitele a oprávněné dole v sekci „Strany úschovy“ — objeví se tady automaticky.
             </div>
           )}
-          {amlPeople.map(p => (
-            <div key={p.name} style={{
-              display: "flex", alignItems: "center", gap: 12,
-              padding: "11px 13px", marginBottom: 8,
-              borderRadius: 10,
-              border: `1.5px solid ${p.done ? "#C7E3CE" : "#F0C9C5"}`,
-              background: p.done ? "#F4FAF5" : "#FDF5F4",
-            }}>
-              <span style={{
-                fontSize: 9, fontWeight: 700, letterSpacing: ".1em", textTransform: "uppercase",
-                padding: "4px 8px", borderRadius: 4, width: 82, textAlign: "center", flexShrink: 0,
-                background: p.isSloz ? "#EEF2FF" : "#ECFDF5",
-                color: p.isSloz ? "#3730A3" : "#065F46",
-              }}>
-                {p.isSloz && p.isOpr ? "obojí" : (p.isSloz ? "složitel" : "oprávněný")}
-              </span>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: 14, fontWeight: 600, color: "#111827" }}>{p.name}</div>
-                <div style={{ fontSize: 11, color: p.done ? "#6B7280" : "#A8443C", marginTop: 1 }}>
-                  {fmtKc(p.castka)}{p.done ? "" : " · identifikace chybí"}
+          {amlStrany.map(s => {
+            const osoby = osobyStrany(s);
+            return (
+              <div key={s.name} style={{ border: "1.5px solid #ECEAF5", borderRadius: 10, marginBottom: 10, overflow: "hidden" }}>
+                <div style={{ background: "#FAFAFC", padding: "8px 13px", display: "flex", alignItems: "center", gap: 10, borderBottom: "1px solid #F0EFF6" }}>
+                  <span style={{
+                    fontSize: 9, fontWeight: 700, letterSpacing: ".1em", textTransform: "uppercase",
+                    padding: "3px 8px", borderRadius: 4, flexShrink: 0,
+                    background: s.isSloz ? "#EEF2FF" : "#ECFDF5",
+                    color: s.isSloz ? "#3730A3" : "#065F46",
+                  }}>
+                    {s.isSloz && s.isOpr ? "obojí" : (s.isSloz ? "složitel" : "oprávněný")}
+                  </span>
+                  <span style={{ fontSize: 13.5, fontWeight: 600, color: "#111827" }}>{s.name}</span>
+                  <span style={{ fontSize: 11.5, color: "#6B7280" }}>{fmtKc(s.castka)}</span>
+                </div>
+                {osoby.map(p => (
+                  <div key={p.id} style={{
+                    display: "flex", alignItems: "center", gap: 9,
+                    padding: "8px 13px", borderBottom: "1px solid #F7F7FA",
+                    background: p.aml_done ? "#F4FAF5" : "#FDF5F4",
+                  }}>
+                    <input value={p.person_name || ""} placeholder="Jméno a příjmení"
+                      onChange={e => updatePerson(p.id, { person_name: e.target.value })}
+                      style={{ ...S.input, flex: 1, minWidth: 130, fontSize: 13, background: "#fff" }} />
+                    <select value={p.role || "strana"} onChange={e => updatePerson(p.id, { role: e.target.value })}
+                      style={{ ...S.input, width: 152, flexShrink: 0, fontSize: 12, cursor: "pointer", background: "#fff" }}>
+                      {AML_ROLES.map(r => <option key={r} value={r}>{r}</option>)}
+                    </select>
+                    {p.aml_done && (
+                      <input type="date" value={p.aml_date || ""} title="Datum provedení identifikace"
+                        onChange={e => updatePerson(p.id, { aml_date: e.target.value || null })}
+                        style={{ ...S.input, width: 134, flexShrink: 0, fontSize: 12, background: "#fff" }} />
+                    )}
+                    <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", flexShrink: 0 }}>
+                      <input type="checkbox" checked={!!p.aml_done}
+                        onChange={e => updatePerson(p.id, {
+                          aml_done: e.target.checked,
+                          aml_date: e.target.checked ? (p.aml_date || dnesIso()) : null,
+                        })}
+                        style={{ width: 17, height: 17, margin: 0, accentColor: "#4A7C59", cursor: "pointer" }} />
+                      <span style={{ fontSize: 11, fontWeight: 700, color: p.aml_done ? "#4A7C59" : "#A8443C", whiteSpace: "nowrap" }}>
+                        {p.aml_done ? "hotovo" : "zaškrtnout"}
+                      </span>
+                    </label>
+                    {p.role !== "strana" && (
+                      <button onClick={() => removePerson(p.id)} title="Odebrat osobu"
+                        style={{ background: "none", border: "none", color: "#D1D5DB", cursor: "pointer", fontSize: 16, padding: "0 2px", flexShrink: 0 }}>×</button>
+                    )}
+                  </div>
+                ))}
+                <div style={{ padding: "7px 13px" }}>
+                  <button onClick={() => addPerson(s)}
+                    style={{ fontSize: 11, fontWeight: 600, color: "#3518a4", background: "#fff", border: "1px solid #E0DDF0", borderRadius: 6, padding: "4px 11px", cursor: "pointer" }}>
+                    + další osoba k identifikaci
+                  </button>
                 </div>
               </div>
-              {p.done && (
-                <input type="date" value={p.date || ""} onChange={e => setAmlDate(p, e.target.value)}
-                  title="Datum provedení identifikace"
-                  style={{ ...S.input, width: 138, flexShrink: 0, fontSize: 12, background: "#fff" }} />
-              )}
-              <label style={{ display: "flex", alignItems: "center", gap: 7, cursor: "pointer", flexShrink: 0 }}>
-                <input type="checkbox" checked={p.done} onChange={e => setAml(p, e.target.checked)}
-                  style={{ width: 17, height: 17, margin: 0, accentColor: "#4A7C59", cursor: "pointer" }} />
-                <span style={{ fontSize: 11, fontWeight: 700, color: p.done ? "#4A7C59" : "#A8443C", whiteSpace: "nowrap" }}>
-                  {p.done ? "hotovo" : "zaškrtnout"}
-                </span>
-              </label>
-            </div>
-          ))}
-          {amlPeople.length > 0 && (
-            <div style={{ fontSize: 10, color: "#9CA3AF", marginTop: 4 }}>
-              Zaškrtnutím se doplní dnešní datum — přepiš ho, pokud identifikace proběhla jindy. Dokud někdo chybí, svítí varování na Přehledu.
+            );
+          })}
+          {amlStrany.length > 0 && (
+            <div style={{ fontSize: 10, color: "#9CA3AF", marginTop: 2, lineHeight: 1.6 }}>
+              U SJM přidej oba manžele, u firmy jednatele i skutečného majitele. Zaškrtnutím se doplní dnešní datum — přepiš, pokud identifikace proběhla jindy.
             </div>
           )}
         </div>
@@ -6629,15 +6760,9 @@ function EscrowLiveTile({ escrows, onNav, onOpenEscrow }) {
   // (jeden oprávněný má klidně tři výplatní řádky — je to pořád jedna osoba)
   const amlRows = [];
   (escrows || []).forEach(e => {
-    const seen = new Set();
-    const names = [];
-    (e.escrow_tranches || []).forEach(t => {
-      if (t.aml_done) return;
-      const name = (t.party_name || "").trim() || "(bez jména)";
-      if (seen.has(name)) return;
-      seen.add(name);
-      names.push(name);
-    });
+    const names = amlPersonsFor(e)
+      .filter(p => !p.aml_done)
+      .map(p => (p.person_name || "").trim() || "(bez jména)");
     if (!names.length) return;
     const objem = (e.escrow_tranches || [])
       .filter(t => t.party_type === 'složitel')
@@ -7318,7 +7443,7 @@ const BACKUP_TABLES = [
   "clients","invoices","work_entries","finance_items",
   "dpfo_months","tax_records","expense_checklist",
   "loan_trackers","loan_transactions",
-  "escrows","escrow_tranches",
+  "escrows","escrow_tranches","escrow_aml_persons",
   "assistant_work_logs","assistant_availability","assistant_attendance"
 ];
 
