@@ -7448,15 +7448,15 @@ function TriGrafyPanel({ financeItems, onSaveFinance, invoices, dpfoMonths, loan
   );
 
   return (
-    <div style={{ borderRadius: BP.rInner, overflow: "hidden", border: "1px solid rgba(0,0,0,0.06)" }}>
+    <div style={{ borderRadius: BP.rInner, overflow: "hidden", border: "1px solid rgba(0,0,0,0.06)", height: "100%" }}>
 
-      {/* ═══ DOLNÍ PŮLKA: MAJETEK + REZERVA ═══ */}
-      <div style={{ display: "flex" }}>
+      {/* ═══ OSOBNÍ MAJETEK ═══ Od 3.8.2026 sedí vedle Měsíčních výdajů v panelu "firma"
+           (Tom: ušetřit level scrollování). Sloupec "Firemní rezerva" tu byl zrušen —
+           rezerva má jediné místo, kartu Spořicí účet v Bilanci. */}
+      <div style={{ display: "flex", height: "100%" }}>
 
-        {/* ── MAJETEK ── celá šířka od 3.8.2026: sloupec "Firemní rezerva" vedle něj byl zrušen
-             (rezerva má jediné místo — kartu Spořicí účet v Bilanci). */}
-        <div style={{ flex: 1, padding: "32px 36px 34px", background: "#fff" }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 22 }}>
+        <div style={{ flex: 1, minWidth: 0, padding: "28px 30px 30px", background: "#fff" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
             {secHdr(M_COL, "Osobní majetek")}
             {eBtn(() => setEditMaj(e => !e), editMaj, M_COL)}
           </div>
@@ -7502,12 +7502,10 @@ function TriGrafyPanel({ financeItems, onSaveFinance, invoices, dpfoMonths, loan
               )}
             </div>
           ) : (
-            <div style={{ display: "flex", alignItems: "center", gap: 34 }}>
-              <div style={{ flexShrink: 0 }}>
-                <InteractiveRing segments={majGlassSegs} size={190} thickness={22} glowColor={M_COL}
-                  centerTop="Majetek" centerMain={fmtKc(totalMaj)} legendOnly />
-              </div>
-              <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 10 }}>
+            <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 22 }}>
+              <InteractiveRing segments={majGlassSegs} size={168} thickness={20} glowColor={M_COL}
+                centerTop="Majetek" centerMain={fmtKc(totalMaj)} legendOnly />
+              <div style={{ width: "100%", minWidth: 0, display: "flex", flexDirection: "column", gap: 10 }}>
                 {allMajSegs.map((seg, i) => (
                   <div key={i} style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 12.5 }}>
                     <span style={{ width: 9, height: 9, borderRadius: "50%", background: seg.color, flexShrink: 0 }} />
@@ -7890,9 +7888,9 @@ function BackupReminderBanner({ onDone }) {
 // v11 (31.7.2026) — Tom: "tohle celé mě nezajímá a nikdy na to nekoukám."
 // Zrušeny panely: meta (žebřík 12 měsíců), navstevnost (GA4), xtb (dlaždice Investice).
 // Meta jako taková ŽIJE DÁL v kalendáři (zlatá ryska + věta o rekordu) — zrušen jen výpis historie.
-const PANEL_LAYOUT_VERSION = 11;
+const PANEL_LAYOUT_VERSION = 12;
 const DEFAULT_PANELS = [
-  "finance","trigrafy","firma","josef","pulz",
+  "finance","firma","josef","pulz",
   "chart","ziskovost","claude"
 ];
 function loadPanelState() {
@@ -11788,19 +11786,23 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
         </div>
       )}
 
-      {/* TRI GRAFY — Spořák + Majetek + Rezerva (interaktivní donut grafy) */}
-      <Panel id="trigrafy">
-      <TriGrafyPanel financeItems={financeItems} onSaveFinance={onSaveFinance}
-        invoices={invoices} dpfoMonths={dpfoMonths}
-        loanTransactions={loanTransactions} escrows={escrows} josefAvg={josefAvg3m} />
-      </Panel>
-
-      {/* FIRMA METRIKY — měsíční výdaje (vč. checklistu, přesunutého sem z Bilance 29.6.2026) */}
+      {/* FIRMA METRIKY — měsíční výdaje + Osobní majetek VEDLE SEBE.
+          Tom 3.8.2026: "dej majetek na stejný level jako výdaje, ušetříme level scrollování."
+          Samostatný panel "trigrafy" tím zanikl (proto PANEL_LAYOUT_VERSION 11 → 12). */}
       <Panel id="firma">
-      <FirmaBar financeItems={financeItems} invoices={invoices} dpfoMonths={dpfoMonths}
-        loanTransactions={loanTransactions} escrows={escrows} onSaveFinance={onSaveFinance}
-        onDeleteFinance={onDeleteFinance} expenseChecks={expenseChecks} onToggleExpenseCheck={onToggleExpenseCheck}
-        josefWage={josefWage} josefYm={_josefYm} onNav={onNav} />
+      <div style={{display:"flex",gap:16,alignItems:"stretch"}}>
+        <div style={{flex:3,minWidth:0,display:"flex",flexDirection:"column"}}>
+          <FirmaBar financeItems={financeItems} invoices={invoices} dpfoMonths={dpfoMonths}
+            loanTransactions={loanTransactions} escrows={escrows} onSaveFinance={onSaveFinance}
+            onDeleteFinance={onDeleteFinance} expenseChecks={expenseChecks} onToggleExpenseCheck={onToggleExpenseCheck}
+            josefWage={josefWage} josefYm={_josefYm} onNav={onNav} />
+        </div>
+        <div style={{flex:2,minWidth:0,display:"flex",flexDirection:"column"}}>
+          <TriGrafyPanel financeItems={financeItems} onSaveFinance={onSaveFinance}
+            invoices={invoices} dpfoMonths={dpfoMonths}
+            loanTransactions={loanTransactions} escrows={escrows} josefAvg={josefAvg3m} />
+        </div>
+      </div>
       </Panel>
 
       <Panel id="josef">
