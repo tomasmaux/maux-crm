@@ -11887,6 +11887,11 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
         const [sporOpen, setSporOpen] = useState(false);
         const [sporEditMode, setSporEditMode] = useState(false);
         const [sporEditVal, setSporEditVal] = useState(0);
+        // Koláč spořáku: index výseče pod myší + jednorázové "namountováno" pro vykreslovací
+        // animaci. Žádný interval — appka nemá nic hlídat na pozadí.
+        const [sporHov, setSporHov] = useState(null);
+        const [sporDrawn, setSporDrawn] = useState(false);
+        useEffect(() => { const t = setTimeout(() => setSporDrawn(true), 90); return () => clearTimeout(t); }, []);
         // Editovatelný checklist nákladů (checkboxy, AddExpenseRow, mzda Josefa) se 29.6.2026 přesunul
         // do dlaždice "Měsíční výdaje" (FirmaBar, Panel id="firma") — Tom: "ta roletka u nákladů je
         // zcela zbytečná" (dělala tuhle dlaždici zbytečně vysokou). Tady zůstal jen souhrnný řádek
@@ -12046,35 +12051,44 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
                   // s ReferenceError, takže tlačítko ✓ ani Enter zůstatek neuložily. Esbuild to
                   // neodhalí (viz skill), pozná se to jen kliknutím.
                   const zItemS = (financeItems||[]).find(i => i.id === "fi_sp_99");
-                  const S_ENV_COLOR = { dph: "#2B2478", dpfo: "#4A44B8", bob: "#6E68C4", danu: "#A79BFF" };
+                  // Paleta: OBÁLKY STÁTU jdou od skoro černé (DPH — odchází nejdřív) po světle
+                  // šedomodrou (daň z úschov — nejdál). Musely se ztlumit, jinak by se v nich
+                  // rozzářená rezerva ztratila a koláč by byl jedna modrá kaše.
+                  const S_ENV_COLOR = { dph: "#241A5E", dpfo: "#454081", bob: "#6660A0", danu: "#A29DC6" };
+                  const S_ENV_NOTE  = { dph: "odvod 25. dne", dpfo: "záloha na daň", danu: "srážková 15 %", bob: "půjčka" };
                   const sEnvSegs = _envS.envelopes.map((e, idx) => ({
+                    key: e.key,
                     label: e.key === "dpfo" ? "DPFO" : e.label,
                     value: e.amount,
-                    color: S_ENV_COLOR[e.key] || ["#C7D2FE","#DDD6FE"][idx % 2],
+                    color: S_ENV_COLOR[e.key] || ["#7E79B4","#BDB9D6"][idx % 2],
+                    note: S_ENV_NOTE[e.key] || "patří státu",
                   }));
                   const sTotalEar = _envS.earmarked;
                   const sFirmaRez = _envS.free;
                   // Tom 3.8.2026: "43,9 není volné — je to firemní rezerva." Slovo "volné" svádělo
                   // k tomu, že se ty peníze dají utratit; přitom drží polštář provozu.
-                  const sFullSegs = [...sEnvSegs, ...(sFirmaRez > 0 ? [{ label: "Firemní rezerva", value: sFirmaRez, color: "#4A44B8" }] : [])];
+                  // Rezerva má přechodovou výplň + jemnou zář (Tom: "indigo sexy neon, ale ubrat").
+                  // Zlatá se tu NEPOUŽÍVÁ — zlatá = osobní majetek, indigo = firma.
+                  const sFullSegs = [...sEnvSegs, ...(sFirmaRez > 0 ? [{
+                    key: "rez", label: "Firemní rezerva", value: sFirmaRez,
+                    color: "url(#spGrad)", dot: "#5B4FF0", note: "tvoje · neutrácet", mine: true,
+                  }] : [])];
                   const sTotalAll = sFullSegs.reduce((s,e)=>s+e.value,0) || 1;
-                  // Koláč má JEN DVA oblouky: vybledlé "patří státu" a sytá "tvoje".
-                  // Rozpad na jednotlivé obálky nese pilulka pod číslem — kruh má odpovědět
-                  // na jedinou otázku: kolik z toho je moje.
-                  const R_D = 46, CIRC_D = 2 * Math.PI * R_D;
+                  // Velký koláč — jeden oblouk na obálku. Vnější vlasový prstenec = polštář,
+                  // takže jeden obrázek odpoví na "jak je to rozdělené" i "jak daleko jsem".
+                  const R_D = 88, CIRC_D = 2 * Math.PI * R_D;
+                  const R_P = 118, CIRC_P = 2 * Math.PI * R_P;
                   let cumPct = 0;
-                  const donutSegs = [
-                    { label: "Patří státu", value: sTotalEar, color: "#DDD9F5" },
-                    ...(sFirmaRez > 0 ? [{ label: "Firemní rezerva", value: sFirmaRez, color: "#4A44B8" }] : []),
-                  ].map(s => {
+                  const donutSegs = sFullSegs.map(s => {
                     const pct = s.value / sTotalAll;
                     const seg = { ...s, pct, startPct: cumPct };
                     cumPct += pct;
                     return seg;
                   });
-                  // Laťka k polštáři — nahrazuje zrušenou nádrž. planKap je z computeFirmaRezerva výš.
                   const polstarPct = planKap > 0 ? Math.min(sFirmaRez / planKap, 1) : 0;
                   const polstarZbyva = Math.max(planKap - sFirmaRez, 0);
+                  // Střed koláče je živý: v klidu tvoje rezerva, při najetí ta výseč, na které jsi.
+                  const hovSeg = sporHov != null ? donutSegs[sporHov] : null;
                   const saveSporBal = () => {
                     onSaveFinance({ ...(zItemS||{category:"sporaci",label:"Zůstatek",id:"fi_sp_99"}), id:"fi_sp_99", amount: sporEditVal });
                     setSporEditMode(false);
@@ -12090,23 +12104,12 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
                       position:"relative",
                       overflow:"visible",
                     }}>
-                      <style>{`
-                        .ssg{transition:stroke-width .18s,opacity .18s;cursor:default}.ssg:hover{stroke-width:19!important}
-                      `}</style>
-
                       {/* Header */}
-                      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
+                      <div style={{marginBottom:10}}>
                         <span style={{fontSize:9.5,letterSpacing:".16em",textTransform:"uppercase",color:"var(--mut)",fontWeight:600}}>Spořicí účet</span>
-                        <button onClick={()=>setSporOpen(v=>!v)} style={{fontSize:10.5,color:"var(--mut)",background:"none",border:"none",cursor:"pointer",padding:0,lineHeight:1}}>
-                          {sporOpen?"skrýt ▲":"detail ▼"}
-                        </button>
                       </div>
 
-                      {/* Číslo vlevo, koláč vpravo. Střed koláče = jediné číslo, na kterém Tomovi
-                          záleží (jeho firemní rezerva); prstenec sčítá celý zůstatek, proto je
-                          popsaný "tvoje" a státní část je vybledlá. */}
-                      <div style={{display:"flex",alignItems:"center",gap:18}}>
-                      <div style={{flex:1,minWidth:0}}>
+                      <div style={{minWidth:0}}>
                         {sporEditMode ? (
                           <div style={{display:"flex",gap:7,alignItems:"center"}}>
                             <input
@@ -12127,90 +12130,105 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
                             onMouseLeave={e=>e.currentTarget.style.background="transparent"}
                             title="Klikni pro úpravu zůstatku"
                           >
-                            <span style={{fontFamily:"Fraunces,serif",fontSize:27,fontWeight:300,color:"var(--txt)",letterSpacing:"-.015em",lineHeight:1,whiteSpace:"nowrap"}}>{fmtKc(sporBalS)}</span>
+                            <span style={{fontFamily:"Fraunces,serif",fontSize:29,fontWeight:300,color:"var(--txt)",letterSpacing:"-.015em",lineHeight:1,whiteSpace:"nowrap"}}>{fmtKc(sporBalS)}</span>
                             <span style={{fontSize:11,color:"var(--mut)",lineHeight:1,opacity:.5}}>✎</span>
-                          </div>
-                        )}
-                        <div style={{fontSize:10.5,color:"var(--mut)",marginTop:7}}>{fmtKc(sTotalEar)} patří státu</div>
-                        {/* Věta závěru — mlčí, když nezbývá nic volného. */}
-                        {sFirmaRez > 0 && (
-                          <div style={{fontSize:12,lineHeight:1.5,color:"var(--ink)",marginTop:10,opacity:.85}}>
-                            {fmtKc(sFirmaRez)} je tvoje firemní rezerva.
+                            <span style={{fontSize:10.5,color:"var(--mut)",marginLeft:3}}>zůstatek</span>
                           </div>
                         )}
                       </div>
 
-                      {/* KOLÁČ — dva oblouky, střed = tvoje. Schová se při editaci zůstatku. */}
+                      {/* ── VELKÝ KOLÁČ ── jeden oblouk na obálku, vnější vlasový prstenec = polštář.
+                          Střed je živý: v klidu tvoje rezerva, při najetí ta výseč, na které jsi.
+                          Schová se při editaci zůstatku, ať input dostane celou šířku. */}
                       {!sporEditMode && (
-                        <svg width="112" height="112" viewBox="0 0 126 126" style={{flexShrink:0}}>
-                          <circle cx="63" cy="63" r={R_D} fill="none" stroke="#F2F1F8" strokeWidth="17"/>
-                          {donutSegs.map((s,i)=>(
-                            <circle key={i} className="ssg"
-                              cx="63" cy="63" r={R_D}
-                              fill="none" stroke={s.color} strokeWidth="17"
-                              strokeDasharray={`${Math.max(s.pct*CIRC_D-2,0)} ${CIRC_D}`}
-                              transform={`rotate(${s.startPct*360-90} 63 63)`}
-                              strokeLinecap="butt"
-                            ><title>{s.label}: {fmtKc(s.value)}</title></circle>
-                          ))}
-                          <text x="63" y="58" textAnchor="middle" fontSize="9" fill="var(--mut)" letterSpacing=".14em">TVOJE</text>
-                          <text x="63" y="77" textAnchor="middle" fontSize="16" fill="var(--txt)" fontFamily="Fraunces,serif" fontWeight="300">{fmtKc(sFirmaRez)}</text>
-                        </svg>
-                      )}
-                      </div>
+                        <div style={{display:"flex",justifyContent:"center",marginTop:6}}>
+                          <svg viewBox="0 0 290 290" style={{width:"100%",maxWidth:272,display:"block"}}>
+                            <defs>
+                              <linearGradient id="spGrad" x1="0" y1="1" x2="1" y2="0">
+                                <stop offset="0%" stopColor="#3B2FD0"/>
+                                <stop offset="100%" stopColor="#6C5FF5"/>
+                              </linearGradient>
+                              <filter id="spGlow" x="-45%" y="-45%" width="190%" height="190%">
+                                <feGaussianBlur stdDeviation="6"/>
+                              </filter>
+                            </defs>
 
-                      {/* Allocation pills */}
-                      <div style={{display:"flex",flexWrap:"wrap",gap:4,marginTop:14}}>
-                        {sFullSegs.map((s,i)=>{
-                          const isRez = s.label === "Firemní rezerva";
-                          return (
-                          <span key={i} title={`${s.label}: ${fmtKc(s.value)} · ${Math.round(s.value/sTotalAll*100)}%`} style={{
-                            fontSize:9.5,padding:"3px 9px 3px 7px",borderRadius:99,
-                            background:isRez?"rgba(74,68,184,.06)":"rgba(0,0,0,.022)",
-                            color:isRez?"#3A3494":"var(--txt)",
-                            border:isRez?"1px solid rgba(74,68,184,.28)":"1px solid rgba(0,0,0,.06)",
-                            fontWeight:isRez?600:500,cursor:"default",whiteSpace:"nowrap",
-                            display:"inline-flex",alignItems:"center",gap:5,
-                          }}><span style={{width:6,height:6,borderRadius:"50%",background:s.color,flexShrink:0}}/>{s.label} {fmtKc(s.value)}</span>
-                          );
-                        })}
-                      </div>
+                            <circle cx="145" cy="145" r={R_D} fill="none" stroke="#F4F3F9" strokeWidth="34"/>
 
-                      {/* LAŤKA K POLŠTÁŘI — nahradila zrušenou nádrž. Vlasová 2px, zlatá (BP.sand):
-                          cíl/meta se v MAUX systému kreslí zlatě, ne zeleně. */}
-                      {planKap > 0 && (
-                        <div style={{marginTop:16,paddingTop:13,borderTop:"1px solid rgba(0,0,0,.06)"}}>
-                          <div style={{display:"flex",justifyContent:"space-between",fontSize:10,color:"var(--mut)",marginBottom:7}}>
-                            <span>Polštář 3 měsíců provozu</span>
-                            <span>{Math.round(polstarPct*100)} % z {fmtKc(planKap)}</span>
-                          </div>
-                          <div style={{height:2,background:"rgba(0,0,0,.07)",position:"relative"}}>
-                            <div style={{position:"absolute",left:0,top:0,height:2,width:`${polstarPct*100}%`,background:BP.sand}} />
-                          </div>
-                          <div style={{fontSize:10,color:"var(--mut)",marginTop:7}}>
-                            {polstarZbyva > 0
-                              ? `zbývá ${fmtKc(polstarZbyva)}`
-                              : `polštář hotový · ${fmtKc(sFirmaRez - planKap)} nad rámec`}
-                          </div>
+                            {/* zář pod výsečí rezervy — jemná, sílí při najetí */}
+                            {donutSegs.filter(s=>s.mine).map((s,i)=>(
+                              <circle key={`g${i}`} cx="145" cy="145" r={R_D}
+                                fill="none" stroke="#6C5FF5" strokeWidth="32"
+                                filter="url(#spGlow)"
+                                opacity={sporHov==null ? .3 : (donutSegs[sporHov]?.mine ? .5 : .08)}
+                                strokeDasharray={sporDrawn ? `${Math.max(s.pct*CIRC_D-2,0)} ${CIRC_D}` : `0 ${CIRC_D}`}
+                                transform={`rotate(${s.startPct*360-90} 145 145)`}
+                                style={{transition:"stroke-dasharray 1.1s cubic-bezier(.4,0,.2,1) .25s, opacity .2s",pointerEvents:"none"}}
+                              />
+                            ))}
+
+                            {donutSegs.map((s,i)=>(
+                              <circle key={i} cx="145" cy="145" r={R_D}
+                                fill="none" stroke={s.color}
+                                strokeWidth={sporHov===i ? 37 : (s.mine ? 34 : 30)}
+                                opacity={sporHov==null || sporHov===i ? 1 : .25}
+                                strokeDasharray={sporDrawn ? `${Math.max(s.pct*CIRC_D-2,0)} ${CIRC_D}` : `0 ${CIRC_D}`}
+                                transform={`rotate(${s.startPct*360-90} 145 145)`}
+                                strokeLinecap="butt"
+                                onMouseEnter={()=>setSporHov(i)}
+                                onMouseLeave={()=>setSporHov(null)}
+                                style={{transition:`stroke-dasharray 1.1s cubic-bezier(.4,0,.2,1) ${i*0.12}s, stroke-width .2s, opacity .2s`,cursor:"pointer"}}
+                              />
+                            ))}
+
+                            {/* vnější vlasový prstenec — polštář */}
+                            <circle cx="145" cy="145" r={R_P} fill="none" stroke="rgba(0,0,0,.05)" strokeWidth="2"/>
+                            <circle cx="145" cy="145" r={R_P} fill="none" stroke="#6C5FF5" strokeWidth="2"
+                              strokeDasharray={sporDrawn ? `${polstarPct*CIRC_P} ${CIRC_P}` : `0 ${CIRC_P}`}
+                              transform={`rotate(-90 145 145)`}
+                              style={{transition:"stroke-dasharray 1.4s cubic-bezier(.4,0,.2,1) .5s"}}
+                            />
+
+                            <text x="145" y="130" textAnchor="middle" fontSize="10" letterSpacing="2.2" fill="var(--mut)">
+                              {hovSeg ? hovSeg.label.toUpperCase() : "TVOJE"}
+                            </text>
+                            <text x="145" y="158" textAnchor="middle" fontSize="25" fontFamily="Fraunces,serif" fontWeight="300"
+                              fill={hovSeg && !hovSeg.mine ? "var(--txt)" : "#4A44B8"}>
+                              {fmtKc(hovSeg ? hovSeg.value : sFirmaRez)}
+                            </text>
+                            <text x="145" y="177" textAnchor="middle" fontSize="11" fill="var(--mut)">
+                              {hovSeg ? hovSeg.note : `${Math.round(sFirmaRez/sTotalAll*100)} % zůstatku`}
+                            </text>
+                          </svg>
                         </div>
                       )}
 
-                      {/* Expandable detail */}
-                      {sporOpen && (
-                        <div style={{marginTop:12,paddingTop:12,borderTop:"1px solid #f3f4f6"}}>
-                          {sFullSegs.map((s,i)=>{
-                            const pct=Math.round((s.value/sTotalAll)*100);
-                            return (
-                              <div key={i} style={{display:"flex",alignItems:"center",gap:8,padding:"5px 0",borderBottom:i<sFullSegs.length-1?"1px solid #f9f9f9":undefined}}>
-                                <span style={{width:8,height:8,borderRadius:"50%",background:s.color,flexShrink:0}} />
-                                <span style={{flex:1,fontSize:11,color:"#6b7280",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{s.label}</span>
-                                <span className="maux-num" style={{fontSize:11,fontWeight:700,color:"#111827",flexShrink:0}}>{fmtKc(s.value)}</span>
-                                <span style={{fontSize:10,color:"#ccc",width:26,textAlign:"right",flexShrink:0}}>{pct}%</span>
-                              </div>
-                            );
-                          })}
+                      {!sporEditMode && planKap > 0 && (
+                        <div style={{textAlign:"center",fontSize:10,color:"var(--mut)",marginTop:2}}>
+                          vnější oblouk · polštář {Math.round(polstarPct*100)} % z {fmtKc(planKap)}
+                          {polstarZbyva > 0 ? ` · zbývá ${fmtKc(polstarZbyva)}` : ` · hotovo, ${fmtKc(sFirmaRez - planKap)} nad rámec`}
                         </div>
                       )}
+
+                      {/* LEGENDA — řádky jsou propojené s koláčem přes stejný sporHov */}
+                      <div style={{display:"flex",flexDirection:"column",gap:1,marginTop:16,paddingTop:11,borderTop:"1px solid rgba(0,0,0,.06)"}}>
+                        {donutSegs.map((s,i)=>(
+                          <div key={i}
+                            onMouseEnter={()=>setSporHov(i)}
+                            onMouseLeave={()=>setSporHov(null)}
+                            style={{
+                              display:"flex",alignItems:"center",gap:9,fontSize:11.5,
+                              padding:"5px 7px",borderRadius:7,cursor:"default",
+                              background: sporHov===i ? "rgba(0,0,0,.025)" : "transparent",
+                              transition:"background .15s",
+                            }}>
+                            <span style={{width:8,height:8,borderRadius:"50%",background:s.dot||s.color,flexShrink:0}} />
+                            <span style={{flex:1,color:"var(--mut)",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{s.label}</span>
+                            <span style={{color:"var(--ink)",fontWeight:500,whiteSpace:"nowrap"}}>{fmtKc(s.value)}</span>
+                            <span style={{color:"var(--mut)",width:34,textAlign:"right",flexShrink:0}}>{Math.round(s.pct*100)} %</span>
+                          </div>
+                        ))}
+                      </div>
                     </div>
                   );
                 })()}
