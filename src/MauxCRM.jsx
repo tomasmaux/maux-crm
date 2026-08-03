@@ -284,7 +284,7 @@ html,body,#root{height:100%;background:#FAFAFA}
 .kpi:hover{border-color:var(--ink);box-shadow:0 4px 20px rgba(53,24,165,.12);transform:translateY(-2px)}
 .kpi.hi:hover{box-shadow:0 6px 28px rgba(53,24,165,.45);transform:translateY(-2px)}
 .kpi .k{font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--mut);font-weight:500;margin-bottom:10px}
-.kpi .v{font-family:'Fraunces',serif;font-size:24px;font-weight:300;color:var(--txt);line-height:1}
+.kpi .v{font-family:var(--num);font-variant-numeric:tabular-nums;font-size:24px;font-weight:600;color:var(--txt);line-height:1}
 .kpi .s{font-size:11.5px;color:var(--mut);margin-top:6px}
 .kpi.hi{background:var(--ink);border-color:var(--ink);box-shadow:0 4px 16px rgba(53,24,165,.3)}
 .kpi.hi:hover{box-shadow:0 6px 20px rgba(53,24,165,.4)}
@@ -304,7 +304,7 @@ html,body,#root{height:100%;background:#FAFAFA}
 .t-name{font-size:13.5px;color:var(--txt);font-weight:500}
 .t-sub{font-size:11px;color:var(--mut);margin-top:2px;font-weight:400}
 .t-date{font-size:12.5px;color:var(--mut)}
-.t-amt{font-family:'Fraunces',serif;font-size:15px;font-weight:300;color:var(--txt)}
+.t-amt{font-family:var(--num);font-variant-numeric:tabular-nums;font-size:15px;font-weight:600;color:var(--txt)}
 .badge{display:inline-flex;align-items:center;gap:5px;font-size:10.5px;padding:4px 10px;border-radius:20px;font-weight:500}
 .badge::before{content:'';width:5px;height:5px;border-radius:50%;display:inline-block;flex-shrink:0}
 .b-ok{background:#ECFDF5;color:#065F46}.b-ok::before{background:#10B981}
@@ -322,7 +322,7 @@ html,body,#root{height:100%;background:#FAFAFA}
 .fld .d{font-size:14px;color:var(--txt);line-height:1.55}
 .fld a{color:var(--ink);text-decoration:none;font-weight:500}
 .fld a:hover{text-decoration:underline}
-.bigval{font-family:'Fraunces',serif;font-size:28px;font-weight:300;color:var(--gold)}
+.bigval{font-family:var(--num);font-variant-numeric:tabular-nums;font-size:28px;font-weight:600;color:var(--gold)}
 .svwrap{display:flex;gap:6px;flex-wrap:wrap;margin-top:4px}
 .sdot{display:inline-flex;align-items:center;gap:5px;font-size:11.5px;color:var(--txt);font-weight:400;background:#F5F4FA;border-radius:20px;padding:3px 9px}
 .sdot i{width:6px;height:6px;border-radius:50%;display:inline-block;flex-shrink:0}
@@ -349,13 +349,13 @@ html,body,#root{height:100%;background:#FAFAFA}
 .item-row:last-child{border-bottom:none}
 .item-row input{font:inherit;font-size:13px;padding:6px 10px;border:1px solid var(--line2);border-radius:6px;outline:none;background:#fff;color:var(--txt);width:100%;transition:.15s}
 .item-row input:focus{border-color:var(--ink);box-shadow:0 0 0 2px rgba(53,24,165,.08)}
-.item-row .amt{font-family:'Fraunces',serif;font-size:14px;color:var(--txt);text-align:right;font-weight:300}
+.item-row .amt{font-family:var(--num);font-variant-numeric:tabular-nums;font-size:14px;color:var(--txt);text-align:right;font-weight:300}
 .item-del{background:none;border:none;cursor:pointer;color:#DDD;font-size:18px;padding:0;display:flex;align-items:center;justify-content:center;transition:.12s;line-height:1}
 .item-del:hover{color:#A8443C}
 .totals{background:#FAFAFA;border:1px solid var(--line);border-radius:10px;padding:14px 18px;margin-bottom:14px}
 .tot-row{display:flex;justify-content:space-between;font-size:13px;color:var(--mut);padding:4px 0}
 .tot-row.final{font-size:14px;color:var(--txt);font-weight:600;border-top:1px solid var(--line2);margin-top:8px;padding-top:10px}
-.tot-row.final .tv{font-family:'Fraunces',serif;font-size:20px;font-weight:300;color:var(--ink)}
+.tot-row.final .tv{font-family:var(--num);font-variant-numeric:tabular-nums;font-size:20px;font-weight:600;color:var(--ink)}
 .inv-det-meta{display:flex;gap:28px;margin:20px 0;padding:20px 0;border-top:1px solid var(--line);border-bottom:1px solid var(--line);flex-wrap:wrap}
 .inv-det-meta .mf .ml{font-size:9px;letter-spacing:.12em;text-transform:uppercase;color:var(--mut);font-weight:500;margin-bottom:5px}
 .inv-det-meta .mf .mv{font-size:14px;color:var(--txt);font-weight:500}
@@ -1569,7 +1569,7 @@ function InvoiceIssueModal({ clientId, entries, clients, invoices, initialBilled
                   {Number(e.sig_count) > 0 && ` · prohlášení ${e.sig_count}× ${fmtKc(Number(e.sig_count) * SIGNATURE_DECL_FEE)}`}
                 </div>
               </div>
-              <div style={{ fontSize: 12.5, fontFamily: "Fraunces, serif", fontWeight: 300, color: "var(--ink)", flexShrink: 0 }}>{fmtKc(e.amount)}</div>
+              <div style={{ fontSize: 12.5, fontFamily:"Inter,ui-sans-serif,system-ui,sans-serif",fontVariantNumeric:"tabular-nums", fontWeight:600, color: "var(--ink)", flexShrink: 0 }}>{fmtKc(e.amount)}</div>
             </label>
           ))}
         </div>
@@ -1614,7 +1614,7 @@ function InvoiceIssueModal({ clientId, entries, clients, invoices, initialBilled
               {discounts.map(d => (
                 <div key={d.id} style={{ display: "flex", alignItems: "center", gap: 10, background: "#FFF5FA", border: "1px solid #F3D9E8", borderRadius: 8, padding: "8px 12px" }}>
                   <span style={{ flex: 1, fontSize: 12, color: "var(--txt)" }}>{d.label}</span>
-                  <span style={{ fontSize: 12.5, fontFamily: "Fraunces, serif", color: "#A8527A" }}>−{fmtKc(d.amount)}</span>
+                  <span style={{ fontSize: 12.5, fontFamily:"Inter,ui-sans-serif,system-ui,sans-serif",fontVariantNumeric:"tabular-nums", color: "#A8527A" }}>−{fmtKc(d.amount)}</span>
                   <button onClick={() => setDiscounts(p => p.filter(x => x.id !== d.id))}
                     style={{ background: "none", border: "none", cursor: "pointer", color: "#A8527A", fontSize: 14 }}>✕</button>
                 </div>
@@ -1650,9 +1650,9 @@ function InvoiceIssueModal({ clientId, entries, clients, invoices, initialBilled
           </div>
           <div style={{ textAlign: "right" }}>
             {discountTotal > 0 && (
-              <div style={{ fontFamily: "Fraunces, serif", fontSize: 13, color: "var(--mut)", textDecoration: "line-through" }}>{fmtKc(totalBefore)}</div>
+              <div style={{ fontFamily:"Inter,ui-sans-serif,system-ui,sans-serif",fontVariantNumeric:"tabular-nums", fontSize: 13, color: "var(--mut)", textDecoration: "line-through" }}>{fmtKc(totalBefore)}</div>
             )}
-            <div style={{ fontFamily: "Fraunces, serif", fontSize: 20, fontWeight: 300, color: "var(--ink)" }}>{fmtKc(total)}</div>
+            <div style={{ fontFamily:"Inter,ui-sans-serif,system-ui,sans-serif",fontVariantNumeric:"tabular-nums", fontSize: 20, fontWeight:600, color: "var(--ink)" }}>{fmtKc(total)}</div>
           </div>
         </div>
 
@@ -1738,7 +1738,7 @@ function DraftDiscountModal({ clientId, entries, clients, onConfirm, onCancel, s
 
         <div style={{ background: "var(--bg)", borderRadius: 10, padding: "12px 16px", marginBottom: 20, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <span style={{ fontSize: 12, color: "var(--mut)" }}>{entries.length} výkazů · sleva celkem</span>
-          <span style={{ fontFamily: "Fraunces, serif", fontSize: 16, color: totalDiscount > 0 ? "#A8527A" : "var(--mut)" }}>
+          <span style={{ fontFamily:"Inter,ui-sans-serif,system-ui,sans-serif",fontVariantNumeric:"tabular-nums", fontSize: 16, color: totalDiscount > 0 ? "#A8527A" : "var(--mut)" }}>
             {totalDiscount > 0 ? `−${fmtKc(totalDiscount)}` : "—"}
           </span>
         </div>
@@ -1852,7 +1852,7 @@ function EntryRow({ e, inv, clients, selectedIds, toggle, editing, openEdit, clo
             )}
           </div>
         </div>
-        <div style={{ fontSize:12.5, fontFamily:"Fraunces, serif", fontWeight:300, color:isSelected?"var(--ink)":"var(--mut)", flexShrink:0, marginRight:4 }}>{fmtKc(e.amount)}</div>
+        <div style={{ fontSize:12.5, fontFamily:"Inter,ui-sans-serif,system-ui,sans-serif",fontVariantNumeric:"tabular-nums", fontWeight:600, color:isSelected?"var(--ink)":"var(--mut)", flexShrink:0, marginRight:4 }}>{fmtKc(e.amount)}</div>
         <button title="Upravit výkaz" onClick={ev => { ev.stopPropagation(); isEditing ? closeEdit(e.id) : openEdit(e); }}
           style={{ background:"none", border:"none", padding:"2px 5px", cursor:"pointer", color: isEditing ? "var(--ink)" : "var(--mut)", fontSize:14, borderRadius:5, flexShrink:0 }}>
           {isEditing ? "✕" : "✎"}
@@ -2203,7 +2203,7 @@ function InvoiceEditModal({ inv, clients, workEntries, onPreview, onCancel, onSa
                               {(draft.hours ?? it.hours) > 0 && `${draft.hours ?? it.hours} h × ${fmtKc(draft.rate ?? it.rate)}`}
                             </div>
                           </div>
-                          <div style={{ fontSize:12.5, fontFamily:"Fraunces, serif", fontWeight:300, color: isSelected ? "var(--ink)" : "var(--mut)", flexShrink:0, marginRight:4 }}>
+                          <div style={{ fontSize:12.5, fontFamily:"Inter,ui-sans-serif,system-ui,sans-serif",fontVariantNumeric:"tabular-nums", fontWeight:600, color: isSelected ? "var(--ink)" : "var(--mut)", flexShrink:0, marginRight:4 }}>
                             {fmtKc(draft.amount ?? it.amount)}
                           </div>
                           <button title="Upravit popisek" onClick={() => setEditingItemKey(isEditingThis ? null : itemKey)}
@@ -2352,7 +2352,7 @@ function InvoiceEditModal({ inv, clients, workEntries, onPreview, onCancel, onSa
                 <div key={d.id} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"8px 12px", background:"#FFF7ED", border:"1px solid #FED7AA", borderRadius:9, marginBottom:6 }}>
                   <span style={{ fontSize:12, color:"var(--txt)" }}>z výkazu: <strong>{d.label}</strong></span>
                   <span style={{ display:"flex", alignItems:"center", gap:10 }}>
-                    <span style={{ fontFamily:"Fraunces, serif", fontSize:13.5, color:"#C2410C" }}>−{fmtKc(d.amount)}</span>
+                    <span style={{ fontFamily:"Inter,ui-sans-serif,system-ui,sans-serif",fontVariantNumeric:"tabular-nums", fontSize:13.5, color:"#C2410C" }}>−{fmtKc(d.amount)}</span>
                     <button onClick={() => setDiscounts(p => p.filter(x => x.id !== d.id))} style={{ background:"none", border:"none", color:"#C2410C", cursor:"pointer", fontSize:13, padding:0 }}>✕</button>
                   </span>
                 </div>
@@ -2406,8 +2406,8 @@ function InvoiceEditModal({ inv, clients, workEntries, onPreview, onCancel, onSa
               {selEntries.length} výkazů · základ {fmtKc(workAmtBeforeDiscount)}{customAmt>0?` · přefakturace ${fmtKc(customAmt)}`:""}
             </div>
             <div style={{ display:"flex", alignItems:"baseline", gap:10 }}>
-              {discountTotal>0 && <span style={{ fontFamily:"Fraunces, serif", fontSize:14, color:"var(--mut)", textDecoration:"line-through" }}>{fmtKc(totalBefore)}</span>}
-              <span style={{ fontFamily:"Fraunces, serif", fontSize:20, fontWeight:300, color:"var(--ink)" }}>{fmtKc(total)}</span>
+              {discountTotal>0 && <span style={{ fontFamily:"Inter,ui-sans-serif,system-ui,sans-serif",fontVariantNumeric:"tabular-nums", fontSize:14, color:"var(--mut)", textDecoration:"line-through" }}>{fmtKc(totalBefore)}</span>}
+              <span style={{ fontFamily:"Inter,ui-sans-serif,system-ui,sans-serif",fontVariantNumeric:"tabular-nums", fontSize:20, fontWeight:600, color:"var(--ink)" }}>{fmtKc(total)}</span>
             </div>
           </div>
           {discountTotal>0 && (
@@ -3646,7 +3646,7 @@ function LoanDashTile({ tracker, transactions, onAddTransaction, onToggleTransac
           </span>
         </div>
         <div style={{ fontSize: 13, color: "var(--mut)", marginBottom: 10 }}>{tracker?.name}</div>
-        <div style={{ fontFamily: "Fraunces,serif", fontSize: 36, fontWeight: 300, color: ownFunds > 0 ? "#B45309" : "var(--txt)", lineHeight: 1 }}>
+        <div style={{ fontFamily:"Inter,ui-sans-serif,system-ui,sans-serif",fontVariantNumeric:"tabular-nums", fontSize: 36, fontWeight:600, color: ownFunds > 0 ? "#B45309" : "var(--txt)", lineHeight: 1 }}>
           {fmtKc(remaining)}
         </div>
         <div style={{ fontSize: 10.5, color: ownFunds > 0 ? "#A16207" : "var(--mut)", marginTop: 8, opacity: .85 }}>
@@ -3662,7 +3662,7 @@ function LoanDashTile({ tracker, transactions, onAddTransaction, onToggleTransac
             <div style={{ fontSize: 8, letterSpacing: ".24em", textTransform: "uppercase", color: "#B45309", fontWeight: 700, opacity: .85 }}>Vlastní prostředky ve financování</div>
             <div style={{ fontSize: 10.5, color: "#A16207", marginTop: 3, lineHeight: 1.45, opacity: .85 }}>pohledávka — vezmeš si zpět při dalším čerpání hypotéky</div>
           </div>
-          <div style={{ fontFamily: "Fraunces,serif", fontSize: 19, fontWeight: 400, color: "#B45309", whiteSpace: "nowrap" }}>{fmtKc(ownFunds)}</div>
+          <div style={{ fontFamily:"Inter,ui-sans-serif,system-ui,sans-serif",fontVariantNumeric:"tabular-nums", fontSize: 19, fontWeight:600, color: "#B45309", whiteSpace: "nowrap" }}>{fmtKc(ownFunds)}</div>
         </div>
       )}
       {/* Stats row */}
@@ -3674,7 +3674,7 @@ function LoanDashTile({ tracker, transactions, onAddTransaction, onToggleTransac
         ].map((s,i) => (
           <div key={i} style={{ flex:1, padding:"12px 16px", borderLeft: i>0?SEP:undefined }}>
             <div style={{ fontSize: 7.5, color: "var(--mut)", letterSpacing: ".18em", textTransform: "uppercase", marginBottom: 5, fontWeight: 700 }}>{s.label}</div>
-            <div style={{ fontSize: 14.5, fontFamily: "Fraunces,serif", fontWeight: 300, color: "var(--txt)", whiteSpace: "nowrap" }}>{s.value}</div>
+            <div style={{ fontSize: 14.5, fontFamily:"Inter,ui-sans-serif,system-ui,sans-serif",fontVariantNumeric:"tabular-nums", fontWeight:600, color: "var(--txt)", whiteSpace: "nowrap" }}>{s.value}</div>
           </div>
         ))}
       </div>
@@ -3750,10 +3750,10 @@ function LoanDashTile({ tracker, transactions, onAddTransaction, onToggleTransac
                 <tr key={tx.id} style={{ borderBottom:"1px solid var(--line)", opacity:tx.is_done?1:.6 }}>
                   <td style={{ padding:"8px 10px", color:"var(--mut)", whiteSpace:"nowrap" }}>{fmtDate(tx.transaction_date)}</td>
                   <td style={{ padding:"8px 10px", color:"var(--txt)" }}>{tx.description}</td>
-                  <td style={{ padding:"8px 10px", textAlign:"right", fontFamily:"Fraunces,serif", fontWeight:300, color:tx.amount<0?"#A8443C":"#4A7C59" }}>
+                  <td style={{ padding:"8px 10px", textAlign:"right", fontFamily:"Inter,ui-sans-serif,system-ui,sans-serif",fontVariantNumeric:"tabular-nums", fontWeight:600, color:tx.amount<0?"#A8443C":"#4A7C59" }}>
                     {tx.amount>0?"+":""}{fmtKc(tx.amount)}
                   </td>
-                  <td style={{ padding:"8px 10px", textAlign:"right", fontFamily:"Fraunces,serif", fontWeight:300, color: tx.balance < 0 ? "#B45309" : undefined }}>{fmtKc(tx.balance)}</td>
+                  <td style={{ padding:"8px 10px", textAlign:"right", fontFamily:"Inter,ui-sans-serif,system-ui,sans-serif",fontVariantNumeric:"tabular-nums", fontWeight:600, color: tx.balance < 0 ? "#B45309" : undefined }}>{fmtKc(tx.balance)}</td>
                   <td style={{ textAlign:"center", cursor:"pointer", fontSize:13 }} onClick={() => onToggleTransaction({...tx,is_done:!tx.is_done})}>
                     {tx.is_done?"✅":"⬜"}
                   </td>
@@ -3986,7 +3986,7 @@ function WealthDonut({ outerItems, innerItems, outerLabel, innerLabel, outerTota
             onMouseLeave={()=>setHovered(null)}>
             <div style={{width:8,height:8,borderRadius:2,background:s.color,flexShrink:0}}/>
             <span style={{fontSize:12,color:isHov(s)?s.color:"var(--txt)",fontWeight:isHov(s)?600:500,whiteSpace:"nowrap",letterSpacing:".01em"}}>{s.label}</span>
-            <span style={{fontSize:11,color:isHov(s)?s.color:"var(--mut)",fontFamily:"Fraunces,serif",fontWeight:300}}>{fmtN(s.amount)}</span>
+            <span style={{fontSize:11,color:isHov(s)?s.color:"var(--mut)",fontFamily:"Inter,ui-sans-serif,system-ui,sans-serif",fontVariantNumeric:"tabular-nums",fontWeight:600}}>{fmtN(s.amount)}</span>
           </div>
         ))}
       </div>
@@ -4013,7 +4013,7 @@ function EditRow({ item, onSave, onDelete, valuePrefix = "", valueSuffix = " Kč
           <button onClick={e => { e.stopPropagation(); onSave({...item, amount: Number(val)}); setEditing(false); }} style={{ background: "var(--ink)", color: "#fff", border: "none", borderRadius: 5, padding: "3px 8px", fontSize: 11, cursor: "pointer" }}>✓</button>
         </>
       ) : (
-        <div style={{ fontSize: 13, fontFamily: "Fraunces,serif", fontWeight: 300, color: isCalculated ? "var(--mut)" : "var(--gold)", whiteSpace: "nowrap" }}>
+        <div style={{ fontSize: 13, fontFamily:"Inter,ui-sans-serif,system-ui,sans-serif",fontVariantNumeric:"tabular-nums", fontWeight:600, color: isCalculated ? "var(--mut)" : "var(--gold)", whiteSpace: "nowrap" }}>
           {isCalculated ? <span style={{ fontSize: 11, color: "#4A7C59" }}>auto</span> : ""} {valuePrefix}{maskNum(new Intl.NumberFormat("cs-CZ").format(Math.round(displayVal)))}{valueSuffix}
         </div>
       )}
@@ -4054,7 +4054,7 @@ function FinanceSection({ title, items, category, onSave, onDelete, accent, auto
       <div style={{ padding: "16px 20px 12px", borderBottom: "1px solid var(--line)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
         <div>
           <div style={{ fontSize: 9, letterSpacing: ".3em", textTransform: "uppercase", color: accent || "var(--mut)", fontWeight: 600 }}>{title}</div>
-          <div style={{ fontFamily: "Fraunces, serif", fontSize: 22, fontWeight: 300, color: "var(--txt)", marginTop: 2 }}>
+          <div style={{ fontFamily:"Inter,ui-sans-serif,system-ui,sans-serif",fontVariantNumeric:"tabular-nums", fontSize: 22, fontWeight:600, color: "var(--txt)", marginTop: 2 }}>
             {isIncome ? "+" : ""}{fmtKc(total)}
             <span style={{ fontSize: 11, color: "var(--mut)", fontFamily: "Inter, sans-serif", marginLeft: 6, fontWeight: 400 }}>/ měsíc</span>
           </div>
@@ -4168,7 +4168,7 @@ function DpfoTracker({ months, onToggle, onAdd, onDelete, year }) {
           ].map((kpi, i) => (
             <div key={i} style={{ paddingRight: 40, paddingLeft: i > 0 ? 40 : 0, borderLeft: i > 0 ? "1px solid rgba(0,0,0,.06)" : "none", marginBottom: 4 }}>
               <div style={{ fontSize: 8, color: "var(--mut)", letterSpacing: ".18em", marginBottom: 8, textTransform: "uppercase", fontWeight: 700, opacity: .65 }}>{kpi.label}</div>
-              <div style={{ fontFamily: "Fraunces,serif", fontSize: 25, fontWeight: 300, color: kpi.color, whiteSpace: "nowrap" }}>{kpi.value}</div>
+              <div style={{ fontFamily:"Inter,ui-sans-serif,system-ui,sans-serif",fontVariantNumeric:"tabular-nums", fontSize: 25, fontWeight:600, color: kpi.color, whiteSpace: "nowrap" }}>{kpi.value}</div>
             </div>
           ))}
         </div>
@@ -4338,7 +4338,7 @@ function LoanTrackerCard({ tracker, transactions, onUpdateTracker, onAddTransact
               {isInvestment ? "Investiční úvěr" : "Osobní dluh"} · {tracker?.name}
             </div>
             {isInvestment ? (
-              <div style={{ fontFamily: "Fraunces,serif", fontSize: 18, fontWeight: 300, color: "#4A7C59" }}>
+              <div style={{ fontFamily:"Inter,ui-sans-serif,system-ui,sans-serif",fontVariantNumeric:"tabular-nums", fontSize: 18, fontWeight:600, color: "#4A7C59" }}>
                 {fmtKc(Math.max(currentBalance, 0))} <span style={{ fontSize: 11, color: "var(--mut)", fontFamily: "Inter" }}>zbývá v kase</span>
               </div>
             ) : (
@@ -4352,7 +4352,7 @@ function LoanTrackerCard({ tracker, transactions, onUpdateTracker, onAddTransact
                     <span style={{ fontSize: 11, color: "var(--mut)" }}>Kč původní dluh</span>
                   </div>
                 ) : (
-                  <div style={{ fontFamily: "Fraunces,serif", fontSize: 18, fontWeight: 300, color: "#A8443C", cursor: "pointer" }}
+                  <div style={{ fontFamily:"Inter,ui-sans-serif,system-ui,sans-serif",fontVariantNumeric:"tabular-nums", fontSize: 18, fontWeight:600, color: "#A8443C", cursor: "pointer" }}
                     onClick={() => setEditAmount(true)}>
                     {original === 0 ? <span style={{ fontSize: 13, color: "var(--mut)" }}>Klikni — zadej původní částku</span> : fmtKc(remaining)}
                     {original > 0 && <span style={{ fontSize: 11, color: "var(--mut)", fontFamily: "Inter", marginLeft: 6 }}>zbývá · původně {fmtKc(original)}</span>}
@@ -4428,10 +4428,10 @@ function LoanTrackerCard({ tracker, transactions, onUpdateTracker, onAddTransact
                 <tr key={tx.id} style={{ borderBottom: "1px solid var(--line)", opacity: tx.is_done ? 1 : .7 }}>
                   <td style={{ padding: "9px 12px", color: "var(--mut)", whiteSpace: "nowrap" }}>{fmtDate(tx.transaction_date)}</td>
                   <td style={{ padding: "9px 12px", color: "var(--txt)" }}>{tx.description}</td>
-                  <td style={{ padding: "9px 12px", textAlign: "right", fontFamily: "Fraunces,serif", fontWeight: 300, color: tx.amount < 0 ? "#A8443C" : "#4A7C59" }}>
+                  <td style={{ padding: "9px 12px", textAlign: "right", fontFamily:"Inter,ui-sans-serif,system-ui,sans-serif",fontVariantNumeric:"tabular-nums", fontWeight:600, color: tx.amount < 0 ? "#A8443C" : "#4A7C59" }}>
                     {tx.amount > 0 ? "+" : ""}{fmtKc(tx.amount)}
                   </td>
-                  <td style={{ padding: "9px 12px", textAlign: "right", fontFamily: "Fraunces,serif", fontWeight: 300, color: "var(--txt)" }}>{fmtKc(tx.balance)}</td>
+                  <td style={{ padding: "9px 12px", textAlign: "right", fontFamily:"Inter,ui-sans-serif,system-ui,sans-serif",fontVariantNumeric:"tabular-nums", fontWeight:600, color: "var(--txt)" }}>{fmtKc(tx.balance)}</td>
                   <td style={{ padding: "9px 12px", textAlign: "center" }}>
                     <span style={{ cursor: "pointer", fontSize: 14 }} onClick={() => onToggleTransaction({...tx, is_done: !tx.is_done})}>
                       {tx.is_done ? "✅" : "⬜"}
@@ -5338,7 +5338,7 @@ function PaymentWizard({ escrow, onClose, onSuccess }) {
         <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:20}}>
           <div>
             <div style={{fontSize:9,letterSpacing:".18em",textTransform:"uppercase",color:"#7C3AED",fontWeight:700,marginBottom:4}}>Výplata z úschovy</div>
-            <div style={{fontFamily:"Fraunces,serif",fontSize:20,fontWeight:400,color:"#1E1B4B"}}>{escrow.escrow_number}</div>
+            <div style={{fontFamily:"Inter,ui-sans-serif,system-ui,sans-serif",fontVariantNumeric:"tabular-nums",fontSize:20,fontWeight:600,color:"#1E1B4B"}}>{escrow.escrow_number}</div>
           </div>
           <button onClick={onClose} style={{background:"none",border:"none",fontSize:20,color:"var(--mut)",cursor:"pointer",padding:"4px 8px",lineHeight:1}}>×</button>
         </div>
@@ -5347,16 +5347,16 @@ function PaymentWizard({ escrow, onClose, onSuccess }) {
         <div style={{background:"#F5F3FF",borderRadius:8,padding:"10px 14px",marginBottom:18,display:"flex",gap:20}}>
           <div>
             <div style={{fontSize:10,color:"#5B21B6",marginBottom:2}}>Celkem v úschově</div>
-            <div style={{fontFamily:"Fraunces,serif",fontWeight:300,fontSize:16,color:"#3518A5"}}>{fmtKc(depositTotal)}</div>
+            <div style={{fontFamily:"Inter,ui-sans-serif,system-ui,sans-serif",fontVariantNumeric:"tabular-nums",fontWeight:600,fontSize:16,color:"#3518A5"}}>{fmtKc(depositTotal)}</div>
           </div>
           <div>
             <div style={{fontSize:10,color:"#5B21B6",marginBottom:2}}>Zbývá k výplatě</div>
-            <div style={{fontFamily:"Fraunces,serif",fontWeight:300,fontSize:16,color:"#3518A5"}}>{fmtKc(balance)}</div>
+            <div style={{fontFamily:"Inter,ui-sans-serif,system-ui,sans-serif",fontVariantNumeric:"tabular-nums",fontWeight:600,fontSize:16,color:"#3518A5"}}>{fmtKc(balance)}</div>
           </div>
           {alreadyPaid > 0 && (
             <div>
               <div style={{fontSize:10,color:"#5B21B6",marginBottom:2}}>Již vyplaceno</div>
-              <div style={{fontFamily:"Fraunces,serif",fontWeight:300,fontSize:16,color:"#4A7C59"}}>{fmtKc(alreadyPaid)}</div>
+              <div style={{fontFamily:"Inter,ui-sans-serif,system-ui,sans-serif",fontVariantNumeric:"tabular-nums",fontWeight:600,fontSize:16,color:"#4A7C59"}}>{fmtKc(alreadyPaid)}</div>
             </div>
           )}
         </div>
@@ -5376,7 +5376,7 @@ function PaymentWizard({ escrow, onClose, onSuccess }) {
                     <input type="radio" name="tranche" value={t.id} checked={selId===t.id} onChange={()=>handleSelectTranche(t.id)} style={{accentColor:"#7C3AED"}}/>
                     <div style={{flex:1}}>
                       <div style={{fontSize:13,fontWeight:500,color:"var(--ink)"}}>{t.party_name}</div>
-                      <div style={{fontSize:11,color:"var(--mut)"}}>nárok: <span style={{fontFamily:"Fraunces,serif",fontWeight:300,fontSize:13}}>{fmtKc(t.amount)}</span></div>
+                      <div style={{fontSize:11,color:"var(--mut)"}}>nárok: <span style={{fontFamily:"Inter,ui-sans-serif,system-ui,sans-serif",fontVariantNumeric:"tabular-nums",fontWeight:500,fontSize:13}}>{fmtKc(t.amount)}</span></div>
                     </div>
                   </label>
                 ))}
@@ -5391,7 +5391,7 @@ function PaymentWizard({ escrow, onClose, onSuccess }) {
                   type="number"
                   value={amount}
                   onChange={e=>{ setAmount(e.target.value); setErr(""); }}
-                  style={{width:"100%",fontSize:15,padding:"8px 10px",borderRadius:7,border:"1.5px solid var(--line)",fontFamily:"Fraunces,serif",fontWeight:300,color:"var(--ink)",boxSizing:"border-box"}}
+                  style={{width:"100%",fontSize:15,padding:"8px 10px",borderRadius:7,border:"1.5px solid var(--line)",fontFamily:"Inter,ui-sans-serif,system-ui,sans-serif",fontVariantNumeric:"tabular-nums",fontWeight:600,color:"var(--ink)",boxSizing:"border-box"}}
                   placeholder="Zadej částku"
                 />
                 {selTranche && parseFloat(amount) < selTranche.amount - 0.5 && (
@@ -5482,7 +5482,7 @@ function EscrowCard({ escrow, onEdit, onDelete, onMarkPaid, onPayment }) {
       <div style={{padding:"14px 18px",borderBottom:"1px solid var(--line)",display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
         <div>
           <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:6}}>
-            <span style={{fontFamily:"Fraunces,serif",fontSize:17,fontWeight:400,color:"var(--ink)"}}>{escrow.escrow_number}</span>
+            <span style={{fontFamily:"Inter,ui-sans-serif,system-ui,sans-serif",fontVariantNumeric:"tabular-nums",fontSize:17,fontWeight:600,color:"var(--ink)"}}>{escrow.escrow_number}</span>
             <span style={{fontSize:10,padding:"2px 9px",borderRadius:20,background:sc.bg,color:sc.text,border:`1px solid ${sc.border}`,fontWeight:500}}>{statusLabel}</span>
             {(() => {
               const osoby = amlPersonsFor(escrow);
@@ -5509,7 +5509,7 @@ function EscrowCard({ escrow, onEdit, onDelete, onMarkPaid, onPayment }) {
           </div>
         </div>
         <div style={{textAlign:"right"}}>
-          <div style={{fontFamily:"Fraunces,serif",fontSize:20,fontWeight:300,color:"var(--gold)"}}>{fmtKc(depositTotal)}</div>
+          <div style={{fontFamily:"Inter,ui-sans-serif,system-ui,sans-serif",fontVariantNumeric:"tabular-nums",fontSize:20,fontWeight:600,color:"var(--gold)"}}>{fmtKc(depositTotal)}</div>
           <div style={{fontSize:11,color:"var(--mut)"}}>v úschově · sazba {(escrow.interest_rate*100).toFixed(1)}%</div>
           {isActive && interest.totalNet > 0 && <div style={{fontSize:11,color:"#4A7C59",fontWeight:500,marginTop:2}}>Zisk: {fmtKc(interest.totalNet)} čistého</div>}
         </div>
@@ -5527,7 +5527,7 @@ function EscrowCard({ escrow, onEdit, onDelete, onMarkPaid, onPayment }) {
               {sloz.map((t,i)=>(
                 <div key={i} style={{paddingBottom:6,marginBottom:i<sloz.length-1?6:0,borderBottom:i<sloz.length-1?"1px solid #E0E7FF":"none"}}>
                   <div style={{fontSize:12,fontWeight:500,color:"var(--ink)",lineHeight:1.3}}>{t.party_name}</div>
-                  <div style={{fontFamily:"Fraunces,serif",fontWeight:300,fontSize:14,color:"var(--gold)"}}>{fmtKc(t.amount)}</div>
+                  <div style={{fontFamily:"Inter,ui-sans-serif,system-ui,sans-serif",fontVariantNumeric:"tabular-nums",fontWeight:600,fontSize:14,color:"var(--gold)"}}>{fmtKc(t.amount)}</div>
                 </div>
               ))}
             </div>
@@ -5540,7 +5540,7 @@ function EscrowCard({ escrow, onEdit, onDelete, onMarkPaid, onPayment }) {
                 <div key={i} style={{paddingBottom:6,marginBottom:i<opr.length-1?6:0,borderBottom:i<opr.length-1?"1px solid #DCFCE7":"none"}}>
                   <div style={{fontSize:12,fontWeight:500,color:"var(--ink)",lineHeight:1.3}}>{t.party_name}</div>
                   <div style={{display:"flex",alignItems:"center",gap:6,flexWrap:"wrap"}}>
-                    <span style={{fontFamily:"Fraunces,serif",fontWeight:300,fontSize:14,color:"var(--gold)"}}>{fmtKc(t.amount)}</span>
+                    <span style={{fontFamily:"Inter,ui-sans-serif,system-ui,sans-serif",fontVariantNumeric:"tabular-nums",fontWeight:600,fontSize:14,color:"var(--gold)"}}>{fmtKc(t.amount)}</span>
                     <span style={{fontSize:12}}>{t.is_paid ? "✅" : "⬜"}</span>
                     {t.paid_date && <span style={{fontSize:10,color:"var(--mut)"}}>{fmtDate(t.paid_date)}</span>}
                     <MarkPaidBtn escrowId={escrow.id} tranche={t} onMarkPaid={onMarkPaid} />
@@ -5589,7 +5589,7 @@ function EscrowCard({ escrow, onEdit, onDelete, onMarkPaid, onPayment }) {
                 <tr key={i} style={{borderTop:"1px solid var(--line)"}}>
                   <td style={{padding:"7px 10px"}}><span style={{fontSize:10,padding:"2px 7px",borderRadius:3,background:t.party_type==='složitel'?"#EEF2FF":"#F0FDF4",color:t.party_type==='složitel'?"#3730A3":"#065F46"}}>{t.party_type}</span></td>
                   <td style={{padding:"7px 10px",color:"var(--txt)"}}>{t.party_name}</td>
-                  <td style={{padding:"7px 10px",textAlign:"right",fontFamily:"Fraunces,serif",fontWeight:300}}>{fmtKc(t.amount)}</td>
+                  <td style={{padding:"7px 10px",textAlign:"right",fontFamily:"Inter,ui-sans-serif,system-ui,sans-serif",fontVariantNumeric:"tabular-nums",fontWeight:600}}>{fmtKc(t.amount)}</td>
                   {t.party_type==='složitel' && t.received_date
                     ? <td style={{padding:"7px 10px",fontSize:11,color:"var(--mut)"}}>{fmtDate(t.received_date)}</td>
                     : <td/>}
@@ -6055,7 +6055,7 @@ function EscrowForm({ init, onSave, onCancel, saving, clients = [] }) {
         <div style={{ fontSize: 9, letterSpacing: ".18em", textTransform: "uppercase", color: "#7C3AED", fontWeight: 700, marginBottom: 3 }}>
           {init ? "Upravit úschovu" : "Nová úschova"}
         </div>
-        <div style={{ fontFamily: "Fraunces,serif", fontSize: 28, fontWeight: 300, color: "#1E1B4B", lineHeight: 1 }}>
+        <div style={{ fontFamily:"Inter,ui-sans-serif,system-ui,sans-serif",fontVariantNumeric:"tabular-nums", fontSize: 28, fontWeight:600, color: "#1E1B4B", lineHeight: 1 }}>
           {d.escrow_number || "—"}
         </div>
       </div>
@@ -6237,7 +6237,7 @@ function EscrowForm({ init, onSave, onCancel, saving, clients = [] }) {
                         {stranaName || "(bez jména)"}
                       </span>
                       <span style={{ fontSize: 11, color: "#374151" }}>
-                        Vloženo: <strong style={{ fontFamily: "Fraunces,serif", fontSize: 14 }}>{fmtKc(celkem)}</strong>
+                        Vloženo: <strong style={{ fontFamily:"Inter,ui-sans-serif,system-ui,sans-serif",fontVariantNumeric:"tabular-nums", fontSize: 14 }}>{fmtKc(celkem)}</strong>
                       </span>
                     </div>
 
@@ -6266,7 +6266,7 @@ function EscrowForm({ init, onSave, onCancel, saving, clients = [] }) {
                               </select>
                             </td>
                             <td style={{ ...S.td, textAlign: "right" }}>
-                              <input type="number" style={{ ...S.input, width: 150, textAlign: "right", fontFamily: "Fraunces,serif", fontSize: 15 }}
+                              <input type="number" style={{ ...S.input, width: 150, textAlign: "right", fontFamily:"Inter,ui-sans-serif,system-ui,sans-serif",fontVariantNumeric:"tabular-nums", fontSize: 15 }}
                                 value={t.amount || ""} placeholder="0"
                                 onChange={e => updateTranche(t.id, { amount: Number(e.target.value) || 0 })} />
                             </td>
@@ -6325,9 +6325,9 @@ function EscrowForm({ init, onSave, onCancel, saving, clients = [] }) {
                         {personName || "(bez jména)"}
                       </span>
                       <div style={{ flex: 1, display: "flex", gap: 18, fontSize: 11, flexWrap: "wrap" }}>
-                        <span style={{ color: "#374151" }}>Nárok: <strong style={{ fontFamily: "Fraunces,serif", fontSize: 13 }}>{fmtKc(totalNarok)}</strong></span>
-                        {totalPaid > 0 && <span style={{ color: "#4A7C59" }}>Vyplaceno: <strong style={{ fontFamily: "Fraunces,serif", fontSize: 13 }}>{fmtKc(totalPaid)}</strong></span>}
-                        {remaining > 0.5 && <span style={{ color: "#B45309" }}>Zbývá: <strong style={{ fontFamily: "Fraunces,serif", fontSize: 13 }}>{fmtKc(remaining)}</strong></span>}
+                        <span style={{ color: "#374151" }}>Nárok: <strong style={{ fontFamily:"Inter,ui-sans-serif,system-ui,sans-serif",fontVariantNumeric:"tabular-nums", fontSize: 13 }}>{fmtKc(totalNarok)}</strong></span>
+                        {totalPaid > 0 && <span style={{ color: "#4A7C59" }}>Vyplaceno: <strong style={{ fontFamily:"Inter,ui-sans-serif,system-ui,sans-serif",fontVariantNumeric:"tabular-nums", fontSize: 13 }}>{fmtKc(totalPaid)}</strong></span>}
+                        {remaining > 0.5 && <span style={{ color: "#B45309" }}>Zbývá: <strong style={{ fontFamily:"Inter,ui-sans-serif,system-ui,sans-serif",fontVariantNumeric:"tabular-nums", fontSize: 13 }}>{fmtKc(remaining)}</strong></span>}
                       </div>
                     </div>
 
@@ -6355,7 +6355,7 @@ function EscrowForm({ init, onSave, onCancel, saving, clients = [] }) {
                             </td>
                             <td style={{ ...S.td, textAlign: "right" }}>
                               <input type="number"
-                                style={{ ...S.input, width: 160, textAlign: "right", fontFamily: "Fraunces,serif", fontSize: 15, fontWeight: 400 }}
+                                style={{ ...S.input, width: 160, textAlign: "right", fontFamily:"Inter,ui-sans-serif,system-ui,sans-serif",fontVariantNumeric:"tabular-nums", fontSize: 15, fontWeight:600 }}
                                 value={t.amount || ""}
                                 onChange={e => updateTranche(t.id, { amount: Number(e.target.value) || 0 })} />
                             </td>
@@ -6448,7 +6448,7 @@ function EscrowForm({ init, onSave, onCancel, saving, clients = [] }) {
             </div>
 
             <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-              <input style={{ ...S.input, width: 160, textAlign: "right", fontFamily: "Fraunces,serif" }}
+              <input style={{ ...S.input, width: 160, textAlign: "right", fontFamily:"Inter,ui-sans-serif,system-ui,sans-serif",fontVariantNumeric:"tabular-nums" }}
                 type="number" placeholder="Částka (Kč)" value={newT.amount}
                 onChange={e => setNewT(p => ({ ...p, amount: e.target.value }))}
                 onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addTranche(); }}} />
@@ -6567,7 +6567,7 @@ function EscrowInsights({ escrows }) {
     borderRadius: 12, padding: "14px 18px",
   });
   const lbl = (color) => ({ fontSize: 11, fontWeight: 500, color, marginBottom: 4 });
-  const val = (size, color) => ({ fontFamily: "Fraunces,serif", fontSize: size, fontWeight: 300, color, fontVariantNumeric: "tabular-nums" });
+  const val = (size, color) => ({ fontFamily:"Inter,ui-sans-serif,system-ui,sans-serif",fontVariantNumeric:"tabular-nums", fontSize: size, fontWeight:600, color, });
 
   return (
     <div style={{display:"flex",flexDirection:"column",gap:12}}>
@@ -6580,7 +6580,7 @@ function EscrowInsights({ escrows }) {
         ].map((item, i) => (
           <div key={i} style={{padding:"12px 16px", borderLeft: i>0?"1px solid rgba(255,255,255,0.1)":undefined}}>
             <div style={{fontSize:11,color:"rgba(255,255,255,0.55)",marginBottom:3}}>{item.label}</div>
-            <div style={{fontFamily:"Fraunces,serif",fontSize:18,fontWeight:300,color:"#fff",fontVariantNumeric:"tabular-nums"}}>{item.value}</div>
+            <div style={{fontFamily:"Inter,ui-sans-serif,system-ui,sans-serif",fontVariantNumeric:"tabular-nums",fontSize:18,fontWeight:600,color:"#fff",}}>{item.value}</div>
             <div style={{fontSize:10,color:"rgba(255,255,255,0.38)",marginTop:2}}>{item.sub}</div>
           </div>
         ))}
@@ -6969,7 +6969,7 @@ function MajetekBar({ financeItems, onSaveFinance, invoices, dpfoMonths, loanTra
       {/* === CELKOVÝ MAJETEK === */}
       <div style={{minWidth:220,display:"flex",flexDirection:"column",justifyContent:"center"}}>
         <div style={{fontSize:11,letterSpacing:".22em",textTransform:"uppercase",color:"#A08350",fontWeight:700,marginBottom:10}}>OSOBNÍ MAJETEK</div>
-        <div style={{fontFamily:"Fraunces,serif",fontSize:44,fontWeight:300,color:"#A08350",lineHeight:1,marginBottom:6}}>{fmtKc(total)}</div>
+        <div style={{fontFamily:"Inter,ui-sans-serif,system-ui,sans-serif",fontVariantNumeric:"tabular-nums",fontSize:44,fontWeight:600,color:"#A08350",lineHeight:1,marginBottom:6}}>{fmtKc(total)}</div>
         <div style={{fontSize:12,color:"var(--mut)"}}>{allAssets.length} složky · celkem</div>
       </div>
 
@@ -7009,7 +7009,7 @@ function MajetekBar({ financeItems, onSaveFinance, invoices, dpfoMonths, loanTra
                   </div>
                 ) : (
                   <div style={{display:"flex",alignItems:"baseline",gap:8}}>
-                    <div style={{fontSize:22,fontFamily:"Fraunces,serif",fontWeight:300,color:a.color,lineHeight:1.2}}>{fmtKc(a.amount)}</div>
+                    <div style={{fontSize:22,fontFamily:"Inter,ui-sans-serif,system-ui,sans-serif",fontVariantNumeric:"tabular-nums",fontWeight:600,color:a.color,lineHeight:1.2}}>{fmtKc(a.amount)}</div>
                     {a.editable && (
                       <button onClick={() => { setEditVal(a.amount); setEditId(a.item?.id); }}
                         style={{background:"none",border:"none",cursor:"pointer",fontSize:12,color:a.color,padding:0,opacity:.7}}>✎</button>
@@ -7265,7 +7265,7 @@ function InteractiveRing({ segments, size = 190, thickness = 20, glowColor, cent
           {active ? (
             <>
               <div style={{ fontSize: 8.5, letterSpacing: ".2em", color: "var(--mut)", fontWeight: 700, textTransform: "uppercase", opacity: 0.7, marginBottom: 7, maxWidth: size - 50, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{active.label}</div>
-              <div style={{ fontFamily: "Fraunces,serif", fontSize: Math.min(size > 160 ? 26 : 19, size * 0.135, String(fmtKc(active.value)||"").length > 10 ? (size > 160 ? 20 : 15) : (size > 160 ? 26 : 19)), fontWeight: 300, color: "var(--txt)", lineHeight: 1, whiteSpace: "nowrap" }}>{fmtKc(active.value)}</div>
+              <div style={{ fontFamily:"Inter,ui-sans-serif,system-ui,sans-serif",fontVariantNumeric:"tabular-nums", fontSize: Math.min(size > 160 ? 26 : 19, size * 0.135, String(fmtKc(active.value)||"").length > 10 ? (size > 160 ? 20 : 15) : (size > 160 ? 26 : 19)), fontWeight:600, color: "var(--txt)", lineHeight: 1, whiteSpace: "nowrap" }}>{fmtKc(active.value)}</div>
               <div style={{ fontSize: 10.5, color: "var(--mut)", opacity: 0.75, marginTop: 7 }}>{Math.round(active.frac * 100)} %</div>
             </>
           ) : (
@@ -8154,7 +8154,7 @@ function PohledavkyPanel({ financeItems, onSaveFinance, onDeleteFinance }) {
         {totalOut > 0 && (
           <div style={{ textAlign: "right" }}>
             <div style={{ fontSize: 8.5, letterSpacing: ".18em", textTransform: "uppercase", color: "var(--mut)", fontWeight: 600, marginBottom: 3 }}>Celkem venku</div>
-            <div style={{ fontFamily: "Fraunces,serif", fontSize: 22, fontWeight: 300, color: "var(--txt)" }}>{fmtKc(totalOut)}</div>
+            <div style={{ fontFamily:"Inter,ui-sans-serif,system-ui,sans-serif",fontVariantNumeric:"tabular-nums", fontSize: 22, fontWeight:600, color: "var(--txt)" }}>{fmtKc(totalOut)}</div>
           </div>
         )}
       </div>
@@ -8187,7 +8187,7 @@ function PohledavkyPanel({ financeItems, onSaveFinance, onDeleteFinance }) {
                     </div>
                   </div>
                 )}
-                <div style={{ fontFamily: "Fraunces,serif", fontSize: 19, fontWeight: 400, color: "var(--txt)", minWidth: 96, textAlign: "right", whiteSpace: "nowrap" }}>
+                <div style={{ fontFamily:"Inter,ui-sans-serif,system-ui,sans-serif",fontVariantNumeric:"tabular-nums", fontSize: 19, fontWeight:600, color: "var(--txt)", minWidth: 96, textAlign: "right", whiteSpace: "nowrap" }}>
                   {fmtKc(Math.abs(item.amount || 0))}
                 </div>
                 <button onClick={() => { if (confirm(`Smazat pohledávku „${item.label}"? (např. protože byla splacena)`)) onDeleteFinance(item.id); }}
@@ -10502,7 +10502,7 @@ function OstatniModule({ dpfoMonths, loanTrackers, loanTransactions, financeItem
         ].map((k, i) => (
           <div key={i} style={{ paddingRight: 42, paddingLeft: i > 0 ? 42 : 0, borderLeft: i > 0 ? "1px solid rgba(0,0,0,.07)" : "none", marginBottom: 8 }}>
             <div style={{ fontSize: 8.5, letterSpacing: ".22em", textTransform: "uppercase", color: "var(--mut)", fontWeight: 700, opacity: .6, marginBottom: 9, whiteSpace: "nowrap" }}>{k.label}</div>
-            <div style={{ fontFamily: "Fraunces,serif", fontSize: 30, fontWeight: 300, color: k.accent ? "#B45309" : "var(--txt)", lineHeight: 1, whiteSpace: "nowrap" }}>{k.value}</div>
+            <div style={{ fontFamily:"Inter,ui-sans-serif,system-ui,sans-serif",fontVariantNumeric:"tabular-nums", fontSize: 30, fontWeight:600, color: k.accent ? "#B45309" : "var(--txt)", lineHeight: 1, whiteSpace: "nowrap" }}>{k.value}</div>
             <div style={{ fontSize: 10, color: "var(--mut)", marginTop: 7, opacity: .65 }}>{k.sub}</div>
           </div>
         ))}
@@ -11271,7 +11271,7 @@ function RecordSeal({ amount, prev, onClose }) {
         display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18, flexShrink: 0 }}>🏆</div>
       <div>
         <div style={{ fontSize: 8.5, letterSpacing: ".22em", textTransform: "uppercase", color: "#96773C", fontWeight: 800 }}>Nový osobní rekord</div>
-        <div style={{ fontFamily: "Fraunces,serif", fontWeight: 300, fontSize: 22, lineHeight: 1.15, color: "var(--ink)", marginTop: 2 }}>{fmtKc(amount)}</div>
+        <div style={{ fontFamily:"Inter,ui-sans-serif,system-ui,sans-serif",fontVariantNumeric:"tabular-nums", fontWeight:600, fontSize: 22, lineHeight: 1.15, color: "var(--ink)", marginTop: 2 }}>{fmtKc(amount)}</div>
         <div style={{ fontSize: 10, color: "var(--mut)", marginTop: 1 }}>překonáno {fmtKc(prev)} · nejlepší za 12 měsíců</div>
       </div>
     </div>
@@ -11933,26 +11933,15 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
               boxShadow:"0 0 0 1px rgba(0,0,0,.08)",
               display:"flex", flexDirection:"column",
             }}>
+              {/* HLAVIČKA — jen popisek. Bilance samotná se od 3.8.2026 kreslí DOLE jako
+                  výsledek pod Příjmy a Výdaji (Tom: "to číslo je na začátku měsíce demotivující,
+                  zarovnej ho doprava jako rozdíl"). Když stálo nahoře jako nadpis, přečetl ho
+                  dřív než čísla, ze kterých vzniklo. */}
               <div style={{padding:"22px 24px 0",textAlign:"center"}}>
-                <div style={{display:"flex",alignItems:"center",justifyContent:"center",gap:6,marginBottom:10}}>
-                  <span className="maux-dot" style={{width:6,height:6,background:"#3518A5",boxShadow:"0 0 4px rgba(53,24,165,.5)"}} />
-                  <div style={{fontSize:10,letterSpacing:".22em",textTransform:"uppercase",color:"#3A3494",fontWeight:600}}>Bilance příštího měsíce</div>
+                <div style={{display:"flex",alignItems:"center",justifyContent:"center",gap:6}}>
+                  <span className="maux-dot" style={{width:6,height:6,background:"#3518A5"}} />
+                  <div style={{fontSize:10,letterSpacing:".22em",textTransform:"uppercase",color:"#3A3494",fontWeight:600}}>Příští měsíc</div>
                 </div>
-                <div style={{
-                  fontFamily:"Fraunces,serif", fontSize:46, fontWeight:300,
-                  color: "#3A3494",
-                  lineHeight:1.05, letterSpacing:"-.015em",
-                  whiteSpace:"nowrap",
-                }}>
-                  {positiveBalance?"+":"−"}{fmtKc(Math.abs(nextMonthBalance))}
-                </div>
-                {/* Věta závěru (Tom 30.7.2026): panel má říct odpověď, ne stav. Mlčí, když je
-                    bilance záporná — tam ať mluví holé číslo. */}
-                {positiveBalance && (
-                  <div style={{fontSize:12.5,lineHeight:1.5,color:"var(--ink)",marginTop:9,opacity:.85}}>
-                    Tolik ti příští měsíc zbyde po nákladech i odvodech.
-                  </div>
-                )}
               </div>
 
               <div style={{flex:1,display:"flex",flexDirection:"column",justifyContent:"flex-start",gap:13,padding:"20px 24px",overflowY:"auto"}}>
@@ -12034,6 +12023,28 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
                       <span className="maux-num" style={{fontSize:11.5,fontWeight:500,color:"#3518A5"}}>{fmtKc(josefWageNext)}</span>
                     </div>
                   </div>
+                </div>
+
+                {/* BILANCE — výsledek, ne nadpis. Zarovnaná doprava pod Příjmy a Výdaje.
+                    Věta pod ní mluví jen tehdy, když má co říct: buď je bilance kladná, nebo
+                    je začátek měsíce a záporné číslo má vysvětlení (faktury ještě nevznikly).
+                    Jinak MLČÍ — nikdy "chybí ti", nikdy "jsi pod plánem". */}
+                <div style={{borderTop:"1px solid rgba(53,24,165,.14)",paddingTop:13}}>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline"}}>
+                    <span style={{fontSize:12,letterSpacing:".1em",textTransform:"uppercase",color:"var(--ink)",fontWeight:700}}>Bilance</span>
+                    <span className="maux-num" style={{fontSize:23,fontWeight:600,color:positiveBalance?"#4A7C59":"var(--txt)",whiteSpace:"nowrap"}}>
+                      {positiveBalance?"+":"−"}{fmtKc(Math.abs(nextMonthBalance))}
+                    </span>
+                  </div>
+                  {positiveBalance ? (
+                    <div style={{fontSize:11,lineHeight:1.5,color:"var(--mut)",marginTop:6,textAlign:"right"}}>
+                      Tolik ti příští měsíc zbyde po nákladech i odvodech.
+                    </div>
+                  ) : now.getDate() <= 10 ? (
+                    <div style={{fontSize:11,lineHeight:1.5,color:"var(--mut)",marginTop:6,textAlign:"right"}}>
+                      Měsíc teprve začal — faktury zatím nejsou vystavené.
+                    </div>
+                  ) : null}
                 </div>
 
                 {/* Nádrž (LiquidTank) s "20 % z polštáře" tu stála do 3.8.2026 — Tom ji zrušil:
@@ -12130,7 +12141,7 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
                             onMouseLeave={e=>e.currentTarget.style.background="transparent"}
                             title="Klikni pro úpravu zůstatku"
                           >
-                            <span style={{fontFamily:"Fraunces,serif",fontSize:29,fontWeight:300,color:"var(--txt)",letterSpacing:"-.015em",lineHeight:1,whiteSpace:"nowrap"}}>{fmtKc(sporBalS)}</span>
+                            <span style={{fontFamily:"Inter,ui-sans-serif,system-ui,sans-serif",fontVariantNumeric:"tabular-nums",fontSize:29,fontWeight:600,color:"var(--txt)",letterSpacing:"-.015em",lineHeight:1,whiteSpace:"nowrap"}}>{fmtKc(sporBalS)}</span>
                             <span style={{fontSize:11,color:"var(--mut)",lineHeight:1,opacity:.5}}>✎</span>
                             <span style={{fontSize:10.5,color:"var(--mut)",marginLeft:3}}>zůstatek</span>
                           </div>
@@ -12288,7 +12299,7 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
                 </div>
                 <div style={{textAlign:"right"}}>
                   <div style={{fontSize:8.5,color:"var(--mut)",letterSpacing:".22em",fontWeight:700,textTransform:"uppercase",opacity:.7}}>Celkem YTD</div>
-                  <div style={{fontFamily:"Fraunces,serif",fontSize:20,fontWeight:300,color:"var(--txt)"}}>{fmtKc(ytdInv + ytdEsc)}</div>
+                  <div style={{fontFamily:"Inter,ui-sans-serif,system-ui,sans-serif",fontVariantNumeric:"tabular-nums",fontSize:20,fontWeight:600,color:"var(--txt)"}}>{fmtKc(ytdInv + ytdEsc)}</div>
                 </div>
               </div>
 
@@ -12705,7 +12716,7 @@ function WorkEntryForm({ init, prefillDate, clients, onSave, onCancel, saving })
           <div className="frow" style={{ marginBottom: 0 }}>
             <label>Celkem bez DPH</label>
             <input readOnly value={`${maskNum(new Intl.NumberFormat("cs-CZ").format(amount))} Kč`}
-              style={{ background: "#fff", color: "var(--ink)", fontFamily: "Fraunces, serif", fontWeight: 300, fontSize: 15 }} />
+              style={{ background: "#fff", color: "var(--ink)", fontFamily:"Inter,ui-sans-serif,system-ui,sans-serif",fontVariantNumeric:"tabular-nums", fontWeight:600, fontSize: 15 }} />
           </div>
         </div>
         )}
@@ -12958,7 +12969,7 @@ function WorkEntryList({ entries, clients, invoices, onNew, onEdit, onDelete, on
           <div key={month} style={{ marginBottom: 24 }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12, gap: 12 }}>
               <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-                <span style={{ fontFamily: "Fraunces, serif", fontSize: 17, fontWeight: 400, color: "var(--txt)" }}>{monthLabel(month)}</span>
+                <span style={{ fontFamily:"Inter,ui-sans-serif,system-ui,sans-serif",fontVariantNumeric:"tabular-nums", fontSize: 17, fontWeight:600, color: "var(--txt)" }}>{monthLabel(month)}</span>
                 <span style={{ fontSize: 11, color: "var(--mut)" }}>{mHours.toFixed(1)} h · {monthEntries.length} záznamů</span>
                 <span style={{ fontSize: 13, fontFamily: "Fraunces, serif", fontWeight: 300, color: "var(--gold)" }}>{maskNum(new Intl.NumberFormat("cs-CZ").format(mTotal))} Kč</span>
               </div>
@@ -13577,7 +13588,7 @@ function InvoiceList({ invoices, clients, workEntries, escrows, onOpen, onOpenCl
                       </div>
                     </div>
                     <div style={{ textAlign: "right", marginRight: 16 }}>
-                      <div style={{ fontFamily: "Fraunces, serif", fontSize: 18, fontWeight: 300, color: "var(--gold)" }}>
+                      <div style={{ fontFamily:"Inter,ui-sans-serif,system-ui,sans-serif",fontVariantNumeric:"tabular-nums", fontSize: 18, fontWeight:600, color: "var(--gold)" }}>
                         {fmtKc(inv.total || 0)}
                       </div>
                       <div style={{ fontSize: 11, color: "var(--mut)" }}>
@@ -13614,7 +13625,7 @@ function InvoiceList({ invoices, clients, workEntries, escrows, onOpen, onOpenCl
                               <td style={{ padding: "10px 18px", color: "var(--mut)", whiteSpace: "nowrap" }}>{fmtDate(e.entry_date)}</td>
                               <td style={{ padding: "10px 18px", color: "var(--txt)" }}>{e.description}</td>
                               <td style={{ padding: "10px 18px", textAlign: "right", color: "var(--mut)" }}>{e.hours > 0 ? `${e.hours} h` : "—"}</td>
-                              <td style={{ padding: "10px 18px", textAlign: "right", fontFamily: "Fraunces, serif", fontWeight: 300 }}>
+                              <td style={{ padding: "10px 18px", textAlign: "right", fontFamily:"Inter,ui-sans-serif,system-ui,sans-serif",fontVariantNumeric:"tabular-nums", fontWeight:600 }}>
                                 {fmtKc(Math.max((e.amount||0)-(Number(e.discount_amount)||0),0)+(e.admin_fee||0)+(Number(e.sig_count)||0)*SIGNATURE_DECL_FEE)}
                               </td>
                             </tr>
@@ -13665,7 +13676,7 @@ function InvoiceList({ invoices, clients, workEntries, escrows, onOpen, onOpenCl
                     </div>
                   </div>
                   <div style={{ textAlign: "right", marginRight: 16 }}>
-                    <div style={{ fontFamily: "Fraunces, serif", fontSize: 18, fontWeight: 300, color: "var(--gold)" }}>{fmtKc(d.total)}</div>
+                    <div style={{ fontFamily:"Inter,ui-sans-serif,system-ui,sans-serif",fontVariantNumeric:"tabular-nums", fontSize: 18, fontWeight:600, color: "var(--gold)" }}>{fmtKc(d.total)}</div>
                     <div style={{ fontSize: 11, color: "var(--mut)" }}>základ {fmtKc(d.workAmt)} + DPH {fmtKc(d.vat)}{(d.admin+d.sig)>0 ? ` + přef. ${fmtKc(d.admin+d.sig)}` : ""}</div>
                     {d.discount > 0 && (
                       <div style={{ fontSize: 10.5, color: "#A8527A", marginTop: 1 }}>sleva uplatněna −{fmtKc(d.discount)}</div>
@@ -13719,7 +13730,7 @@ function InvoiceList({ invoices, clients, workEntries, escrows, onOpen, onOpenCl
                               )}
                             </td>
                             <td style={{ padding: "10px 18px", textAlign: "right", color: "var(--mut)" }}>{e.hours > 0 ? `${e.hours} h` : "—"}</td>
-                            <td style={{ padding: "10px 18px", textAlign: "right", fontFamily: "Fraunces, serif", fontWeight: 300 }}>
+                            <td style={{ padding: "10px 18px", textAlign: "right", fontFamily:"Inter,ui-sans-serif,system-ui,sans-serif",fontVariantNumeric:"tabular-nums", fontWeight:600 }}>
                               {fmtKc(Math.max((e.amount||0)-(Number(e.discount_amount)||0),0)+(e.admin_fee||0)+(Number(e.sig_count)||0)*SIGNATURE_DECL_FEE)}
                             </td>
                           </tr>
@@ -13875,7 +13886,7 @@ function InvoiceDetail({ inv, clients, onBack, onEdit, onDelete }) {
         <div className="mf"><div className="ml">Klient</div><div className="mv">{clientName}</div></div>
         <div className="mf"><div className="ml">Vystavena</div><div className="mv">{fmtDate(inv.issue_date)}</div></div>
         <div className="mf"><div className="ml">Splatnost</div><div className="mv">{fmtDate(inv.due_date)}</div></div>
-        <div className="mf"><div className="ml">Základ bez DPH</div><div className="mv" style={{ fontFamily: "Fraunces, serif", fontSize: 20, fontWeight: 300, color: "var(--gold)" }}>{fmtKc(inv.subtotal)}</div></div>
+        <div className="mf"><div className="ml">Základ bez DPH</div><div className="mv" style={{ fontFamily:"Inter,ui-sans-serif,system-ui,sans-serif",fontVariantNumeric:"tabular-nums", fontSize: 20, fontWeight:600, color: "var(--gold)" }}>{fmtKc(inv.subtotal)}</div></div>
         <div className="mf"><div className="ml">Celkem s DPH</div><div className="mv" style={{ fontSize: 14, color: "var(--mut)" }}>{fmtKc(inv.total)}</div></div>
       </div>
       <table className="inv-items-det">
@@ -13886,7 +13897,7 @@ function InvoiceDetail({ inv, clients, onBack, onEdit, onDelete }) {
               <td>{it.description || "—"}{it.flat_rate && <span style={{ marginLeft: 7, fontSize: 9, fontWeight: 600, letterSpacing: ".06em", textTransform: "uppercase", color: "#5B21B6", background: "#F3F0FF", border: "1px solid #DDD6FE", borderRadius: 4, padding: "1px 6px" }}>paušál</span>}</td>
               <td>{it.flat_rate ? "—" : (it.hours ? `${it.hours} h` : "—")}</td>
               <td>{it.flat_rate ? "—" : (it.rate ? fmtKc(it.rate) : "—")}</td>
-              <td style={{ textAlign: "right", fontFamily: "Fraunces, serif", fontWeight: 300 }}>{fmtKc(it.amount)}</td>
+              <td style={{ textAlign: "right", fontFamily:"Inter,ui-sans-serif,system-ui,sans-serif",fontVariantNumeric:"tabular-nums", fontWeight:600 }}>{fmtKc(it.amount)}</td>
             </tr>
           ))}
         </tbody>
@@ -14114,23 +14125,23 @@ function SroOptimizationPanel({ year, invoices }) {
       <div style={{display:"flex",gap:28,flexWrap:"wrap",marginBottom:12}}>
         <div>
           <div style={{fontSize:10,color:"var(--mut)"}}>OSVČ — DPFO (15 % / 23 %)</div>
-          <div style={{fontFamily:"Fraunces,serif",fontSize:22,fontWeight:300,color:triggered?"#A8443C":"var(--txt)"}}>{fmtKc(taxOsvc)}</div>
+          <div style={{fontFamily:"Inter,ui-sans-serif,system-ui,sans-serif",fontVariantNumeric:"tabular-nums",fontSize:22,fontWeight:600,color:triggered?"#A8443C":"var(--txt)"}}>{fmtKc(taxOsvc)}</div>
           <div style={{fontSize:9.5,color:"var(--mut)"}}>efektivně {effOsvcPct.toFixed(1)} % z obratu</div>
         </div>
         <div>
           <div style={{fontSize:10,color:"var(--mut)"}}>s.r.o. — zisk zůstává ve firmě (21 %)</div>
-          <div style={{fontFamily:"Fraunces,serif",fontSize:22,fontWeight:300,color:"#4A7C59"}}>{fmtKc(taxSroRetained)}</div>
+          <div style={{fontFamily:"Inter,ui-sans-serif,system-ui,sans-serif",fontVariantNumeric:"tabular-nums",fontSize:22,fontWeight:600,color:"#4A7C59"}}>{fmtKc(taxSroRetained)}</div>
           <div style={{fontSize:9.5,color:"var(--mut)"}}>efektivně 21,0 % z obratu</div>
         </div>
         <div>
           <div style={{fontSize:10,color:"var(--mut)"}}>s.r.o. — zisk vyplacen (21 % + 15 % z podílu)</div>
-          <div style={{fontFamily:"Fraunces,serif",fontSize:22,fontWeight:300,color:"var(--txt)"}}>{fmtKc(taxSroDistributed)}</div>
+          <div style={{fontFamily:"Inter,ui-sans-serif,system-ui,sans-serif",fontVariantNumeric:"tabular-nums",fontSize:22,fontWeight:600,color:"var(--txt)"}}>{fmtKc(taxSroDistributed)}</div>
           <div style={{fontSize:9.5,color:"var(--mut)"}}>efektivně {effSroDistPct.toFixed(1)} % z obratu</div>
         </div>
         {triggered && (
           <div>
             <div style={{fontSize:10,color:"var(--mut)"}}>Možná úspora (zisk ve firmě vs. OSVČ)</div>
-            <div style={{fontFamily:"Fraunces,serif",fontSize:22,fontWeight:500,color:saving>0?"#4A7C59":"#A8443C"}}>
+            <div style={{fontFamily:"Inter,ui-sans-serif,system-ui,sans-serif",fontVariantNumeric:"tabular-nums",fontSize:22,fontWeight:500,color:saving>0?"#4A7C59":"#A8443C"}}>
               {saving>0?"až +":""}{fmtKc(Math.abs(saving))}
             </div>
             <div style={{fontSize:9.5,color:"var(--mut)"}}>ročně, orientačně</div>
@@ -14674,7 +14685,7 @@ function DphOdpocetTile({ invoices, financeItems, onSaveFinance, onNav, dashNadm
         {kpis.map((k, i) => (
           <div key={i} style={{ background:"#fff", padding:"14px 18px" }}>
             <div style={{ fontSize:9.5, color:"var(--mut)", letterSpacing:".02em", lineHeight:1.35, minHeight:26 }}>{k.label}</div>
-            <div style={{ fontFamily:"Fraunces,serif", fontSize:k.big?26:22, fontWeight:k.big?500:300, color:k.color, marginTop:4, whiteSpace:"nowrap" }}>{k.value}</div>
+            <div style={{ fontFamily:"Inter,ui-sans-serif,system-ui,sans-serif",fontVariantNumeric:"tabular-nums", fontSize:k.big?26:22, fontWeight:k.big?500:300, color:k.color, marginTop:4, whiteSpace:"nowrap" }}>{k.value}</div>
             <div style={{ fontSize:9, color:"var(--mut)", marginTop:3, opacity:.8 }}>{k.hint}</div>
           </div>
         ))}
@@ -14837,18 +14848,18 @@ function DaneModule({ year, taxRecords, financeItems, invoices, dpfoMonths, escr
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(150px,1fr))", gap: 1, background: "var(--line)" }}>
           <div style={{ background:"#fff", padding:"4px 16px 4px 0" }}>
             <div style={{ fontSize: 9.5, color: "var(--mut)" }}>Zaplaceno na zálohách (YTD, auto)</div>
-            <div style={{ fontFamily: "Fraunces,serif", fontSize: 23, fontWeight: 300, color: "var(--txt)", marginTop:3 }}>{fmtKc(totalPaid)}</div>
+            <div style={{ fontFamily:"Inter,ui-sans-serif,system-ui,sans-serif",fontVariantNumeric:"tabular-nums", fontSize: 23, fontWeight:600, color: "var(--txt)", marginTop:3 }}>{fmtKc(totalPaid)}</div>
           </div>
           <div style={{ background:"#fff", padding:"4px 16px" }}>
             <div style={{ fontSize: 9.5, color: "var(--mut)" }}>Skutečné vyúčtování (ruční)</div>
-            <div style={{ fontFamily: "Fraunces,serif", fontSize: 23, fontWeight: 300, color: haveAllSettlements ? "var(--txt)" : "var(--mut)", marginTop:3 }}>
+            <div style={{ fontFamily:"Inter,ui-sans-serif,system-ui,sans-serif",fontVariantNumeric:"tabular-nums", fontSize: 23, fontWeight:600, color: haveAllSettlements ? "var(--txt)" : "var(--mut)", marginTop:3 }}>
               {haveAllSettlements ? fmtKc(totalSettled) : "doplň ↓"}
             </div>
           </div>
           {totalDiff != null && (
             <div style={{ background:"#fff", padding:"4px 16px" }}>
               <div style={{ fontSize: 9.5, color: "var(--mut)" }}>{totalDiff >= 0 ? "Přeplatek celkem" : "Nedoplatek celkem"}</div>
-              <div style={{ fontFamily: "Fraunces,serif", fontSize: 23, fontWeight: 500, color: totalDiff >= 0 ? "#4A7C59" : "#A8443C", marginTop:3 }}>
+              <div style={{ fontFamily:"Inter,ui-sans-serif,system-ui,sans-serif",fontVariantNumeric:"tabular-nums", fontSize: 23, fontWeight: 500, color: totalDiff >= 0 ? "#4A7C59" : "#A8443C", marginTop:3 }}>
                 {totalDiff >= 0 ? "+" : "−"}{fmtKc(Math.abs(totalDiff))}
               </div>
             </div>
@@ -14856,7 +14867,7 @@ function DaneModule({ year, taxRecords, financeItems, invoices, dpfoMonths, escr
           {danUschov > 0 && (
             <div style={{ background:"#fff", padding:"4px 16px" }}>
               <div style={{ fontSize: 9.5, color: "var(--mut)" }}>Daň z výnosu úschov (info)</div>
-              <div style={{ fontFamily: "Fraunces,serif", fontSize: 23, fontWeight: 300, color: "var(--mut)", marginTop:3 }}>{fmtKc(danUschov)}</div>
+              <div style={{ fontFamily:"Inter,ui-sans-serif,system-ui,sans-serif",fontVariantNumeric:"tabular-nums", fontSize: 23, fontWeight:600, color: "var(--mut)", marginTop:3 }}>{fmtKc(danUschov)}</div>
             </div>
           )}
         </div>
