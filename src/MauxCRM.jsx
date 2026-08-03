@@ -1052,6 +1052,31 @@ async function fetchEscrows() {
   return data || [];
 }
 
+/* ─── EKÚ (Elektronická kniha úschov) ─── */
+/* Pořadí podle usn. představenstva ČAK č. 7/2004 ve znění od 1. 1. 2026:
+   1) oznámit úschovu PŘED přijetím peněz, 2) odeslat datum přijetí, 3) odeslat datum vyplacení.
+   Nárok klienta na náhradu z Garančního fondu vzniká jen při řádném oznámení. */
+function ekuStav(e) {
+  const kroky = [
+    { key: "eku_announced",     label: "Úschova oznámena do EKÚ", hint: "před přijetím peněz", value: e.eku_announced || "" },
+    { key: "eku_received_sent", label: "Odesláno datum přijetí",  hint: "u opakovaného plnění první platba", value: e.eku_received_sent || "" },
+    { key: "eku_paid_sent",     label: "Odesláno datum vyplacení", hint: "po výplatě z úschovy", value: e.eku_paid_sent || "" },
+  ];
+  // Krok 2 dává smysl až po přijetí, krok 3 až po výplatě — dřív se nepočítá jako dluh
+  kroky[1].relevant = !!e.date_received;
+  kroky[2].relevant = !!e.date_paid;
+  kroky[0].relevant = true;
+
+  const splneno = kroky.filter(k => k.relevant && k.value).length;
+  const ocekavano = kroky.filter(k => k.relevant).length;
+  // Nejzávažnější vada: oznámeno až po přijetí peněz, nebo vůbec, ačkoli peníze dorazily
+  let vada = "";
+  if (e.date_received && !e.eku_announced) vada = "Peníze přijaty, ale úschova nebyla oznámena do EKÚ.";
+  else if (e.eku_announced && e.date_received && e.eku_announced > e.date_received)
+    vada = "Oznámení do EKÚ je datováno až po přijetí peněz — nárok klienta na Garanční fond tím může padnout.";
+  return { kroky, splneno, ocekavano, hotovo: ocekavano > 0 && splneno === ocekavano, vada };
+}
+
 /* ─── AML osoby ─── */
 const AML_ROLES = [
   "strana", "SJM manžel/ka", "člen statutárního orgánu",
@@ -1093,7 +1118,8 @@ function amlPersonsFor(escrow) {
 async function upsertEscrow(e) {
   const { escrow_tranches: _t, escrow_aml_persons: _p, banka: _b, spis_aml: _s, ...rest } = e;
   // Convert empty strings to null for date columns (Postgres rejects "")
-  const DATE_COLS = ["date_received","date_navrh_podan","date_plomba_end","date_paid"];
+  const DATE_COLS = ["date_received","date_navrh_podan","date_plomba_end","date_paid",
+                     "eku_announced","eku_received_sent","eku_paid_sent"];
   DATE_COLS.forEach(k => { if (rest[k] === "") rest[k] = null; });
   const { error } = await supabase.from("escrows").upsert({ ...rest, updated_at: new Date().toISOString() });
   if (error) throw error;
@@ -5441,6 +5467,13 @@ function EscrowCard({ escrow, onEdit, onDelete, onMarkPaid, onPayment }) {
                 ? <span style={{fontSize:9,padding:"2px 7px",borderRadius:4,background:"#F0FDF4",color:"#065F46",fontWeight:600}}>AML ✓</span>
                 : <span title={missingNames.length ? "Chybí AML: " + missingNames.join(", ") : "AML chybí"} style={{fontSize:9,padding:"2px 7px",borderRadius:4,background:"#FEF2F2",color:"#991B1B",fontWeight:600}}>AML ⚠</span>;
             })()}
+            {(() => {
+              const eku = ekuStav(escrow);
+              const title = eku.vada || (eku.hotovo ? "EKÚ nahlášeno" : `EKÚ: ${eku.splneno} z ${eku.ocekavano} kroků`);
+              return eku.hotovo
+                ? <span title={title} style={{fontSize:9,padding:"2px 7px",borderRadius:4,background:"#F0FDF4",color:"#065F46",fontWeight:600}}>EKÚ ✓</span>
+                : <span title={title} style={{fontSize:9,padding:"2px 7px",borderRadius:4,background:eku.vada?"#FEF2F2":"#FEF3C7",color:eku.vada?"#991B1B":"#92400E",fontWeight:600}}>EKÚ {eku.splneno}/{eku.ocekavano}</span>;
+            })()}
             {needsAlert && <span style={{fontSize:9,padding:"2px 7px",borderRadius:4,background:"#FEF3C7",color:"#92400E",fontWeight:700}}>⚠ Blíží se konec plomby</span>}
           </div>
           <div style={{fontSize:12,color:"var(--mut)",lineHeight:1.6}}>
@@ -6031,6 +6064,63 @@ function EscrowForm({ init, onSave, onCancel, saving, clients = [] }) {
           </div>
         </div>
       </div>
+
+      {/* Karta EKÚ — hlášení do elektronické knihy úschov */}
+      {(() => {
+        const eku = ekuStav(d);
+        return (
+          <div style={S.card}>
+            <div style={{ ...S.cardHead("#1c0a63"), justifyContent: "space-between" }}>
+              <span style={S.cht}>EKÚ — elektronická kniha úschov</span>
+              <span style={{
+                fontSize: 10, fontWeight: 700, letterSpacing: ".06em",
+                padding: "3px 10px", borderRadius: 20, color: "#fff",
+                background: eku.hotovo ? "rgba(74,124,89,.35)" : "rgba(255,255,255,.14)",
+              }}>
+                {eku.splneno} z {eku.ocekavano} nahlášeno
+              </span>
+            </div>
+            <div style={S.cardBody}>
+              {eku.vada && (
+                <div style={{
+                  background: "#FDF5F4", border: "1px solid #F0C9C5", borderRadius: 8,
+                  padding: "9px 12px", marginBottom: 10, fontSize: 11.5, color: "#A8443C", lineHeight: 1.5,
+                }}>
+                  {eku.vada}
+                </div>
+              )}
+              {eku.kroky.map((k, i) => (
+                <div key={k.key} style={{
+                  display: "flex", alignItems: "center", gap: 11,
+                  padding: "9px 12px", marginBottom: 7, borderRadius: 9,
+                  border: `1.5px solid ${k.value ? "#C7E3CE" : (k.relevant ? "#F0C9C5" : "#EDEDF2")}`,
+                  background: k.value ? "#F4FAF5" : (k.relevant ? "#FDF5F4" : "#FAFAFC"),
+                  opacity: k.relevant ? 1 : .6,
+                }}>
+                  <span style={{
+                    width: 20, height: 20, borderRadius: "50%", flexShrink: 0,
+                    display: "flex", alignItems: "center", justifyContent: "center",
+                    fontSize: 10, fontWeight: 700,
+                    background: k.value ? "#4A7C59" : "#E5E7EB", color: k.value ? "#fff" : "#9CA3AF",
+                  }}>{i + 1}</span>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 13, fontWeight: 600, color: "#111827" }}>{k.label}</div>
+                    <div style={{ fontSize: 10.5, color: "#9CA3AF", marginTop: 1 }}>
+                      {k.relevant ? k.hint : "čeká — " + (k.key === "eku_received_sent" ? "peníze zatím nepřijaty" : "zatím nevyplaceno")}
+                    </div>
+                  </div>
+                  <input type="date" value={k.value} disabled={!k.relevant}
+                    onChange={e2 => set(k.key, e2.target.value || null)}
+                    style={{ ...S.input, width: 148, flexShrink: 0, fontSize: 12, background: k.relevant ? "#fff" : "#F3F4F6" }} />
+                </div>
+              ))}
+              <div style={{ fontSize: 10, color: "#9CA3AF", marginTop: 2, lineHeight: 1.6 }}>
+                Od 1. 1. 2026 se úschova hlásí do EKÚ ještě před přijetím peněz — jinak klientovi nevznikne nárok na náhradu z Garančního fondu ČAK. Do EKÚ se chodí přes PORTÁL ČAK.
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* Karta 3: Poznámka */}
       <div style={S.card}>
@@ -6870,6 +6960,11 @@ function EscrowLiveTile({ escrows, onNav, onOpenEscrow }) {
   });
   const amlMissingCount = amlRows.reduce((s, r) => s + r.names.length, 0);
 
+  // EKÚ — jen skutečná vada (peníze přijaty bez oznámení, nebo oznámeno pozdě), ne rozdělaná úschova
+  const ekuVady = (escrows || [])
+    .map(e => ({ esc: e, cislo: e.escrow_number || "(bez čísla)", vada: ekuStav(e).vada }))
+    .filter(x => x.vada);
+
   return (
     <div style={{display:"flex",flexDirection:"column",gap:0}}>
     {amlRows.length > 0 && (
@@ -6921,7 +7016,36 @@ function EscrowLiveTile({ escrows, onNav, onOpenEscrow }) {
         </div>
       </div>
     )}
-    <div style={{background:"var(--card)",border:"1px solid var(--line)",borderRadius:amlRows.length>0?"0 0 3px 3px":"3px",padding:"24px 28px",display:"flex",alignItems:"center",gap:30,flexWrap:"wrap"}}>
+    {ekuVady.length > 0 && (
+      <div style={{
+        background:"var(--card)", border:"1px solid #E8CFCB",
+        borderTop: amlRows.length > 0 ? "none" : "1px solid #E8CFCB",
+        borderBottom:"none", borderRadius: amlRows.length > 0 ? 0 : "3px 3px 0 0", overflow:"hidden"
+      }}>
+        <div style={{padding:"11px 18px",borderBottom:"1px solid #F2E3E1",display:"flex",alignItems:"center",gap:9}}>
+          <span style={{width:6,height:6,borderRadius:"50%",background:"#A8443C",flexShrink:0}} />
+          <span style={{fontSize:12,color:"#1F2937"}}>
+            EKÚ — vada hlášení u <strong style={{fontWeight:700,color:"#A8443C"}}>{ekuVady.length} {ekuVady.length===1?"úschovy":(ekuVady.length<5?"úschov":"úschov")}</strong>
+          </span>
+        </div>
+        {ekuVady.map(x => (
+          <div key={x.esc.id} style={{padding:"9px 18px",borderBottom:"1px solid #F7F0EF",display:"flex",alignItems:"center",gap:12}}>
+            <div style={{flex:1,minWidth:0}}>
+              <div style={{fontSize:12.5,color:"#111827"}}><strong style={{fontWeight:700}}>{x.cislo}</strong></div>
+              <div style={{fontSize:10.5,color:"#A8443C",marginTop:1,lineHeight:1.45}}>{x.vada}</div>
+            </div>
+            {onOpenEscrow && (
+              <button onClick={()=>onOpenEscrow(x.esc)} style={{
+                fontSize:10.5,fontWeight:600,color:"#A8443C",background:"#fff",
+                border:"1px solid #E8CFCB",borderRadius:6,padding:"4px 11px",
+                cursor:"pointer",whiteSpace:"nowrap",flexShrink:0
+              }}>Otevřít →</button>
+            )}
+          </div>
+        ))}
+      </div>
+    )}
+    <div style={{background:"var(--card)",border:"1px solid var(--line)",borderRadius:(amlRows.length>0||ekuVady.length>0)?"0 0 3px 3px":"3px",padding:"24px 28px",display:"flex",alignItems:"center",gap:30,flexWrap:"wrap"}}>
       <div style={{minWidth:230}}>
         <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,marginBottom:10}}>
           <div style={{display:"flex",alignItems:"center",gap:6}}>
