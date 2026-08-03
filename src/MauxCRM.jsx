@@ -1011,9 +1011,10 @@ async function deleteEscrowDb(id) {
   if (error) throw error;
 }
 async function upsertEscrowTranche(t) {
-  // Strip unknown columns and convert empty date strings to null
-  const { aml_done: _a, ...clean } = t;
-  ["received_date","paid_date"].forEach(k => { if (clean[k] === "") clean[k] = null; });
+  // aml_done / aml_date jsou reálné sloupce (migrace 3. 8. 2026) — NEODSTRAŇOVAT
+  const clean = { ...t };
+  clean.aml_done = !!clean.aml_done;
+  ["received_date","paid_date","aml_date"].forEach(k => { if (clean[k] === "") clean[k] = null; });
   const { error } = await supabase.from("escrow_tranches").upsert(clean);
   if (error) throw error;
 }
@@ -5166,6 +5167,7 @@ function PaymentWizard({ escrow, onClose, onSuccess }) {
           party_type: 'oprávněný', party_name: t.party_name,
           amount: remainder, is_paid: false, paid_date: null,
           sort_order: (t.sort_order || 0) + 0.5, notes: t.notes || null,
+          aml_done: !!t.aml_done, aml_date: t.aml_date || null,
         });
         // Stav úschovy → částečně vyplaceno (pokud ještě byly nějaké nevyplacené)
         if (unpaid.length >= 1) {
@@ -5552,10 +5554,15 @@ function EscrowForm({ init, onSave, onCancel, saving }) {
 
   // Přidat nový řádek výplaty pro existující osobu
   const addPaymentRow = (personName) => {
-    setTranches(prev => [...prev, {
-      id: uid(), escrow_id: d.id, party_type: 'oprávněný', party_name: personName,
-      amount: 0, is_paid: false, paid_date: null, received_date: null, sort_order: prev.length,
-    }]);
+    setTranches(prev => {
+      // Nový řádek zdědí AML stav osoby — jinak by přidání výplaty shodilo hotovou identifikaci
+      const src = prev.find(t => t.party_name === personName && t.aml_done);
+      return [...prev, {
+        id: uid(), escrow_id: d.id, party_type: 'oprávněný', party_name: personName,
+        amount: 0, is_paid: false, paid_date: null, received_date: null, sort_order: prev.length,
+        aml_done: !!src, aml_date: src ? (src.aml_date || null) : null,
+      }];
+    });
   };
 
   // Přejmenovat všechny tranše osoby najednou
@@ -5605,6 +5612,7 @@ function EscrowForm({ init, onSave, onCancel, saving }) {
             party_name: t.party_name, amount: remainder,
             is_paid: false, paid_date: null,
             sort_order: (t.sort_order || 0) + 0.5,
+            aml_done: !!t.aml_done, aml_date: t.aml_date || null,
           });
           continue;
         }
@@ -5649,6 +5657,37 @@ function EscrowForm({ init, onSave, onCancel, saving }) {
 
   const sloz = tranches.filter(t => t.party_type === 'složitel');
   const opr  = tranches.filter(t => t.party_type === 'oprávněný');
+
+  // AML — jedna osoba = jedna fajfka, i když má víc tranší
+  const amlMap = {};
+  tranches.forEach(t => {
+    const key = (t.party_name || '').trim() || '(bez jména)';
+    if (!amlMap[key]) amlMap[key] = { name: key, rows: [], isSloz: false, isOpr: false, castka: 0 };
+    const g = amlMap[key];
+    g.rows.push(t);
+    if (t.party_type === 'složitel') g.isSloz = true; else g.isOpr = true;
+    g.castka += (t.amount || 0);
+  });
+  const amlPeople = Object.values(amlMap)
+    .map(g => ({
+      ...g,
+      done: g.rows.every(t => !!t.aml_done),
+      date: (g.rows.find(t => t.aml_date) || {}).aml_date || "",
+    }))
+    .sort((a, b) => (a.isSloz === b.isSloz ? a.name.localeCompare(b.name, 'cs') : (a.isSloz ? -1 : 1)));
+  const amlHotovo = amlPeople.filter(p => p.done).length;
+
+  const setAml = (person, checked) => {
+    const dnes = new Date();
+    const iso = `${dnes.getFullYear()}-${String(dnes.getMonth()+1).padStart(2,'0')}-${String(dnes.getDate()).padStart(2,'0')}`;
+    person.rows.forEach(t => updateTranche(t.id, {
+      aml_done: checked,
+      aml_date: checked ? (person.date || iso) : null,
+    }));
+  };
+  const setAmlDate = (person, v) => {
+    person.rows.forEach(t => updateTranche(t.id, { aml_date: v || null }));
+  };
 
   // Seskupit oprávněné po osobách
   const oprGroups = {};
@@ -5709,6 +5748,69 @@ function EscrowForm({ init, onSave, onCancel, saving }) {
         </div>
       </div>
 
+      {/* Karta AML — identifikace stran */}
+      <div style={S.card}>
+        <div style={{ ...S.cardHead("#1c0a63"), justifyContent: "space-between" }}>
+          <span style={S.cht}>AML — identifikace stran</span>
+          <span style={{
+            fontSize: 10, fontWeight: 700, letterSpacing: ".06em",
+            padding: "3px 10px", borderRadius: 20,
+            background: amlPeople.length && amlHotovo === amlPeople.length ? "rgba(74,124,89,.35)" : "rgba(255,255,255,.14)",
+            color: "#fff",
+          }}>
+            {amlPeople.length ? `${amlHotovo} z ${amlPeople.length} hotovo` : "žádné strany"}
+          </span>
+        </div>
+        <div style={S.cardBody}>
+          {amlPeople.length === 0 && (
+            <div style={{ fontSize: 12, color: "#9CA3AF", padding: "6px 2px" }}>
+              Zatím tu nejsou žádné strany. Přidej složitele a oprávněné dole v sekci „Strany úschovy“ — objeví se tady automaticky.
+            </div>
+          )}
+          {amlPeople.map(p => (
+            <div key={p.name} style={{
+              display: "flex", alignItems: "center", gap: 12,
+              padding: "11px 13px", marginBottom: 8,
+              borderRadius: 10,
+              border: `1.5px solid ${p.done ? "#C7E3CE" : "#F0C9C5"}`,
+              background: p.done ? "#F4FAF5" : "#FDF5F4",
+            }}>
+              <span style={{
+                fontSize: 9, fontWeight: 700, letterSpacing: ".1em", textTransform: "uppercase",
+                padding: "4px 8px", borderRadius: 4, width: 82, textAlign: "center", flexShrink: 0,
+                background: p.isSloz ? "#EEF2FF" : "#ECFDF5",
+                color: p.isSloz ? "#3730A3" : "#065F46",
+              }}>
+                {p.isSloz && p.isOpr ? "obojí" : (p.isSloz ? "složitel" : "oprávněný")}
+              </span>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 14, fontWeight: 600, color: "#111827" }}>{p.name}</div>
+                <div style={{ fontSize: 11, color: p.done ? "#6B7280" : "#A8443C", marginTop: 1 }}>
+                  {fmtKc(p.castka)}{p.done ? "" : " · identifikace chybí"}
+                </div>
+              </div>
+              {p.done && (
+                <input type="date" value={p.date || ""} onChange={e => setAmlDate(p, e.target.value)}
+                  title="Datum provedení identifikace"
+                  style={{ ...S.input, width: 138, flexShrink: 0, fontSize: 12, background: "#fff" }} />
+              )}
+              <label style={{ display: "flex", alignItems: "center", gap: 7, cursor: "pointer", flexShrink: 0 }}>
+                <input type="checkbox" checked={p.done} onChange={e => setAml(p, e.target.checked)}
+                  style={{ width: 17, height: 17, margin: 0, accentColor: "#4A7C59", cursor: "pointer" }} />
+                <span style={{ fontSize: 11, fontWeight: 700, color: p.done ? "#4A7C59" : "#A8443C", whiteSpace: "nowrap" }}>
+                  {p.done ? "hotovo" : "zaškrtnout"}
+                </span>
+              </label>
+            </div>
+          ))}
+          {amlPeople.length > 0 && (
+            <div style={{ fontSize: 10, color: "#9CA3AF", marginTop: 4 }}>
+              Zaškrtnutím se doplní dnešní datum — přepiš ho, pokud identifikace proběhla jindy. Dokud někdo chybí, svítí varování na Přehledu.
+            </div>
+          )}
+        </div>
+      </div>
+
       {/* Karta 2: Časová osa */}
       <div style={S.card}>
         <div style={S.cardHead("#2D1B8E")}>
@@ -5743,7 +5845,7 @@ function EscrowForm({ init, onSave, onCancel, saving }) {
           <textarea value={d.notes || ""} onChange={e => set("notes", e.target.value)}
             style={{ ...S.input, minHeight: 54, resize: "vertical", lineHeight: 1.5 }} />
           <div style={{ fontSize: 10, color: "#9CA3AF", marginTop: 6 }}>
-            AML stav se zaznamenává u každé osoby v sekci Strany níže.
+            AML se zaškrtává v kartě „AML — identifikace stran“ nahoře.
           </div>
         </div>
       </div>
@@ -5765,7 +5867,6 @@ function EscrowForm({ init, onSave, onCancel, saving }) {
                     <th style={S.th}>Jméno</th>
                     <th style={{ ...S.th, textAlign: "right" }}>Vloženo (Kč)</th>
                     <th style={S.th}>Datum přijetí</th>
-                    <th style={{ ...S.th, textAlign: "center", width: 70 }}>AML</th>
                     <th style={{ ...S.th, width: 32 }}></th>
                   </tr>
                 </thead>
@@ -5783,16 +5884,6 @@ function EscrowForm({ init, onSave, onCancel, saving }) {
                       <td style={S.td}>
                         <input type="date" style={S.input} value={t.received_date || ""}
                           onChange={e => updateTranche(t.id, { received_date: e.target.value || null })} />
-                      </td>
-                      <td style={{ ...S.td, textAlign: "center" }}>
-                        <label style={{ display: "inline-flex", alignItems: "center", gap: 5, cursor: "pointer" }}>
-                          <input type="checkbox" checked={!!t.aml_done}
-                            onChange={e => updateTranche(t.id, { aml_done: e.target.checked })}
-                            style={{ width: "auto", accentColor: "#4A7C59" }} />
-                          <span style={{ fontSize: 9, fontWeight: 700, color: t.aml_done ? "#4A7C59" : "#A8443C" }}>
-                            {t.aml_done ? "✓" : "⚠"}
-                          </span>
-                        </label>
                       </td>
                       <td style={S.td}>
                         <button onClick={() => removeTranche(t.id)}
@@ -5836,26 +5927,19 @@ function EscrowForm({ init, onSave, onCancel, saving }) {
                         {totalPaid > 0 && <span style={{ color: "#4A7C59" }}>Vyplaceno: <strong style={{ fontFamily: "Fraunces,serif", fontSize: 13 }}>{fmtKc(totalPaid)}</strong></span>}
                         {remaining > 0.5 && <span style={{ color: "#B45309" }}>Zbývá: <strong style={{ fontFamily: "Fraunces,serif", fontSize: 13 }}>{fmtKc(remaining)}</strong></span>}
                       </div>
-                      {/* AML per osoba — sdílené pro všechny tranše téhož jména */}
+                      {/* AML stav — jen náhled, přepíná se v kartě AML nahoře */}
                       {(() => {
                         const amlDone = rows.every(t => !!t.aml_done);
                         return (
-                          <label style={{ display: "flex", alignItems: "center", gap: 5, cursor: "pointer", flexShrink: 0 }}>
-                            <input type="checkbox" checked={amlDone}
-                              onChange={e => {
-                                rows.forEach(t => updateTranche(t.id, { aml_done: e.target.checked }));
-                              }}
-                              style={{ width: "auto", accentColor: "#4A7C59" }} />
-                            <span style={{
-                              fontSize: 9, fontWeight: 700, letterSpacing: ".08em",
-                              color: amlDone ? "#4A7C59" : "#A8443C",
-                              background: amlDone ? "#DCFCE7" : "#FEF2F2",
-                              border: `1px solid ${amlDone ? "#A7F3D0" : "#FECACA"}`,
-                              borderRadius: 4, padding: "2px 7px",
-                            }}>
-                              {amlDone ? "AML ✓" : "AML ⚠"}
-                            </span>
-                          </label>
+                          <span title="AML se zaškrtává v kartě „AML — identifikace stran“ nahoře" style={{
+                            fontSize: 9, fontWeight: 700, letterSpacing: ".08em", flexShrink: 0,
+                            color: amlDone ? "#4A7C59" : "#A8443C",
+                            background: amlDone ? "#DCFCE7" : "#FEF2F2",
+                            border: `1px solid ${amlDone ? "#A7F3D0" : "#FECACA"}`,
+                            borderRadius: 4, padding: "2px 7px",
+                          }}>
+                            {amlDone ? "AML ✓" : "AML ⚠"}
+                          </span>
                         );
                       })()}
                     </div>
@@ -6556,38 +6640,41 @@ function EscrowLiveTile({ escrows, onNav }) {
   const Kd = (n) => maskNum(n.toLocaleString('cs-CZ', {minimumFractionDigits:2,maximumFractionDigits:2})) + ' Kč';
   const DNY = ["Ne","Po","Út","St","Čt","Pá","So"];
 
-  // AML varování — konkrétní osoby bez aml_done v tranších
+  // AML varování — OSOBY bez dokončené identifikace, ne tranše
+  // (jeden oprávněný má klidně tři výplatní řádky — je to pořád jedna osoba)
+  const amlSeen = new Set();
   const amlMissingItems = [];
   (escrows || []).forEach(e => {
-    const tr = e.escrow_tranches || [];
-    tr.filter(t => !t.aml_done).forEach(t => {
-      amlMissingItems.push({ escrow: e.escrow_number, name: t.party_name || "?", type: t.party_type });
+    (e.escrow_tranches || []).forEach(t => {
+      if (t.aml_done) return;
+      const name = (t.party_name || "").trim() || "?";
+      const key = e.id + "|" + name;
+      if (amlSeen.has(key)) return;
+      amlSeen.add(key);
+      amlMissingItems.push({ escrow: e.escrow_number, name, type: t.party_type });
     });
   });
-  // Deduplikovat po jménu+úschově
   const amlMissingEscrows = [...new Set(amlMissingItems.map(x => x.escrow))];
 
   return (
     <div style={{display:"flex",flexDirection:"column",gap:0}}>
     {amlMissingItems.length > 0 && (
       <div style={{
-        background:"linear-gradient(135deg,#7C2D12 0%,#991B1B 100%)",
+        background:"#A8443C",
         borderRadius:"3px 3px 0 0",
         padding:"10px 18px",
-        display:"flex",alignItems:"center",gap:12,
-        boxShadow:"0 2px 8px rgba(153,27,27,.25)"
+        display:"flex",alignItems:"center",gap:12
       }}>
-        <span style={{fontSize:18,flexShrink:0}}>⚠️</span>
-        <div style={{flex:1}}>
-          <div style={{fontSize:11,fontWeight:700,color:"#FEF2F2",letterSpacing:".04em"}}>
-            AML chybí u {amlMissingItems.length} {amlMissingItems.length===1?"osoby":"osob"} v {amlMissingEscrows.length} {amlMissingEscrows.length===1?"úschově":"úschovách"} — ČAK!
+        <div style={{flex:1,minWidth:0}}>
+          <div style={{fontSize:11,fontWeight:600,color:"#fff",letterSpacing:".04em"}}>
+            AML chybí u {amlMissingItems.length} {amlMissingItems.length===1?"osoby":(amlMissingItems.length<5?"osob":"osob")} v {amlMissingEscrows.length} {amlMissingEscrows.length===1?"úschově":(amlMissingEscrows.length<5?"úschovách":"úschovách")}
           </div>
-          <div style={{fontSize:10,color:"#FECACA",marginTop:2}}>
-            {amlMissingItems.map(x => `${x.escrow}: ${x.name}`).join(" · ")}
+          <div style={{fontSize:10,color:"rgba(255,255,255,.72)",marginTop:2,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+            {amlMissingItems.slice(0,8).map(x => `${x.escrow}: ${x.name}`).join(" · ")}{amlMissingItems.length>8 ? ` · +${amlMissingItems.length-8} dalších` : ""}
           </div>
         </div>
         {onNav && (
-          <button onClick={()=>onNav("uschovy")} style={{fontSize:10,fontWeight:700,color:"#fff",background:"rgba(255,255,255,.15)",border:"1px solid rgba(255,255,255,.3)",borderRadius:6,padding:"4px 10px",cursor:"pointer",whiteSpace:"nowrap",flexShrink:0}}>
+          <button onClick={()=>onNav("uschovy")} style={{fontSize:10,fontWeight:600,color:"#fff",background:"rgba(255,255,255,.16)",border:"1px solid rgba(255,255,255,.3)",borderRadius:6,padding:"4px 10px",cursor:"pointer",whiteSpace:"nowrap",flexShrink:0}}>
             Doplnit AML →
           </button>
         )}
@@ -7431,142 +7518,113 @@ function AddExpenseRow({ category, color, onSaveFinance }) {
   );
 }
 
-/* ─── ZISKOVOST ZAKÁZEK — reálné vs. fakturované hodiny z výkazů práce ─── */
-function ZiskovostPanel({ workEntries, clients }) {
-  const cardSt = { background: "#fff", border: "1px solid var(--line)", borderRadius: 14, padding: "18px 20px" };
+/* ─── HODNOTA TVÉ HODINY — kolik vydělá jedna reálně odpracovaná hodina ───
+   Nahradilo starý panel "Ziskovost zakázek" (3. 8. 2026). Ten měl tři KPI dlaždice
+   a seznam deseti zakázek, zabíral půl obrazovky a Tom se na něj nedíval — mimo jiné
+   proto, že si protiřečil: velké číslo "ziskovost 119 %" počítalo poměr jen z hodinových
+   záznamů, ale důkaz pod ním ("127,1 h fakt. · 128,2 h reálně") sečetl reálné hodiny
+   včetně paušálů, což dává 99 %. Dvě metody pod jedním číslem.
+   Teď: jedno číslo v Kč/h za měsíc + řada sedmi měsíců. Jedna metoda, jeden příběh. */
+function ZiskovostPanel({ workEntries }) {
+  const cardSt = { background: "#fff", border: "1px solid var(--line)", borderRadius: BP.r, padding: "20px 24px" };
   const lblSt  = { fontSize: 9, letterSpacing: ".2em", textTransform: "uppercase", fontWeight: 600, color: "var(--mut)" };
 
-  // withReal = vše s vyplněnými reálnými hodinami (vč. paušálů — ty se počítají jen do "Efektivní hodinovky",
-  // protože u nich pojem "fakturovaných hodin" nedává smysl). hourlyEntries = jen klasické hodinové záznamy,
-  // ze kterých se počítá "Nominální sazba" a "Ziskovost (fakt. ÷ reálně)".
-  const withReal = (workEntries || []).filter(e => (e.real_hours || 0) > 0 && ((e.hours || 0) > 0 || e.billing_type === "flat_rate"));
-  const hourlyEntries = withReal.filter(e => (e.hours || 0) > 0);
+  // Jediná metoda: peníze za záznam ÷ reálně odpracované hodiny. Sleva se odečítá,
+  // paušály se počítají taky (u nich pojem "fakturovaná hodina" nedává smysl, ale
+  // vydělané koruny za odpracovaný čas ano). Záporné nikdy — Math.max(...,0).
+  const netAmt = e => Math.max((e.amount || (e.hours || 0) * (e.rate || 0)) - (Number(e.discount_amount) || 0), 0);
+  const MN = ["led", "úno", "bře", "dub", "kvě", "čvn", "čvc", "srp", "zář", "říj", "lis", "pro"];
 
-  if (withReal.length === 0) {
+  const S = useMemo(() => {
+    const rows = (workEntries || []).filter(e =>
+      (e.real_hours || 0) > 0 && e.entry_date && ((e.hours || 0) > 0 || e.billing_type === "flat_rate"));
+    const byM = {};
+    rows.forEach(e => {
+      const k = String(e.entry_date).slice(0, 7);
+      if (!byM[k]) byM[k] = { h: 0, kc: 0 };
+      byM[k].h  += e.real_hours || 0;
+      byM[k].kc += netAmt(e);
+    });
+    const now = new Date();
+    const series = [];
+    for (let i = 6; i >= 0; i--) {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      const k = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+      const b = byM[k] || { h: 0, kc: 0 };
+      series.push({ key: k, mi: d.getMonth(), rate: b.h > 0 ? b.kc / b.h : null, hours: b.h });
+    }
+    return { series, count: rows.length };
+  }, [workEntries]);
+
+  if (S.count === 0) {
     return (
       <div style={cardSt}>
-        <div style={{ ...lblSt, marginBottom: 8 }}>Ziskovost zakázek</div>
+        <div style={{ ...lblSt, marginBottom: 8 }}>Hodnota tvé hodiny</div>
         <div style={{ fontSize: 13, color: "var(--mut)", padding: "10px 0 4px", lineHeight: 1.6 }}>
-          Zatím nemáš dost záznamů s vyplněnými reálnými hodinami — jakmile jich přibude (pole „reálné hodiny" ve výkazu práce),
-          objeví se tu analýza ziskovosti: kolik skutečně vyděláváš na hodinu odpracovaného času oproti fakturované sazbě.
+          Zatím nemáš dost záznamů s vyplněnými reálnými hodinami — jakmile jich přibude (pole „reálné hodiny" ve výkazu
+          práce), objeví se tu, kolik korun ti vydělá jedna skutečně odpracovaná hodina, měsíc po měsíci.
         </div>
       </div>
     );
   }
 
-  // Efektivní hodinovka — počítá se ze VŠECH záznamů s reálnými hodinami (vč. paušálů): co skutečně vydělávám na hodinu práce.
-  const totalReal   = withReal.reduce((s, e) => s + (e.real_hours || 0), 0);
-  // sleva (discount_amount) se musí odečíst — jinak "efektivní hodinovka" ukazuje výdělek
-  // i za úkony, kde klient díky slevě fakticky zaplatil méně (nebo nic).
-  const netAmt = e => Math.max((e.amount || (e.hours || 0) * (e.rate || 0)) - (Number(e.discount_amount) || 0), 0);
-  const totalAmount = withReal.reduce((s, e) => s + netAmt(e), 0);
-  const effRate  = totalReal > 0 ? totalAmount / totalReal : 0;
+  // Hlavní číslo = poslední měsíc, který má aspoň 2 h reálné práce. Prvních pár dní
+  // měsíce je vzorek příliš malý a hodinovka by skákala o tisíce.
+  const solid = [...S.series].reverse().find(m => m.hours >= 2) || null;
+  const rest  = S.series.filter(m => m.rate != null && m.key !== (solid && solid.key));
+  const avg   = rest.length ? rest.reduce((s, m) => s + m.rate, 0) / rest.length : null;
+  const diff  = (solid && avg != null) ? solid.rate - avg : null;
 
-  // Nominální sazba a Ziskovost — jen z hodinových záznamů (paušál nemá "fakturované hodiny", takže by zkresloval poměr).
-  const totalBilled     = hourlyEntries.reduce((s, e) => s + (e.hours || 0), 0);
-  const totalRealHourly = hourlyEntries.reduce((s, e) => s + (e.real_hours || 0), 0);
-  const hourlyAmount    = hourlyEntries.reduce((s, e) => s + netAmt(e), 0);
-  const nomRate  = totalBilled     > 0 ? hourlyAmount / totalBilled     : 0;
-  const ratioAll = totalRealHourly > 0 ? totalBilled / totalRealHourly : 0;
-
-  const rows = hourlyEntries
-    .map(e => ({ ...e, client: clients.find(c => c.id === e.client_id), ratio: e.real_hours > 0 ? e.hours / e.real_hours : 0 }))
-    .sort((a, b) => new Date(b.entry_date) - new Date(a.entry_date))
-    .slice(0, 10);
-
-  const best  = [...rows].sort((a, b) => b.ratio - a.ratio)[0];
-  const worst = [...rows].sort((a, b) => a.ratio - b.ratio)[0];
-  const pctColor = (r) => r >= 1.15 ? "#4A7C59" : r >= 0.9 ? "#A08350" : "#A8443C";
-  const fmtH = (h) => `${(h || 0).toLocaleString("cs-CZ", { maximumFractionDigits: 1 })} h`;
+  const vals = S.series.filter(m => m.rate != null).map(m => m.rate);
+  const top  = vals.length ? Math.max(...vals) : 1;
+  const H    = 62;
 
   return (
     <div style={cardSt}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 14 }}>
-        <div style={lblSt}>Ziskovost zakázek — reálné vs. fakturované hodiny</div>
-        <div style={{ fontSize: 10, color: "var(--mut)" }}>{withReal.length} záznamů s reálnými hodinami</div>
+        <div style={lblSt}>Hodnota tvé hodiny</div>
+        <div style={{ fontSize: 10, color: "var(--mut)" }}>{S.count} záznamů s reálnými hodinami</div>
       </div>
 
-      {/* KPI řada */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 10, marginBottom: 18 }}>
-        <div style={{ background: "#F0FDF4", border: "1px solid #BBF7D0", borderRadius: 12, padding: "12px 16px" }}>
-          <div style={{ fontSize: 10, color: "#065F46", marginBottom: 3 }}>Efektivní hodinovka</div>
-          <div style={{ fontFamily: "Fraunces,serif", fontSize: 20, fontWeight: 300, color: "#4A7C59" }}>{fmtKc(effRate)}/h</div>
-          <div style={{ fontSize: 10, color: "#065F46", marginTop: 3 }}>výdělek na reálně odpracovanou hodinu</div>
-        </div>
-        <div style={{ background: "#F7F5FF", border: "1px solid #DDD6FE", borderRadius: 12, padding: "12px 16px" }}>
-          <div style={{ fontSize: 10, color: "#5B21B6", marginBottom: 3 }}>Nominální sazba</div>
-          <div style={{ fontFamily: "Fraunces,serif", fontSize: 20, fontWeight: 300, color: "#7C3AED" }}>{fmtKc(nomRate)}/h</div>
-          <div style={{ fontSize: 10, color: "#5B21B6", marginTop: 3 }}>vážený průměr fakturované hodinovky</div>
-        </div>
-        <div style={{ background: ratioAll >= 1 ? "#F0FDF4" : "#FEF2F2", border: `1px solid ${ratioAll >= 1 ? "#BBF7D0" : "#FECACA"}`, borderRadius: 12, padding: "12px 16px" }}>
-          <div style={{ fontSize: 10, color: ratioAll >= 1 ? "#065F46" : "#991B1B", marginBottom: 3 }}>Ziskovost (fakt. ÷ reálně)</div>
-          <div style={{ fontFamily: "Fraunces,serif", fontSize: 20, fontWeight: 300, color: ratioAll >= 1 ? "#4A7C59" : "#A8443C" }}>{(ratioAll * 100).toFixed(0)} %</div>
-          <div style={{ fontSize: 10, color: ratioAll >= 1 ? "#065F46" : "#991B1B", marginTop: 3 }}>{fmtH(totalBilled)} fakt. · {fmtH(totalReal)} reálně</div>
-        </div>
-      </div>
-
-      {/* Poslední zakázky — karta na každý záznam */}
-      <div style={{ fontSize: 9, letterSpacing: ".18em", textTransform: "uppercase", color: "var(--mut)", fontWeight: 600, marginBottom: 9 }}>
-        Poslední zakázky · fakturováno vs. reálně odpracováno
-      </div>
-      <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
-        {rows.map((r, i) => {
-          const ratio = r.ratio;
-          const pct = (ratio * 100).toFixed(0);
-          const col = pctColor(ratio);
-          const desc = r.description || r.work_type || "";
-          const billedW = Math.min(100, (r.hours / (r.real_hours || r.hours || 1)) * 100);
-          return (
-            <div key={i} style={{ background: "#FAFAFA", border: "1px solid var(--line)", borderRadius: 10, padding: "9px 13px", display: "flex", gap: 12, alignItems: "center" }}>
-              {/* Ziskovost badge */}
-              <div style={{ width: 46, flexShrink: 0, textAlign: "center" }}>
-                <div style={{ fontSize: 15, fontWeight: 700, color: col, lineHeight: 1 }}>{pct} %</div>
-                <div style={{ fontSize: 8.5, color: col, marginTop: 2, fontWeight: 600 }}>zisk.</div>
-              </div>
-              {/* Info */}
-              <div style={{ flex: 1, overflow: "hidden" }}>
-                <div style={{ display: "flex", alignItems: "baseline", gap: 6, flexWrap: "wrap" }}>
-                  <span style={{ fontSize: 12, fontWeight: 600, color: "var(--ink)" }}>{r.client?.name || "—"}</span>
-                  <span style={{ fontSize: 9.5, color: "var(--mut)" }}>{fmtDate(r.entry_date)}</span>
-                </div>
-                {desc && (
-                  <div style={{ fontSize: 11, color: "var(--txt)", marginTop: 1, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{desc}</div>
-                )}
-                {/* Hodiny — vizuální poměr */}
-                <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 5 }}>
-                  <div style={{ width: 36, fontSize: 9, color: "#7C3AED", fontWeight: 600 }}>{fmtH(r.hours)}</div>
-                  <div style={{ flex: 1, height: 5, borderRadius: 3, background: "var(--line)", overflow: "hidden", position: "relative" }}>
-                    <div style={{ position: "absolute", left: 0, top: 0, height: "100%", width: `${billedW}%`, background: col, borderRadius: 3, opacity: .75 }} />
-                    <div style={{ position: "absolute", left: 0, top: 0, height: "100%", width: "100%", borderRadius: 3, background: "transparent", outline: "none" }} />
-                  </div>
-                  <div style={{ width: 36, fontSize: 9, color: "var(--mut)", textAlign: "right" }}>{fmtH(r.real_hours)}</div>
-                </div>
-                <div style={{ display: "flex", justifyContent: "space-between", marginTop: 1 }}>
-                  <span style={{ fontSize: 8.5, color: "#7C3AED" }}>fakt.</span>
-                  <span style={{ fontSize: 8.5, color: "var(--mut)" }}>reálně</span>
-                </div>
-              </div>
-            </div>
-          );
-        })}
-      </div>
-
-      {(best || worst) && (
-        <div style={{ display: "flex", gap: 14, marginTop: 16, paddingTop: 14, borderTop: "1px solid var(--line)" }}>
-          {best && (
-            <div style={{ flex: 1 }}>
-              <div style={{ fontSize: 9.5, color: "#065F46", fontWeight: 600, marginBottom: 2 }}>🏆 Nejziskovější</div>
-              <div style={{ fontSize: 11.5, color: "var(--txt)" }}>{best.client?.name || "—"} · {(best.ratio * 100).toFixed(0)} % ({fmtH(best.hours)} fakt. / {fmtH(best.real_hours)} reálně)</div>
-            </div>
-          )}
-          {worst && worst !== best && (
-            <div style={{ flex: 1 }}>
-              <div style={{ fontSize: 9.5, color: "#991B1B", fontWeight: 600, marginBottom: 2 }}>⏳ Nejnáročnější</div>
-              <div style={{ fontSize: 11.5, color: "var(--txt)" }}>{worst.client?.name || "—"} · {(worst.ratio * 100).toFixed(0)} % ({fmtH(worst.hours)} fakt. / {fmtH(worst.real_hours)} reálně)</div>
+      <div style={{ display: "flex", alignItems: "flex-end", gap: 30 }}>
+        <div style={{ flexShrink: 0, minWidth: 176 }}>
+          <div style={bpHero(38, BP.indigoInk)}>
+            {solid ? fmtKc(Math.round(solid.rate)) : "—"}
+            <span style={{ fontSize: 19, color: "var(--mut)" }}> / h</span>
+          </div>
+          <div style={{ fontSize: 11, color: "var(--mut)", marginTop: 6, lineHeight: 1.5 }}>
+            {solid ? `${MN[solid.mi]} · ${solid.hours.toLocaleString("cs-CZ", { maximumFractionDigits: 1 })} h práce` : "zatím bez dat"}
+          </div>
+          {diff != null && (
+            <div style={{ fontSize: 11, color: diff >= 0 ? BP.up : "var(--mut)", marginTop: 4, lineHeight: 1.5 }}>
+              {diff >= 0
+                ? `o ${fmtKc(Math.round(diff))} výš než průměr ostatních měsíců`
+                : `průměr ostatních měsíců ${fmtKc(Math.round(avg))}/h`}
             </div>
           )}
         </div>
-      )}
+
+        <div style={{ flex: 1, display: "flex", alignItems: "flex-end", gap: 7 }}>
+          {S.series.map((m) => {
+            const has = m.rate != null;
+            const h = has ? Math.max(4, Math.round((m.rate / top) * H)) : 2;
+            const isMain = solid && m.key === solid.key;
+            return (
+              <div key={m.key} style={{ flex: 1, textAlign: "center" }}>
+                <div style={{ fontSize: 9, color: isMain ? BP.indigoDeep : "transparent", marginBottom: 3, whiteSpace: "nowrap" }}>
+                  {has ? Math.round(m.rate / 100) / 10 + " tis." : "—"}
+                </div>
+                <div style={{
+                  height: h, borderRadius: 2,
+                  background: isMain ? BP.indigo : (has ? BP.sand : "var(--line)"),
+                  opacity: isMain ? 1 : (has ? .45 : 1),
+                }} />
+                <div style={{ fontSize: 9, color: isMain ? BP.indigoDeep : "var(--mut)", marginTop: 5 }}>{MN[m.mi]}</div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
     </div>
   );
 }
@@ -11954,7 +12012,7 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
 
       {/* ── ZISKOVOST ZAKÁZEK (nahradilo DPFO/úvěry — ty jsou teď v sekci Ostatní) ── */}
       <Panel id="ziskovost">
-        <ZiskovostPanel workEntries={workEntries} clients={clients} />
+        <ZiskovostPanel workEntries={workEntries} />
       </Panel>
 
       {/* ── CLAUDE AI ── */}
