@@ -1085,10 +1085,27 @@ function ekuStav(e) {
 }
 
 /* ─── AML osoby ─── */
+/* Role osoby ve straně úschovy.
+   NOSITELÉ tvoří samotnou stranu a skládá se z nich její název — může to být fyzická
+   i právnická osoba, klidně obojí najednou (spoluvlastníci: s.r.o. a fyzická osoba).
+   PODPŮRNÉ osoby stranou nejsou, jen se u nich provádí identifikace (jednatelé apod.).
+   "strana" je legacy hodnota z první verze — chová se jako fyzická osoba. */
+const AML_ROLE_NOSITELE = ["fyzická osoba", "SJM manžel/ka", "právnická osoba", "strana"];
 const AML_ROLES = [
-  "strana", "SJM manžel/ka", "člen statutárního orgánu",
-  "skutečný majitel", "zmocněnec", "jiná osoba",
+  "fyzická osoba", "SJM manžel/ka", "právnická osoba",
+  "člen statutárního orgánu", "skutečný majitel", "zmocněnec", "jiná osoba",
 ];
+/* Zdroje peněz u tranše složitele — plní zároveň § 9 přezkoumání zdroje peněžních prostředků */
+const TRANCHE_SOURCES = [
+  "vlastní zdroje", "hypoteční úvěr", "jiný úvěr",
+  "prodej nemovitosti", "dar", "dědictví", "jiný zdroj",
+];
+const jeNositel = (role) => AML_ROLE_NOSITELE.includes(role || "fyzická osoba");
+/* Název strany se skládá ze jmen nositelů — doslovně, žádné skloňování do množného čísla. */
+function nazevStranyZOsob(osoby) {
+  const jm = osoby.filter(o => jeNositel(o.role)).map(o => (o.person_name || "").trim()).filter(Boolean);
+  return jm.join(" a ");
+}
 
 async function upsertAmlPerson(p) {
   const clean = { ...p };
@@ -1140,6 +1157,7 @@ async function upsertEscrowTranche(t) {
   const clean = { ...t };
   clean.aml_done = !!clean.aml_done;
   ["received_date","paid_date","aml_date"].forEach(k => { if (clean[k] === "") clean[k] = null; });
+  if (clean.source === "") clean.source = null;
   const { error } = await supabase.from("escrow_tranches").upsert(clean);
   if (error) throw error;
 }
@@ -5676,11 +5694,10 @@ function EscrowForm({ init, onSave, onCancel, saving, clients = [] }) {
   });
   const [newT, setNewT] = useState({
     party_type: "složitel", subject: "osoba", party_name: "",
-    name2: "", ico: "", amount: "", received_date: "",
+    name2: "", ico: "", amount: "", received_date: "", source: "",
   });
   const [aresBusy, setAresBusy] = useState(false);
   const [aresNote, setAresNote] = useState("");
-  const [editingNames, setEditingNames] = useState({});
 
   // AML osoby — samostatná evidence, nezávislá na platebních řádcích
   const [amlPersons, setAmlPersons] = useState(() => {
@@ -5699,36 +5716,39 @@ function EscrowForm({ init, onSave, onCancel, saving, clients = [] }) {
     const jm1 = newT.party_name.trim();
     if (!jm1) return;
     const jm2 = (newT.name2 || "").trim();
-    // Název platební strany: u SJM spojíme obě jména, u firmy zůstává název firmy
-    const nazevStrany = (newT.subject === "sjm" && jm2) ? `${jm1} a ${jm2}` : jm1;
 
-    const trancheId = uid();
+    // Nositelé strany — z nich se skládá její název
+    const zaklad = (jmeno, role) => ({
+      id: uid(), escrow_id: d.id, person_name: jmeno, role,
+      aml_done: false, aml_date: null, note: null,
+    });
+    let osoby;
+    if (newT.subject === "sjm") {
+      osoby = [zaklad(jm1, "fyzická osoba"), zaklad(jm2, "SJM manžel/ka")];
+    } else if (newT.subject === "firma") {
+      osoby = [zaklad(jm1, "právnická osoba")];
+      (aresClenove.length ? aresClenove : [{ name: "" }])
+        .forEach(c => osoby.push(zaklad(c.name, "člen statutárního orgánu")));
+      osoby.push(zaklad("", "skutečný majitel"));
+    } else {
+      osoby = [zaklad(jm1, "fyzická osoba")];
+    }
+    const nazevStrany = nazevStranyZOsob(osoby) || jm1;
+
     setTranches(p => [...p, {
-      id: trancheId, escrow_id: d.id,
+      id: uid(), escrow_id: d.id,
       party_type: newT.party_type, party_name: nazevStrany,
       amount: Number(newT.amount) || 0,
       received_date: newT.received_date || null,
+      source: newT.party_type === "složitel" ? (newT.source || "") : "",
       sort_order: p.length,
     }]);
+    setAmlPersons(prev => [...prev, ...osoby.map((o, i) => ({
+      ...o, escrow_id: d.id, party_name: nazevStrany, party_type: newT.party_type,
+      sort_order: prev.length + i,
+    }))]);
 
-    // AML osoby — kolik jich pod stranou vzniká, řídí typ subjektu
-    const zaklad = (jmeno, role) => ({
-      id: uid(), escrow_id: d.id, party_name: nazevStrany, party_type: newT.party_type,
-      person_name: jmeno, role, aml_done: false, aml_date: null, note: null,
-    });
-    let osoby = [];
-    if (newT.subject === "sjm") {
-      osoby = [zaklad(jm1, "strana"), zaklad(jm2, "SJM manžel/ka")];
-    } else if (newT.subject === "firma") {
-      osoby = (aresClenove.length ? aresClenove : [{ name: "", funkce: "" }])
-        .map(c => zaklad(c.name, "člen statutárního orgánu"));
-      osoby.push(zaklad("", "skutečný majitel"));
-    } else {
-      osoby = [zaklad(jm1, "strana")];
-    }
-    setAmlPersons(prev => [...prev, ...osoby.map((o, i) => ({ ...o, sort_order: prev.length + i }))]);
-
-    setNewT({ party_type: "složitel", subject: "osoba", party_name: "", name2: "", ico: "", amount: "", received_date: "" });
+    setNewT({ party_type: "složitel", subject: "osoba", party_name: "", name2: "", ico: "", amount: "", received_date: "", source: "" });
     setAresClenove([]); setAresNote("");
   };
 
@@ -5780,7 +5800,7 @@ function EscrowForm({ init, onSave, onCancel, saving, clients = [] }) {
       const have = new Set(prev.map(p => p.party_name));
       const add = strany.filter(s => !have.has(s.nm)).map((s, i) => ({
         id: uid(), escrow_id: d.id, party_name: s.nm, party_type: s.type,
-        person_name: s.nm, role: "strana", aml_done: s.done, aml_date: s.date,
+        person_name: s.nm, role: "fyzická osoba", aml_done: s.done, aml_date: s.date,
         sort_order: prev.length + i, note: null,
       }));
       return add.length ? [...prev, ...add] : prev;
@@ -5798,17 +5818,6 @@ function EscrowForm({ init, onSave, onCancel, saving, clients = [] }) {
         aml_done: !!src, aml_date: src ? (src.aml_date || null) : null,
       }];
     });
-  };
-
-  // Přejmenovat všechny tranše osoby najednou
-  const renameOprPerson = (oldName, newName) => {
-    if (!newName.trim() || newName === oldName) return;
-    setAmlPersons(ps => ps.map(p => p.party_name === oldName
-      ? { ...p, party_name: newName, person_name: (p.role === "strana" && p.person_name === oldName) ? newName : p.person_name }
-      : p));
-    setTranches(prev => prev.map(t =>
-      t.party_type === 'oprávněný' && t.party_name === oldName ? { ...t, party_name: newName } : t
-    ));
   };
 
   const [toast, setToast] = useState(null);
@@ -5927,10 +5936,13 @@ function EscrowForm({ init, onSave, onCancel, saving, clients = [] }) {
                 aml_date: e.target.checked ? (p.aml_date || dnesIso()) : null,
               })}
               style={{ width: 17, height: 17, margin: 0, accentColor: "#4A7C59", cursor: "pointer", flexShrink: 0 }} />
-            <input value={p.person_name || ""} placeholder="Jméno a příjmení" list="maux-klienti-list"
+            <input value={p.person_name || ""} list="maux-klienti-list"
+              placeholder={p.role === "právnická osoba" ? "Název firmy" : "Jméno a příjmení"}
               onChange={e => updatePerson(p.id, { person_name: e.target.value })}
+              onBlur={() => prepocitejNazev(p.party_name)}
               style={{ ...S.input, flex: 1, minWidth: 130, fontSize: 13, background: "#fff" }} />
-            <select value={p.role || "strana"} onChange={e => updatePerson(p.id, { role: e.target.value })}
+            <select value={AML_ROLES.includes(p.role) ? p.role : "fyzická osoba"}
+              onChange={e => { updatePerson(p.id, { role: e.target.value }); setTimeout(() => prepocitejNazev(p.party_name), 0); }}
               style={{ ...S.input, width: 178, flexShrink: 0, fontSize: 12, cursor: "pointer", background: "#fff" }}>
               {AML_ROLES.map(r => <option key={r} value={r}>{r}</option>)}
             </select>
@@ -5939,10 +5951,10 @@ function EscrowForm({ init, onSave, onCancel, saving, clients = [] }) {
                   onChange={e => updatePerson(p.id, { aml_date: e.target.value || null })}
                   style={{ ...S.input, width: 134, flexShrink: 0, fontSize: 12, background: "#fff" }} />
               : <span style={{ width: 134, flexShrink: 0, fontSize: 11, fontWeight: 700, color: "#A8443C", textAlign: "center" }}>identifikace chybí</span>}
-            {p.role !== "strana" && (
+            {osoby.filter(x => jeNositel(x.role)).length > 1 || !jeNositel(p.role) ? (
               <button onClick={() => removePerson(p.id)} title="Odebrat osobu"
                 style={{ background: "none", border: "none", color: "#D1D5DB", cursor: "pointer", fontSize: 16, padding: "0 2px", flexShrink: 0 }}>×</button>
-            )}
+            ) : <span style={{ width: 18, flexShrink: 0 }} />}
           </div>
         ))}
         <div style={{ padding: "6px 13px" }}>
@@ -5982,12 +5994,51 @@ function EscrowForm({ init, onSave, onCancel, saving, clients = [] }) {
     return `${x.getFullYear()}-${String(x.getMonth()+1).padStart(2,'0')}-${String(x.getDate()).padStart(2,'0')}`;
   };
   const updatePerson = (id, patch) => setAmlPersons(prev => prev.map(p => p.id === id ? { ...p, ...patch } : p));
-  const addPerson = (s, role) => setAmlPersons(prev => [...prev, {
-    id: uid(), escrow_id: d.id, party_name: s.name, party_type: s.isSloz ? 'složitel' : 'oprávněný',
-    person_name: "", role: role || "SJM manžel/ka", aml_done: false, aml_date: null,
-    sort_order: prev.length, note: null,
-  }]);
-  const removePerson = (id) => setAmlPersons(prev => prev.filter(p => p.id !== id));
+  const addPerson = (s, role) => setAmlPersons(prev => {
+    const stavajici = prev.filter(o => o.party_name === s.name);
+    // Má-li strana jen jednoho nositele a je to fyzická osoba, nejčastější doplněk je manžel/ka;
+    // u firmy je to člen statutárního orgánu.
+    const maPO = stavajici.some(o => o.role === "právnická osoba");
+    const vychozi = role || (maPO ? "člen statutárního orgánu" : "SJM manžel/ka");
+    return [...prev, {
+      id: uid(), escrow_id: d.id, party_name: s.name, party_type: s.isSloz ? 'složitel' : 'oprávněný',
+      person_name: "", role: vychozi, aml_done: false, aml_date: null,
+      sort_order: prev.length, note: null,
+    }];
+  });
+  const removePerson = (id) => { setAmlPersons(prev => prev.filter(p => p.id !== id)); setTimeout(prepocitejVsechny, 0); };
+
+  /* Název strany je odvozený ze jmen nositelů. Volá se po doeditování, ne po každé klávese —
+     jinak by se strana přejmenovávala při každém písmenu. */
+  const prepocitejNazev = (stara) => {
+    setAmlPersons(prevOsoby => {
+      const osoby = prevOsoby.filter(o => o.party_name === stara);
+      const novy = nazevStranyZOsob(osoby);
+      if (!novy || novy === stara) return prevOsoby;
+      setTranches(prevT => prevT.map(t => t.party_name === stara ? { ...t, party_name: novy } : t));
+      return prevOsoby.map(o => o.party_name === stara ? { ...o, party_name: novy } : o);
+    });
+  };
+  const prepocitejVsechny = () => {
+    const jmena = [...new Set(amlPersons.map(o => o.party_name))];
+    jmena.forEach(prepocitejNazev);
+  };
+
+  // Seskupit složitele po stranách — jedna strana může mít víc tranší (vlastní zdroje + úvěr)
+  const slozGroups = {};
+  sloz.forEach(t => {
+    const k = t.party_name || '(bez jména)';
+    if (!slozGroups[k]) slozGroups[k] = [];
+    slozGroups[k].push(t);
+  });
+
+  const addSlozPayment = (stranaName) => {
+    setTranches(prev => [...prev, {
+      id: uid(), escrow_id: d.id, party_type: 'složitel', party_name: stranaName,
+      amount: 0, received_date: null, paid_date: null, is_paid: false,
+      source: "", sort_order: prev.length,
+    }]);
+  };
 
   // Seskupit oprávněné po osobách
   const oprGroups = {};
@@ -6173,28 +6224,85 @@ function EscrowForm({ init, onSave, onCancel, saving, clients = [] }) {
         </div>
         <div style={S.cardBody}>
 
-          {/* SLOŽITELÉ — karta na stranu, pod ní osoby k identifikaci */}
-          {sloz.length > 0 && (
+          {/* SLOŽITELÉ — strana = seznam nositelů, pod ní osoby a platební log */}
+          {Object.keys(slozGroups).length > 0 && (
             <div style={{ marginBottom: 18 }}>
               <div style={{ fontSize: 9, letterSpacing: ".15em", textTransform: "uppercase", fontWeight: 700, color: "#3730A3", marginBottom: 10 }}>Složitelé</div>
-              {sloz.map(t => (
-                <div key={t.id} style={{ marginBottom: 12, border: "1.5px solid #DDD9F3", borderRadius: 10, overflow: "hidden" }}>
-                  <div style={{ background: "#F5F4FC", padding: "10px 13px", display: "flex", alignItems: "center", gap: 10, borderBottom: "1px solid #E9E6F7" }}>
-                    <input style={{ ...S.input, flex: 1, minWidth: 150, fontSize: 14, fontWeight: 600, background: "#fff" }}
-                      value={t.party_name}
-                      onChange={e => updateTranche(t.id, { party_name: e.target.value })} />
-                    <input type="number" style={{ ...S.input, width: 160, textAlign: "right", fontFamily: "Fraunces,serif", fontSize: 15, background: "#fff" }}
-                      value={t.amount || ""} placeholder="0"
-                      onChange={e => updateTranche(t.id, { amount: Number(e.target.value) || 0 })} />
-                    <input type="date" style={{ ...S.input, width: 148, fontSize: 12, background: "#fff" }}
-                      value={t.received_date || ""}
-                      onChange={e => updateTranche(t.id, { received_date: e.target.value || null })} />
-                    <button onClick={() => removeTranche(t.id)} title="Odebrat stranu"
-                      style={{ background: "none", border: "none", color: "#D1D5DB", cursor: "pointer", fontSize: 17, padding: "0 2px" }}>×</button>
+              {Object.entries(slozGroups).map(([stranaName, rows]) => {
+                const celkem = rows.reduce((s, t) => s + (t.amount || 0), 0);
+                return (
+                  <div key={stranaName} style={{ marginBottom: 13, border: "1.5px solid #DDD9F3", borderRadius: 10, overflow: "hidden" }}>
+                    <div style={{ background: "#F5F4FC", padding: "10px 13px", display: "flex", alignItems: "center", gap: 12, borderBottom: "1px solid #E9E6F7" }}>
+                      <span style={{ flex: 1, minWidth: 0, fontSize: 14, fontWeight: 600, color: "#111827" }}>
+                        {stranaName || "(bez jména)"}
+                      </span>
+                      <span style={{ fontSize: 11, color: "#374151" }}>
+                        Vloženo: <strong style={{ fontFamily: "Fraunces,serif", fontSize: 14 }}>{fmtKc(celkem)}</strong>
+                      </span>
+                    </div>
+
+                    {renderAmlOsoby(stranaName, "složitel")}
+
+                    <table style={S.tbl}>
+                      <thead>
+                        <tr>
+                          <th style={{ ...S.th, width: 30 }}>#</th>
+                          <th style={S.th}>Zdroj peněz</th>
+                          <th style={{ ...S.th, textAlign: "right" }}>Částka (Kč)</th>
+                          <th style={S.th}>Datum přijetí</th>
+                          <th style={{ ...S.th, width: 30 }}></th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {rows.map((t, idx) => (
+                          <tr key={t.id}>
+                            <td style={{ ...S.td, color: "#9CA3AF", fontSize: 11 }}>{idx + 1}</td>
+                            <td style={S.td}>
+                              <select style={{ ...S.input, width: 172, fontSize: 12, cursor: "pointer" }}
+                                value={t.source || ""}
+                                onChange={e => updateTranche(t.id, { source: e.target.value })}>
+                                <option value="">— zdroj neuveden —</option>
+                                {TRANCHE_SOURCES.map(s => <option key={s} value={s}>{s}</option>)}
+                              </select>
+                            </td>
+                            <td style={{ ...S.td, textAlign: "right" }}>
+                              <input type="number" style={{ ...S.input, width: 150, textAlign: "right", fontFamily: "Fraunces,serif", fontSize: 15 }}
+                                value={t.amount || ""} placeholder="0"
+                                onChange={e => updateTranche(t.id, { amount: Number(e.target.value) || 0 })} />
+                            </td>
+                            <td style={S.td}>
+                              <input type="date" style={{ ...S.input, width: 148, fontSize: 12 }}
+                                value={t.received_date || ""}
+                                onChange={e => updateTranche(t.id, { received_date: e.target.value || null })} />
+                            </td>
+                            <td style={S.td}>
+                              {rows.length > 1 && (
+                                <button onClick={() => removeTranche(t.id)} title="Odebrat platbu"
+                                  style={{ background: "none", border: "none", color: "#D1D5DB", cursor: "pointer", fontSize: 16, padding: "2px 4px" }}>×</button>
+                              )}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+
+                    <div style={{ padding: "7px 13px", display: "flex", gap: 8, alignItems: "center" }}>
+                      <button onClick={() => addSlozPayment(stranaName)}
+                        style={{ fontSize: 11, fontWeight: 600, color: "#3518a4", background: "#fff", border: "1px solid #E0DDF0", borderRadius: 6, padding: "4px 11px", cursor: "pointer" }}>
+                        + přidat platbu
+                      </button>
+                      <span style={{ fontSize: 10, color: "#9CA3AF" }}>
+                        Vlastní zdroje a hypotéka jsou dvě platby jedné strany.
+                      </span>
+                      <span style={{ flex: 1 }} />
+                      <button onClick={() => rows.forEach(t => removeTranche(t.id))} title="Odebrat celou stranu"
+                        style={{ background: "none", border: "none", color: "#D1D5DB", cursor: "pointer", fontSize: 11, padding: "2px 4px" }}>
+                        odebrat stranu
+                      </button>
+                    </div>
                   </div>
-                  {renderAmlOsoby(t.party_name, "složitel")}
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
 
@@ -6208,22 +6316,14 @@ function EscrowForm({ init, onSave, onCancel, saving, clients = [] }) {
                 const totalNarok = rows.reduce((s, t) => s + (t.amount || 0), 0);
                 const totalPaid  = rows.filter(t => t.is_paid).reduce((s, t) => s + (t.amount || 0), 0);
                 const remaining  = totalNarok - totalPaid;
-                const draftName  = editingNames[personName];
 
                 return (
                   <div key={personName} style={{ marginBottom: 14, border: "1.5px solid #A7F3D0", borderRadius: 10, overflow: "hidden" }}>
                     {/* Hlavička osoby */}
                     <div style={{ background: "#ECFDF5", padding: "10px 14px", display: "flex", alignItems: "center", gap: 14, borderBottom: "1px solid #D1FAE5" }}>
-                      <input
-                        style={{ ...S.input, width: 210, fontSize: 14, fontWeight: 600, background: "transparent", border: "1px solid #6EE7B7", borderRadius: 6 }}
-                        value={draftName !== undefined ? draftName : personName}
-                        onChange={e => setEditingNames(p => ({ ...p, [personName]: e.target.value }))}
-                        onBlur={e => {
-                          const v = e.target.value.trim();
-                          if (v && v !== personName) renameOprPerson(personName, v);
-                          setEditingNames(p => { const n = { ...p }; delete n[personName]; return n; });
-                        }}
-                      />
+                      <span style={{ width: 210, fontSize: 14, fontWeight: 600, color: "#111827", flexShrink: 0 }}>
+                        {personName || "(bez jména)"}
+                      </span>
                       <div style={{ flex: 1, display: "flex", gap: 18, fontSize: 11, flexWrap: "wrap" }}>
                         <span style={{ color: "#374151" }}>Nárok: <strong style={{ fontFamily: "Fraunces,serif", fontSize: 13 }}>{fmtKc(totalNarok)}</strong></span>
                         {totalPaid > 0 && <span style={{ color: "#4A7C59" }}>Vyplaceno: <strong style={{ fontFamily: "Fraunces,serif", fontSize: 13 }}>{fmtKc(totalPaid)}</strong></span>}
@@ -6353,8 +6453,15 @@ function EscrowForm({ init, onSave, onCancel, saving, clients = [] }) {
                 onChange={e => setNewT(p => ({ ...p, amount: e.target.value }))}
                 onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addTranche(); }}} />
               {newT.party_type === 'složitel' && (
-                <input style={{ ...S.input, width: 160, fontSize: 12 }} type="date" value={newT.received_date}
+                <input style={{ ...S.input, width: 150, fontSize: 12 }} type="date" value={newT.received_date}
                   onChange={e => setNewT(p => ({ ...p, received_date: e.target.value }))} />
+              )}
+              {newT.party_type === 'složitel' && (
+                <select style={{ ...S.input, width: 170, fontSize: 12, cursor: "pointer" }} value={newT.source}
+                  onChange={e => setNewT(p => ({ ...p, source: e.target.value }))}>
+                  <option value="">— zdroj peněz —</option>
+                  {TRANCHE_SOURCES.map(s => <option key={s} value={s}>{s}</option>)}
+                </select>
               )}
               <button onClick={addTranche}
                 style={{ padding: "8px 18px", borderRadius: 8, background: "#3518a4", color: "#fff", border: "none", fontSize: 12, fontWeight: 700, cursor: "pointer", whiteSpace: "nowrap" }}>
