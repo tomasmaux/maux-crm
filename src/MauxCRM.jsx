@@ -1056,7 +1056,14 @@ async function fetchEscrows() {
 /* Pořadí podle usn. představenstva ČAK č. 7/2004 ve znění od 1. 1. 2026:
    1) oznámit úschovu PŘED přijetím peněz, 2) odeslat datum přijetí, 3) odeslat datum vyplacení.
    Nárok klienta na náhradu z Garančního fondu vzniká jen při řádném oznámení. */
+const EKU_OD = "2026-01-01"; // povinnost hlásit PŘED přijetím peněz platí od 1. 1. 2026
 function ekuStav(e) {
+  // Historické úschovy se nesledují: uzavřené, a ty, kam peníze dorazily před účinností
+  // nové stavovské úpravy — u nich už oznámení „před přijetím" nelze zpětně splnit.
+  const historicka = e.status === "ukončeno" || (e.date_received && e.date_received < EKU_OD);
+  if (historicka) {
+    return { sleduje: false, kroky: [], splneno: 0, ocekavano: 0, hotovo: true, vada: "" };
+  }
   const kroky = [
     { key: "eku_announced",     label: "Úschova oznámena do EKÚ", hint: "před přijetím peněz", value: e.eku_announced || "" },
     { key: "eku_received_sent", label: "Odesláno datum přijetí",  hint: "u opakovaného plnění první platba", value: e.eku_received_sent || "" },
@@ -1074,7 +1081,7 @@ function ekuStav(e) {
   if (e.date_received && !e.eku_announced) vada = "Peníze přijaty, ale úschova nebyla oznámena do EKÚ.";
   else if (e.eku_announced && e.date_received && e.eku_announced > e.date_received)
     vada = "Oznámení do EKÚ je datováno až po přijetí peněz — nárok klienta na Garanční fond tím může padnout.";
-  return { kroky, splneno, ocekavano, hotovo: ocekavano > 0 && splneno === ocekavano, vada };
+  return { sleduje: true, kroky, splneno, ocekavano, hotovo: ocekavano > 0 && splneno === ocekavano, vada };
 }
 
 /* ─── AML osoby ─── */
@@ -5469,6 +5476,7 @@ function EscrowCard({ escrow, onEdit, onDelete, onMarkPaid, onPayment }) {
             })()}
             {(() => {
               const eku = ekuStav(escrow);
+              if (!eku.sleduje) return null;
               const title = eku.vada || (eku.hotovo ? "EKÚ nahlášeno" : `EKÚ: ${eku.splneno} z ${eku.ocekavano} kroků`);
               return eku.hotovo
                 ? <span title={title} style={{fontSize:9,padding:"2px 7px",borderRadius:4,background:"#F0FDF4",color:"#065F46",fontWeight:600}}>EKÚ ✓</span>
@@ -6068,6 +6076,19 @@ function EscrowForm({ init, onSave, onCancel, saving, clients = [] }) {
       {/* Karta EKÚ — hlášení do elektronické knihy úschov */}
       {(() => {
         const eku = ekuStav(d);
+        if (!eku.sleduje) return (
+          <div style={S.card}>
+            <div style={{ ...S.cardHead("#6B7280"), justifyContent: "space-between" }}>
+              <span style={S.cht}>EKÚ — elektronická kniha úschov</span>
+              <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: ".06em", padding: "3px 10px", borderRadius: 20, color: "#fff", background: "rgba(255,255,255,.14)" }}>
+                nesleduje se
+              </span>
+            </div>
+            <div style={{ ...S.cardBody, fontSize: 12, color: "#9CA3AF", lineHeight: 1.6 }}>
+              Historická úschova — buď je uzavřená, nebo peníze dorazily před 1. 1. 2026, kdy začala platit povinnost hlásit úschovu do EKÚ ještě před jejich přijetím. Zpětně už ji splnit nelze, takže ji appka nehlídá.
+            </div>
+          </div>
+        );
         return (
           <div style={S.card}>
             <div style={{ ...S.cardHead("#1c0a63"), justifyContent: "space-between" }}>
