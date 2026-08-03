@@ -5927,21 +5927,6 @@ function EscrowForm({ init, onSave, onCancel, saving }) {
                         {totalPaid > 0 && <span style={{ color: "#4A7C59" }}>Vyplaceno: <strong style={{ fontFamily: "Fraunces,serif", fontSize: 13 }}>{fmtKc(totalPaid)}</strong></span>}
                         {remaining > 0.5 && <span style={{ color: "#B45309" }}>Zbývá: <strong style={{ fontFamily: "Fraunces,serif", fontSize: 13 }}>{fmtKc(remaining)}</strong></span>}
                       </div>
-                      {/* AML stav — jen náhled, přepíná se v kartě AML nahoře */}
-                      {(() => {
-                        const amlDone = rows.every(t => !!t.aml_done);
-                        return (
-                          <span title="AML se zaškrtává v kartě „AML — identifikace stran“ nahoře" style={{
-                            fontSize: 9, fontWeight: 700, letterSpacing: ".08em", flexShrink: 0,
-                            color: amlDone ? "#4A7C59" : "#A8443C",
-                            background: amlDone ? "#DCFCE7" : "#FEF2F2",
-                            border: `1px solid ${amlDone ? "#A7F3D0" : "#FECACA"}`,
-                            borderRadius: 4, padding: "2px 7px",
-                          }}>
-                            {amlDone ? "AML ✓" : "AML ⚠"}
-                          </span>
-                        );
-                      })()}
                     </div>
 
                     {/* Tabulka plateb */}
@@ -6613,7 +6598,7 @@ function MajetekBar({ financeItems, onSaveFinance, invoices, dpfoMonths, loanTra
 }
 
 /* ─── ŽIVÝ VÝDĚLEK Z ÚSCHOV — náhrada za RUNWAY (dnes / včera / předevčírem / 7 dní) ─── */
-function EscrowLiveTile({ escrows, onNav }) {
+function EscrowLiveTile({ escrows, onNav, onOpenEscrow }) {
   const [, setTick] = useState(0);
   useEffect(() => {
     const iv = setInterval(() => setTick(t => t + 1), 1000);
@@ -6642,45 +6627,77 @@ function EscrowLiveTile({ escrows, onNav }) {
 
   // AML varování — OSOBY bez dokončené identifikace, ne tranše
   // (jeden oprávněný má klidně tři výplatní řádky — je to pořád jedna osoba)
-  const amlSeen = new Set();
-  const amlMissingItems = [];
+  const amlRows = [];
   (escrows || []).forEach(e => {
+    const seen = new Set();
+    const names = [];
     (e.escrow_tranches || []).forEach(t => {
       if (t.aml_done) return;
-      const name = (t.party_name || "").trim() || "?";
-      const key = e.id + "|" + name;
-      if (amlSeen.has(key)) return;
-      amlSeen.add(key);
-      amlMissingItems.push({ escrow: e.escrow_number, name, type: t.party_type });
+      const name = (t.party_name || "").trim() || "(bez jména)";
+      if (seen.has(name)) return;
+      seen.add(name);
+      names.push(name);
     });
+    if (!names.length) return;
+    const objem = (e.escrow_tranches || [])
+      .filter(t => t.party_type === 'složitel')
+      .reduce((s, t) => s + (t.amount || 0), 0);
+    amlRows.push({ esc: e, cislo: e.escrow_number || "(bez čísla)", names, objem, status: e.status || "" });
   });
-  const amlMissingEscrows = [...new Set(amlMissingItems.map(x => x.escrow))];
+  const amlMissingCount = amlRows.reduce((s, r) => s + r.names.length, 0);
 
   return (
     <div style={{display:"flex",flexDirection:"column",gap:0}}>
-    {amlMissingItems.length > 0 && (
+    {amlRows.length > 0 && (
       <div style={{
-        background:"#A8443C",
+        background:"var(--card)",
+        border:"1px solid #E8CFCB",
+        borderBottom:"none",
         borderRadius:"3px 3px 0 0",
-        padding:"10px 18px",
-        display:"flex",alignItems:"center",gap:12
+        overflow:"hidden"
       }}>
-        <div style={{flex:1,minWidth:0}}>
-          <div style={{fontSize:11,fontWeight:600,color:"#fff",letterSpacing:".04em"}}>
-            AML chybí u {amlMissingItems.length} {amlMissingItems.length===1?"osoby":(amlMissingItems.length<5?"osob":"osob")} v {amlMissingEscrows.length} {amlMissingEscrows.length===1?"úschově":(amlMissingEscrows.length<5?"úschovách":"úschovách")}
-          </div>
-          <div style={{fontSize:10,color:"rgba(255,255,255,.72)",marginTop:2,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
-            {amlMissingItems.slice(0,8).map(x => `${x.escrow}: ${x.name}`).join(" · ")}{amlMissingItems.length>8 ? ` · +${amlMissingItems.length-8} dalších` : ""}
-          </div>
+        <div style={{
+          padding:"11px 18px",
+          borderBottom:"1px solid #F2E3E1",
+          display:"flex",alignItems:"center",gap:9
+        }}>
+          <span style={{width:6,height:6,borderRadius:"50%",background:"#A8443C",flexShrink:0}} />
+          <span style={{fontSize:12,color:"#1F2937"}}>
+            AML k doplnění — <strong style={{fontWeight:700,color:"#A8443C"}}>{amlMissingCount} {amlMissingCount===1?"osoba":(amlMissingCount<5?"osoby":"osob")}</strong>
+          </span>
         </div>
-        {onNav && (
-          <button onClick={()=>onNav("uschovy")} style={{fontSize:10,fontWeight:600,color:"#fff",background:"rgba(255,255,255,.16)",border:"1px solid rgba(255,255,255,.3)",borderRadius:6,padding:"4px 10px",cursor:"pointer",whiteSpace:"nowrap",flexShrink:0}}>
-            Doplnit AML →
-          </button>
-        )}
+        {amlRows.map(r => (
+          <div key={r.esc.id} style={{
+            padding:"9px 18px",
+            borderBottom:"1px solid #F7F0EF",
+            display:"flex",alignItems:"center",gap:12
+          }}>
+            <div style={{flex:1,minWidth:0}}>
+              <div style={{fontSize:12.5,color:"#111827",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+                <strong style={{fontWeight:700}}>{r.cislo}</strong>
+                <span style={{color:"#6B7280"}}> · {r.names.join(", ")}</span>
+              </div>
+              <div style={{fontSize:10.5,color:"#9CA3AF",marginTop:1}}>
+                {r.status.replace(/_/g," ")}{r.objem > 0 ? ` · ${fmtKc(r.objem)}` : ""}
+              </div>
+            </div>
+            {onOpenEscrow && (
+              <button onClick={()=>onOpenEscrow(r.esc)} style={{
+                fontSize:10.5,fontWeight:600,color:"#A8443C",background:"#fff",
+                border:"1px solid #E8CFCB",borderRadius:6,padding:"4px 11px",
+                cursor:"pointer",whiteSpace:"nowrap",flexShrink:0
+              }}>
+                Otevřít →
+              </button>
+            )}
+          </div>
+        ))}
+        <div style={{padding:"7px 18px",fontSize:10,color:"#9CA3AF"}}>
+          Zmizí samo, jakmile je poslední osoba zaškrtnutá.
+        </div>
       </div>
     )}
-    <div style={{background:"var(--card)",border:"1px solid var(--line)",borderRadius:amlMissingItems.length>0?"0 0 3px 3px":"3px",padding:"24px 28px",display:"flex",alignItems:"center",gap:30,flexWrap:"wrap"}}>
+    <div style={{background:"var(--card)",border:"1px solid var(--line)",borderRadius:amlRows.length>0?"0 0 3px 3px":"3px",padding:"24px 28px",display:"flex",alignItems:"center",gap:30,flexWrap:"wrap"}}>
       <div style={{minWidth:230}}>
         <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,marginBottom:10}}>
           <div style={{display:"flex",alignItems:"center",gap:6}}>
@@ -16971,6 +16988,13 @@ export default function MauxCRM() {
   const goBack = () => { if (mode !== "list" && mode !== "") { setMode("list"); setSel(null); return; } const prev = modHistory[modHistory.length-1]; if (prev) { setModHistory(h => h.slice(0,-1)); setMod(prev.mod); try { localStorage.setItem("maux_mod", prev.mod); } catch {} setMode("list"); setSel(null); } };
   // Chytré kliknutí na den v kalendáři výkazů → přímo otevře "Nový záznam" s předdoplněným datem
   const [prefillDate, setPrefillDate] = useState(null);
+  // Skok z Přehledu rovnou do editace konkrétní úschovy (AML seznam)
+  const navToEscrowEdit = (esc) => {
+    setModHistory(h => [...h, { mod, mode }]);
+    setMod("uschovy"); try { localStorage.setItem("maux_mod", "uschovy"); } catch {}
+    setMode("list"); setSel(null);
+    setSelEscrow(esc); setEscrowMode("edit");
+  };
   const navToNewWorkEntry = (ds) => { setModHistory(h => [...h, { mod, mode }]); setMod("vykaz"); setMode("new"); setSel(null); setEscrowMode("list"); setSelEscrow(null); setPrefillDate(ds); };
   const canGoBack = (mode !== "list" && mode !== "") || modHistory.length > 0;
   const [sel, setSel] = useState(null);
@@ -17590,7 +17614,7 @@ export default function MauxCRM() {
           {/* ÚSCHOVY */}
           {mod === "uschovy" && escrowMode === "list" && (
             <>
-            <EscrowLiveTile escrows={escrows} />
+            <EscrowLiveTile escrows={escrows} onOpenEscrow={navToEscrowEdit} />
             <div style={{height:16}} />
             <EscrowList
               escrows={escrows}
