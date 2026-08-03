@@ -142,6 +142,53 @@ async function aresLookup(ico) {
   if (!r.ok) throw new Error(`ARES chyba ${r.status}`);
   return _parseAresSubject(await r.json());
 }
+/* Členové statutárního orgánu z veřejného rejstříku.
+   Schéma ARES/VR se může měnit — proto se v odpovědi hledá tolerantně.
+   Když se nic nenajde, vrátí prázdné pole a uživatel jména dopíše ručně. */
+const ARES_VR_API = "https://ares.gov.cz/ekonomicke-subjekty-v-be/rest/ekonomicke-subjekty-vr";
+async function aresStatutari(ico) {
+  const clean = String(ico).replace(/\s/g, "");
+  if (!/^\d{6,8}$/.test(clean)) return [];
+  let data;
+  try {
+    const r = await fetch(`${ARES_VR_API}/${clean.padStart(8, "0")}`);
+    if (!r.ok) return [];
+    data = await r.json();
+  } catch (_) { return []; }
+
+  const out = [];
+  const seen = new Set();
+  const jePlatny = (o) => !o?.datumVymazu && !o?.datumZaniku && !o?.datumVymazuOsoby;
+
+  const sebrat = (node, funkce) => {
+    if (!node || typeof node !== "object") return;
+    const fo = node.fyzickaOsoba || node.osoba || node;
+    const jm = [fo.jmeno, fo.prijmeni].filter(Boolean).join(" ").trim();
+    if (jm && !seen.has(jm)) { seen.add(jm); out.push({ name: jm, funkce: funkce || "" }); }
+  };
+
+  const projit = (node, funkceKontext) => {
+    if (!node || typeof node !== "object") return;
+    if (Array.isArray(node)) { node.forEach(x => projit(x, funkceKontext)); return; }
+    const funkceZde = (node.funkce && (node.funkce.hodnoty?.[0]?.nazev || node.funkce.nazev || node.funkce)) || funkceKontext;
+    for (const [k, v] of Object.entries(node)) {
+      if (/clenoveOrganu/i.test(k) && Array.isArray(v)) {
+        v.filter(jePlatny).forEach(cl => {
+          const f = (cl.funkce && (cl.funkce.hodnoty?.[0]?.nazev || cl.funkce.nazev || cl.funkce)) || funkceZde;
+          const cil = cl.clen || cl.osoba || cl;
+          if (Array.isArray(cil)) cil.filter(jePlatny).forEach(x => sebrat(x, typeof f === "string" ? f : ""));
+          else sebrat(cil, typeof f === "string" ? f : "");
+        });
+      } else if (v && typeof v === "object") {
+        projit(v, typeof funkceZde === "string" ? funkceZde : funkceKontext);
+      }
+    }
+  };
+
+  try { projit(data, ""); } catch (_) { return []; }
+  return out.slice(0, 12);
+}
+
 async function aresSearch(query, maxResults = 10) {
   const q = String(query).trim();
   if (q.length < 2) throw new Error("Zadejte alespoň 2 znaky");
@@ -1006,7 +1053,10 @@ async function fetchEscrows() {
 }
 
 /* ─── AML osoby ─── */
-const AML_ROLES = ["strana", "SJM manžel/ka", "jednatel", "skutečný majitel", "zmocněnec", "jiná osoba"];
+const AML_ROLES = [
+  "strana", "SJM manžel/ka", "člen statutárního orgánu",
+  "skutečný majitel", "zmocněnec", "jiná osoba",
+];
 
 async function upsertAmlPerson(p) {
   const clean = { ...p };
@@ -5543,7 +5593,7 @@ function EscrowCard({ escrow, onEdit, onDelete, onMarkPaid, onPayment }) {
 
 const ESCROW_DRAFT_KEY = "escrow_form_draft";
 
-function EscrowForm({ init, onSave, onCancel, saving }) {
+function EscrowForm({ init, onSave, onCancel, saving, clients = [] }) {
   const [d, setD] = useState(() => {
     if (init) return { ...init };
     // Restore draft for new escrow
@@ -5583,7 +5633,12 @@ function EscrowForm({ init, onSave, onCancel, saving }) {
     } catch (_) {}
     return [];
   });
-  const [newT, setNewT] = useState({ party_type: "složitel", party_name: "", amount: "", received_date: "" });
+  const [newT, setNewT] = useState({
+    party_type: "složitel", subject: "osoba", party_name: "",
+    name2: "", ico: "", amount: "", received_date: "",
+  });
+  const [aresBusy, setAresBusy] = useState(false);
+  const [aresNote, setAresNote] = useState("");
   const [editingNames, setEditingNames] = useState({});
 
   // AML osoby — samostatná evidence, nezávislá na platebních řádcích
@@ -5600,9 +5655,60 @@ function EscrowForm({ init, onSave, onCancel, saving }) {
   });
 
   const addTranche = () => {
-    if (!newT.party_name.trim()) return;
-    setTranches(p => [...p, { ...newT, amount: Number(newT.amount) || 0, id: uid(), escrow_id: d.id, sort_order: p.length }]);
-    setNewT({ party_type: "složitel", party_name: "", amount: "", received_date: "" });
+    const jm1 = newT.party_name.trim();
+    if (!jm1) return;
+    const jm2 = (newT.name2 || "").trim();
+    // Název platební strany: u SJM spojíme obě jména, u firmy zůstává název firmy
+    const nazevStrany = (newT.subject === "sjm" && jm2) ? `${jm1} a ${jm2}` : jm1;
+
+    const trancheId = uid();
+    setTranches(p => [...p, {
+      id: trancheId, escrow_id: d.id,
+      party_type: newT.party_type, party_name: nazevStrany,
+      amount: Number(newT.amount) || 0,
+      received_date: newT.received_date || null,
+      sort_order: p.length,
+    }]);
+
+    // AML osoby — kolik jich pod stranou vzniká, řídí typ subjektu
+    const zaklad = (jmeno, role) => ({
+      id: uid(), escrow_id: d.id, party_name: nazevStrany, party_type: newT.party_type,
+      person_name: jmeno, role, aml_done: false, aml_date: null, note: null,
+    });
+    let osoby = [];
+    if (newT.subject === "sjm") {
+      osoby = [zaklad(jm1, "strana"), zaklad(jm2, "SJM manžel/ka")];
+    } else if (newT.subject === "firma") {
+      osoby = (aresClenove.length ? aresClenove : [{ name: "", funkce: "" }])
+        .map(c => zaklad(c.name, "člen statutárního orgánu"));
+      osoby.push(zaklad("", "skutečný majitel"));
+    } else {
+      osoby = [zaklad(jm1, "strana")];
+    }
+    setAmlPersons(prev => [...prev, ...osoby.map((o, i) => ({ ...o, sort_order: prev.length + i }))]);
+
+    setNewT({ party_type: "složitel", subject: "osoba", party_name: "", name2: "", ico: "", amount: "", received_date: "" });
+    setAresClenove([]); setAresNote("");
+  };
+
+  // Načtení firmy z ARESu — název, sídlo a členové statutárního orgánu
+  const [aresClenove, setAresClenove] = useState([]);
+  const nactiFirmu = async () => {
+    const ico = (newT.ico || "").replace(/\s/g, "");
+    if (!/^\d{6,8}$/.test(ico)) { setAresNote("Zadej IČO (6–8 číslic)."); return; }
+    setAresBusy(true); setAresNote("");
+    try {
+      const a = await aresLookup(ico);
+      setNewT(p => ({ ...p, party_name: a.name || p.party_name }));
+      const cl = await aresStatutari(ico);
+      setAresClenove(cl);
+      setAresNote(cl.length
+        ? `${a.name} — z rejstříku ${cl.length === 1 ? "1 člen" : cl.length + " členů"} statutárního orgánu: ${cl.map(c => c.name).join(", ")}. Po přidání zkontroluj.`
+        : `${a.name} — členy statutárního orgánu se nepodařilo načíst, doplň je ručně.`);
+    } catch (err) {
+      setAresNote(err?.message || "ARES nedostupný — vyplň ručně.");
+    }
+    setAresBusy(false);
   };
   const removeTranche = (id) => setTranches(p => p.filter(t => t.id !== id));
   const updateTranche = (id, patch) => {
@@ -5762,6 +5868,52 @@ function EscrowForm({ init, onSave, onCancel, saving }) {
   const sloz = tranches.filter(t => t.party_type === 'složitel');
   const opr  = tranches.filter(t => t.party_type === 'oprávněný');
 
+  // Sdílený blok osob k identifikaci pod jednou stranou
+  const renderAmlOsoby = (stranaName, partyType) => {
+    const osoby = amlPersons.filter(p => p.party_name === stranaName);
+    return (
+      <div>
+        {osoby.map(p => (
+          <div key={p.id} style={{
+            display: "flex", alignItems: "center", gap: 8,
+            padding: "7px 13px", borderBottom: "1px solid #F6F6FA",
+            background: p.aml_done ? "#F4FAF5" : "#FDF5F4",
+          }}>
+            <input type="checkbox" checked={!!p.aml_done}
+              title="AML záznam, PEPCheck a sankce hotové"
+              onChange={e => updatePerson(p.id, {
+                aml_done: e.target.checked,
+                aml_date: e.target.checked ? (p.aml_date || dnesIso()) : null,
+              })}
+              style={{ width: 17, height: 17, margin: 0, accentColor: "#4A7C59", cursor: "pointer", flexShrink: 0 }} />
+            <input value={p.person_name || ""} placeholder="Jméno a příjmení" list="maux-klienti-list"
+              onChange={e => updatePerson(p.id, { person_name: e.target.value })}
+              style={{ ...S.input, flex: 1, minWidth: 130, fontSize: 13, background: "#fff" }} />
+            <select value={p.role || "strana"} onChange={e => updatePerson(p.id, { role: e.target.value })}
+              style={{ ...S.input, width: 178, flexShrink: 0, fontSize: 12, cursor: "pointer", background: "#fff" }}>
+              {AML_ROLES.map(r => <option key={r} value={r}>{r}</option>)}
+            </select>
+            {p.aml_done
+              ? <input type="date" value={p.aml_date || ""} title="Datum provedení identifikace"
+                  onChange={e => updatePerson(p.id, { aml_date: e.target.value || null })}
+                  style={{ ...S.input, width: 134, flexShrink: 0, fontSize: 12, background: "#fff" }} />
+              : <span style={{ width: 134, flexShrink: 0, fontSize: 11, fontWeight: 700, color: "#A8443C", textAlign: "center" }}>identifikace chybí</span>}
+            {p.role !== "strana" && (
+              <button onClick={() => removePerson(p.id)} title="Odebrat osobu"
+                style={{ background: "none", border: "none", color: "#D1D5DB", cursor: "pointer", fontSize: 16, padding: "0 2px", flexShrink: 0 }}>×</button>
+            )}
+          </div>
+        ))}
+        <div style={{ padding: "6px 13px" }}>
+          <button onClick={() => addPerson({ name: stranaName, isSloz: partyType === "složitel" })}
+            style={{ fontSize: 11, fontWeight: 600, color: "#3518a4", background: "#fff", border: "1px solid #E0DDF0", borderRadius: 6, padding: "3px 10px", cursor: "pointer" }}>
+            + další osoba k identifikaci
+          </button>
+        </div>
+      </div>
+    );
+  };
+
   // AML — strany (platební subjekty) a pod nimi konkrétní fyzické osoby
   const amlStrany = [];
   {
@@ -5855,93 +6007,6 @@ function EscrowForm({ init, onSave, onCancel, saving }) {
         </div>
       </div>
 
-      {/* Karta AML — identifikace osob */}
-      <div style={S.card}>
-        <div style={{ ...S.cardHead("#1c0a63"), justifyContent: "space-between" }}>
-          <span style={S.cht}>AML — identifikace osob</span>
-          <span style={{
-            fontSize: 10, fontWeight: 700, letterSpacing: ".06em",
-            padding: "3px 10px", borderRadius: 20,
-            background: amlVsechnyOsoby.length && amlHotovo === amlVsechnyOsoby.length ? "rgba(74,124,89,.35)" : "rgba(255,255,255,.14)",
-            color: "#fff",
-          }}>
-            {amlVsechnyOsoby.length ? `${amlHotovo} z ${amlVsechnyOsoby.length} hotovo` : "žádné strany"}
-          </span>
-        </div>
-        <div style={S.cardBody}>
-          {amlStrany.length === 0 && (
-            <div style={{ fontSize: 12, color: "#9CA3AF", padding: "6px 2px" }}>
-              Zatím tu nejsou žádné strany. Přidej složitele a oprávněné dole v sekci „Strany úschovy“ — objeví se tady automaticky.
-            </div>
-          )}
-          {amlStrany.map(s => {
-            const osoby = osobyStrany(s);
-            return (
-              <div key={s.name} style={{ border: "1.5px solid #ECEAF5", borderRadius: 10, marginBottom: 10, overflow: "hidden" }}>
-                <div style={{ background: "#FAFAFC", padding: "8px 13px", display: "flex", alignItems: "center", gap: 10, borderBottom: "1px solid #F0EFF6" }}>
-                  <span style={{
-                    fontSize: 9, fontWeight: 700, letterSpacing: ".1em", textTransform: "uppercase",
-                    padding: "3px 8px", borderRadius: 4, flexShrink: 0,
-                    background: s.isSloz ? "#EEF2FF" : "#ECFDF5",
-                    color: s.isSloz ? "#3730A3" : "#065F46",
-                  }}>
-                    {s.isSloz && s.isOpr ? "obojí" : (s.isSloz ? "složitel" : "oprávněný")}
-                  </span>
-                  <span style={{ fontSize: 13.5, fontWeight: 600, color: "#111827" }}>{s.name}</span>
-                  <span style={{ fontSize: 11.5, color: "#6B7280" }}>{fmtKc(s.castka)}</span>
-                </div>
-                {osoby.map(p => (
-                  <div key={p.id} style={{
-                    display: "flex", alignItems: "center", gap: 9,
-                    padding: "8px 13px", borderBottom: "1px solid #F7F7FA",
-                    background: p.aml_done ? "#F4FAF5" : "#FDF5F4",
-                  }}>
-                    <input value={p.person_name || ""} placeholder="Jméno a příjmení"
-                      onChange={e => updatePerson(p.id, { person_name: e.target.value })}
-                      style={{ ...S.input, flex: 1, minWidth: 130, fontSize: 13, background: "#fff" }} />
-                    <select value={p.role || "strana"} onChange={e => updatePerson(p.id, { role: e.target.value })}
-                      style={{ ...S.input, width: 152, flexShrink: 0, fontSize: 12, cursor: "pointer", background: "#fff" }}>
-                      {AML_ROLES.map(r => <option key={r} value={r}>{r}</option>)}
-                    </select>
-                    {p.aml_done && (
-                      <input type="date" value={p.aml_date || ""} title="Datum provedení identifikace"
-                        onChange={e => updatePerson(p.id, { aml_date: e.target.value || null })}
-                        style={{ ...S.input, width: 134, flexShrink: 0, fontSize: 12, background: "#fff" }} />
-                    )}
-                    <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", flexShrink: 0 }}>
-                      <input type="checkbox" checked={!!p.aml_done}
-                        onChange={e => updatePerson(p.id, {
-                          aml_done: e.target.checked,
-                          aml_date: e.target.checked ? (p.aml_date || dnesIso()) : null,
-                        })}
-                        style={{ width: 17, height: 17, margin: 0, accentColor: "#4A7C59", cursor: "pointer" }} />
-                      <span style={{ fontSize: 11, fontWeight: 700, color: p.aml_done ? "#4A7C59" : "#A8443C", whiteSpace: "nowrap" }}>
-                        {p.aml_done ? "hotovo" : "zaškrtnout"}
-                      </span>
-                    </label>
-                    {p.role !== "strana" && (
-                      <button onClick={() => removePerson(p.id)} title="Odebrat osobu"
-                        style={{ background: "none", border: "none", color: "#D1D5DB", cursor: "pointer", fontSize: 16, padding: "0 2px", flexShrink: 0 }}>×</button>
-                    )}
-                  </div>
-                ))}
-                <div style={{ padding: "7px 13px" }}>
-                  <button onClick={() => addPerson(s)}
-                    style={{ fontSize: 11, fontWeight: 600, color: "#3518a4", background: "#fff", border: "1px solid #E0DDF0", borderRadius: 6, padding: "4px 11px", cursor: "pointer" }}>
-                    + další osoba k identifikaci
-                  </button>
-                </div>
-              </div>
-            );
-          })}
-          {amlStrany.length > 0 && (
-            <div style={{ fontSize: 10, color: "#9CA3AF", marginTop: 2, lineHeight: 1.6 }}>
-              U SJM přidej oba manžele, u firmy jednatele i skutečného majitele. Zaškrtnutím se doplní dnešní datum — přepiš, pokud identifikace proběhla jindy.
-            </div>
-          )}
-        </div>
-      </div>
-
       {/* Karta 2: Časová osa */}
       <div style={S.card}>
         <div style={S.cardHead("#2D1B8E")}>
@@ -5976,54 +6041,49 @@ function EscrowForm({ init, onSave, onCancel, saving }) {
           <textarea value={d.notes || ""} onChange={e => set("notes", e.target.value)}
             style={{ ...S.input, minHeight: 54, resize: "vertical", lineHeight: 1.5 }} />
           <div style={{ fontSize: 10, color: "#9CA3AF", marginTop: 6 }}>
-            AML se zaškrtává v kartě „AML — identifikace stran“ nahoře.
+            AML se zaškrtává u jednotlivých osob v sekci Strany úschovy níže.
           </div>
         </div>
       </div>
 
       {/* Karta 4: Strany + platební evidence */}
       <div style={S.card}>
-        <div style={S.cardHead("#1E1B4B")}>
-          <span style={S.cht}>Strany úschovy — platební evidence</span>
+        <div style={{ ...S.cardHead("#1E1B4B"), justifyContent: "space-between" }}>
+          <span style={S.cht}>Strany úschovy</span>
+          {amlVsechnyOsoby.length > 0 && (
+            <span style={{
+              fontSize: 10, fontWeight: 700, letterSpacing: ".06em",
+              padding: "3px 10px", borderRadius: 20, color: "#fff",
+              background: amlHotovo === amlVsechnyOsoby.length ? "rgba(74,124,89,.35)" : "rgba(255,255,255,.14)",
+            }}>
+              {amlHotovo} z {amlVsechnyOsoby.length} identifikováno
+            </span>
+          )}
         </div>
         <div style={S.cardBody}>
 
-          {/* SLOŽITELÉ — tabulka */}
+          {/* SLOŽITELÉ — karta na stranu, pod ní osoby k identifikaci */}
           {sloz.length > 0 && (
-            <div style={{ marginBottom: 20 }}>
-              <div style={{ fontSize: 9, letterSpacing: ".15em", textTransform: "uppercase", fontWeight: 700, color: "#3730A3", marginBottom: 8 }}>Složitelé</div>
-              <table style={S.tbl}>
-                <thead>
-                  <tr>
-                    <th style={S.th}>Jméno</th>
-                    <th style={{ ...S.th, textAlign: "right" }}>Vloženo (Kč)</th>
-                    <th style={S.th}>Datum přijetí</th>
-                    <th style={{ ...S.th, width: 32 }}></th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {sloz.map(t => (
-                    <tr key={t.id}>
-                      <td style={S.td}>
-                        <input style={S.input} value={t.party_name}
-                          onChange={e => updateTranche(t.id, { party_name: e.target.value })} />
-                      </td>
-                      <td style={S.td}>
-                        <input type="number" style={{ ...S.input, textAlign: "right", fontFamily: "Fraunces,serif" }}
-                          value={t.amount || ""} onChange={e => updateTranche(t.id, { amount: Number(e.target.value) || 0 })} />
-                      </td>
-                      <td style={S.td}>
-                        <input type="date" style={S.input} value={t.received_date || ""}
-                          onChange={e => updateTranche(t.id, { received_date: e.target.value || null })} />
-                      </td>
-                      <td style={S.td}>
-                        <button onClick={() => removeTranche(t.id)}
-                          style={{ background: "none", border: "none", color: "#D1D5DB", cursor: "pointer", fontSize: 16, padding: "2px 6px" }}>×</button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+            <div style={{ marginBottom: 18 }}>
+              <div style={{ fontSize: 9, letterSpacing: ".15em", textTransform: "uppercase", fontWeight: 700, color: "#3730A3", marginBottom: 10 }}>Složitelé</div>
+              {sloz.map(t => (
+                <div key={t.id} style={{ marginBottom: 12, border: "1.5px solid #DDD9F3", borderRadius: 10, overflow: "hidden" }}>
+                  <div style={{ background: "#F5F4FC", padding: "10px 13px", display: "flex", alignItems: "center", gap: 10, borderBottom: "1px solid #E9E6F7" }}>
+                    <input style={{ ...S.input, flex: 1, minWidth: 150, fontSize: 14, fontWeight: 600, background: "#fff" }}
+                      value={t.party_name}
+                      onChange={e => updateTranche(t.id, { party_name: e.target.value })} />
+                    <input type="number" style={{ ...S.input, width: 160, textAlign: "right", fontFamily: "Fraunces,serif", fontSize: 15, background: "#fff" }}
+                      value={t.amount || ""} placeholder="0"
+                      onChange={e => updateTranche(t.id, { amount: Number(e.target.value) || 0 })} />
+                    <input type="date" style={{ ...S.input, width: 148, fontSize: 12, background: "#fff" }}
+                      value={t.received_date || ""}
+                      onChange={e => updateTranche(t.id, { received_date: e.target.value || null })} />
+                    <button onClick={() => removeTranche(t.id)} title="Odebrat stranu"
+                      style={{ background: "none", border: "none", color: "#D1D5DB", cursor: "pointer", fontSize: 17, padding: "0 2px" }}>×</button>
+                  </div>
+                  {renderAmlOsoby(t.party_name, "složitel")}
+                </div>
+              ))}
             </div>
           )}
 
@@ -6059,6 +6119,8 @@ function EscrowForm({ init, onSave, onCancel, saving }) {
                         {remaining > 0.5 && <span style={{ color: "#B45309" }}>Zbývá: <strong style={{ fontFamily: "Fraunces,serif", fontSize: 13 }}>{fmtKc(remaining)}</strong></span>}
                       </div>
                     </div>
+
+                    {renderAmlOsoby(personName, "oprávněný")}
 
                     {/* Tabulka plateb */}
                     <table style={S.tbl}>
@@ -6131,42 +6193,79 @@ function EscrowForm({ init, onSave, onCancel, saving }) {
           )}
 
           {/* Přidat novou stranu */}
-          <div style={{ background: "#F9FAFB", border: "1.5px dashed #D1D5DB", borderRadius: 8, padding: "12px 14px" }}>
-            <div style={{ fontSize: 9, fontWeight: 700, color: "#6B7280", marginBottom: 8, letterSpacing: ".12em", textTransform: "uppercase" }}>Přidat stranu</div>
-            <div style={{ display: "flex", gap: 8, alignItems: "flex-end", flexWrap: "wrap" }}>
-              <div>
-                <label style={S.label}>Typ</label>
-                <select style={{ ...S.input, width: 130 }} value={newT.party_type} onChange={e => setNewT(p => ({ ...p, party_type: e.target.value }))}>
-                  <option value="složitel">Složitel</option>
-                  <option value="oprávněný">Oprávněný</option>
-                </select>
+          <div style={{ background: "#F9FAFB", border: "1.5px dashed #D1D5DB", borderRadius: 10, padding: "13px 14px" }}>
+            <div style={{ fontSize: 9, fontWeight: 700, color: "#6B7280", marginBottom: 10, letterSpacing: ".12em", textTransform: "uppercase" }}>Přidat stranu</div>
+
+            <div style={{ display: "flex", gap: 8, marginBottom: 9, flexWrap: "wrap" }}>
+              <select style={{ ...S.input, width: 130, cursor: "pointer" }} value={newT.party_type}
+                onChange={e => setNewT(p => ({ ...p, party_type: e.target.value }))}>
+                <option value="složitel">Složitel</option>
+                <option value="oprávněný">Oprávněný</option>
+              </select>
+              <select style={{ ...S.input, flex: 1, minWidth: 170, cursor: "pointer" }} value={newT.subject}
+                onChange={e => { setNewT(p => ({ ...p, subject: e.target.value })); setAresClenove([]); setAresNote(""); }}>
+                <option value="osoba">Fyzická osoba</option>
+                <option value="sjm">Manželé v SJM</option>
+                <option value="firma">Firma / s.r.o.</option>
+              </select>
+            </div>
+
+            {newT.subject === "firma" && (
+              <div style={{ display: "flex", gap: 8, marginBottom: 9, flexWrap: "wrap" }}>
+                <input style={{ ...S.input, width: 150 }} placeholder="IČO" value={newT.ico}
+                  onChange={e => setNewT(p => ({ ...p, ico: e.target.value }))}
+                  onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); nactiFirmu(); }}} />
+                <button onClick={nactiFirmu} disabled={aresBusy}
+                  style={{ padding: "8px 14px", borderRadius: 8, background: "#fff", color: "#3518a4", border: "1px solid #DDD9F3", fontSize: 12, fontWeight: 700, cursor: aresBusy ? "wait" : "pointer", whiteSpace: "nowrap" }}>
+                  {aresBusy ? "Načítám…" : "Načíst z ARESu"}
+                </button>
               </div>
-              <div style={{ flex: 1, minWidth: 140 }}>
-                <label style={S.label}>Jméno</label>
-                <input style={S.input} placeholder="Např. Filipčík" value={newT.party_name}
-                  onChange={e => setNewT(p => ({ ...p, party_name: e.target.value }))}
+            )}
+
+            <div style={{ display: "flex", gap: 8, marginBottom: 9, flexWrap: "wrap" }}>
+              <input style={{ ...S.input, flex: 1, minWidth: 160 }} list="maux-klienti-list"
+                placeholder={newT.subject === "firma" ? "Název firmy" : (newT.subject === "sjm" ? "Jméno manžela" : "Jméno a příjmení")}
+                value={newT.party_name}
+                onChange={e => setNewT(p => ({ ...p, party_name: e.target.value }))}
+                onKeyDown={e => { if (e.key === 'Enter' && newT.subject !== "sjm") { e.preventDefault(); addTranche(); }}} />
+              {newT.subject === "sjm" && (
+                <input style={{ ...S.input, flex: 1, minWidth: 160 }} list="maux-klienti-list"
+                  placeholder="Jméno manželky" value={newT.name2}
+                  onChange={e => setNewT(p => ({ ...p, name2: e.target.value }))}
                   onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addTranche(); }}} />
-              </div>
-              <div style={{ width: 150 }}>
-                <label style={S.label}>Částka (Kč)</label>
-                <input style={{ ...S.input, textAlign: "right", fontFamily: "Fraunces,serif" }}
-                  type="number" placeholder="0" value={newT.amount}
-                  onChange={e => setNewT(p => ({ ...p, amount: e.target.value }))}
-                  onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addTranche(); }}} />
-              </div>
+              )}
+            </div>
+
+            <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+              <input style={{ ...S.input, width: 160, textAlign: "right", fontFamily: "Fraunces,serif" }}
+                type="number" placeholder="Částka (Kč)" value={newT.amount}
+                onChange={e => setNewT(p => ({ ...p, amount: e.target.value }))}
+                onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addTranche(); }}} />
               {newT.party_type === 'složitel' && (
-                <div style={{ width: 150 }}>
-                  <label style={S.label}>Datum přijetí</label>
-                  <input style={S.input} type="date" value={newT.received_date}
-                    onChange={e => setNewT(p => ({ ...p, received_date: e.target.value }))} />
-                </div>
+                <input style={{ ...S.input, width: 160, fontSize: 12 }} type="date" value={newT.received_date}
+                  onChange={e => setNewT(p => ({ ...p, received_date: e.target.value }))} />
               )}
               <button onClick={addTranche}
-                style={{ padding: "8px 18px", borderRadius: 8, background: "#4F46E5", color: "#fff", border: "none", fontSize: 12, fontWeight: 700, cursor: "pointer", whiteSpace: "nowrap" }}>
+                style={{ padding: "8px 18px", borderRadius: 8, background: "#3518a4", color: "#fff", border: "none", fontSize: 12, fontWeight: 700, cursor: "pointer", whiteSpace: "nowrap" }}>
                 + Přidat
               </button>
             </div>
+
+            {aresNote && (
+              <div style={{ fontSize: 11, color: "#4B5563", marginTop: 9, lineHeight: 1.5 }}>{aresNote}</div>
+            )}
+            <div style={{ fontSize: 10, color: "#9CA3AF", marginTop: 7, lineHeight: 1.6 }}>
+              {newT.subject === "sjm"
+                ? "Vznikne jedna platba na společný účet a dvě samostatné identifikace."
+                : (newT.subject === "firma"
+                  ? "Vznikne jedna platba a řádky na členy statutárního orgánu i skutečného majitele. Skutečného majitele ověř z evidence skutečných majitelů."
+                  : "Vznikne jedna platba a jedna identifikace. Jména napovídá evidence klientů.")}
+            </div>
           </div>
+
+          <datalist id="maux-klienti-list">
+            {(clients || []).map(c => <option key={c.id} value={c.name} />)}
+          </datalist>
         </div>
       </div>
 
@@ -17755,6 +17854,7 @@ export default function MauxCRM() {
           {mod === "uschovy" && (escrowMode === "new" || escrowMode === "edit") && (
             <EscrowForm
               init={escrowMode === "edit" ? selEscrow : null}
+              clients={clients}
               onSave={saveEscrow}
               onCancel={() => { setEscrowMode("list"); setSelEscrow(null); }}
               saving={saving}
