@@ -1220,6 +1220,61 @@ function computeXtbPortfolio(positions = [], closedTrades = [], tranches = [], m
   };
 }
 
+// ── SCHVALOVÁNÍ JOSEFOVÝCH VÝKAZŮ (4. 8. 2026) ──────────────────────────────
+// Tom: "musím to nějak složitě párovat na můj výkaz?" Nemusí. Párování NENÍ algoritmus:
+// vazba vzniká klikem na konkrétní Josefův záznam. Appka nic nehádá, jen si pamatuje,
+// do kterého Tomova výkazu záznam šel (assistant_work_logs.work_entry_id).
+//
+// ⚠️ Josefovy hodiny se NIKDY nepřičítají k Tomovým. Kdyby ano, "hodnota tvé hodiny"
+// by se nafoukla pokaždé, když práci předá — metrika by lhala tím příjemnějším směrem.
+const LOG_OPEN = "open", LOG_INVOICED = "invoiced", LOG_INTERNAL = "internal";
+const logStatus = (l) => l && l.billing_status ? l.billing_status : LOG_OPEN;
+const isBdLog = (l) => l && (l.entry_type === "bd" || !l.client_id);
+
+// Schvalování se rozjíždí od srpna 2026 (Tom: "dělejme to od srpna dál").
+// Starší Josefovy výkazy se do fronty nedostanou vůbec — nemá smysl zpětně
+// odklikávat půl roku práce, kterou si stejně nikdo nepamatuje.
+const SCHVALOVANI_OD = "2026-08-01";
+
+// Fronta ke schválení: klientská práce, která ještě nikam nešla.
+// BD (business development) se nefakturuje, do fronty nepatří.
+function assistantQueue(logs = []) {
+  return (logs || [])
+    .filter(l => l && !isBdLog(l) && logStatus(l) === LOG_OPEN && !l.work_entry_id
+                 && String(l.entry_date || "") >= SCHVALOVANI_OD)
+    .sort((a,b) => String(a.entry_date||"").localeCompare(String(b.entry_date||"")));
+}
+
+// Návratnost: co se z Josefových podkladů vyfakturovalo, minus co stál.
+// ⚠️ Deduplikace přes work_entry_id je povinná — na jeden výkaz může viset víc jeho
+// záznamů a bez ní by se částka započítala tolikrát, kolik jich je.
+function computeJosefRoi(logs = [], workEntries = [], costCzk = 0) {
+  const schvalene = (logs || []).filter(l => l && l.work_entry_id && logStatus(l) === LOG_INVOICED);
+  const idsSet = {};
+  schvalene.forEach(l => { idsSet[l.work_entry_id] = true; });
+  const fakturovano = Object.keys(idsSet).reduce((s, id) => {
+    const e = (workEntries || []).find(w => w.id === id);
+    return s + (e ? Math.max((e.amount || 0) - (Number(e.discount_amount) || 0), 0) : 0);
+  }, 0);
+  const jehoHodiny = schvalene.reduce((s,l) => s + (Number(l.hours) || 0), 0);
+  // ⚠️ Tvůj čas se bere z real_hours, ne z hours. Na tom stojí "Hodnota tvé hodiny"
+  // a u paušální položky se hours nastavuje na nulu — sáhnout na hours by ten graf rozbilo.
+  const tveHodiny  = Object.keys(idsSet).reduce((s, id) => {
+    const e = (workEntries || []).find(w => w.id === id);
+    return s + (e ? (Number(e.real_hours) || 0) : 0);
+  }, 0);
+  return {
+    fakturovano, jehoHodiny, tveHodiny,
+    pocetVykazu: Object.keys(idsSet).length,
+    pocetZaznamu: schvalene.length,
+    naklad: costCzk,
+    cisty: fakturovano - costCzk,
+  };
+}
+
+// České skloňování dnů — "3 dní" je špatně, patří "3 dny".
+const dnyTvar = (n) => (n === 1 ? "den" : (n >= 2 && n <= 4 ? "dny" : "dní"));
+
 // ── DLUHY — jediný zdroj pravdy (4. 8. 2026) ────────────────────────────────
 // Dřív se tenhle výpočet válel jen uvnitř OstatniModule. Od chvíle, kdy čistý majetek
 // ukazuje i Přehled, by dvě kopie znamenaly dvě různá čísla — proto je funkce sdílená.
@@ -7828,7 +7883,7 @@ function TriGrafyPanel({ financeItems, onSaveFinance, invoices, dpfoMonths, loan
                               strokeLinecap="round" vectorEffect="non-scaling-stroke" opacity={roste ? 0.85 : 0.5} />
                           </svg>
                           <div style={{ fontSize: 9, color: "var(--mut)", opacity: .65, marginTop: 2 }}>
-                            {v.length} dní · {roste ? "▲" : "▼"} {fmtKc(Math.abs(v[v.length-1] - v[0]))}
+                            {v.length} {dnyTvar(v.length)} · {roste ? "▲" : "▼"} {fmtKc(Math.abs(v[v.length-1] - v[0]))}
                           </div>
                         </div>
                       );
@@ -7845,7 +7900,7 @@ function TriGrafyPanel({ financeItems, onSaveFinance, invoices, dpfoMonths, loan
                   <div style={{ fontSize: 9.5, color: "var(--mut)", opacity: .65, marginTop: 4, lineHeight: 1.5 }}>
                     {dluhy.osobni > 0 ? `po odečtení dluhů ${fmtKc(dluhy.osobni)}` : "žádné osobní dluhy"}
                     {dluhy.investicni > 0 && ` · investiční úvěr ${fmtKc(dluhy.investicni)} mimo — kryje ho nemovitost`}
-                    {wealthDelta && ` · za ${wealthDelta.dni} dní ${wealthDelta.delta >= 0 ? "▲" : "▼"} ${fmtKc(Math.abs(wealthDelta.delta))}`}
+                    {wealthDelta && ` · za ${wealthDelta.dni} ${dnyTvar(wealthDelta.dni)} ${wealthDelta.delta >= 0 ? "▲" : "▼"} ${fmtKc(Math.abs(wealthDelta.delta))}`}
                   </div>
                 </div>
               </div>
@@ -11130,7 +11185,216 @@ function OstatniModule({ dpfoMonths, loanTrackers, loanTransactions, financeItem
 }
 
 /* ─── JOSEF PANEL — Dashboard widget ─── */
-function JosefPanel({ logs, attendance: attendanceProp, availability, clients = [], financeItems = [], onSaveFinance }) {
+/* ─── SCHVALOVACÍ FRONTA (4. 8. 2026) ───────────────────────────────────────
+   Josefovy klientské záznamy, které ještě nikam nešly. Vybereš, klikneš, hotovo —
+   párování je ten klik, appka nic nehádá.
+   Výběr je zamčený na jednoho klienta: jeden Tomův výkaz = jeden klient. */
+function SchvalovaciFronta({ logs = [], clients = [], workEntries = [], onApprove, colors }) {
+  const { IND, INDV, MUT, INK, HL } = colors;
+  const fronta = assistantQueue(logs);
+  const [sel, setSel]   = useState({});
+  const [open, setOpen] = useState(false);
+  const [mode, setMode] = useState("new");
+  const [popis, setPopis]     = useState("");
+  const [castka, setCastka]   = useState("");
+  const [cas, setCas]         = useState("0,5");
+  const [fb, setFb]           = useState("");
+  const [existId, setExistId] = useState("");
+  const [saving, setSaving]   = useState(false);
+
+  const cislo = (s) => Number(String(s).replace(/\s/g, "").replace(",", ".")) || 0;
+  const jmenoKlienta = (id) => (clients.find(c => c.id === id) || {}).name || "Klient";
+  const vybrane  = fronta.filter(l => sel[l.id]);
+  // Zámek na klienta — jakmile něco vybereš, ostatní klienti zešednou.
+  const zamek    = vybrane.length ? vybrane[0].client_id : null;
+  const hodinyV  = vybrane.reduce((s,l) => s + (Number(l.hours)||0), 0);
+
+  const prepni = (l) => {
+    if (zamek && l.client_id !== zamek) return;
+    setSel(p => ({ ...p, [l.id]: !p[l.id] }));
+  };
+
+  // Nevyfakturované výkazy téhož klienta — krátký seznam pro "připojit k existujícímu".
+  const kandidati = (workEntries || [])
+    .filter(e => e && !e.invoice_id && e.client_id === zamek)
+    .sort((a,b) => String(b.entry_date||"").localeCompare(String(a.entry_date||"")))
+    .slice(0, 8);
+
+  const otevri = (m) => {
+    if (!vybrane.length) return;
+    setMode(m);
+    const texty = Array.from(new Set(vybrane.map(l => String(l.description||"").trim()).filter(Boolean)));
+    setPopis(texty.join("; "));
+    setCastka(""); setCas("0,5"); setFb("");
+    setExistId(kandidati.length ? kandidati[0].id : "");
+    setOpen(true);
+  };
+
+  const uloz = async () => {
+    const logIds = vybrane.map(l => l.id);
+    if (mode === "new") {
+      const c = cislo(castka);
+      if (!c) { alert("Zadej částku, kterou účtuješ klientovi."); return; }
+      if (!popis.trim()) { alert("Popis nesmí být prázdný — jde klientovi do faktury."); return; }
+      const datum = vybrane.map(l => l.entry_date).filter(Boolean).sort().pop() || today();
+      setSaving(true);
+      // Paušální položka: částku určuješ ty, ne Josefovy hodiny.
+      // Tvůj čas jde do real_hours — tam, odkud žije "Hodnota tvé hodiny".
+      await onApprove({ logIds, mode: "new", feedback: fb, entry: {
+        id: uid(), client_id: zamek, entry_date: datum,
+        description: popis.trim(),
+        billing_type: "flat_rate", hours: 0, rate: 0,
+        flat_amount: c, amount: c,
+        notary_fee: 0, admin_fee: 0, sig_count: 0,
+        real_hours: cislo(cas), notes: "",
+      }});
+    } else if (mode === "existing") {
+      if (!existId) { alert("Vyber výkaz, ke kterému se to má připojit."); return; }
+      setSaving(true);
+      await onApprove({ logIds, mode: "existing", existingEntryId: existId, feedback: fb });
+    } else {
+      setSaving(true);
+      await onApprove({ logIds, mode: "internal", feedback: fb });
+    }
+    setSaving(false); setOpen(false); setSel({});
+  };
+
+  if (!fronta.length) return null;
+
+  const chip = (txt, onClick, plna) => (
+    <button onClick={onClick} disabled={!vybrane.length}
+      style={{ fontSize: 10.5, fontWeight: 600, padding: "6px 12px", borderRadius: 8, cursor: vybrane.length ? "pointer" : "default",
+        background: plna ? IND : "none", color: plna ? "#fff" : (vybrane.length ? INDV : MUT),
+        border: plna ? "none" : "1px solid rgba(74,68,184,.25)", opacity: vybrane.length ? 1 : .45 }}>{txt}</button>
+  );
+
+  return (
+    <div style={{ margin: "0 22px 6px", padding: "13px 15px", background: "rgba(74,68,184,.04)", border: "1px solid rgba(74,68,184,.16)", borderRadius: BP.rInner }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 9 }}>
+        <span style={{ fontSize: 9, letterSpacing: ".2em", textTransform: "uppercase", color: INDV, fontWeight: 700 }}>Od Josefa · ke schválení</span>
+        <span style={{ fontSize: 10, color: MUT }}>{fronta.length} {fronta.length === 1 ? "záznam" : (fronta.length < 5 ? "záznamy" : "záznamů")}</span>
+      </div>
+
+      {fronta.slice(0, 6).map(l => {
+        const zamceno = zamek && l.client_id !== zamek;
+        const on = !!sel[l.id];
+        return (
+          <div key={l.id} onClick={() => prepni(l)}
+            title={zamceno ? "Jeden výkaz = jeden klient. Nejdřív dokonči výběr u předchozího klienta." : undefined}
+            style={{ display: "flex", gap: 9, alignItems: "flex-start", padding: "7px 0", borderTop: `1px solid ${HL}`,
+              cursor: zamceno ? "default" : "pointer", opacity: zamceno ? .35 : 1 }}>
+            <span style={{ width: 13, height: 13, borderRadius: 4, flexShrink: 0, marginTop: 1,
+              border: `1.5px solid ${on ? IND : "rgba(0,0,0,.2)"}`, background: on ? IND : "transparent",
+              color: "#fff", fontSize: 9, lineHeight: "11px", textAlign: "center" }}>{on ? "✓" : ""}</span>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: 11.5, color: INK, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                {jmenoKlienta(l.client_id)} — {l.description || "bez popisu"}
+              </div>
+              <div style={{ fontSize: 9.5, color: MUT, marginTop: 2 }}>
+                {fmtDate(l.entry_date)} · {(Number(l.hours)||0)} h
+              </div>
+            </div>
+          </div>
+        );
+      })}
+      {fronta.length > 6 && (
+        <div style={{ fontSize: 9.5, color: MUT, paddingTop: 7, borderTop: `1px solid ${HL}` }}>…a další {fronta.length - 6}</div>
+      )}
+
+      <div style={{ display: "flex", gap: 7, marginTop: 11, flexWrap: "wrap", alignItems: "center" }}>
+        {chip("Schválit do fakturace", () => otevri("new"), true)}
+        {kandidati.length > 0 && chip("Připojit k existujícímu", () => otevri("existing"))}
+        {chip("Nefakturovat", () => otevri("internal"))}
+        {vybrane.length > 0 && (
+          <span style={{ fontSize: 9.5, color: MUT, marginLeft: "auto" }}>vybráno {vybrane.length} · {hodinyV} h</span>
+        )}
+      </div>
+
+      {open && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(20,16,50,.45)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 400, padding: 20 }}
+          onClick={() => !saving && setOpen(false)}>
+          <div onClick={e => e.stopPropagation()}
+            style={{ background: "#fff", borderRadius: 16, padding: "24px 26px", width: "100%", maxWidth: 520, maxHeight: "88vh", overflowY: "auto" }}>
+            <div style={{ fontFamily: "Fraunces,serif", fontSize: 19, color: INK, marginBottom: 3 }}>
+              {mode === "new" ? "Schválit do fakturace" : mode === "existing" ? "Připojit k existujícímu výkazu" : "Nefakturovat"}
+            </div>
+            <div style={{ fontSize: 11, color: MUT, marginBottom: 16 }}>
+              {jmenoKlienta(zamek)} · {vybrane.length} {vybrane.length === 1 ? "záznam" : "záznamy"} · {hodinyV} h Josefovy práce
+            </div>
+
+            {mode === "new" && (
+              <>
+                <div style={{ fontSize: 10.5, color: MUT, marginBottom: 5 }}>Popis pro klienta <span style={{ opacity: .7 }}>— tohle jde do faktury</span></div>
+                <textarea value={popis} onChange={e => setPopis(e.target.value)} rows={3}
+                  style={{ width: "100%", padding: "9px 11px", fontSize: 12.5, color: INK, border: "1px solid rgba(0,0,0,.14)", borderRadius: 9, outline: "none", fontFamily: "inherit", resize: "vertical", boxSizing: "border-box" }} />
+                <div style={{ fontSize: 9.5, color: MUT, marginTop: 5, marginBottom: 14, paddingLeft: 9, borderLeft: "2px solid rgba(0,0,0,.08)", lineHeight: 1.55 }}>
+                  Josefovým textem: {vybrane.map(l => `„${l.description || "bez popisu"}"`).join(" · ")}
+                </div>
+
+                <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+                  <div style={{ flex: 1, minWidth: 130 }}>
+                    <div style={{ fontSize: 10.5, color: MUT, marginBottom: 5 }}>Účtováno klientovi</div>
+                    <input value={castka} onChange={e => setCastka(e.target.value)} autoFocus placeholder="12 500"
+                      style={{ width: "100%", padding: "8px 10px", fontSize: 14, fontWeight: 600, color: INK, border: `1px solid rgba(74,68,184,.3)`, borderRadius: 8, outline: "none", boxSizing: "border-box" }} />
+                  </div>
+                  <div style={{ flex: 1, minWidth: 130 }}>
+                    <div style={{ fontSize: 10.5, color: MUT, marginBottom: 5 }}>Tvůj vlastní čas (h)</div>
+                    <input value={cas} onChange={e => setCas(e.target.value)} placeholder="0,5"
+                      style={{ width: "100%", padding: "8px 10px", fontSize: 14, fontWeight: 600, color: INK, border: "1px solid rgba(0,0,0,.14)", borderRadius: 8, outline: "none", boxSizing: "border-box" }} />
+                  </div>
+                </div>
+                <div style={{ fontSize: 9.5, color: MUT, marginTop: 7, marginBottom: 16, lineHeight: 1.55 }}>
+                  Josefovy hodiny se k tvým nepřičítají — jinak by ti hodnota tvojí hodiny rostla pokaždé, když práci předáš.
+                </div>
+              </>
+            )}
+
+            {mode === "existing" && (
+              <div style={{ marginBottom: 16 }}>
+                <div style={{ fontSize: 10.5, color: MUT, marginBottom: 6 }}>Nevyfakturované výkazy tohoto klienta</div>
+                {kandidati.map(e => (
+                  <div key={e.id} onClick={() => setExistId(e.id)}
+                    style={{ padding: "9px 11px", marginBottom: 6, borderRadius: 9, cursor: "pointer",
+                      border: `1.5px solid ${existId === e.id ? IND : "rgba(0,0,0,.1)"}`,
+                      background: existId === e.id ? "rgba(74,68,184,.05)" : "#fff" }}>
+                    <div style={{ fontSize: 12, color: INK }}>{e.description}</div>
+                    <div style={{ fontSize: 9.5, color: MUT, marginTop: 2 }}>{fmtDate(e.entry_date)} · {fmtKc(e.amount || 0)}</div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {mode === "internal" && (
+              <div style={{ fontSize: 12, color: INK, lineHeight: 1.6, marginBottom: 16 }}>
+                Záznamy zmizí z fronty a nikam se nenaváží. Josefovi se to nezobrazí jako chyba —
+                uvidí jen to, co mu napíšeš níž.
+              </div>
+            )}
+
+            <div style={{ fontSize: 10.5, color: MUT, marginBottom: 5 }}>
+              Zpětná vazba Pepovi <span style={{ opacity: .7 }}>— nepovinné, prázdné se neodešle</span>
+            </div>
+            <textarea value={fb} onChange={e => setFb(e.target.value)} rows={2}
+              placeholder='Např.: samotné slovo Rešerše klientovi nic neřekne. Napiš k čemu a co z toho vyšlo.'
+              style={{ width: "100%", padding: "9px 11px", fontSize: 12.5, color: INK, border: "1px solid rgba(0,0,0,.14)", borderRadius: 9, outline: "none", fontFamily: "inherit", resize: "vertical", boxSizing: "border-box" }} />
+            <div style={{ fontSize: 9.5, color: MUT, marginTop: 5 }}>Uvidí tvůj text, ne tvoje ceny.</div>
+
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 20 }}>
+              <button onClick={() => setOpen(false)} disabled={saving}
+                style={{ fontSize: 12, color: MUT, background: "none", border: "1px solid rgba(0,0,0,.12)", borderRadius: 9, padding: "8px 14px", cursor: "pointer" }}>Zrušit</button>
+              <button onClick={uloz} disabled={saving}
+                style={{ fontSize: 12, fontWeight: 600, color: "#fff", background: IND, border: "none", borderRadius: 9, padding: "8px 16px", cursor: "pointer", opacity: saving ? .6 : 1 }}>
+                {saving ? "Ukládám…" : (mode === "internal" ? "Uklidit z fronty" : "Schválit")}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function JosefPanel({ logs, attendance: attendanceProp, availability, clients = [], financeItems = [], onSaveFinance, workEntries = [], onApprove }) {
   const now = new Date();
   const pad = n => String(n).padStart(2, "0");
   const ym = `${now.getFullYear()}-${pad(now.getMonth() + 1)}`;
@@ -11302,6 +11566,48 @@ function JosefPanel({ logs, attendance: attendanceProp, availability, clients = 
           </div>
         </div>
       )}
+
+      {/* Fronta ke schválení — malá a viditelná. Schovaná by se přestala vyprazdňovat
+          a odklikávala by se naslepo; tím by z měření návratnosti bylo měření ochoty klikat. */}
+      <SchvalovaciFronta logs={logs} clients={clients} workEntries={workEntries}
+        onApprove={onApprove} colors={{ IND, INDV, MUT, INK, HL }} />
+
+      {/* Návratnost — jen za běžící měsíc. Porovnávat všechny jeho náklady od června
+          proti výkazům schváleným od dneška by ukázalo obří ztrátu, která nic neznamená. */}
+      {(() => {
+        const mLogsApproved = (logs || []).filter(l => String(l.approved_at || "").slice(0,7) === ym);
+        if (!mLogsApproved.length) return null;
+        const roi = computeJosefRoi(mLogsApproved, workEntries, wageToDate);
+        if (!roi.pocetVykazu) return null;
+        const kladny = roi.cisty >= 0;
+        return (
+          <div style={{ margin: "0 22px 6px", padding: "13px 15px", borderRadius: BP.rInner, background: "rgba(74,68,184,.035)" }}>
+            <div style={{ fontSize: 9, letterSpacing: ".2em", textTransform: "uppercase", color: INDV, fontWeight: 700, marginBottom: 9 }}>
+              Co ti vydělal · {monthNameJP}
+            </div>
+            <div style={{ display: "flex", gap: 18, flexWrap: "wrap", alignItems: "baseline" }}>
+              <div>
+                <div style={{ fontSize: 9.5, color: MUT, marginBottom: 3 }}>Fakturováno z jeho podkladů</div>
+                <div className="maux-num" style={{ fontSize: 19, fontWeight: 600, color: INK }}>{fmtKc(roi.fakturovano)}</div>
+              </div>
+              <div>
+                <div style={{ fontSize: 9.5, color: MUT, marginBottom: 3 }}>Stál tě</div>
+                <div className="maux-num" style={{ fontSize: 19, fontWeight: 600, color: MUT }}>{fmtKc(roi.naklad)}</div>
+              </div>
+              <div style={{ marginLeft: "auto", textAlign: "right" }}>
+                <div style={{ fontSize: 9.5, color: MUT, marginBottom: 3 }}>Rozdíl</div>
+                <div className="maux-num" style={{ fontSize: 22, fontWeight: 600, color: kladny ? UP : "var(--txt)" }}>
+                  {kladny ? "+" : ""}{fmtKc(roi.cisty)}
+                </div>
+              </div>
+            </div>
+            <div style={{ fontSize: 9.5, color: MUT, marginTop: 9, lineHeight: 1.55 }}>
+              {roi.pocetVykazu} {roi.pocetVykazu === 1 ? "výkaz" : (roi.pocetVykazu < 5 ? "výkazy" : "výkazů")} ·
+              {" "}odpracoval {fh(roi.jehoHodiny)} h, tebe to stálo {fh(roi.tveHodiny)} h vlastního času
+            </div>
+          </div>
+        );
+      })()}
 
       {/* Řada 1 — Aktuální náklad + Docházka dnes */}
       <div style={{ display: "flex", borderTop: `1px solid ${HL}`, borderBottom: `1px solid ${HL}` }}>
@@ -11972,7 +12278,7 @@ function MilestoneCelebration({ row, nextGoal, variant = "closed", onClose }) {
     </div>
   );
 }
-function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, loanTrackers, loanTransactions, escrows, expenseChecks, onToggleExpenseCheck, onNav, onAddWorkEntry, onSaveFinance, onDeleteFinance, onDpfoToggle, onLoanTxAdd, onLoanTxToggle, onLoanTxDelete, onLoanUpdate, assistantLogs=[], assistantAttendance=[], assistantAvailability=null, xtbTranches=[], xtbSnapshots=[], xtbPositions=[], xtbClosedTrades=[], xtbCashOps=[], xtbMarket=null, wealthSnapshots=[] }) {
+function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, loanTrackers, loanTransactions, escrows, expenseChecks, onToggleExpenseCheck, onNav, onAddWorkEntry, onSaveFinance, onDeleteFinance, onDpfoToggle, onLoanTxAdd, onLoanTxToggle, onLoanTxDelete, onLoanUpdate, assistantLogs=[], assistantAttendance=[], assistantAvailability=null, xtbTranches=[], xtbSnapshots=[], xtbPositions=[], xtbClosedTrades=[], xtbCashOps=[], xtbMarket=null, wealthSnapshots=[], onApproveAssistantLogs }) {
   const [escrowAlertDismissed, setEscrowAlertDismissed] = useState(false);
   const prevMonthStr = (() => { const d = new Date(); d.setDate(1); d.setMonth(d.getMonth()-1); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`; })();
   const dochazkaKey = `maux_dochazka_odeslana_${prevMonthStr}`;
@@ -12424,7 +12730,8 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
 
       <Panel id="josef">
         <JosefPanel logs={assistantLogs} attendance={assistantAttendance} availability={assistantAvailability}
-          clients={clients} financeItems={financeItems} onSaveFinance={onSaveFinance} />
+          clients={clients} financeItems={financeItems} onSaveFinance={onSaveFinance}
+          workEntries={workEntries} onApprove={onApproveAssistantLogs} />
       </Panel>
 
       {/* ─── PULZ FIRMY — překvapivá novinka V.03: jeden pohled, který spojí vše dohromady ─── */}
@@ -16744,6 +17051,16 @@ function AsistentVykazy({ email, clients, onRefresh }) {
                     <span style={{fontSize:10.5,color:"var(--mut)"}}>{fmtDate(l.entry_date)}</span>
                     {bd&&<span style={{fontSize:9,color:"#6366F1",fontWeight:600}}>0 Kč</span>}
                     {l.status==="archived"&&<span style={{fontSize:8.5,background:"#F0FDF4",color:"#065F46",borderRadius:4,padding:"1px 6px",fontWeight:700}}>archivováno</span>}
+                    {/* Razítko schválení — bez jediné částky. Pepa má vidět, že jeho práce
+                        došla ke klientovi, ne za kolik. */}
+                    {logStatus(l)===LOG_INVOICED&&(
+                      <span title="Mgr. Maux tenhle výkaz schválil a práce šla klientovi na fakturu."
+                        style={{fontSize:8.5,background:"rgba(43,36,120,.07)",color:"#2B2478",borderRadius:4,padding:"1px 6px",fontWeight:700,letterSpacing:".03em"}}>ve fakturaci</span>
+                    )}
+                    {String(l.feedback||"").trim()&&(
+                      <span title="Mgr. Maux k tomuhle výkazu něco připsal — najdete to v listu Zpětná vazba."
+                        style={{fontSize:8.5,background:"rgba(160,131,80,.1)",color:"#6B5424",borderRadius:4,padding:"1px 6px",fontWeight:700,letterSpacing:".03em"}}>poznámka</span>
+                    )}
                   </div>
                   {editDesc?.id===l.id ? (
                     <div>
@@ -17491,14 +17808,14 @@ function AsistentDochazka({ email, attendance, logs, onRefreshAttendance, onGo }
    Když s Tomem něco v Josefově pohledu upravíme, ručně zvedneme ASISTENT_BUILD
    a dopíšeme, co se změnilo. Josef to uvidí právě jednou — při nejbližším
    přihlášení. Když se nic nezmění, Josef nic neuvidí a nic se nikam nevolá.    */
-const ASISTENT_BUILD = "2026-08-04";
+const ASISTENT_BUILD = "2026-08-04b";
 // Texty pro Josefa se píšou VYKÁNÍM a zdvořile ("Zapište prosím…", "Vaše práce").
 // Tykání se do asistentského portálu nedostane — Tom si to takhle přeje.
 const ASISTENT_BUILD_NOTE = [
-  "Přibyl list Převody — přehled všech nemovitostí, které kancelář převádí.",
-  "Vidíte u každého převodu strany, fázi řízení a kdy doběhne; kupní ceny se nezobrazují.",
-  "Nový převod můžete založit sám tlačítkem vpravo nahoře — hlavně ty bez úschovy.",
-  "Převody s úschovou se doplňují samy; u nich stačí dopsat, o jakou nemovitost jde.",
+  "Přibyl list Zpětná vazba. Tom teď vaše výkazy prochází a schvaluje do fakturace.",
+  "Když k některému něco dopíše, najdete to tady. Většinou tu bude ticho — to znamená, že výkaz prošel tak, jak jste ho napsal.",
+  "V listu Výkazy přibyla u řádků dvě razítka: „ve fakturaci\" znamená, že práce šla klientovi, „poznámka\" že je k ní něco napsaného.",
+  "Schvalují se výkazy od srpna dál — starší už necháváme být.",
 ];
 
 const HARD_RELOAD_KEYS = (() => {
@@ -17579,6 +17896,59 @@ function UpdateNotice() {
   );
 }
 
+/* ─── ZPĚTNÁ VAZBA — Pepův pohled (4. 8. 2026) ───────────────────────────────
+   Varianta B: žádné štítky, žádné počty, nic, z čeho jde udělat skóre.
+   Naplní se jen tam, kde Tom něco napsal. Ticho znamená "bylo to v pořádku" —
+   a je to tady napsané výslovně, aby si Pepa z prázdné lišty nic nedomýšlel.
+   ⚠️ Částky sem NIKDY nepatří. Ani cena pro klienta, ani jeho vlastní náklad. */
+function AsistentZpetnaVazba({ logs = [], clients = [] }) {
+  const jmeno = (id) => (clients.find(c => c.id === id) || {}).name || "Klient";
+  const sVazbou = (logs || [])
+    .filter(l => l && String(l.feedback || "").trim())
+    .sort((a,b) => String(b.feedback_at || b.entry_date || "").localeCompare(String(a.feedback_at || a.entry_date || "")));
+  const veFakturaci = (logs || []).filter(l => logStatus(l) === LOG_INVOICED).length;
+
+  // Označit přečtené. Žádné notifikace, žádné hlídání — jen tichý příznak.
+  useEffect(() => {
+    const nove = (logs || []).filter(l => String(l.feedback || "").trim() && l.feedback_seen === false);
+    if (!nove.length) return;
+    Promise.all(nove.map(l => upsertAssistantWorkLog({ ...l, feedback_seen: true }))).catch(() => {});
+  }, [logs]);
+
+  return (
+    <div style={{padding:"28px 0 0"}}>
+      <div style={{fontFamily:"Fraunces,serif",fontSize:26,color:"var(--ink)",marginBottom:6}}>Zpětná vazba</div>
+      <div style={{fontSize:13,color:"var(--mut)",lineHeight:1.65,maxWidth:600,marginBottom:24}}>
+        {sVazbou.length === 0
+          ? "Zatím tu nic není, a to je dobrá zpráva. Tom sem píše jen tam, kde má co dodat — když je ticho, výkaz prošel tak, jak jste ho napsal."
+          : `${sVazbou.length === 1 ? "Jedna poznámka" : sVazbou.length < 5 ? `${sVazbou.length} poznámky` : `${sVazbou.length} poznámek`}. U ostatních výkazů bylo všechno v pořádku.`}
+      </div>
+
+      {veFakturaci > 0 && (
+        <div style={{fontSize:12,color:"var(--mut)",background:"rgba(43,36,120,.04)",borderRadius:10,padding:"12px 15px",marginBottom:20,lineHeight:1.6}}>
+          <span style={{color:"var(--ink)",fontWeight:600}}>{veFakturaci}</span> {veFakturaci === 1 ? "váš výkaz šel" : "vašich výkazů šlo"} do fakturace klientovi.
+          Vaše práce se dostala až na fakturu — pod jménem Mgr. Mauxe, jak to u advokáta musí být.
+        </div>
+      )}
+
+      {sVazbou.map(l => (
+        <div key={l.id} style={{padding:"14px 0",borderTop:"1px solid rgba(0,0,0,.07)"}}>
+          <div style={{display:"flex",gap:10,alignItems:"baseline",flexWrap:"wrap"}}>
+            <span style={{fontSize:13,color:"var(--ink)",fontWeight:500}}>
+              {isBdLog(l) ? (l.bd_category || "Vlastní rozvoj") : jmeno(l.client_id)}
+            </span>
+            <span style={{fontSize:12,color:"var(--mut)",flex:1,minWidth:0,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+              {l.description}
+            </span>
+            <span style={{fontSize:11,color:"var(--mut)"}}>{fmtDate(l.entry_date)}</span>
+          </div>
+          <div style={{fontSize:13,color:"var(--txt)",lineHeight:1.65,marginTop:7}}>{l.feedback}</div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function AsistentApp({ session, onLogout, previewMode }) {
   const [mod, setMod] = useState("prehled");
   const [clients, setClients] = useState([]);
@@ -17613,6 +17983,7 @@ function AsistentApp({ session, onLogout, previewMode }) {
     { key:"vykaz",    icon:"✦", label:"Výkazy" },
     { key:"dochazka", icon:"◷", label:"Docházka" },
     { key:"prevody",  icon:"⇄", label:"Převody" },
+    { key:"vazba",    icon:"✎", label:"Zpětná vazba" },
   ];
 
   // Pepa zakládá a upravuje převody stejně jako Tom, jen bez kupních cen (bezCen).
@@ -17691,6 +18062,7 @@ function AsistentApp({ session, onLogout, previewMode }) {
             {mod==="vykaz"    && <AsistentVykazy email={email} clients={clients} onRefresh={refreshLogs} />}
             {mod==="dochazka" && <AsistentDochazka email={email} attendance={attendance} logs={logs} onRefreshAttendance={refreshAtt} onGo={setMod} />}
             {mod==="prevody" && <PrevodyModule transfers={transfers} escrows={escrows} onSave={savePrevod} bezCen />}
+            {mod==="vazba"   && <AsistentZpetnaVazba logs={logs} clients={clients} />}
           </>
         )}
       </main>
@@ -18471,6 +18843,43 @@ export default function MauxCRM() {
       setMode("list"); setSel(null); setPrefillDate(null);
     } catch (err) { alert("Chyba: " + err.message); } finally { setSaving(false); }
   };
+  // ── SCHVÁLENÍ JOSEFOVÝCH ZÁZNAMŮ ──────────────────────────────────────────
+  // Jedna operace, tři možné konce:
+  //   mode "new"      → vznikne Tvůj výkaz, Josefovy záznamy se na něj navážou
+  //   mode "existing" → záznamy se navážou na výkaz, který už existuje
+  //   mode "internal" → nefakturovatelné; vazba žádná, jen se to uklidí z fronty
+  // Zpětná vazba je nepovinná. Prázdné pole = nic se Pepovi nepošle (ticho = v pořádku).
+  const approveAssistantLogs = async ({ logIds = [], mode = "new", entry = null, existingEntryId = null, feedback = "" }) => {
+    if (!logIds.length) return;
+    setSaving(true);
+    try {
+      let entryId = null;
+      if (mode === "new" && entry) {
+        await upsertWorkEntry(entry);
+        entryId = entry.id;
+      } else if (mode === "existing") {
+        entryId = existingEntryId || null;
+      }
+      const kdy = new Date().toISOString();
+      const fb = String(feedback || "").trim();
+      await Promise.all(logIds.map(id => {
+        const l = assistantLogs.find(x => x.id === id);
+        if (!l) return Promise.resolve();
+        const rec = { ...l,
+          work_entry_id: mode === "internal" ? null : entryId,
+          approved_at: kdy,
+          billing_status: mode === "internal" ? LOG_INTERNAL : LOG_INVOICED,
+        };
+        if (fb) { rec.feedback = fb; rec.feedback_at = kdy; rec.feedback_seen = false; }
+        return upsertAssistantWorkLog(rec);
+      }));
+      if (mode !== "internal") setWorkEntries(await fetchWorkEntries());
+      setAssistantLogs(await fetchAssistantWorkLogs("asistent@maux.cz"));
+    } catch (err) {
+      alert("Schválení se nepovedlo: " + err.message + "\n\nJestli to píše něco o sloupci, chybí migrace SCHVALOVANI_migrace.sql v Supabase.");
+    } finally { setSaving(false); }
+  };
+
   const doDeleteWorkEntry = async (id) => {
     try {
       await deleteWorkEntryDb(id);
@@ -18822,7 +19231,8 @@ export default function MauxCRM() {
               xtbClosedTrades={xtbClosedTrades}
               xtbCashOps={xtbCashOps}
               xtbMarket={xtbMarket}
-              wealthSnapshots={wealthSnapshots} />
+              wealthSnapshots={wealthSnapshots}
+              onApproveAssistantLogs={approveAssistantLogs} />
           )}
 
           {/* VÝKAZ PRÁCE */}
