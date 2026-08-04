@@ -3702,95 +3702,104 @@ function PixelNeko({ invoices = [], workEntries = [] }) {
 
   return (
     <div style={{
-      position: "fixed", left: x - 16, top: y - (state === "sleep" ? 8 : 16),
+      position: "fixed", left: x - 17, top: y - 30,
       zIndex: 9999, pointerEvents: "none",
       opacity: plachy ? 0.12 : 1,
       transition: `left ${speed} ease-in-out, top ${speed} ease-in-out, opacity .25s`,
       filter: "drop-shadow(0 2px 4px rgba(79,70,229,.15))",
     }}>
-      {/* Ladder (when climbing) */}
-      {extra === "ladder" && (
-        <div style={{ position: "absolute", left: 12, top: 16, width: 8, height: 40 }}>
-          <svg viewBox="0 0 8 40" width="8" height="40" style={{ imageRendering: "pixelated" }}>
-            <rect x="0" y="0" width="2" height="40" fill="#D97706" opacity=".7"/>
-            <rect x="6" y="0" width="2" height="40" fill="#D97706" opacity=".7"/>
-            <rect x="0" y="5" width="8" height="2" fill="#F59E0B" opacity=".6"/>
-            <rect x="0" y="15" width="8" height="2" fill="#F59E0B" opacity=".6"/>
-            <rect x="0" y="25" width="8" height="2" fill="#F59E0B" opacity=".6"/>
-            <rect x="0" y="35" width="8" height="2" fill="#F59E0B" opacity=".6"/>
-          </svg>
-        </div>
-      )}
-
-      {/* Milk bowl (when drinking) */}
-      {extra === "bowl" && (
-        <div style={{ position: "absolute", left: facing > 0 ? 28 : -14, bottom: state === "sleep" ? 2 : -2 }}>
-          <svg viewBox="0 0 12 6" width="16" height="8" style={{ imageRendering: "pixelated" }}>
-            <rect x="1" y="0" width="10" height="2" fill="#E0E7FF"/>
-            <rect x="0" y="2" width="12" height="3" fill="#C7D2FE"/>
-            <rect x="2" y="1" width="8" height="1" fill="#fff"/>
-            <rect x="1" y="5" width="10" height="1" fill="#C3C0E4"/>
-          </svg>
-        </div>
-      )}
-
-      {/* Cat sprite */}
-      <svg viewBox="0 0 16 16" width="32" height="32" style={{
-        imageRendering: "pixelated",
-        transform: `scaleX(${facing}) ${state === "sleep" ? "rotate(90deg)" : state === "stretch" ? "scaleY(0.8) translateY(3px)" : ""}`,
-        transition: "transform 0.3s",
+      {/* ═══ POĎEBRADSKÝ SKŘÍTEK — hlavní marketér MAUX Legal ═══
+          Vektor, ne pixely (Tom 5.8.2026: 'a co kdyby byl trochu min minecraft').
+          Čepice VERMILLION #D14A32, ne BP.down #A8443C — jinak by se v periferním
+          vidění pletla se zápornými čísly. Krumpáček nosí pořád, je to on.
+          POŘADÍ VRSTEV JE KRITICKÉ: obličej → vousy → vesta → čepice. Když se
+          vousy kreslí před obličejem, obličej je přikryje a zbude bílý proužek. */}
+      <svg viewBox="0 0 130 172" width="34" height="45" style={{
+        transform: `scaleX(${facing})${state === "sleep" ? " rotate(9deg) translateY(5px)" : ""}`,
+        transformOrigin: "50% 85%",
+        transition: "transform .35s",
+        overflow: "visible",
       }}>
-        {/* ears */}
-        <rect x="2" y="1" width="2" height="2" fill="#6366F1"/>
-        <rect x="10" y="1" width="2" height="2" fill="#6366F1"/>
-        {/* head */}
-        <rect x="2" y="3" width="10" height="4" fill="#818CF8"/>
-        <rect x="3" y="3" width="8" height="4" fill="#C3C0E4"/>
-        {/* eyes — different per state */}
-        {state === "sleep" ? (
-          <>
-            <rect x="4" y="5" width="2" height="1" fill="#312E81"/>
-            <rect x="8" y="5" width="2" height="1" fill="#312E81"/>
-          </>
-        ) : state === "peek" ? (
-          <>
-            <rect x="4" y="4" width="2" height="2" fill="#312E81"/>
-            <rect x="5" y="4" width="1" height="1" fill="#fff"/>
-            <rect x="8" y="4" width="2" height="2" fill="#312E81"/>
-            <rect x="9" y="4" width="1" height="1" fill="#fff"/>
-          </>
-        ) : state === "milk" ? (
-          <>
-            <rect x="4" y="4" width="1" height="1" fill="#312E81"/>
-            <rect x="9" y="4" width="1" height="1" fill="#312E81"/>
-            <rect x="6" y="6" width="2" height="1" fill="#F472B6" opacity=".5"/>
-          </>
-        ) : state === "wash" ? (
-          <>
-            <rect x="4" y="4" width="1" height="1" fill="#312E81"/>
-            <rect x="9" y="4" width="1" height="1" fill="#312E81"/>
-            <rect x="3" y="4" width="1" height="3" fill="#C7D2FE"/>
-          </>
-        ) : (
-          <>
-            <rect x="4" y="4" width="1" height="2" fill="#312E81"/>
-            <rect x="5" y="4" width="1" height="1" fill="#fff"/>
-            <rect x="9" y="4" width="1" height="2" fill="#312E81"/>
-            <rect x="10" y="4" width="1" height="1" fill="#fff"/>
-          </>
+        {extra === "bowl" && (
+          <g>
+            <rect x="100" y="126" width="22" height="17" rx="3" fill="#F6F2E8" stroke="#C9C2B2" strokeWidth="1.5"/>
+            <rect x="100" y="130" width="22" height="3.5" fill="#4A44B8"/>
+            <path d="M122 131 q9 4 0 8" fill="none" stroke="#C9C2B2" strokeWidth="2.5"/>
+          </g>
         )}
-        {/* nose */}
-        <rect x="7" y="5" width="1" height="1" fill="#C084FC"/>
-        {/* body */}
-        <rect x="3" y="7" width="8" height="5" fill="#C3C0E4"/>
-        <rect x="4" y="7" width="6" height="5" fill="#C7D2FE"/>
-        {/* paws — animate for walking */}
-        <rect x={3} y={12 - legOffset} width="2" height={1 + legOffset} fill="#818CF8"/>
-        <rect x={9} y={12 - (1-legOffset)} width="2" height={1 + (1-legOffset)} fill="#818CF8"/>
-        {/* tail — wagging */}
-        <rect x="11" y={9 - (frame % 2)} width="1" height="1" fill="#C3C0E4"/>
-        <rect x="12" y={8 - (frame % 2)} width="1" height="2" fill="#818CF8"/>
-        <rect x="13" y={7 - (frame % 2)} width="1" height="2" fill="#6366F1"/>
+        {extra === "ladder" && (
+          <g opacity=".92">
+            <rect x="2" y="132" width="26" height="6" rx="1.5" fill="#FBF9F3" stroke="#CFC8B8" strokeWidth="1.2"/>
+            <rect x="5" y="141" width="26" height="6" rx="1.5" fill="#FBF9F3" stroke="#CFC8B8" strokeWidth="1.2"/>
+            <rect x="1" y="150" width="26" height="6" rx="1.5" fill="#FBF9F3" stroke="#CFC8B8" strokeWidth="1.2"/>
+          </g>
+        )}
+
+        {/* kontaktní stín — aby nelevitoval */}
+        <ellipse cx="65" cy="167" rx="27" ry="4" fill="#1C0A63" opacity=".10"/>
+
+        {/* 1 · krumpáček za tělem */}
+        <g transform={state === "climb" ? "rotate(-26 92 128)" : ""}>
+          <line x1="86" y1="146" x2="107" y2="96" stroke="#96683A" strokeWidth="5" strokeLinecap="round"/>
+          <line x1="86" y1="146" x2="107" y2="96" stroke="#7C5430" strokeWidth="1.6" strokeLinecap="round" opacity=".55"/>
+          <path d="M98 101 L117 88 L121 95 L102 108 Z" fill="#9DA0AA"/>
+          <path d="M98 101 L117 88 L119 91.5 L100 104.5 Z" fill="#BCC0C8"/>
+        </g>
+
+        {/* 2 · nohy */}
+        <rect x="50" y={148 + (isWalking ? legOffset * 3 : 0)} width="11" height={17 - (isWalking ? legOffset * 3 : 0)} rx="4.5" fill="#2C2680"/>
+        <rect x="69" y={148 + (isWalking ? (1 - legOffset) * 3 : 0)} width="11" height={17 - (isWalking ? (1 - legOffset) * 3 : 0)} rx="4.5" fill="#2C2680"/>
+
+        {/* 3 · ruce */}
+        <rect x="27" y={state === "stretch" ? 84 : 120} width="12" height="26" rx="6" fill="#E6CEB4"/>
+        <rect x="91" y={state === "stretch" || state === "wash" ? 84 : 120} width="12" height="26" rx="6" fill="#E0C6AA"/>
+
+        {/* 4 · obličej, oušky, stín pod kšiltem, tvářičky */}
+        <ellipse cx="34" cy="80" rx="7" ry="9" fill="#E0C6AA"/>
+        <ellipse cx="96" cy="80" rx="7" ry="9" fill="#E0C6AA"/>
+        <ellipse cx="65" cy="78" rx="27" ry="24" fill="#E6CEB4"/>
+        <path d="M38 72 Q65 62 92 72 Q92 62 84 58 L46 58 Q38 62 38 72 Z" fill="#D9BC9E" opacity=".7"/>
+        <ellipse cx="45" cy="84" rx="5.5" ry="3.6" fill="#E3A78F" opacity=".5"/>
+        <ellipse cx="85" cy="84" rx="5.5" ry="3.6" fill="#E3A78F" opacity=".5"/>
+
+        {/* 5 · oči */}
+        {state === "sleep" ? (
+          <g stroke="#1C1440" strokeWidth="2.6" strokeLinecap="round">
+            <path d="M51 72 q4.5 4 9 0"/><path d="M70 72 q4.5 4 9 0"/>
+          </g>
+        ) : state === "peek" ? (
+          <g>
+            <ellipse cx="56" cy="72" rx="6.5" ry="7.5" fill="#fff"/>
+            <ellipse cx="74" cy="72" rx="6.5" ry="7.5" fill="#fff"/>
+            <circle cx="56" cy="73" r="3.2" fill="#1C1440"/><circle cx="74" cy="73" r="3.2" fill="#1C1440"/>
+          </g>
+        ) : (
+          <g>
+            <ellipse cx="56" cy="72" rx="4.2" ry="5.2" fill="#1C1440"/>
+            <ellipse cx="74" cy="72" rx="4.2" ry="5.2" fill="#1C1440"/>
+            <circle cx="57.6" cy="70" r="1.5" fill="#fff"/><circle cx="75.6" cy="70" r="1.5" fill="#fff"/>
+          </g>
+        )}
+
+        {/* 6 · vousy PŘED obličejem — zvlněný spodek, ne trojúhelník */}
+        <path d="M40 90 Q65 97 90 90 Q88 112 84 126 Q76 133 71 128 Q65 139 59 128 Q54 133 46 126 Q42 112 40 90 Z"
+              fill="#F3EEE2" stroke="#DBD2BE" strokeWidth="1.4" strokeLinejoin="round"/>
+        <ellipse cx="65" cy="87" rx="7.5" ry="6.5" fill="#D9BC9E"/>
+        <ellipse cx="65" cy="85" rx="4" ry="2.4" fill="#E6CEB4" opacity=".7"/>
+
+        {/* 7 · vesta, kravata, visačka */}
+        <rect x="33" y="122" width="64" height="34" rx="13" fill="#C6C0DE"/>
+        <path d="M46 122 h6 v34 h-6 a13 13 0 0 1 -13 -13 v-8 a13 13 0 0 1 13 -13 Z" fill="#A9A3CA"/>
+        <rect x="55" y="122" width="20" height="34" fill="#D2CDE6"/>
+        <path d="M57 122 L73 122 L65 150 Z" fill="#2C2680"/>
+        <ellipse cx="45" cy="136" rx="4.2" ry="5.2" fill="#C6A86B"/>
+        <ellipse cx="44" cy="134.5" rx="1.6" ry="2" fill="#DCC28E"/>
+
+        {/* 8 · ČERVENÁ ČEPIČKA PRO ŠTĚSTÍ — zvlněná, se špičkou nakloněnou stranou */}
+        <path d="M74 10 Q80 22 99 62 L31 62 Q48 30 60 12 Q67 4 74 10 Z" fill="#D14A32"/>
+        <path d="M74 10 Q68 26 55 62 L31 62 Q48 30 60 12 Q67 4 74 10 Z" fill="#BC3E28"/>
+        <rect x="28" y="55" width="74" height="15" rx="7.5" fill="#9E3220"/>
+        <rect x="28" y="55" width="74" height="5" rx="2.5" fill="#B03A26"/>
       </svg>
 
       {/* Speech bubble */}
