@@ -109,8 +109,12 @@ const fmtKc = (n) => maskNum(new Intl.NumberFormat("cs-CZ").format(Math.round(n 
 const fmtSigned = (v) => v === 0 ? "0 Kč" : v > 0 ? `+${fmtKc(v)}` : `−${fmtKc(Math.abs(v))}`;
 const fmtDate = (d) => d ? new Date(d).toLocaleDateString("cs-CZ", { day: "numeric", month: "numeric", year: "numeric" }) : "—";
 const uid = () => "id_" + Math.random().toString(36).slice(2, 10);
-const today = () => new Date().toISOString().slice(0, 10);
-const addDays = (d, n) => { const dt = new Date(d); dt.setDate(dt.getDate() + n); return dt.toISOString().slice(0, 10); };
+// POZOR: toISOString() je UTC. V našem pásmu (UTC+2) by u času mezi půlnocí a druhou
+// hodinou vrátil VČEREJŠÍ datum — pohyb zadaný po půlnoci by spadl do minulého měsíce.
+// Datum proto skládáme z lokálních složek. (Oprava 4.8.2026.)
+const localYmd = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+const today = () => localYmd(new Date());
+const addDays = (d, n) => { const dt = new Date(d); dt.setDate(dt.getDate() + n); return localYmd(dt); };
 
 /* ─── ARES (Administrativní registr ekonomických subjektů) ─── */
 const ARES_API = "https://ares.gov.cz/ekonomicke-subjekty-v-be/rest/ekonomicke-subjekty";
@@ -564,6 +568,32 @@ async function syncDpfoSavingPaid(dpfoMonths, year, month, paid, fallbackAmount)
   if (error) throw error;
   return fetchDpfoMonths(year);
 }
+
+/* ── VAZBA VÝDAJ ↔ ÚVĚR V OSTATNÍ (4.8.2026) ──────────────────────────────────
+   Tom: "když na dashboardu zaškrtnu Auto, ať se v Ostatní objeví, že jsem dnes
+   poslal pět tisíc." Výdaj, jehož název sedí na některý tracker (Auto, Bobnice,
+   půjčka od táty), teď při zaškrtnutí zapíše splátku — odškrtnutí ji vezme zpět.
+   Dvě pojistky, bez kterých by to poškodilo evidenci dluhu:
+   • deterministické ID `expay_<úvěr>_<rok>_<měsíc>` → druhé kliknutí nezaloží
+     druhou splátku, jen přepíše tutéž;
+   • ruční pohyby jsou nedotknutelné — maže se JEN záznam s tímhle ID, a když
+     v měsíci nějaká splátka už je (zadal ji Tom sám přes "+ Pohyb"), checkbox
+     nezapíše nic. Bez toho by dluh vypadal nižší, než ve skutečnosti je. */
+const _normName = s => (s || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]/g, "");
+function loanForExpenseItem(loanTrackers, item) {
+  const li = _normName(item?.label);
+  if (li.length < 3) return null;   // dvouznakový název by seděl na cokoli
+  return (loanTrackers || []).find(t => {
+    // ⚠️ INVESTIČNÍ ÚVĚRY VEN. Bobnice drží obálku na spořáku (computeSporakEnvelopes
+    // čte loan_bobnice), takže automaticky zapsaná splátka by obálku snížila a firemní
+    // rezervu o tutéž částku NAFOUKLA — přesně ta lež, kterou jsme právě opravovali
+    // u DPFO. Čerpání a splátky investičního úvěru se zadávají ručně.
+    if (t.type === "investment") return false;
+    const lt = _normName(t.name);
+    return lt.length >= 3 && (lt.includes(li) || li.includes(lt));
+  }) || null;
+}
+const expenseLoanTxId = (loanId, year, month) => `expay_${loanId}_${year}_${String(month).padStart(2, "0")}`;
 
 // ── LOANS ──
 async function fetchLoanTrackers() {
@@ -17741,6 +17771,32 @@ export default function MauxCRM() {
       const fi = (financeItems || []).find(i => i.id === itemId);
       if (fi && isDpfoExpenseItem(fi)) {
         setDpfoMonths(await syncDpfoSavingPaid(dpfoMonths, y, mo, paid, Math.abs(fi.amount || 0)));
+      }
+      // Výdaj se stejnojmenným úvěrem v Ostatní (Auto, Bobnice…) — zapiš/vezmi zpět
+      // splátku. Pojistky proti duplicitě a proti sahání na ruční pohyby: viz
+      // loanForExpenseItem.
+      const loan = fi && loanForExpenseItem(loanTrackers, fi);
+      if (loan) {
+        const txId  = expenseLoanTxId(loan.id, y, mo);
+        const list  = (loanTransactions || {})[loan.id] || [];
+        const castka = Math.abs(fi.amount || 0);
+        if (paid) {
+          const ymPref = `${y}-${String(mo).padStart(2, "0")}`;
+          // Splátku za tenhle měsíc už Tom zadal ručně → nesaháme na to, jinak by
+          // se dluh započetl dvakrát a vypadal nižší, než je.
+          const uzJe = list.some(t => (t.transaction_date || "").startsWith(ymPref) && (t.amount || 0) < 0);
+          if (!uzJe && castka > 0) {
+            await upsertLoanTransaction({
+              id: txId, loan_id: loan.id, transaction_date: today(),
+              amount: -castka, description: "Splátka — odškrtnuto na Přehledu", is_done: true,
+            });
+            const cerstve = await fetchLoanTransactions(loan.id);
+            setLoanTransactions(p => ({ ...p, [loan.id]: cerstve }));
+          }
+        } else if (list.some(t => t.id === txId)) {
+          await deleteLoanTransaction(txId);
+          setLoanTransactions(p => ({ ...p, [loan.id]: (p[loan.id] || []).filter(t => t.id !== txId) }));
+        }
       }
     }
     catch(e) { alert("Chyba: " + e.message); }
