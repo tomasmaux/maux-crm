@@ -526,6 +526,45 @@ async function setExpenseCheck(itemId, year, month, paid) {
   return fetchExpenseChecks(year, month);
 }
 
+/* ── VAZBA „DPFO záloha" ve Výdajích ↔ obálka DPFO na spořáku (4.8.2026) ──────
+   Tom: "když zaškrtnu uhrazení DPFO zálohy, nesníží se mi firemní rezerva."
+   Byla to pravda. Checkbox na Přehledu psal do `expense_checklist`, ale obálka
+   DPFO se počítá výhradně z `dpfo_months` (viz computeSporakEnvelopes) — dvě
+   evidence téže věci, které o sobě nevěděly. DPFO tracker přitom sám tvrdil
+   "odškrtáváš na Přehledu, tady se to jen zrcadlí", což nebyla pravda.
+   Tichý důsledek: po ručním přepsání zůstatku spořáku o zálohu nahoru obálka
+   nenarostla → firemní rezerva ukázala jako Tomovy peníze částku, která patří
+   finančnímu úřadu (~8 tis. měsíčně, za rok až sto tisíc).
+   Od teď se obě strany drží za ruku obousměrně (druhý směr v handleDpfoToggle). */
+function isDpfoExpenseItem(item) {
+  return /dpfo/i.test(item?.label || "");
+}
+// Spořicí řádek DPFO pro daný měsíc. Jen kladné částky — záporné jsou platby FÚ
+// a ty se s měsíčním checkboxem nepárují.
+function dpfoSavingRowFor(dpfoMonths, year, month) {
+  return (dpfoMonths || []).find(m => m.year === year && m.month === month && (m.amount || 0) >= 0) || null;
+}
+// Srovná stav spořicího řádku s checkboxem. Když řádek pro měsíc chybí (Tom ho
+// nezaložil v trackeru), založí ho z částky výdajové položky — jinak by kliknutí
+// tiše nedělalo nic, což je přesně ta chyba, kterou opravujeme.
+async function syncDpfoSavingPaid(dpfoMonths, year, month, paid, fallbackAmount) {
+  const row = dpfoSavingRowFor(dpfoMonths, year, month);
+  if (row) {
+    if (!!row.is_paid === paid) return dpfoMonths;
+    const { error } = await supabase.from("dpfo_months")
+      .upsert({ ...row, is_paid: paid, paid_at: paid ? new Date().toISOString() : null });
+    if (error) throw error;
+    return fetchDpfoMonths(year);
+  }
+  if (!paid || !(fallbackAmount > 0)) return dpfoMonths;   // není co založit ani co odškrtnout
+  const { error } = await supabase.from("dpfo_months").insert({
+    id: `dpfo_${year}_z${Date.now()}`, year, month: Number(month),
+    amount: Math.round(fallbackAmount), is_paid: true, paid_at: new Date().toISOString(),
+  });
+  if (error) throw error;
+  return fetchDpfoMonths(year);
+}
+
 // ── LOANS ──
 async function fetchLoanTrackers() {
   const { data, error } = await supabase.from("loan_trackers").select("*");
@@ -4134,9 +4173,7 @@ function DpfoTracker({ months, onToggle, onAdd, onDelete, year }) {
   const [payAmt, setPayAmt] = useState(34900);
   const [editMode, setEditMode] = useState(false); // kalibrace — ruční oprava měsíců (jinak se odškrtává na Přehledu)
 
-  const A  = "#D97706";   // amber
-  const AL = "#FFFBEB";
-  const R  = "#A8443C";   // red for payments
+  const R  = "#A8443C";   // tlumená červená — jen platby odeslané finančáku
 
   const handleAddPayment = () => {
     if (payAmt > 0) {
@@ -4149,105 +4186,77 @@ function DpfoTracker({ months, onToggle, onAdd, onDelete, year }) {
   return (
     <div style={{ background: "#fff", border: "1px solid rgba(0,0,0,.05)", borderRadius: 20, overflow: "hidden", boxShadow: "0 1px 2px rgba(16,12,60,.04), 0 14px 44px -20px rgba(16,12,60,.10)" }}>
 
-      {/* ── HEADER: editorial čísla bez barevných boxů ── */}
-      <div style={{ padding: "24px 28px 22px" }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 22, flexWrap: "wrap", gap: 6 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
-            <span style={{ width: 7, height: 7, borderRadius: "50%", background: A, boxShadow: `0 0 0 3px ${A}1F`, flexShrink: 0 }} />
-            <span style={{ fontSize: 8.5, letterSpacing: ".26em", textTransform: "uppercase", fontWeight: 700, color: "var(--mut)", opacity: .75 }}>
-              DPFO {year} · zálohy na daň z příjmu
-            </span>
-          </div>
-          <div style={{ fontSize: 10.5, color: "var(--mut)", opacity: .6 }}>spoření 8 000 Kč/měs · prosinec 35 000 Kč</div>
+      {/* ── HLAVA — jedna dominanta: co leží na spořáku pro finančák.
+           Varianta A (Tom 4.8.2026): dlaždice říká STAV, nic víc. Tři KPI vedle sebe
+           i mřížka dvanácti měsíců zanikly — odškrtává se ve Výdajích na Přehledu,
+           tady zůstal jen zůstatek, dvě opěrná čísla a kalibrace pod tlačítkem. ── */}
+      <div style={{ padding: "24px 28px 20px" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 9, marginBottom: 20 }}>
+          <span style={{ width: 6, height: 6, borderRadius: "50%", background: "#4A44B8", flexShrink: 0 }} />
+          <span style={{ fontSize: 8.5, letterSpacing: ".26em", textTransform: "uppercase", fontWeight: 600, color: "var(--mut)", opacity: .75 }}>
+            Daň z příjmu · {year}
+          </span>
         </div>
-        <div style={{ display: "flex", flexWrap: "wrap" }}>
-          {[
-            { label: "Naspořeno", value: fmtKc(savedSum), color: "var(--txt)" },
-            { label: "Odvedeno finančnímu úřadu", value: paidToFU > 0 ? `−${fmtKc(paidToFU)}` : "0 Kč", color: paidToFU > 0 ? "#B91C1C" : "var(--txt)" },
-            { label: "Zůstatek na spořáku", value: fmtKc(netBalance), color: netBalance >= 0 ? "var(--txt)" : "#B91C1C" },
-          ].map((kpi, i) => (
-            <div key={i} style={{ paddingRight: 40, paddingLeft: i > 0 ? 40 : 0, borderLeft: i > 0 ? "1px solid rgba(0,0,0,.06)" : "none", marginBottom: 4 }}>
-              <div style={{ fontSize: 8, color: "var(--mut)", letterSpacing: ".18em", marginBottom: 8, textTransform: "uppercase", fontWeight: 700, opacity: .65 }}>{kpi.label}</div>
-              <div style={{ fontFamily:"Inter,ui-sans-serif,system-ui,sans-serif",fontVariantNumeric:"tabular-nums", fontSize: 25, fontWeight:600, color: kpi.color, whiteSpace: "nowrap" }}>{kpi.value}</div>
+        <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", gap: 20, flexWrap: "wrap" }}>
+          <div>
+            <div style={{ fontSize: 10.5, color: "var(--mut)", marginBottom: 7 }}>Na spořáku pro finančák</div>
+            <div className="maux-num" style={{ fontSize: 32, fontWeight: 600, color: netBalance >= 0 ? "#4A44B8" : "#A8443C", lineHeight: 1, whiteSpace: "nowrap" }}>
+              {fmtKc(netBalance)}
             </div>
-          ))}
+          </div>
+          <div style={{ textAlign: "right", fontSize: 11, color: "var(--mut)", lineHeight: 2 }}>
+            <div>Naspořeno <span className="maux-num" style={{ color: "var(--txt)", fontSize: 12 }}>{fmtKc(savedSum)}</span></div>
+            <div>Odvedeno FÚ <span className="maux-num" style={{ color: paidToFU > 0 ? "#A8443C" : "var(--txt)", fontSize: 12 }}>{paidToFU > 0 ? `−${fmtKc(paidToFU)}` : "0 Kč"}</span></div>
+          </div>
         </div>
       </div>
 
-      {/* ── SECTION 1: Roční přehled spoření — jen zrcadlo Přehledu (odškrtává se tam) ── */}
-      <div style={{ padding: "0 24px 20px" }}>
+      {/* ── TICHÝ ŘÁDEK + KALIBRACE — mřížka dvanácti měsíců zanikla (Tom 4.8.2026:
+           "není lepší to mít jenom na dashboardu?"). Zůstal jen počet uložených měsíců;
+           klikací opravy se rozbalí pod tlačítkem, protože je Tom potřebuje jednou za rok. ── */}
+      <div style={{ padding: "0 28px 18px" }}>
         {(() => {
-          const planTotal = savings.reduce((s,m) => s+(m.amount||0), 0);
           const doneCount = savings.filter(m => m.is_paid).length;
-          const pct = planTotal > 0 ? Math.round((savedSum/planTotal)*100) : 0;
           return (
             <>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12, flexWrap: "wrap", gap: 8 }}>
-                <div style={{ fontSize: 8.5, fontWeight: 700, color: "var(--mut)", letterSpacing: ".2em", textTransform: "uppercase", opacity: .75 }}>
-                  Roční přehled spoření
-                </div>
-                <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-                  <span style={{ fontSize: 10.5, color: "var(--mut)", opacity: .75 }}>odškrtáváš na Přehledu · tady se to jen zrcadlí</span>
-                  <button onClick={() => setEditMode(v => !v)}
-                    style={{ fontSize: 10.5, padding: "5px 12px", borderRadius: 8, border: editMode ? "1.5px solid #4F46E5" : "1px solid rgba(0,0,0,.12)", background: editMode ? "#EEF2FF" : "#fff", color: editMode ? "#4338CA" : "var(--mut)", fontWeight: 600, cursor: "pointer", fontFamily: "inherit", transition: "all .15s" }}>
-                    {editMode ? "✓ Hotovo" : "✎ Kalibrace"}
-                  </button>
-                </div>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap",
+                borderTop: "1px solid rgba(0,0,0,.05)", paddingTop: 14 }}>
+                <span style={{ fontSize: 11, color: "var(--mut)" }}>
+                  Uloženo <span className="maux-num" style={{ color: "var(--txt)", fontSize: 12 }}>{doneCount}</span> z {savings.length || 12} měsíců · odškrtáváš ve Výdajích na Přehledu
+                </span>
+                <button onClick={() => setEditMode(v => !v)}
+                  style={{ fontSize: 10.5, padding: "5px 12px", borderRadius: 8, border: editMode ? "1.5px solid #4A44B8" : "1px solid rgba(0,0,0,.12)", background: editMode ? "#F1F0FB" : "#fff", color: editMode ? "#3A3494" : "var(--mut)", fontWeight: 600, cursor: "pointer", fontFamily: "inherit", transition: "all .15s" }}>
+                  {editMode ? "✓ Hotovo" : "Kalibrace"}
+                </button>
               </div>
 
-              {/* progress souhrn */}
-              <div style={{ marginBottom: 14 }}>
-                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10.5, color: "var(--mut)", marginBottom: 6 }}>
-                  <span><b style={{ color: "#92400E" }}>{doneCount}</b>/{savings.length || 12} měsíců uloženo</span>
-                  <span>naspořeno <b style={{ color: "var(--txt)" }}>{fmtKc(savedSum)}</b> z plánu {fmtKc(planTotal)} · {pct} %</span>
-                </div>
-                <div style={{ height: 6, background: "#F3F4F6", borderRadius: 3, overflow: "hidden" }}>
-                  <div style={{ height: "100%", width: `${Math.min(pct,100)}%`, background: "linear-gradient(90deg,#F59E0B,#D97706)", borderRadius: 3, transition: "width .5s" }} />
-                </div>
-              </div>
-
-              {!editMode ? (
-                /* READ-ONLY timeline — 12 segmentů */
-                <div style={{ display: "flex", gap: 5 }}>
+              {editMode && (
+                <div style={{ marginTop: 12 }}>
+                  <div style={{ fontSize: 10.5, color: "#3A3494", background: "#F1F0FB", border: "1px solid rgba(74,68,184,.14)", borderRadius: 10, padding: "8px 12px", marginBottom: 10, lineHeight: 1.5 }}>
+                    Kliknutím přepneš měsíc. Změna se okamžitě propíše i do Výdajů na Přehledu — jsou to stejná data.
+                  </div>
                   {savings.length === 0 ? (
                     <div style={{ fontSize: 11.5, color: "var(--mut)", padding: "6px 0" }}>Žádné měsíční záznamy.</div>
-                  ) : savings.map(m => (
-                    <div key={m.id} title={`${CZ_MONTHS[m.month-1]} — ${m.is_paid ? "uloženo" : "zatím ne"} (${fmtKc(m.amount||0)})`} style={{ flex: 1, textAlign: "center" }}>
-                      <div style={{
-                        height: 32, borderRadius: 9, display: "flex", alignItems: "center", justifyContent: "center",
-                        background: m.is_paid ? "linear-gradient(180deg,#FEF3C7,#FDE68A)" : "#F6F6F9",
-                        border: m.is_paid ? "1px solid rgba(217,119,6,.3)" : "1px solid rgba(0,0,0,.04)",
-                        fontSize: 11, fontWeight: 700, color: m.is_paid ? "#92400E" : "#D6D3E1",
-                      }}>{m.is_paid ? "✓" : "·"}</div>
-                      <div style={{ fontSize: 8.5, marginTop: 5, color: m.is_paid ? "#92400E" : "var(--mut)", fontWeight: 600, opacity: m.is_paid ? 1 : .6 }}>{CZ_MONTHS_SHORT[m.month-1]}</div>
-                      <div style={{ fontSize: 7.5, color: "var(--mut)", opacity: .55 }}>{m.amount ? Math.round(m.amount/1000)+"k" : ""}</div>
+                  ) : (
+                    <div style={{ display: "grid", gridTemplateColumns: "repeat(6,1fr)", gap: 8 }}>
+                      {savings.map(m => (
+                        <button key={m.id} onClick={() => onToggle(m)}
+                          title={m.is_paid ? "Klikni pro odznačení" : "Klikni pro označení jako uloženo"}
+                          style={{
+                            padding: "10px 4px", borderRadius: 12,
+                            border: `1.5px solid ${m.is_paid ? "rgba(74,68,184,.35)" : "rgba(0,0,0,.08)"}`,
+                            background: m.is_paid ? "#F1F0FB" : "#FAFAFC",
+                            cursor: "pointer", transition: ".12s",
+                            display: "flex", flexDirection: "column", alignItems: "center", gap: 3, fontFamily: "inherit",
+                          }}>
+                          <span style={{ fontSize: 10, fontWeight: 600, color: m.is_paid ? "#3A3494" : "var(--mut)" }}>{CZ_MONTHS_SHORT[m.month-1]}</span>
+                          <span style={{ fontSize: 9.5, color: m.is_paid ? "#4A44B8" : "#D6D3D1" }}>{m.is_paid ? "✓" : "○"}</span>
+                          <span className="maux-num" style={{ fontSize: 8, color: m.is_paid ? "#3A3494" : "var(--mut)", opacity: .8 }}>{m.amount ? Math.round(m.amount/1000)+"k" : ""}</span>
+                        </button>
+                      ))}
                     </div>
-                  ))}
+                  )}
                 </div>
-              ) : (
-                /* KALIBRACE — klikací opravy (stejná data jako na Přehledu) */
-                <>
-                  <div style={{ fontSize: 10.5, color: "#4338CA", background: "#EEF2FF", border: "1px solid rgba(79,70,229,.15)", borderRadius: 10, padding: "8px 12px", marginBottom: 10, lineHeight: 1.5 }}>
-                    Režim kalibrace — kliknutím přepneš měsíc. Změna se okamžitě propíše i na Přehled (jsou to stejná data).
-                  </div>
-                  <div style={{ display: "grid", gridTemplateColumns: "repeat(6,1fr)", gap: 8 }}>
-                    {savings.map(m => (
-                      <button key={m.id} onClick={() => onToggle(m)}
-                        title={m.is_paid ? "Klikni pro odznačení" : "Klikni pro označení jako uloženo"}
-                        style={{
-                          padding: "10px 4px", borderRadius: 12,
-                          border: `1.5px solid ${m.is_paid ? "#FDE68A" : "rgba(0,0,0,.08)"}`,
-                          background: m.is_paid ? AL : "#FAFAFC",
-                          cursor: "pointer", transition: ".12s",
-                          display: "flex", flexDirection: "column", alignItems: "center", gap: 3, fontFamily: "inherit",
-                        }}>
-                        <span style={{ fontSize: 10, fontWeight: 700, color: m.is_paid ? "#92400E" : "var(--mut)" }}>{CZ_MONTHS_SHORT[m.month-1]}</span>
-                        <span style={{ fontSize: 9.5, color: m.is_paid ? A : "#D6D3D1" }}>{m.is_paid ? "✓" : "○"}</span>
-                        <span style={{ fontSize: 8, color: m.is_paid ? "#B45309" : "var(--mut)", opacity: .8 }}>{m.amount ? Math.round(m.amount/1000)+"k" : ""}</span>
-                      </button>
-                    ))}
-                  </div>
-                </>
               )}
             </>
           );
@@ -10478,10 +10487,10 @@ function OstatniModule({ dpfoMonths, loanTrackers, loanTransactions, financeItem
       }
     });
     const receivables = (financeItems || []).filter(i => i.category === "pohledavka").reduce((s,i) => s + Math.abs(i.amount || 0), 0);
-    const saved  = (dpfoMonths || []).filter(m => (m.amount||0) >= 0 && m.is_paid).reduce((s,m) => s + (m.amount||0), 0);
-    const paidFU = (dpfoMonths || []).filter(m => (m.amount||0) < 0).reduce((s,m) => s + Math.abs(m.amount||0), 0);
-    return { debt, ownFunds, receivables, dpfoNet: saved - paidFU };
-  }, [loanTrackers, loanTransactions, financeItems, dpfoMonths]);
+    // dpfoNet tu byl taky — zrušen 4.8.2026, duplikoval hlavní číslo dlaždice o kus níž
+    // (lekce "jedno číslo, jedno místo"). DPFO má jediné plné místo: dlaždici Daň z příjmu.
+    return { debt, ownFunds, receivables };
+  }, [loanTrackers, loanTransactions, financeItems]);
 
   const SecLabel = ({ children }) => (
     <div style={{ display: "flex", alignItems: "center", gap: 18, margin: "10px 2px -6px" }}>
@@ -10498,7 +10507,6 @@ function OstatniModule({ dpfoMonths, loanTrackers, loanTransactions, financeItem
           { label: "Dluhy celkem", value: fmtKc(hero.debt), sub: "úvěry + osobní" },
           { label: "Pohledávky venku", value: fmtKc(hero.receivables), sub: "půjčené ven" },
           { label: "Vlastní peníze v hypotéce", value: hero.ownFunds > 0 ? fmtKc(hero.ownFunds) : "0 Kč", sub: hero.ownFunds > 0 ? "vrátí se dalším čerpáním" : "nic nedotuješ", accent: hero.ownFunds > 0 },
-          { label: "DPFO spořák", value: fmtKc(hero.dpfoNet), sub: "zůstatek na daň" },
         ].map((k, i) => (
           <div key={i} style={{ paddingRight: 42, paddingLeft: i > 0 ? 42 : 0, borderLeft: i > 0 ? "1px solid rgba(0,0,0,.07)" : "none", marginBottom: 8 }}>
             <div style={{ fontSize: 8.5, letterSpacing: ".22em", textTransform: "uppercase", color: "var(--mut)", fontWeight: 700, opacity: .6, marginBottom: 9, whiteSpace: "nowrap" }}>{k.label}</div>
@@ -17681,6 +17689,18 @@ export default function MauxCRM() {
   const handleDpfoToggle = async (row) => {
     const updated = await toggleDpfoMonth(row);
     setDpfoMonths(p => p.map(m => m.id === row.id ? updated : m));
+    // Druhý směr vazby: kalibrace v trackeru srovná i checkbox na Přehledu.
+    // Jen běžící měsíc a jen spořicí řádek — minulé měsíce a platby FÚ nemají
+    // v měsíčním checklistu co dělat.
+    const now = new Date();
+    const y = now.getFullYear(), mo = now.getMonth() + 1;
+    if (row.year === y && row.month === mo && (row.amount || 0) >= 0) {
+      const fi = (financeItems || []).find(i => isDpfoExpenseItem(i) && ["nutne", "luxus"].includes(i.category));
+      if (fi) {
+        // Zrcadlo není kritické — obálka už je správně, tak kvůli němu nestropuj.
+        try { setExpenseChecks(await setExpenseCheck(fi.id, y, mo, !!updated.is_paid)); } catch { /* ticho */ }
+      }
+    }
   };
   const handleDpfoAdd = async (year, month, amount) => {
     try {
@@ -17712,7 +17732,17 @@ export default function MauxCRM() {
   };
   const toggleExpenseCheck = async (itemId, paid) => {
     const now = new Date();
-    try { setExpenseChecks(await setExpenseCheck(itemId, now.getFullYear(), now.getMonth()+1, paid)); }
+    const y = now.getFullYear(), mo = now.getMonth() + 1;
+    try {
+      setExpenseChecks(await setExpenseCheck(itemId, y, mo, paid));
+      // DPFO záloha není běžný výdaj — peníze neodešly ven, přesunuly se na spořák
+      // do obálky státu. Musí se proto propsat i do dpfo_months, jinak obálka
+      // nenaroste a firemní rezerva ukáže jako volné peníze ty, co patří finančáku.
+      const fi = (financeItems || []).find(i => i.id === itemId);
+      if (fi && isDpfoExpenseItem(fi)) {
+        setDpfoMonths(await syncDpfoSavingPaid(dpfoMonths, y, mo, paid, Math.abs(fi.amount || 0)));
+      }
+    }
     catch(e) { alert("Chyba: " + e.message); }
   };
   const handleLoanTxAdd = async (tx) => {
