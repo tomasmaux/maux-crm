@@ -1220,6 +1220,54 @@ function computeXtbPortfolio(positions = [], closedTrades = [], tranches = [], m
   };
 }
 
+// ── DLUHY — jediný zdroj pravdy (4. 8. 2026) ────────────────────────────────
+// Dřív se tenhle výpočet válel jen uvnitř OstatniModule. Od chvíle, kdy čistý majetek
+// ukazuje i Přehled, by dvě kopie znamenaly dvě různá čísla — proto je funkce sdílená.
+//
+// ⚠️ Investiční úvěr (Bobnice) se vede ZVLÁŠŤ a do "osobních dluhů" nepatří.
+// Proti němu stojí nemovitost, která v Osobním majetku vůbec není. Odečíst ho
+// bez toho aktiva by čistý majetek nesmyslně srazilo.
+function computeDebts(loanTrackers = [], loanTransactions = {}, financeItems = []) {
+  let osobni = 0, investicni = 0, ownFunds = 0;
+  (loanTrackers || []).forEach(t => {
+    const txs = (loanTransactions || {})[t.id] || [];
+    if (t.type === "investment") {
+      const drawn  = txs.filter(x => x.amount > 0 && x.is_done).reduce((s,x) => s + x.amount, 0);
+      const repaid = txs.filter(x => x.amount < 0 && x.is_done).reduce((s,x) => s + Math.abs(x.amount), 0);
+      const rem = drawn - repaid;
+      if (rem >= 0) investicni += rem; else ownFunds += -rem;
+    } else {
+      const paid = txs.filter(x => x.amount < 0 && x.is_done).reduce((s,x) => s + Math.abs(x.amount), 0);
+      osobni += Math.max((t.original_amount || 0) - paid, 0);
+    }
+  });
+  const receivables = (financeItems || []).filter(i => i.category === "pohledavka")
+    .reduce((s,i) => s + Math.abs(i.amount || 0), 0);
+  return { osobni, investicni, debt: osobni + investicni, ownFunds, receivables };
+}
+
+// ── DENNÍ SNÍMEK MAJETKU (4. 8. 2026) ───────────────────────────────────────
+// Appka měřila jen TOK (kolik jsi vydělal), ne ZÁSOBU v čase. Bez historie se
+// míra úspor — "z každých 100 Kč obratu mi zůstalo X" — spočítat nedá a zpětně
+// dopočítat nejde. Proto se od dneška zapisuje jeden řádek denně.
+// Žádný interval, žádné hlídání na pozadí: píše se při načtení Přehledu, jednou za den.
+async function fetchWealthSnapshots() {
+  const { data, error } = await supabase.from("wealth_snapshots").select("*").order("snapshot_date");
+  if (error) throw error;
+  return data || [];
+}
+async function ensureTodayWealthSnapshot(assets, debts) {
+  const d = today();
+  const { data: existing } = await supabase.from("wealth_snapshots").select("id").eq("snapshot_date", d).maybeSingle();
+  if (existing) return;
+  const { error } = await supabase.from("wealth_snapshots").insert({
+    id: `wealth_${d}`, snapshot_date: d,
+    assets: Math.round(assets || 0), debts: Math.round(debts || 0),
+    net: Math.round((assets || 0) - (debts || 0)),
+  });
+  if (error && !String(error.message || "").includes("duplicate")) throw error;
+}
+
 // Zapíše dnešní equity, jen pokud za dnešek ještě žádný snapshot neexistuje —
 // volá se z AkcieModule při každém otevření, tak roste historie pro graf v čase.
 async function ensureTodaySnapshot(equity, balance, currency) {
@@ -7511,7 +7559,9 @@ function FinDonutChart({ segments, centerDefault, centerColor, size = 170 }) {
 
 /* ─── SPOŘICÍ ÚČET — samostatná čtvercová dlaždice (vedle Příjmy/Výdaje na Přehledu) ─── */
 /* ─── TRI GRAFY PANEL — Majetek + Rezerva jako interaktivní donut grafy (Spořák je teď samostatná dlaždice na Přehledu) ─── */
-function TriGrafyPanel({ financeItems, onSaveFinance, invoices, dpfoMonths, loanTransactions, escrows, josefAvg = 0 }) {
+function TriGrafyPanel({ financeItems, onSaveFinance, invoices, dpfoMonths, loanTransactions, escrows, josefAvg = 0,
+                         xtbSnapshots = [], xtbPositions = [], xtbClosedTrades = [], xtbCashOps = [], xtbTranches = [], xtbMarket = null,
+                         loanTrackers = [], wealthSnapshots = [] }) {
   // ── SPOŘÁK ──
   const sporaci    = (financeItems||[]).filter(i => i.category === "sporaci" && i.notes !== "SKIP_DISPLAY");
   const zItem      = sporaci.find(i => i.id === "fi_sp_99");
@@ -7534,6 +7584,35 @@ function TriGrafyPanel({ financeItems, onSaveFinance, invoices, dpfoMonths, loan
   // ── REZERVA (počítáno už zde, protože teď vstupuje i do Majetku — Tom: "majetek = akcie, stavební spoření a zatřetí firemní rezerva, kterou vlastním") ──
   const firmaRez   = actualBal - totalEar;
 
+  // ── AKCIE ŽIVĚ (4. 8. 2026) ─────────────────────────────────────────────────
+  // Tom: "vždyť ten zůstatek akcií mám real time přeci." Měl pravdu — ruční fi_ma_01
+  // zamrzlo na 535 000 Kč, zatímco list Akcie ukazoval 552 869 Kč.
+  // ⚠️ Ceny z Yahoo se stahují JEN při otevření listu Akcie (žádné volání na pozadí).
+  // Proto hybrid, který nepřidává ani jeden síťový požadavek:
+  //   • ceny už v paměti (byl jsi na Akciích) → počítá se živě sdílenou funkcí
+  //   • jinak → poslední denní snapshot z xtb_equity_snapshots (zapisuje ho AkcieModule)
+  // Bez cen by computeXtbPortfolio vrátil POŘIZOVACÍ hodnotu — proto stráž na maCeny.
+  const akcieLive = useMemo(() => {
+    if (xtbMarket && (xtbPositions||[]).length) {
+      const pf = computeXtbPortfolio(xtbPositions, xtbClosedTrades, xtbTranches, xtbMarket, xtbCashOps);
+      if (pf && pf.maCeny && pf.celkem > 0) return { value: Math.round(pf.celkem), datum: today(), live: true };
+    }
+    const snaps = (xtbSnapshots||[]).filter(s => s && s.equity != null && s.snapshot_date)
+                                    .sort((a,b) => String(a.snapshot_date).localeCompare(String(b.snapshot_date)));
+    const last = snaps[snaps.length-1];
+    return last ? { value: Math.round(last.equity), datum: last.snapshot_date, live: false } : null;
+  }, [xtbMarket, xtbPositions, xtbClosedTrades, xtbTranches, xtbCashOps, xtbSnapshots]);
+  // Křivka posledních 30 snapshotů — směr, ne hodnota. Data už v paměti, nic se nestahuje.
+  const akcieSpark = useMemo(() => {
+    return (xtbSnapshots||[]).filter(s => s && s.equity != null && s.snapshot_date)
+      .sort((a,b) => String(a.snapshot_date).localeCompare(String(b.snapshot_date)))
+      .slice(-30).map(s => Number(s.equity) || 0);
+  }, [xtbSnapshots]);
+  const akcieDatum = akcieLive ? (() => {
+    const [y,m,d] = String(akcieLive.datum).split("-");
+    return d && m ? `${Number(d)}. ${Number(m)}.` : akcieLive.datum;
+  })() : "";
+
   // ── MAJETEK ──
   const akcieItem  = (financeItems||[]).find(i => i.id === "fi_ma_01");
   const stavItem   = (financeItems||[]).find(i => i.id === "fi_ma_02");
@@ -7541,12 +7620,56 @@ function TriGrafyPanel({ financeItems, onSaveFinance, invoices, dpfoMonths, loan
   // Jeden indigo systém, víc odstínů — Tom: "klid, jistota, žádná samostatná barva navíc"
   const MAJ_C      = ["#3518A5","#4F46E5","#6358D4","#8A7FE0","#241177","#9D93DD"];
   const allMajSegs = [
-    akcieItem && { item: akcieItem, label: "Akcie / ETF",      value: akcieItem.amount||0, color: MAJ_C[0] },
+    (akcieItem || akcieLive) && {
+      item: akcieLive ? null : akcieItem, label: "Akcie / ETF",
+      value: akcieLive ? akcieLive.value : (akcieItem?.amount||0), color: MAJ_C[0],
+      auto: !!akcieLive, note: akcieLive ? (akcieLive.live ? "živě" : `k ${akcieDatum}`) : null,
+      autoTip: "Bere se z listu Akcie (tržní hodnota pozic + hotovost na účtu). Aktualizuje se pokaždé, když list Akcie otevřeš.",
+      spark: akcieSpark.length > 1 ? akcieSpark : null,
+    },
     stavItem  && { item: stavItem,  label: "Stavební spoření", value: stavItem.amount||0,  color: MAJ_C[1] },
-    ...(firmaRez > 0 ? [{ label: "Firemní rezerva", value: firmaRez, color: MAJ_C[2], auto: true }] : []),
+    ...(firmaRez > 0 ? [{ label: "Firemní rezerva", value: firmaRez, color: MAJ_C[2], auto: true, note: "neutrácet",
+                          autoTip: "Počítá se automaticky ze Spořicího účtu (zůstatek minus obálky) — uprav na kartě Spořák." }] : []),
     ...extraMaj.map((it,idx) => ({ item: it, label: it.label, value: it.amount||0, color: MAJ_C[(3+idx)%MAJ_C.length] })),
   ].filter(Boolean).filter(s => s.value > 0 || s.item);
   const totalMaj   = allMajSegs.reduce((s,a) => s+a.value, 0);
+
+  // ── ČISTÝ MAJETEK (4. 8. 2026) ──────────────────────────────────────────────
+  // Donut ukazoval hrubý majetek a mlčel o dluzích. Jediné číslo, které je pravda,
+  // je majetek po odečtení toho, co dlužíš. Investiční úvěr se ODEČÍTÁ ZVLÁŠŤ —
+  // viz computeDebts: proti němu stojí nemovitost, která v tomhle donutu není.
+  const dluhy = useMemo(
+    () => computeDebts(loanTrackers, loanTransactions, financeItems),
+    [loanTrackers, loanTransactions, financeItems]
+  );
+  const cistyMaj = totalMaj - dluhy.osobni;
+
+  // Změna čistého majetku za posledních ~30 dní. Mlčí, dokud nejsou aspoň dva snímky —
+  // historie začíná dnem, kdy proběhla migrace, zpětně se dopočítat nedá.
+  const wealthDelta = useMemo(() => {
+    const rows = (wealthSnapshots||[]).filter(s => s && s.net != null && s.snapshot_date)
+      .sort((a,b) => String(a.snapshot_date).localeCompare(String(b.snapshot_date)));
+    if (rows.length < 2) return null;
+    const posledni = rows[rows.length-1];
+    const d = new Date(); d.setDate(d.getDate() - 30);
+    const mez = localYmd(d);
+    const stary = rows.filter(r => String(r.snapshot_date) <= mez).pop() || rows[0];
+    if (!stary || stary.snapshot_date === posledni.snapshot_date) return null;
+    const dni = Math.max(1, Math.round(
+      (new Date(String(posledni.snapshot_date) + "T00:00:00") - new Date(String(stary.snapshot_date) + "T00:00:00")) / 86400000
+    ));
+    return { delta: Number(posledni.net) - Number(stary.net), dni };
+  }, [wealthSnapshots]);
+
+  // Zápis dnešního snímku. Jednou za návštěvu, jednou za den, žádný interval.
+  // Stráž na totalMaj > 0: dokud se data nenačtou, zapsala by se nula a zkreslila křivku.
+  const wealthZapsan = useRef(false);
+  useEffect(() => {
+    if (wealthZapsan.current) return;
+    if (!(totalMaj > 0) || !(financeItems||[]).length) return;
+    wealthZapsan.current = true;
+    ensureTodayWealthSnapshot(totalMaj, dluhy.osobni).catch(() => {});
+  }, [totalMaj, dluhy.osobni, (financeItems||[]).length]);
 
   // Meta rezervy = automatický firemní polštář (3 měsíce provozu, strop 300 tis.).
   // Ruční fi_plan_kapital se od 31.7.2026 nepoužívá — jeden cíl, nikdy dva.
@@ -7639,7 +7762,7 @@ function TriGrafyPanel({ financeItems, onSaveFinance, invoices, dpfoMonths, loan
                   {seg.auto ? (
                     <>
                       <span style={{ fontSize: 13, fontWeight: 500, color: "var(--ink)", whiteSpace: "nowrap" }}>{fmtKc(seg.value)}</span>
-                      <span title="Počítá se automaticky ze Spořicího účtu (zůstatek minus obálky) — uprav na kartě Spořák." style={{ fontSize: 9, color: "var(--mut)", fontStyle: "italic", padding: "0 2px", flexShrink: 0 }}>auto</span>
+                      <span title={seg.autoTip || "Počítá se automaticky."} style={{ fontSize: 9, color: "var(--mut)", fontStyle: "italic", padding: "0 2px", flexShrink: 0 }}>auto</span>
                     </>
                   ) : editId === seg.item?.id ? (
                     <>
@@ -7677,15 +7800,54 @@ function TriGrafyPanel({ financeItems, onSaveFinance, invoices, dpfoMonths, loan
                 centerTop="Majetek" centerMain={fmtKc(totalMaj)} legendOnly />
               <div style={{ width: "100%", minWidth: 0, display: "flex", flexDirection: "column", gap: 10 }}>
                 {allMajSegs.map((seg, i) => (
-                  <div key={i} style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 12.5 }}>
-                    <span style={{ width: 9, height: 9, borderRadius: "50%", background: seg.color, flexShrink: 0 }} />
-                    <span style={{ flex: 1, color: "var(--mut)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                      {seg.label}
-                      {seg.auto && <span style={{ fontSize: 9.5, fontStyle: "italic", marginLeft: 6, opacity: .7 }}>neutrácet</span>}
-                    </span>
-                    <span style={{ color: "var(--ink)", fontWeight: 500, whiteSpace: "nowrap" }}>{fmtKc(seg.value)}</span>
+                  <div key={i}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 12.5 }}>
+                      <span style={{ width: 9, height: 9, borderRadius: "50%", background: seg.color, flexShrink: 0 }} />
+                      <span style={{ flex: 1, color: "var(--mut)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
+                        title={seg.auto ? seg.autoTip : undefined}>
+                        {seg.label}
+                        {seg.note && <span style={{ fontSize: 9.5, fontStyle: "italic", marginLeft: 6, opacity: .7 }}>{seg.note}</span>}
+                      </span>
+                      <span className="maux-num" style={{ color: "var(--ink)", fontWeight: 500, whiteSpace: "nowrap" }}>{fmtKc(seg.value)}</span>
+                    </div>
+                    {/* Vlasová křivka posledních 30 snapshotů — říká SMĚR, ne hodnotu.
+                        Žádné osy, žádné popisky: číslo je na řádku nad ní. */}
+                    {seg.spark && (() => {
+                      const v = seg.spark, mn = Math.min(...v), mx = Math.max(...v), rng = mx - mn;
+                      const W = 100, H = 18;
+                      const pts = v.map((n, idx) => {
+                        const x = v.length > 1 ? (idx / (v.length - 1)) * W : 0;
+                        const y = rng > 0 ? H - ((n - mn) / rng) * H : H / 2;
+                        return `${x.toFixed(2)},${y.toFixed(2)}`;
+                      }).join(" ");
+                      const roste = v[v.length-1] >= v[0];
+                      return (
+                        <div style={{ marginTop: 5, marginLeft: 19, marginBottom: 2 }}>
+                          <svg viewBox={`0 -1 ${W} ${H+2}`} preserveAspectRatio="none" style={{ width: "100%", height: 20, display: "block", overflow: "visible" }}>
+                            <polyline points={pts} fill="none" stroke={seg.color} strokeWidth="1.2" strokeLinejoin="round"
+                              strokeLinecap="round" vectorEffect="non-scaling-stroke" opacity={roste ? 0.85 : 0.5} />
+                          </svg>
+                          <div style={{ fontSize: 9, color: "var(--mut)", opacity: .65, marginTop: 2 }}>
+                            {v.length} dní · {roste ? "▲" : "▼"} {fmtKc(Math.abs(v[v.length-1] - v[0]))}
+                          </div>
+                        </div>
+                      );
+                    })()}
                   </div>
                 ))}
+                {/* ⚠️ LEKCE (3.8.2026): menší číslo nesmí být nadpis. Čistý majetek stojí
+                    POD donutem jako důsledek, ne nad ním jako hero. */}
+                <div style={{ marginTop: 14, paddingTop: 12, borderTop: "1px solid rgba(0,0,0,.06)" }}>
+                  <div style={{ display: "flex", alignItems: "baseline", gap: 10, fontSize: 12.5 }}>
+                    <span style={{ flex: 1, color: "var(--mut)" }}>Čistý majetek</span>
+                    <span className="maux-num" style={{ fontSize: 15, fontWeight: 600, color: "var(--ink)", whiteSpace: "nowrap" }}>{fmtKc(cistyMaj)}</span>
+                  </div>
+                  <div style={{ fontSize: 9.5, color: "var(--mut)", opacity: .65, marginTop: 4, lineHeight: 1.5 }}>
+                    {dluhy.osobni > 0 ? `po odečtení dluhů ${fmtKc(dluhy.osobni)}` : "žádné osobní dluhy"}
+                    {dluhy.investicni > 0 && ` · investiční úvěr ${fmtKc(dluhy.investicni)} mimo — kryje ho nemovitost`}
+                    {wealthDelta && ` · za ${wealthDelta.dni} dní ${wealthDelta.delta >= 0 ? "▲" : "▼"} ${fmtKc(Math.abs(wealthDelta.delta))}`}
+                  </div>
+                </div>
               </div>
             </div>
           )}
@@ -10905,25 +11067,13 @@ function OstatniModule({ dpfoMonths, loanTrackers, loanTransactions, financeItem
   // Pozn.: dřívější auto-seed pohledávky odstraněn — mazání musí být trvalé.
 
   // ── Souhrnné metriky pro hero pás ──
-  const hero = useMemo(() => {
-    let debt = 0, ownFunds = 0;
-    (loanTrackers || []).forEach(t => {
-      const txs = (loanTransactions || {})[t.id] || [];
-      if (t.type === "investment") {
-        const drawn  = txs.filter(x => x.amount > 0 && x.is_done).reduce((s,x) => s + x.amount, 0);
-        const repaid = txs.filter(x => x.amount < 0 && x.is_done).reduce((s,x) => s + Math.abs(x.amount), 0);
-        const rem = drawn - repaid;
-        if (rem >= 0) debt += rem; else ownFunds += -rem;
-      } else {
-        const paid = txs.filter(x => x.amount < 0 && x.is_done).reduce((s,x) => s + Math.abs(x.amount), 0);
-        debt += Math.max((t.original_amount || 0) - paid, 0);
-      }
-    });
-    const receivables = (financeItems || []).filter(i => i.category === "pohledavka").reduce((s,i) => s + Math.abs(i.amount || 0), 0);
-    // dpfoNet tu byl taky — zrušen 4.8.2026, duplikoval hlavní číslo dlaždice o kus níž
-    // (lekce "jedno číslo, jedno místo"). DPFO má jediné plné místo: dlaždici Daň z příjmu.
-    return { debt, ownFunds, receivables };
-  }, [loanTrackers, loanTransactions, financeItems]);
+  // dpfoNet tu byl taky — zrušen 4.8.2026, duplikoval hlavní číslo dlaždice o kus níž
+  // (lekce "jedno číslo, jedno místo"). DPFO má jediné plné místo: dlaždici Daň z příjmu.
+  // Od 4.8.2026 se dluhy počítají sdílenou funkcí computeDebts — stejné číslo vidí i Přehled.
+  const hero = useMemo(
+    () => computeDebts(loanTrackers, loanTransactions, financeItems),
+    [loanTrackers, loanTransactions, financeItems]
+  );
 
   const SecLabel = ({ children }) => (
     <div style={{ display: "flex", alignItems: "center", gap: 18, margin: "10px 2px -6px" }}>
@@ -11822,7 +11972,7 @@ function MilestoneCelebration({ row, nextGoal, variant = "closed", onClose }) {
     </div>
   );
 }
-function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, loanTrackers, loanTransactions, escrows, expenseChecks, onToggleExpenseCheck, onNav, onAddWorkEntry, onSaveFinance, onDeleteFinance, onDpfoToggle, onLoanTxAdd, onLoanTxToggle, onLoanTxDelete, onLoanUpdate, assistantLogs=[], assistantAttendance=[], assistantAvailability=null, xtbTranches=[] }) {
+function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, loanTrackers, loanTransactions, escrows, expenseChecks, onToggleExpenseCheck, onNav, onAddWorkEntry, onSaveFinance, onDeleteFinance, onDpfoToggle, onLoanTxAdd, onLoanTxToggle, onLoanTxDelete, onLoanUpdate, assistantLogs=[], assistantAttendance=[], assistantAvailability=null, xtbTranches=[], xtbSnapshots=[], xtbPositions=[], xtbClosedTrades=[], xtbCashOps=[], xtbMarket=null, wealthSnapshots=[] }) {
   const [escrowAlertDismissed, setEscrowAlertDismissed] = useState(false);
   const prevMonthStr = (() => { const d = new Date(); d.setDate(1); d.setMonth(d.getMonth()-1); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`; })();
   const dochazkaKey = `maux_dochazka_odeslana_${prevMonthStr}`;
@@ -12264,7 +12414,10 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
         <div style={{flex:2,minWidth:0,display:"flex",flexDirection:"column"}}>
           <TriGrafyPanel financeItems={financeItems} onSaveFinance={onSaveFinance}
             invoices={invoices} dpfoMonths={dpfoMonths}
-            loanTransactions={loanTransactions} escrows={escrows} josefAvg={josefAvg3m} />
+            loanTransactions={loanTransactions} escrows={escrows} josefAvg={josefAvg3m}
+            xtbSnapshots={xtbSnapshots} xtbPositions={xtbPositions} xtbClosedTrades={xtbClosedTrades}
+            xtbCashOps={xtbCashOps} xtbTranches={xtbTranches} xtbMarket={xtbMarket}
+            loanTrackers={loanTrackers} wealthSnapshots={wealthSnapshots} />
         </div>
       </div>
       </Panel>
@@ -17913,6 +18066,10 @@ export default function MauxCRM() {
   const [loanTransactions, setLoanTransactions] = useState({}); // { loanId: [] }
   const [xtbTranches, setXtbTranches] = useState([]);
   const [xtbSnapshots, setXtbSnapshots] = useState([]);
+  // Snímky majetku. Vlastní efekt schválně: dokud v Supabase neproběhne MAJETEK_migrace.sql,
+  // tabulka neexistuje a dotaz spadne — nesmí to strhnout celé úvodní načtení appky.
+  const [wealthSnapshots, setWealthSnapshots] = useState([]);
+  useEffect(() => { fetchWealthSnapshots().then(setWealthSnapshots).catch(() => {}); }, []);
   const [xtbTitles, setXtbTitles] = useState([]);
   const [xtbClosedTrades, setXtbClosedTrades] = useState([]);
   const [xtbPositions, setXtbPositions] = useState([]);
@@ -18659,7 +18816,13 @@ export default function MauxCRM() {
               assistantLogs={assistantLogs}
               assistantAttendance={assistantAttendance}
               assistantAvailability={assistantAvailability}
-              xtbTranches={xtbTranches} />
+              xtbTranches={xtbTranches}
+              xtbSnapshots={xtbSnapshots}
+              xtbPositions={xtbPositions}
+              xtbClosedTrades={xtbClosedTrades}
+              xtbCashOps={xtbCashOps}
+              xtbMarket={xtbMarket}
+              wealthSnapshots={wealthSnapshots} />
           )}
 
           {/* VÝKAZ PRÁCE */}
