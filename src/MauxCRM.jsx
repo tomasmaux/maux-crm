@@ -43,6 +43,7 @@ const MODULES = [
   { key: "fakturace",  label: "Fakturace",      live: true, icon: "◈" },
   { key: "klienti",    label: "Klienti",        live: true, icon: "◉" },
   { key: "uschovy",    label: "Úschovy",        live: true, icon: "◇" },
+  { key: "prevody",    label: "Převody",        live: true, icon: "⇄" },
   { key: "akcie",      label: "Akcie",          live: true, icon: "△" },
   { key: "dane",       label: "Daně",           live: true, icon: "§" },
   { key: "rejstriky",  label: "Rejstříky",      live: true, icon: "⬡" },
@@ -617,6 +618,109 @@ async function upsertLoanTransaction(tx) {
 async function deleteLoanTransaction(id) {
   const { error } = await supabase.from("loan_transactions").delete().eq("id", id);
   if (error) throw error;
+}
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   PŘEVODY NEMOVITOSTÍ (4. 8. 2026)
+   ------------------------------------------------------------------------------
+   Tom: „nemám přehled, jaké nemovitosti převádím. Některé jsou třeba bez úschovy
+   a v tu chvíli nemám evidenci, kdy to doběhne."
+   Úschova neumí nést nemovitost — `escrows` má jen číslo, klienta, částky a data.
+   Proto samostatná tabulka `transfers` s VOLITELNOU vazbou na úschovu:
+     • převod BEZ úschovy — všechno ruční, fáze se přepíná klikem
+     • převod S úschovou — nemovitost a strany ruční, ale fáze i termín se čtou
+       ŽIVĚ z úschovy (transferPhase). Nic se nezdvojuje, nic se nemůže rozejít.
+   ═══════════════════════════════════════════════════════════════════════════ */
+const TRANSFER_PHASES = [
+  { key: "priprava", label: "Příprava",       hint: "smlouvy se chystají" },
+  { key: "podpis",   label: "Čeká na podpis", hint: "smlouvy u stran" },
+  { key: "vklad",    label: "Ve vkladu",      hint: "návrh podán, běží plomba" },
+  { key: "zapsano",  label: "Zapsáno",        hint: "vklad povolen" },
+  { key: "hotovo",   label: "Hotovo",         hint: "vyplaceno a předáno" },
+];
+const transferPhaseLabel = k => TRANSFER_PHASES.find(p => p.key === k)?.label || "Příprava";
+
+// Fáze převodu. U napojené úschovy se ODVOZUJE z jejích dat — ruční přepínání by
+// vytvořilo druhý zdroj pravdy a ta dvě čísla by se dřív nebo později rozešla.
+function transferPhase(t, escrow) {
+  if (!escrow) return t?.phase || "priprava";
+  if (escrow.date_paid) return "hotovo";
+  const konecPlomby = escrow.date_plomba_end
+    || (escrow.date_navrh_podan ? addDays(escrow.date_navrh_podan, 20) : null);
+  if (konecPlomby && konecPlomby <= today()) return "zapsano";
+  if (escrow.date_navrh_podan) return "vklad";
+  if (escrow.date_received) return "podpis";
+  return "priprava";
+}
+
+// Datum, kdy převod doběhne — a jestli se čeká na Toma, nebo na někoho jiného.
+// Vrací { date, label, naTobe }. `date` může být null (fáze bez termínu).
+function transferDeadline(t, escrow) {
+  const f = transferPhase(t, escrow);
+  if (f === "hotovo") return { date: escrow?.date_paid || t?.date_predani || null, label: "dokončeno", naTobe: false };
+  if (f === "zapsano") return { date: null, label: escrow ? "vyplatit z úschovy" : "předat nemovitost", naTobe: true };
+  if (f === "vklad") {
+    const konec = escrow
+      ? (escrow.date_plomba_end || (escrow.date_navrh_podan ? addDays(escrow.date_navrh_podan, 20) : null))
+      : (t?.date_vklad ? addDays(t.date_vklad, 20) : null);
+    return { date: konec, label: "konec plomby", naTobe: false };
+  }
+  if (f === "podpis") return { date: null, label: "u stran k podpisu", naTobe: false };
+  return { date: null, label: "chystají se smlouvy", naTobe: true };
+}
+
+/* ── DAŇ Z NEMOVITÝCH VĚCÍ — schválené vylepšení (Tom 4. 8. 2026) ─────────────
+   Kupující, který nabyl nemovitost v roce R, podává přiznání k dani z nemovitých
+   věcí do 31. LEDNA roku R+1 (§ 13a zákona č. 338/1992 Sb.). Klienti na to
+   zapomínají pravidelně; advokát, který v lednu pošle jednu větu, vypadá jako
+   profík a nestojí ho to nic — datum zápisu vkladu už stejně evidujeme.
+   Připomínka se rozsvítí od 1. PROSINCE roku nabytí a zhasne, až ji Tom odškrtne
+   nebo až termín marně uplyne (pak už nemá co připomínat). */
+function transferTaxDeadline(t, escrow) {
+  const zapsano = t?.date_zapsano || (transferPhase(t, escrow) === "hotovo" ? escrow?.date_paid : null);
+  if (!zapsano) return null;
+  const rok = Number(String(zapsano).slice(0, 4));
+  if (!(rok > 2000)) return null;
+  return { rok, termin: `${rok + 1}-01-31` };
+}
+function transferTaxPending(t, escrow, dnes = today()) {
+  if (t?.tax_notified) return false;
+  const d = transferTaxDeadline(t, escrow);
+  if (!d) return false;
+  return dnes >= `${d.rok}-12-01` && dnes <= d.termin;
+}
+
+async function fetchTransfers() {
+  const { data, error } = await supabase.from("transfers").select("*").order("created_at", { ascending: false });
+  if (error) { console.error("fetchTransfers:", error.message); return []; }
+  return data || [];
+}
+async function upsertTransfer(t) {
+  const { error } = await supabase.from("transfers").upsert(t);
+  if (error) throw error;
+}
+async function deleteTransfer(id) {
+  const { error } = await supabase.from("transfers").delete().eq("id", id);
+  if (error) throw error;
+}
+// Jednorázový seed: ke každé úschově, která ještě nemá svůj převod, se založí řádek.
+// Tom nemá přepisovat dvacet úschov ručně. Idempotentní — párováno přes escrow_id,
+// takže opakované spuštění nic nezduplikuje. Nemovitost zůstane prázdná, doplní ji sám.
+async function seedTransfersFromEscrows(escrows, transfers) {
+  const mame = new Set((transfers || []).map(t => t.escrow_id).filter(Boolean));
+  const chybi = (escrows || []).filter(e => !mame.has(e.id));
+  if (!chybi.length) return transfers;
+  for (const e of chybi) {
+    await upsertTransfer({
+      id: `tr_${e.id}`, escrow_id: e.id,
+      property: "", cadastral: "", lv: "",
+      price: (e.escrow_tranches || []).filter(x => x.party_type === "složitel").reduce((s, x) => s + (x.amount || 0), 0) || null,
+      seller: "", buyer: e.client_name || "",
+      phase: "priprava", notes: "", created_by: "auto",
+      created_at: new Date().toISOString(),
+    });
+  }
+  return fetchTransfers();
 }
 
 // ── XTB: tranše (ruční ledger vkladů/výběrů) + denní equity snapshoty ──
@@ -10263,6 +10367,268 @@ function ClaudeTracker() {
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
+   PŘEVODY — rejstřík všeho, co Tom převádí (varianta A, schváleno 4. 8. 2026)
+   Tom: „nemám přehled, jaké nemovitosti převádím."
+   Jedna tabulka, řazená podle toho, co doběhne nejdřív; co čeká na Toma jde
+   nahoru. Úschovy se natáhnou samy a jejich fáze i termín se čtou živě —
+   ruční je u nich jen nemovitost a strany.
+   `bezCen` = Pepův pohled: vidí nemovitost, strany a fázi, ceny ne.
+   ═══════════════════════════════════════════════════════════════════════════ */
+function PrevodyModule({ transfers, escrows, onSave, onDelete, bezCen }) {
+  const [form, setForm]   = useState(null);   // rozepsaný převod (nový i editovaný)
+  const [filtr, setFiltr] = useState("bezi");
+
+  const escrowById = useMemo(() => {
+    const m = {};
+    (escrows || []).forEach(e => { m[e.id] = e; });
+    return m;
+  }, [escrows]);
+
+  // Obohacení + řazení. Na tobě nahoru, pak nejbližší termín, pak bez termínu.
+  const rows = useMemo(() => {
+    const list = (transfers || []).map(t => {
+      const esc = t.escrow_id ? escrowById[t.escrow_id] : null;
+      const faze = transferPhase(t, esc);
+      const dl   = transferDeadline(t, esc);
+      return { t, esc, faze, dl, danPending: transferTaxPending(t, esc) };
+    });
+    const poradi = { priprava: 0, podpis: 1, vklad: 2, zapsano: 3, hotovo: 4 };
+    return list
+      .filter(r => filtr === "vse" ? true : filtr === "hotove" ? r.faze === "hotovo" : r.faze !== "hotovo")
+      .sort((a, b) => {
+        if (a.dl.naTobe !== b.dl.naTobe) return a.dl.naTobe ? -1 : 1;
+        if (a.dl.date && b.dl.date) return a.dl.date.localeCompare(b.dl.date);
+        if (a.dl.date) return -1;
+        if (b.dl.date) return 1;
+        return poradi[a.faze] - poradi[b.faze];
+      });
+  }, [transfers, escrowById, filtr]);
+
+  const bezi     = rows.filter(r => r.faze !== "hotovo").length;
+  const danSeznam = useMemo(() => (transfers || [])
+    .map(t => ({ t, esc: t.escrow_id ? escrowById[t.escrow_id] : null }))
+    .filter(r => transferTaxPending(r.t, r.esc)), [transfers, escrowById]);
+
+  const prazdny = () => ({
+    id: uid(), escrow_id: null, property: "", cadastral: "", lv: "", price: null,
+    seller: "", buyer: "", phase: "priprava", date_vklad: "", date_zapsano: "",
+    date_predani: "", notes: "", tax_notified: false, created_by: bezCen ? "josef" : "tom",
+    created_at: new Date().toISOString(),
+  });
+
+  const ulozit = async () => {
+    if (!form) return;
+    if (!(form.property || "").trim()) { alert("Doplň aspoň označení nemovitosti."); return; }
+    // Prázdné datumové pole je v HTML "", ale sloupec typu date v Postgresu prázdný
+    // string odmítne — musí jít null. Totéž u ceny.
+    const prazdneNaNull = v => (v === "" || v == null ? null : v);
+    await onSave({
+      ...form,
+      price:        form.price === "" || form.price == null ? null : Number(form.price),
+      date_vklad:   prazdneNaNull(form.date_vklad),
+      date_zapsano: prazdneNaNull(form.date_zapsano),
+      date_predani: prazdneNaNull(form.date_predani),
+      escrow_id:    prazdneNaNull(form.escrow_id),
+    });
+    setForm(null);
+  };
+
+  const FAZE_BARVA = {
+    priprava: { bg: "#F4F3FA", fg: "#4A4470" },
+    podpis:   { bg: "#FBF3E4", fg: "#7A5A16" },
+    vklad:    { bg: "#EFEEFB", fg: "#3A3494" },
+    zapsano:  { bg: "#E9F2EC", fg: "#2F5C41" },
+    hotovo:   { bg: "#F2F2F4", fg: "#6B6B78" },
+  };
+
+  const Pole = ({ label, children, sirka }) => (
+    <div style={{ flex: sirka || 1, minWidth: 120 }}>
+      <div style={{ fontSize: 9, letterSpacing: ".16em", textTransform: "uppercase", color: "var(--mut)", fontWeight: 600, marginBottom: 5 }}>{label}</div>
+      {children}
+    </div>
+  );
+  const inp = { width: "100%", fontSize: 12.5, padding: "7px 9px", border: "1px solid var(--line)", borderRadius: 8, outline: "none", fontFamily: "inherit", background: "#fff", boxSizing: "border-box" };
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 22, maxWidth: 1020 }}>
+
+      {danSeznam.length > 0 && !bezCen && (
+        <div style={{ background: "#FBF7EE", border: "1px solid rgba(198,168,107,.35)", borderRadius: 14, padding: "16px 20px" }}>
+          <div style={{ fontSize: 9, letterSpacing: ".2em", textTransform: "uppercase", color: "#7A5A16", fontWeight: 600, marginBottom: 8 }}>
+            Daň z nemovitých věcí
+          </div>
+          <div style={{ fontSize: 13, color: "var(--txt)", marginBottom: 10, lineHeight: 1.6 }}>
+            {danSeznam.length === 1 ? "Jeden kupující musí" : `${danSeznam.length} kupující musí`} podat přiznání do 31. ledna. Stačí jim to připomenout.
+          </div>
+          {danSeznam.map(({ t, esc }) => (
+            <div key={t.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "7px 0", borderTop: "1px solid rgba(198,168,107,.2)" }}>
+              <span style={{ flex: 1, fontSize: 12.5 }}>{t.property || "(nemovitost nedoplněna)"} <span style={{ color: "var(--mut)" }}>· {t.buyer || "kupující"}</span></span>
+              <button className="btn gho" style={{ fontSize: 10.5, padding: "4px 10px" }}
+                onClick={() => onSave({ ...t, tax_notified: true })}>Připomenuto</button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <span style={{ width: 6, height: 6, borderRadius: "50%", background: "#4A44B8" }} />
+          <span style={{ fontSize: 9, letterSpacing: ".26em", textTransform: "uppercase", color: "var(--mut)", fontWeight: 600 }}>
+            Převody · {bezi} {bezi === 1 ? "běží" : "běží"}
+          </span>
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+          {[["bezi", "Běžící"], ["hotove", "Hotové"], ["vse", "Vše"]].map(([k, l]) => (
+            <button key={k} onClick={() => setFiltr(k)}
+              style={{ fontSize: 10.5, padding: "5px 11px", borderRadius: 8, cursor: "pointer", fontFamily: "inherit", fontWeight: 600,
+                border: filtr === k ? "1.5px solid #4A44B8" : "1px solid rgba(0,0,0,.12)",
+                background: filtr === k ? "#F1F0FB" : "#fff", color: filtr === k ? "#3A3494" : "var(--mut)" }}>{l}</button>
+          ))}
+          <button onClick={() => setForm(prazdny())}
+            style={{ fontSize: 11, padding: "6px 13px", borderRadius: 8, border: "none", background: "#4A44B8", color: "#fff", fontWeight: 600, cursor: "pointer", fontFamily: "inherit", marginLeft: 4 }}>
+            + Nový převod
+          </button>
+        </div>
+      </div>
+
+      {form && (
+        <div style={{ background: "#fff", border: "1px solid rgba(74,68,184,.22)", borderRadius: 16, padding: "20px 24px" }}>
+          <div style={{ display: "flex", gap: 14, flexWrap: "wrap", marginBottom: 14 }}>
+            <Pole label="Nemovitost" sirka={2.4}>
+              <input style={inp} autoFocus value={form.property || ""} placeholder="Byt, Na Hrázi 144/40"
+                onChange={e => setForm({ ...form, property: e.target.value })} />
+            </Pole>
+            <Pole label="Katastrální území">
+              <input style={inp} value={form.cadastral || ""} placeholder="Poděbrady"
+                onChange={e => setForm({ ...form, cadastral: e.target.value })} />
+            </Pole>
+            <Pole label="LV">
+              <input style={inp} value={form.lv || ""} placeholder="2841"
+                onChange={e => setForm({ ...form, lv: e.target.value })} />
+            </Pole>
+          </div>
+          <div style={{ display: "flex", gap: 14, flexWrap: "wrap", marginBottom: 14 }}>
+            <Pole label="Prodávající">
+              <input style={inp} value={form.seller || ""} onChange={e => setForm({ ...form, seller: e.target.value })} />
+            </Pole>
+            <Pole label="Kupující">
+              <input style={inp} value={form.buyer || ""} onChange={e => setForm({ ...form, buyer: e.target.value })} />
+            </Pole>
+            {!bezCen && (
+              <Pole label="Kupní cena">
+                <input style={inp} type="number" value={form.price ?? ""} placeholder="0"
+                  onChange={e => setForm({ ...form, price: e.target.value })} />
+              </Pole>
+            )}
+          </div>
+          <div style={{ display: "flex", gap: 14, flexWrap: "wrap", marginBottom: 14 }}>
+            <Pole label="Úschova">
+              <select style={inp} value={form.escrow_id || ""}
+                onChange={e => setForm({ ...form, escrow_id: e.target.value || null })}>
+                <option value="">bez úschovy</option>
+                {(escrows || []).map(e => <option key={e.id} value={e.id}>{e.escrow_number} — {e.client_name || ""}</option>)}
+              </select>
+            </Pole>
+            {!form.escrow_id && (
+              <Pole label="Fáze">
+                <select style={inp} value={form.phase || "priprava"} onChange={e => setForm({ ...form, phase: e.target.value })}>
+                  {TRANSFER_PHASES.map(p => <option key={p.key} value={p.key}>{p.label} — {p.hint}</option>)}
+                </select>
+              </Pole>
+            )}
+            <Pole label="Návrh na vklad podán">
+              <input style={inp} type="date" value={form.date_vklad || ""} onChange={e => setForm({ ...form, date_vklad: e.target.value })} />
+            </Pole>
+            <Pole label="Vklad zapsán">
+              <input style={inp} type="date" value={form.date_zapsano || ""} onChange={e => setForm({ ...form, date_zapsano: e.target.value })} />
+            </Pole>
+          </div>
+          <Pole label="Poznámka">
+            <input style={inp} value={form.notes || ""} onChange={e => setForm({ ...form, notes: e.target.value })} />
+          </Pole>
+          <div style={{ display: "flex", gap: 8, marginTop: 16, alignItems: "center" }}>
+            <button onClick={ulozit}
+              style={{ padding: "8px 18px", background: "#4A44B8", color: "#fff", border: "none", borderRadius: 8, fontWeight: 600, cursor: "pointer", fontSize: 12, fontFamily: "inherit" }}>
+              Uložit
+            </button>
+            <button className="btn gho" style={{ fontSize: 11.5 }} onClick={() => setForm(null)}>Zrušit</button>
+            {form.escrow_id && (
+              <span style={{ fontSize: 10.5, color: "var(--mut)", marginLeft: 4 }}>
+                Fáze i termín se u napojené úschovy čtou z ní — ručně se nepřepínají.
+              </span>
+            )}
+            {/* Mazat lze JEN ruční převod. Napojený na úschovu by se při dalším načtení
+                appky vrátil (seed ho založí znovu) — místo mazání se u něj přepne fáze. */}
+            {(transfers || []).some(t => t.id === form.id) && !form.escrow_id && onDelete && (
+              <button className="btn gho" style={{ fontSize: 11, marginLeft: "auto", color: "#A8443C" }}
+                onClick={() => { if (confirm("Smazat převod?")) { onDelete(form.id); setForm(null); } }}>Smazat</button>
+            )}
+          </div>
+        </div>
+      )}
+
+      <div style={{ background: "#fff", border: "1px solid rgba(0,0,0,.05)", borderRadius: 16, overflow: "hidden" }}>
+        {rows.length === 0 ? (
+          <div style={{ padding: "34px 24px", textAlign: "center", color: "var(--mut)", fontSize: 12.5 }}>
+            Zatím žádný převod. Založ první tlačítkem nahoře.
+          </div>
+        ) : (
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5, tableLayout: "fixed" }}>
+            <thead>
+              <tr style={{ fontSize: 8.5, letterSpacing: ".16em", textTransform: "uppercase", color: "var(--mut)", fontWeight: 600 }}>
+                <th style={{ textAlign: "left", padding: "14px 12px 12px 22px", width: "36%" }}>Nemovitost</th>
+                <th style={{ textAlign: "left", padding: "14px 12px 12px", width: "22%" }}>Strany</th>
+                <th style={{ textAlign: "left", padding: "14px 12px 12px", width: "18%" }}>Fáze</th>
+                <th style={{ textAlign: "right", padding: "14px 22px 12px 12px", width: "24%" }}>Doběhne</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map(({ t, esc, faze, dl }) => {
+                const b = FAZE_BARVA[faze] || FAZE_BARVA.priprava;
+                return (
+                  <tr key={t.id} onClick={() => setForm({ ...t })}
+                    style={{ borderTop: "1px solid rgba(0,0,0,.05)", cursor: "pointer" }}>
+                    <td style={{ padding: "13px 12px 13px 22px" }}>
+                      <div style={{ color: t.property ? "var(--txt)" : "var(--mut)", fontStyle: t.property ? "normal" : "italic" }}>
+                        {t.property || "doplň nemovitost"}
+                      </div>
+                      <div style={{ fontSize: 10.5, color: "var(--mut)", marginTop: 3 }}>
+                        {[t.cadastral, t.lv ? `LV ${t.lv}` : null,
+                          !bezCen && t.price ? fmtKc(t.price) : null,
+                          esc ? esc.escrow_number : "bez úschovy"].filter(Boolean).join(" · ")}
+                      </div>
+                    </td>
+                    <td style={{ padding: "13px 12px", color: "var(--mut)" }}>
+                      {[t.seller, t.buyer].filter(Boolean).join(" → ") || "—"}
+                    </td>
+                    <td style={{ padding: "13px 12px" }}>
+                      <span style={{ background: b.bg, color: b.fg, fontSize: 10.5, padding: "3px 9px", borderRadius: 7, fontWeight: 600, whiteSpace: "nowrap" }}>
+                        {transferPhaseLabel(faze)}
+                      </span>
+                    </td>
+                    <td style={{ padding: "13px 22px 13px 12px", textAlign: "right" }}>
+                      {dl.date
+                        ? <div className="maux-num" style={{ fontSize: 12.5 }}>{fmtDate(dl.date)}</div>
+                        : <div style={{ fontSize: 12, color: dl.naTobe ? "#A8443C" : "var(--mut)", fontWeight: dl.naTobe ? 600 : 400 }}>{dl.label}</div>}
+                      {dl.date && <div style={{ fontSize: 10, color: "var(--mut)", marginTop: 3 }}>{dl.label}</div>}
+                      {!dl.date && dl.naTobe && <div style={{ fontSize: 10, color: "#A8443C", marginTop: 3 }}>čeká na tebe</div>}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        )}
+      </div>
+
+      <div style={{ fontSize: 10.5, color: "var(--mut)", paddingLeft: 2 }}>
+        Klikni na řádek pro úpravu. Úschovy se sem natáhly samy — doplň u nich nemovitost.
+      </div>
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
    REJSTŘÍKY — ARES lookup + katastr quick-link
    Přímé volání ARES REST API (CORS OK, žádný proxy) + odkaz na nahlížení do KN.
    ═══════════════════════════════════════════════════════════════════════════ */
@@ -16935,14 +17301,14 @@ function AsistentDochazka({ email, attendance, logs, onRefreshAttendance, onGo }
    Když s Tomem něco v Josefově pohledu upravíme, ručně zvedneme ASISTENT_BUILD
    a dopíšeme, co se změnilo. Josef to uvidí právě jednou — při nejbližším
    přihlášení. Když se nic nezmění, Josef nic neuvidí a nic se nikam nevolá.    */
-const ASISTENT_BUILD = "2026-07-30";
+const ASISTENT_BUILD = "2026-08-04";
 // Texty pro Josefa se píšou VYKÁNÍM a zdvořile ("Zapište prosím…", "Vaše práce").
 // Tykání se do asistentského portálu nedostane — Tom si to takhle přeje.
 const ASISTENT_BUILD_NOTE = [
-  "Nový přehled — hlavním ukazatelem je utilizace: kolik z 8h dne máte popsané ve výkazu.",
-  "V panelu Utilizace si přepnete mezi tímto a minulým měsícem; starší najdete v grafu níže.",
-  "Panel Ještě chybí popsat Vám ukáže dny, kde máte v docházce více času než ve výkazu.",
-  "Před zapsáním odchodu Vám aplikace připomene, co za daný den ještě není ve výkazu.",
+  "Přibyl list Převody — přehled všech nemovitostí, které kancelář převádí.",
+  "Vidíte u každého převodu strany, fázi řízení a kdy doběhne; kupní ceny se nezobrazují.",
+  "Nový převod můžete založit sám tlačítkem vpravo nahoře — hlavně ty bez úschovy.",
+  "Převody s úschovou se doplňují samy; u nich stačí dopsat, o jakou nemovitost jde.",
 ];
 
 const HARD_RELOAD_KEYS = (() => {
@@ -17029,6 +17395,8 @@ function AsistentApp({ session, onLogout, previewMode }) {
   const [logs, setLogs] = useState([]);
   const [attendance, setAttendance] = useState([]);
   const [availability, setAvailability] = useState(null);
+  const [transfers, setTransfers] = useState([]);   // Pepa smí převody číst i zakládat
+  const [escrows, setEscrows] = useState([]);       // jen kvůli fázi napojených převodů
   const [ready, setReady] = useState(false);
   const email = session.user.email;
   const thisMonthKey = (() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`; })();
@@ -17039,7 +17407,12 @@ function AsistentApp({ session, onLogout, previewMode }) {
       fetchAssistantWorkLogs(email),
       fetchAssistantAttendance(email),
       fetchAssistantAvailability(email, thisMonthKey).catch(() => null),
-    ]).then(([c,l,a,av]) => { setClients(c); setLogs(l); setAttendance(a); setAvailability(av); setReady(true); }).catch(console.error);
+      fetchTransfers().catch(() => []),
+      fetchEscrows().catch(() => []),
+    ]).then(([c,l,a,av,trs,esc]) => {
+      setClients(c); setLogs(l); setAttendance(a); setAvailability(av);
+      setTransfers(trs || []); setEscrows(esc || []); setReady(true);
+    }).catch(console.error);
   }, [email]);
 
   const refreshLogs = () => fetchAssistantWorkLogs(email).then(setLogs).catch(console.error);
@@ -17049,7 +17422,14 @@ function AsistentApp({ session, onLogout, previewMode }) {
     { key:"prehled",  icon:"◎", label:"Přehled" },
     { key:"vykaz",    icon:"✦", label:"Výkazy" },
     { key:"dochazka", icon:"◷", label:"Docházka" },
+    { key:"prevody",  icon:"⇄", label:"Převody" },
   ];
+
+  // Pepa zakládá a upravuje převody stejně jako Tom, jen bez kupních cen (bezCen).
+  const savePrevod = async (t) => {
+    try { await upsertTransfer(t); setTransfers(await fetchTransfers()); }
+    catch(e) { alert("Chyba: " + e.message); }
+  };
 
   return (
     <div className="mx" style={{minHeight:"100vh",background:"var(--bg)",display:"flex",flexDirection:"column"}}>
@@ -17120,6 +17500,7 @@ function AsistentApp({ session, onLogout, previewMode }) {
             {mod==="prehled"  && <AsistentPrehled logs={logs} attendance={attendance} clients={clients} availability={availability} onGo={setMod} />}
             {mod==="vykaz"    && <AsistentVykazy email={email} clients={clients} onRefresh={refreshLogs} />}
             {mod==="dochazka" && <AsistentDochazka email={email} attendance={attendance} logs={logs} onRefreshAttendance={refreshAtt} onGo={setMod} />}
+            {mod==="prevody" && <PrevodyModule transfers={transfers} escrows={escrows} onSave={savePrevod} bezCen />}
           </>
         )}
       </main>
@@ -17538,6 +17919,7 @@ export default function MauxCRM() {
     [xtbPositions, xtbClosedTrades, xtbTranches, xtbCashOps, xtbHist]
   );
   const [escrows, setEscrows] = useState([]);
+  const [transfers, setTransfers] = useState([]);   // převody nemovitostí
 
   // ── Oslava milníku ──────────────────────────────────────────────────────────
   // Dvě různé chvíle, dvě různé váhy:
@@ -17684,8 +18066,9 @@ export default function MauxCRM() {
       fetchXtbClosedTrades().catch(e => { console.error("xtb closed trades:", e); return []; }),
       fetchXtbPositions().catch(e => { console.error("xtb positions:", e); return []; }),
       fetchXtbCashOps().catch(e => { console.error("xtb cash ops:", e); return []; }),
+      fetchTransfers().catch(e => { console.error("transfers:", e); return []; }),
     ])
-      .then(async ([c, i, w, f, dpfo, tax, checks, loans, esc, aLogs, aAtt, aAvail, xtbTr, xtbSnap, xtbTit, xtbCt, xtbPos, xtbCo]) => {
+      .then(async ([c, i, w, f, dpfo, tax, checks, loans, esc, aLogs, aAtt, aAvail, xtbTr, xtbSnap, xtbTit, xtbCt, xtbPos, xtbCo, trs]) => {
         setClients(c); setInvoices(i); setWorkEntries(w); setFinanceItems(f);
         setDpfoMonths(dpfo);
         setTaxRecords(tax);
@@ -17706,11 +18089,25 @@ export default function MauxCRM() {
           txMap[l.id] = await fetchLoanTransactions(l.id).catch(() => []);
         }));
         setLoanTransactions(txMap);
+        // Převody: úschova bez svého převodu se doplní sama, ať Tom nezakládá
+        // dvacet řádků ručně. Idempotentní — párováno přes escrow_id.
+        setTransfers(trs || []);
+        try { setTransfers(await seedTransfersFromEscrows(esc || [], trs || [])); }
+        catch (e) { console.error("seed transfers:", e); }
       })
       .finally(() => setDataLoading(false));
   }, [session]);
 
   const handleLogout = async () => { await supabase.auth.signOut(); setClients([]); setInvoices([]); setWorkEntries([]); setFinanceItems([]); };
+
+  const saveTransfer = async (t) => {
+    try { await upsertTransfer(t); setTransfers(await fetchTransfers()); }
+    catch(e) { alert("Chyba: " + e.message); }
+  };
+  const removeTransfer = async (id) => {
+    try { await deleteTransfer(id); setTransfers(p => p.filter(x => x.id !== id)); }
+    catch(e) { alert("Chyba: " + e.message); }
+  };
 
   const saveFinanceItem = async (item) => {
     try { await upsertFinanceItem(item); setFinanceItems(await fetchFinanceItems()); }
@@ -18358,6 +18755,16 @@ export default function MauxCRM() {
               onSaveTax={saveTaxRecord}
               onSaveFinance={saveFinanceItem}
               onNav={navTo}
+            />
+          )}
+
+          {/* PŘEVODY — rejstřík nemovitostí, úschovy se natáhnou samy */}
+          {mod === "prevody" && (
+            <PrevodyModule
+              transfers={transfers}
+              escrows={escrows}
+              onSave={saveTransfer}
+              onDelete={removeTransfer}
             />
           )}
 
