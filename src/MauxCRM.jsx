@@ -1231,10 +1231,10 @@ const LOG_OPEN = "open", LOG_INVOICED = "invoiced", LOG_INTERNAL = "internal";
 const logStatus = (l) => l && l.billing_status ? l.billing_status : LOG_OPEN;
 const isBdLog = (l) => l && (l.entry_type === "bd" || !l.client_id);
 
-// Schvalování se rozjíždí od srpna 2026 (Tom: "dělejme to od srpna dál").
-// Starší Josefovy výkazy se do fronty nedostanou vůbec — nemá smysl zpětně
-// odklikávat půl roku práce, kterou si stejně nikdo nepamatuje.
-const SCHVALOVANI_OD = "2026-08-01";
+// Schvalování se rozjíždí od července 2026 (Tom 4.8.2026: nejdřív srpen, pak
+// "tak přidejme i červenec"). Starší výkazy se do fronty nedostanou vůbec — nemá
+// smysl zpětně odklikávat půl roku práce, kterou si stejně nikdo nepamatuje.
+const SCHVALOVANI_OD = "2026-07-01";
 
 // Fronta ke schválení: klientská práce, která ještě nikam nešla.
 // BD (business development) se nefakturuje, do fronty nepatří.
@@ -11572,18 +11572,24 @@ function JosefPanel({ logs, attendance: attendanceProp, availability, clients = 
       <SchvalovaciFronta logs={logs} clients={clients} workEntries={workEntries}
         onApprove={onApprove} colors={{ IND, INDV, MUT, INK, HL }} />
 
-      {/* Návratnost — jen za běžící měsíc. Porovnávat všechny jeho náklady od června
-          proti výkazům schváleným od dneška by ukázalo obří ztrátu, která nic neznamená. */}
+      {/* Návratnost se páruje podle MĚSÍCE, KDY PRÁCE VZNIKLA — ne podle data schválení.
+          ⚠️ Kdyby se počítalo podle approved_at, červencová práce schválená v srpnu by se
+          porovnávala se srpnovým nákladem a návratnost srpna by se nafoukla o cizí zásluhu.
+          Ukazuje se poslední měsíc, ve kterém je něco schváleného. */}
       {(() => {
-        const mLogsApproved = (logs || []).filter(l => String(l.approved_at || "").slice(0,7) === ym);
-        if (!mLogsApproved.length) return null;
-        const roi = computeJosefRoi(mLogsApproved, workEntries, wageToDate);
+        const schvalene = (logs || []).filter(l => logStatus(l) === LOG_INVOICED && l.entry_date);
+        if (!schvalene.length) return null;
+        const roiYm = schvalene.map(l => String(l.entry_date).slice(0,7)).sort().pop();
+        const mLogsApproved = schvalene.filter(l => String(l.entry_date).slice(0,7) === roiYm);
+        const nakladM = roiYm === ym ? wageToDate : ((costMonths.find(c => c.m === roiYm) || {}).cost || 0);
+        const roi = computeJosefRoi(mLogsApproved, workEntries, nakladM);
         if (!roi.pocetVykazu) return null;
+        const roiMesic = CZM[Number(String(roiYm).slice(5,7)) - 1] || monthNameJP;
         const kladny = roi.cisty >= 0;
         return (
           <div style={{ margin: "0 22px 6px", padding: "13px 15px", borderRadius: BP.rInner, background: "rgba(74,68,184,.035)" }}>
             <div style={{ fontSize: 9, letterSpacing: ".2em", textTransform: "uppercase", color: INDV, fontWeight: 700, marginBottom: 9 }}>
-              Co ti vydělal · {monthNameJP}
+              Co ti vydělal · {roiMesic}
             </div>
             <div style={{ display: "flex", gap: 18, flexWrap: "wrap", alignItems: "baseline" }}>
               <div>
@@ -11604,6 +11610,8 @@ function JosefPanel({ logs, attendance: attendanceProp, availability, clients = 
             <div style={{ fontSize: 9.5, color: MUT, marginTop: 9, lineHeight: 1.55 }}>
               {roi.pocetVykazu} {roi.pocetVykazu === 1 ? "výkaz" : (roi.pocetVykazu < 5 ? "výkazy" : "výkazů")} ·
               {" "}odpracoval {fh(roi.jehoHodiny)} h, tebe to stálo {fh(roi.tveHodiny)} h vlastního času
+              <br />
+              <span style={{ opacity: .8 }}>Náklad je za celý měsíc, výkazy jen ty schválené — dokud frontu nevyprázdníš, je rozdíl podhodnocený.</span>
             </div>
           </div>
         );
@@ -17815,7 +17823,7 @@ const ASISTENT_BUILD_NOTE = [
   "Přibyl list Zpětná vazba. Tom teď vaše výkazy prochází a schvaluje do fakturace.",
   "Když k některému něco dopíše, najdete to tady. Většinou tu bude ticho — to znamená, že výkaz prošel tak, jak jste ho napsal.",
   "V listu Výkazy přibyla u řádků dvě razítka: „ve fakturaci\" znamená, že práce šla klientovi, „poznámka\" že je k ní něco napsaného.",
-  "Schvalují se výkazy od srpna dál — starší už necháváme být.",
+  "Schvalují se výkazy od července dál — starší už necháváme být.",
 ];
 
 const HARD_RELOAD_KEYS = (() => {
