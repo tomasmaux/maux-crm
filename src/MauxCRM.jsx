@@ -11726,12 +11726,35 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
       {/* Pozdrav "Dobrý večer, Tomáši" ZRUŠEN (Tom, 31.7.2026) — spolu s horním pruhem odešel,
           aby obrazovka začínala rovnou vítězným kalendářem. Zbyl tenký servisní řádek:
           vlevo signály, které mají hořet, vpravo ovládání layoutu. */}
+      {/* Servisní řádek = TOK PENĚZ (Tom, 4.8.2026: varianta A).
+          Nevyfakturováno → Na cestě → Po splatnosti. Počet klientů čekajících na fakturu
+          i DPH na spořáku odsud ZRUŠENY — počet není peníze a DPH je u koláče spořáku.
+          Všechny tři články jsou ve stejné bázi jako zbytek appky: subtotal, tedy BEZ DPH
+          a bez přefakturací (notář, sp. poplatek) — Tomovy peníze, ne průtok. */}
       <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:12}}>
         <div style={{fontSize:12,color:"var(--mut)",display:"flex",gap:14,flexWrap:"wrap",alignItems:"center"}}>
           <span>{now.toLocaleDateString("cs-CZ",{weekday:"long",day:"numeric",month:"long"})}</span>
-          {overdue.length>0 && <span style={{color:"#A8443C",fontWeight:500}}>⚠ {overdue.length}× po splatnosti</span>}
-          {Object.keys(unbilledByClient).length>0 && <span style={{color:"var(--ink)",fontWeight:500}}>◆ {Object.keys(unbilledByClient).length} klientů čeká na fakturu</span>}
-          {dphReserved>0 && <span style={{color:"#D97706",fontWeight:500}}>DPH spořák: {fmtKc(dphReserved)}</span>}
+          {unbilledAmt>0 && (
+            <span style={{display:"flex",alignItems:"baseline",gap:6}}>
+              <span>Nevyfakturováno</span>
+              <b className="maux-num" style={{fontSize:13,fontWeight:600,color:"var(--txt)"}}>{fmtKc(unbilledAmt)}</b>
+            </span>
+          )}
+          {unbilledAmt>0 && onTheWayInv>0 && <span style={{color:"var(--line2)"}}>→</span>}
+          {onTheWayInv>0 && (
+            <span style={{display:"flex",alignItems:"baseline",gap:6}}>
+              <span>Na cestě</span>
+              <b className="maux-num" style={{fontSize:13,fontWeight:600,color:"#4A44B8"}}>{fmtKc(onTheWayInv)}</b>
+            </span>
+          )}
+          {onTheWayInv>0 && overdueAmt>0 && <span style={{color:"var(--line2)"}}>→</span>}
+          {overdueAmt>0 && (
+            <span style={{display:"flex",alignItems:"baseline",gap:6,color:"#A8443C"}}>
+              <span>Po splatnosti</span>
+              <b className="maux-num" style={{fontSize:13,fontWeight:600}}>{fmtKc(overdueAmt)}</b>
+              <span style={{fontSize:11}}>· {overdue.length} {overdue.length===1?"faktura":overdue.length<=4?"faktury":"faktur"}</span>
+            </span>
+          )}
         </div>
         <div style={{display:"flex",gap:8,alignItems:"center",flexShrink:0}}>
           {editLayout && (
