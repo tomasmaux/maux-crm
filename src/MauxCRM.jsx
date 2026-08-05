@@ -122,6 +122,12 @@ const uid = () => "id_" + Math.random().toString(36).slice(2, 10);
 // Datum proto skládáme z lokálních složek. (Oprava 4.8.2026.)
 const localYmd = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 const today = () => localYmd(new Date());
+/* České tvary měsíců — bez nich vznikají věty typu "za srpna" nebo "proti červenecu". */
+const CZ_MES_NOM = ["leden","únor","březen","duben","květen","červen","červenec","srpen","září","říjen","listopad","prosinec"];
+const CZ_MES_GEN = ["ledna","února","března","dubna","května","června","července","srpna","září","října","listopadu","prosince"];
+const CZ_MES_LOK = ["lednu","únoru","březnu","dubnu","květnu","červnu","červenci","srpnu","září","říjnu","listopadu","prosinci"];
+const czMes = (m, pad = "nom") => (pad === "gen" ? CZ_MES_GEN : pad === "lok" ? CZ_MES_LOK : CZ_MES_NOM)[m] || "";
+const czMesVelke = (m, pad = "nom") => { const t = czMes(m, pad); return t.charAt(0).toUpperCase() + t.slice(1); };
 const addDays = (d, n) => { const dt = new Date(d); dt.setDate(dt.getDate() + n); return localYmd(dt); };
 
 /* ─── ARES (Administrativní registr ekonomických subjektů) ─── */
@@ -7917,31 +7923,126 @@ const BACKUP_TABLES = [
   "assistant_work_logs","assistant_availability","assistant_attendance"
 ];
 
-async function downloadFullBackup() {
+/* Trvale uložený odkaz na složku pro zálohy (File System Access API).
+   Handle se ukládá do IndexedDB — localStorage neumí uložit objekt handle. */
+const BACKUP_DIR_DB = "maux_backup_dir";
+function bkOpenDb() {
+  return new Promise((res, rej) => {
+    const r = indexedDB.open(BACKUP_DIR_DB, 1);
+    r.onupgradeneeded = () => r.result.createObjectStore("h");
+    r.onsuccess = () => res(r.result);
+    r.onerror = () => rej(r.error);
+  });
+}
+async function bkGetHandle() {
+  try {
+    const db = await bkOpenDb();
+    return await new Promise((res) => {
+      const rq = db.transaction("h", "readonly").objectStore("h").get("dir");
+      rq.onsuccess = () => res(rq.result || null);
+      rq.onerror = () => res(null);
+    });
+  } catch { return null; }
+}
+async function bkSetHandle(handle) {
+  try {
+    const db = await bkOpenDb();
+    db.transaction("h", "readwrite").objectStore("h").put(handle, "dir");
+  } catch {}
+}
+function bkSupported() {
+  return typeof window !== "undefined" && typeof window.showDirectoryPicker === "function";
+}
+async function bkEnsurePermission(handle) {
+  if (!handle) return false;
+  const opts = { mode: "readwrite" };
+  try {
+    if (await handle.queryPermission(opts) === "granted") return true;
+    return await handle.requestPermission(opts) === "granted";
+  } catch { return false; }
+}
+/* Vyzve k výběru složky a zapamatuje si ji. Vrací handle nebo null. */
+async function pickBackupDir() {
+  if (!bkSupported()) return null;
+  try {
+    const handle = await window.showDirectoryPicker({ id: "maux-zalohy", mode: "readwrite" });
+    await bkSetHandle(handle);
+    return handle;
+  } catch { return null; }
+}
+/* Smaže zálohy starší než 12 měsíců. */
+async function bkPruneOld(dir) {
+  const limit = new Date();
+  limit.setMonth(limit.getMonth() - 12);
+  let removed = 0;
+  try {
+    for await (const [name, h] of dir.entries()) {
+      if (h.kind !== "file") continue;
+      const m = name.match(/^maux-crm-zaloha-(\d{4})-(\d{2})-(\d{2})\.json$/);
+      if (!m) continue;
+      const d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+      if (d < limit) { await dir.removeEntry(name); removed++; }
+    }
+  } catch {}
+  return removed;
+}
+
+async function buildBackupPayload() {
   const result = {};
   for (const table of BACKUP_TABLES) {
     const { data, error } = await supabase.from(table).select("*");
     result[table] = error ? { error: error.message } : data;
   }
-  // localStorage snapshot
   result["_localStorage"] = {};
   const lsKeys = ["claude_entries","claude_settings","maux_notes","maux_panel_state","maux_backup_done_month"];
   lsKeys.forEach(k => {
     try { result["_localStorage"][k] = JSON.parse(localStorage.getItem(k) || "null"); } catch { result["_localStorage"][k] = null; }
   });
+  return result;
+}
 
+/* Uloží zálohu. Když je vybraná složka, zapíše do ní přímo; jinak klasicky stáhne.
+   Vrací { mode: "dir" | "download", filename, dirName, pruned }. */
+async function downloadFullBackup() {
+  const result = await buildBackupPayload();
   const now = new Date();
-  const stamp = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,"0")}-${String(now.getDate()).padStart(2,"0")}`;
-  const filename = `maux-crm-zaloha-${stamp}.json`;
-  const blob = new Blob([JSON.stringify(result, null, 2)], { type: "application/json" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url; a.download = filename; a.click();
-  URL.revokeObjectURL(url);
+  const filename = `maux-crm-zaloha-${localYmd(now)}.json`;
+  const text = JSON.stringify(result, null, 2);
 
-  // Mark as done for this month
-  const monthKey = now.toISOString().slice(0,7);
+  let mode = "download", dirName = "", pruned = 0, wroteClients = false;
+  const dir = await bkGetHandle();
+  if (dir && await bkEnsurePermission(dir)) {
+    try {
+      const fh = await dir.getFileHandle(filename, { create: true });
+      const w = await fh.createWritable();
+      await w.write(text);
+      await w.close();
+      pruned = await bkPruneOld(dir);
+      // Evidence klientů pro skill maux-klienti — vždy přepsat aktuální verzí.
+      if (Array.isArray(result.clients)) {
+        try {
+          const ch = await dir.getFileHandle("klienti.json", { create: true });
+          const cw = await ch.createWritable();
+          await cw.write(JSON.stringify({ _exportovano: localYmd(now), _zdroj: "MAUX CRM", klienti: result.clients }, null, 2));
+          await cw.close();
+          wroteClients = true;
+        } catch {}
+      }
+      dirName = dir.name || "";
+      mode = "dir";
+    } catch { mode = "download"; }
+  }
+  if (mode === "download") {
+    const blob = new Blob([text], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = filename; a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  const monthKey = localYmd(now).slice(0,7);
   try { localStorage.setItem("maux_backup_done_month", monthKey); } catch {}
+  return { mode, filename, dirName, pruned, wroteClients };
 }
 
 function backupReminderShouldShow() {
@@ -7964,49 +8065,105 @@ function backupReminderShouldShow() {
 function BackupReminderBanner({ onDone }) {
   const [visible, setVisible] = useState(backupReminderShouldShow);
   const [loading, setLoading] = useState(false);
+  const [hasDir, setHasDir] = useState(null);
+  const [done, setDone] = useState(null);
 
-  if (!visible) return null;
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      const h = bkSupported() ? await bkGetHandle() : null;
+      if (alive) setHasDir(!!h);
+    })();
+    return () => { alive = false; };
+  }, []);
 
-  const handleDownload = async () => {
+  if (!visible && !done) return null;
+
+  const handlePick = async () => {
+    const h = await pickBackupDir();
+    if (h) setHasDir(true);
+  };
+
+  const handleSave = async () => {
     setLoading(true);
-    await downloadFullBackup();
+    const res = await downloadFullBackup();
     setLoading(false);
     setVisible(false);
+    setDone(res);
     onDone && onDone();
   };
 
   const handleSnooze = () => {
-    const tomorrow = new Date();
-    tomorrow.setDate(tomorrow.getDate() + 1);
-    const key = tomorrow.toISOString().slice(0,10);
-    try { localStorage.setItem("maux_backup_snooze_until", key); } catch {}
+    const d = new Date();
+    d.setDate(d.getDate() + 7);
+    try { localStorage.setItem("maux_backup_snooze_until", localYmd(d)); } catch {}
     setVisible(false);
   };
 
-  return (
-    <div style={{
-      background:"#fff", border:"1px solid #E8E6F0", borderLeft:"3px solid var(--ink)",
-      borderRadius:12, padding:"14px 20px", marginBottom:24,
-      display:"flex", alignItems:"center", justifyContent:"space-between", gap:16,
-      boxShadow:"0 1px 6px rgba(53,24,165,.06)"
-    }}>
-      <div style={{display:"flex",alignItems:"center",gap:12}}>
-        <span style={{fontSize:18,lineHeight:1}}>💾</span>
+  const wrap = {
+    background: "#fff", border: "1px solid #E8E6F0", borderLeft: "3px solid var(--ink)",
+    borderRadius: 12, padding: "14px 20px", marginBottom: 24,
+    display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16
+  };
+  const btnMain = { padding: "7px 16px", background: "var(--ink)", color: "#fff", border: "none", borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: "pointer" };
+  const btnGhost = { padding: "7px 14px", background: "transparent", border: "1px solid #E8E6F0", borderRadius: 8, fontSize: 12, color: "var(--mut)", cursor: "pointer" };
+
+  if (done) {
+    const green = "#4A7C59";
+    return (
+      <div style={{ ...wrap, borderLeft: "3px solid " + green }}>
         <div>
-          <div style={{fontSize:13,fontWeight:600,color:"var(--ink)"}}>Čas na zálohu dat</div>
-          <div style={{fontSize:11,color:"var(--mut)",marginTop:1}}>
-            Stáhni si kompletní zálohu — klienti, faktury, výkazy, finance, vše.
+          <div style={{ fontSize: 13, fontWeight: 600, color: "var(--ink)" }}>
+            {done.mode === "dir" ? "Záloha uložena do složky" : "Záloha stažena"}
+          </div>
+          <div className="maux-num" style={{ fontSize: 11, color: "var(--mut)", marginTop: 3 }}>
+            {done.mode === "dir" ? (done.dirName ? done.dirName + " / " + done.filename : done.filename) : done.filename}
+          </div>
+          {done.wroteClients && (
+            <div style={{ fontSize: 11, color: "var(--mut)", marginTop: 2 }}>
+              Aktualizováno i klienti.json
+            </div>
+          )}
+          {done.pruned > 0 && (
+            <div style={{ fontSize: 11, color: "var(--mut)", marginTop: 2 }}>
+              Starší než 12 měsíců smazáno: {done.pruned}
+            </div>
+          )}
+        </div>
+        <button onClick={() => setDone(null)} style={btnGhost}>Zavřít</button>
+      </div>
+    );
+  }
+
+  if (bkSupported() && hasDir === false) {
+    return (
+      <div style={wrap}>
+        <div>
+          <div style={{ fontSize: 13, fontWeight: 600, color: "var(--ink)" }}>Kam mám zálohy ukládat?</div>
+          <div style={{ fontSize: 11, color: "var(--mut)", marginTop: 1 }}>
+            Vyber složku jednou. Příště už se tě ptát nebudu.
           </div>
         </div>
+        <div style={{ display: "flex", gap: 8, flexShrink: 0 }}>
+          <button onClick={handleSnooze} style={btnGhost}>Teď ne</button>
+          <button onClick={handlePick} style={btnMain}>Vybrat složku</button>
+        </div>
       </div>
-      <div style={{display:"flex",gap:8,flexShrink:0}}>
-        <button onClick={handleSnooze}
-          style={{padding:"7px 14px",background:"transparent",border:"1px solid #E8E6F0",borderRadius:8,fontSize:12,color:"var(--mut)",cursor:"pointer"}}>
-          Teď ne
-        </button>
-        <button onClick={handleDownload} disabled={loading}
-          style={{padding:"7px 16px",background:"var(--ink)",color:"#fff",border:"none",borderRadius:8,fontSize:12,fontWeight:600,cursor:"pointer",opacity:loading?.6:1}}>
-          {loading ? "Stahuji…" : "Stáhnout zálohu"}
+    );
+  }
+
+  return (
+    <div style={wrap}>
+      <div>
+        <div style={{ fontSize: 13, fontWeight: 600, color: "var(--ink)" }}>Čas na zálohu dat</div>
+        <div style={{ fontSize: 11, color: "var(--mut)", marginTop: 1 }}>
+          Klienti, faktury, výkazy, finance — vše.
+        </div>
+      </div>
+      <div style={{ display: "flex", gap: 8, flexShrink: 0 }}>
+        <button onClick={handleSnooze} style={btnGhost}>Připomeň za týden</button>
+        <button onClick={handleSave} disabled={loading} style={{ ...btnMain, opacity: loading ? .6 : 1 }}>
+          {loading ? "Ukládám…" : (hasDir ? "Uložit zálohu" : "Stáhnout zálohu")}
         </button>
       </div>
     </div>
@@ -11145,7 +11302,9 @@ function JosefPanel({ logs, attendance: attendanceProp, availability, clients = 
   const todayStr = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
   const CZM = ["ledna","února","března","dubna","května","června","července","srpna","září","října","listopadu","prosince"];
   const CZM_SH = ["led","úno","bře","dub","kvě","čvn","čvc","srp","zář","říj","lis","pro"];
-  const monthNameJP = CZM[now.getMonth()];
+  const monthNameJP    = czMesVelke(now.getMonth());          // Srpen
+  const monthNameJPLok = czMes(now.getMonth(), "lok");        // v srpnu
+  const monthNameJPAcc = czMes(now.getMonth());               // za srpen
   const fh = h => (h % 1 === 0 ? String(h) : h.toFixed(1));
 
   const [freshAtt, setFreshAtt] = useState(null);
@@ -11380,7 +11539,7 @@ function JosefPanel({ logs, attendance: attendanceProp, availability, clients = 
             {checkInStr && <span style={{ fontSize: 10.5, color: MUT }}>od {checkInStr}</span>}
           </div>
           <div style={{ display: "flex", justifyContent: "space-between", margin: "11px 0 5px" }}>
-            <span style={{ fontSize: 9.5, color: MUT }}>Odpracováno v {monthNameJP}</span>
+            <span style={{ fontSize: 9.5, color: MUT }}>Odpracováno v {monthNameJPLok}</span>
             <span style={{ fontSize: 9.5, color: INK, fontWeight: 600 }}>{daysWorked}/{progressDenom} dní · {Math.round(progress * 100)} %</span>
           </div>
           <div style={{ height: 4, background: HL, borderRadius: 99, overflow: "hidden" }}>
@@ -11448,7 +11607,7 @@ function JosefPanel({ logs, attendance: attendanceProp, availability, clients = 
         <div style={{ flex: 1, padding: "16px 22px" }}>
           <div style={lbl({ marginBottom: 12 })}>Co dělá nejdýl · {monthNameJP}</div>
           {topTasks.length === 0 ? (
-            <div style={{ fontSize: 10.5, color: MUT, paddingTop: 4 }}>Zatím žádné výkazy za {monthNameJP}.</div>
+            <div style={{ fontSize: 10.5, color: MUT, paddingTop: 4 }}>Zatím žádné výkazy za {monthNameJPAcc}.</div>
           ) : (
             <div style={{ display: "flex", flexDirection: "column", gap: 9 }}>
               {topTasks.map((t, i) => (
@@ -14001,9 +14160,9 @@ function VykazyCalendar({ workEntries, escrows, invoices, dense = false, onOpenF
                   <div style={{position:"relative",height:2,background:"rgba(74,68,184,.10)",margin:record?"24px 0 16px":"26px 0 16px",maxWidth:480}}>
                     <div style={{position:"absolute",left:0,top:0,bottom:0,width:`${Math.min(donePct,goalPct)}%`,background:PHOS,transition:"width .6s cubic-bezier(.16,1,.3,1)"}} />
                     {won && over > 0 && (
-                      <div title={`Přesah nad metu ${Math.round(over).toLocaleString("cs-CZ")} Kč`} style={{position:"absolute",left:`${goalPct}%`,top:0,bottom:0,width:`${Math.max(0,donePct-goalPct)}%`,background:BP.sand,transition:"width .6s cubic-bezier(.16,1,.3,1)"}} />
+                      <div title={`Přesah nad metu ${Math.round(over).toLocaleString("cs-CZ")} Kč`} style={{position:"absolute",left:`${goalPct}%`,top:0,bottom:0,width:`${Math.max(0,donePct-goalPct)}%`,background:BP.indigoDeep,transition:"width .6s cubic-bezier(.16,1,.3,1)"}} />
                     )}
-                    {!won && <div title={`Meta ${hero.goal.toLocaleString("cs-CZ")} Kč`} style={{position:"absolute",left:`${goalPct}%`,top:-3,bottom:-3,width:1.5,background:BP.sand}} />}
+                    {!won && <div title={`Meta ${hero.goal.toLocaleString("cs-CZ")} Kč`} style={{position:"absolute",left:`${goalPct}%`,top:-3,bottom:-3,width:1.5,background:BP.indigoDeep}} />}
                   </div>
                 )}
                 <div style={{display:"flex",alignItems:"center",flexWrap:"wrap",fontSize:dense?10:11,color:"var(--mut)",rowGap:4,marginTop:hero?0:8}}>
@@ -14052,7 +14211,7 @@ function VykazyCalendar({ workEntries, escrows, invoices, dense = false, onOpenF
                     })}
                   </svg>
                   <div style={{fontSize:9,letterSpacing:".14em",color:"var(--mut)",textTransform:"uppercase",marginTop:8,opacity:.8,whiteSpace:"nowrap"}}>
-                    {sr.length} měsíců · zlatá = meta
+                    {sr.length} měsíců · plná výplň = nad metou
                   </div>
                 </div>
               )}
@@ -16216,7 +16375,7 @@ function AsistentPrehled({ logs, attendance, clients, availability, onGo }) {
   const ut     = utilOf(pKey+"-01", pKey+"-31");
   const utPrev = utilOf(utBefKey+"-01", utBefKey+"-31");
   const utDelta  = (ut.pct!=null && utPrev.pct!=null && utPrev.days>=3) ? ut.pct-utPrev.pct : null;
-  const utBefName= MONTHS_CS[Number(utBefKey.slice(5,7))-1];
+  const utBefName= czMes(Number(utBefKey.slice(5,7))-1, "lok");   // dativ = lokál: proti červenci
   const utGapDay = Math.max(0, ASISTENT_DAY_CAPTURE_H-ut.avg);
 
   // ── MĚSÍČNÍ ŘADA · efektivita ──
@@ -16407,7 +16566,7 @@ function AsistentPrehled({ logs, attendance, clients, availability, onGo }) {
             <div style={{fontSize:10,color:MUT}}>
               Cíl <b style={{color:"var(--txt)"}}>{ASISTENT_DAY_CAPTURE_H} h zapsaných denně</b>
               {ut.days>0 && <> · {ut.days} {dnyWord(ut.days)} v práci</>}
-              {utDelta!=null && <> · <b style={{color:utDelta>=0?OK:SANDD}}>{utDelta>=0?"+":"−"}{Math.abs(utDelta)} b. proti {utBefName}u</b></>}
+              {utDelta!=null && <> · <b style={{color:utDelta>=0?OK:SANDD}}>{utDelta>=0?"+":"−"}{Math.abs(utDelta)} b. proti {utBefName}</b></>}
             </div>
           </div>
 
