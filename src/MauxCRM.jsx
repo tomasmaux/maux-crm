@@ -16817,37 +16817,67 @@ function AsistentKlientForm({ init, initialName, clients = [], onSave, onCancel,
   );
 }
 
-/* ── KLIENTI — Pepův adresář ─────────────────────────────────────────────────
-   Odpovídá na otázku "koho máme a jak se s ním spojím", ne "kolik vydělal".
-   Fakturováno ani hodinová sazba se nikde nevykreslují, mazání klienta a
-   přepnutí stavu na ukončený zůstává jen Tomovi — jednosměrka. */
-function AsistentKlienti({ clients = [], onRefresh }) {
+/* ── KLIENTI V PEPOVĚ PORTÁLU — VĚDOMĚ NE ADRESÁŘ (Tom 5. 8. 2026) ───────────
+   Tom: "vidí tak nějak všechno mi přijde. možná mu ty klienty dám jen
+   k vyhledání a nebudeme mu je ukazovat?"
+
+   Výpis celé klientely je pryč. Ve výchozím stavu Pepa vidí JEN klienty
+   z vlastních výkazů za posledních 30 dní — tedy nic, co by už neznal —
+   a kohokoli dalšího si musí dohledat. Rozdíl je v chování, ne v přístupu:
+   napsat dvě písmena a vysypat seznam pořád jde, skutečnou hráz umí
+   postavit jen databáze. Adresář zve k listování, hledání zve k dohledání.
+
+   NEVRACEJ SEM plný seznam klientů ani chipy stavu — bylo to jednou nasazené
+   a Tom to zamítl, jakmile to viděl naostro. */
+function AsistentKlienti({ clients = [], logs = [], onRefresh }) {
   const [q, setQ] = useState("");
-  const [stav, setStav] = useState("aktivní");
   const [mode, setMode] = useState("list");
   const [selId, setSelId] = useState(null);
   const [saving, setSaving] = useState(false);
 
   const stavOf = (c) => c.status || "aktivní";
   const sel = clients.find(c => c.id === selId) || null;
+  const dotaz = q.trim();
+  const hleda = dotaz.length >= 2;
 
-  const pocty = useMemo(() => ({
-    "aktivní": clients.filter(c => stavOf(c) === "aktivní").length,
-    "spící":   clients.filter(c => stavOf(c) === "spící").length,
-    "vse":     clients.length,
-  }), [clients]);
+  // Klienti z Pepových VLASTNÍCH výkazů za 30 dní, od nejčerstvějšího.
+  // BD záznamy nemají client_id, takže sem přirozeně nespadnou.
+  const nedavni = useMemo(() => {
+    const hranice = addDays(today(), -30);
+    const posledni = {};
+    (logs || []).forEach(l => {
+      if (!l.client_id || !l.entry_date || l.entry_date < hranice) return;
+      if (!posledni[l.client_id] || l.entry_date > posledni[l.client_id]) posledni[l.client_id] = l.entry_date;
+    });
+    return Object.keys(posledni)
+      .map(id => ({ c: clients.find(x => x.id === id), kdy: posledni[id] }))
+      .filter(x => x.c)
+      .sort((x, y) => y.kdy.localeCompare(x.kdy))
+      .slice(0, 8);
+  }, [logs, clients]);
 
-  const filtered = useMemo(() => {
-    const s = q.trim().toLowerCase();
+  // Hledá se napříč celou evidencí včetně spících — stejně jako už dnes
+  // ve Výkazech. Filtr stavu tu vědomě není, byl by to jen jiný adresář.
+  const nalezeni = useMemo(() => {
+    if (!hleda) return [];
+    const s = dotaz.toLowerCase();
     return clients
-      .filter(c => stav === "vse" || stavOf(c) === stav)
-      .filter(c => !s
-        || (c.name || "").toLowerCase().includes(s)
+      .filter(c => (c.name || "").toLowerCase().includes(s)
         || (c.contact || "").toLowerCase().includes(s)
         || (c.ico || "").includes(s)
         || (c.emails || []).join(" ").toLowerCase().includes(s))
-      .sort((a, b) => (a.name || "").localeCompare(b.name || "", "cs"));
-  }, [clients, q, stav]);
+      .sort((a, b) => (a.name || "").localeCompare(b.name || "", "cs"))
+      .slice(0, 25);
+  }, [clients, dotaz, hleda]);
+
+  // "dnes / včera / před 5 dny" čte líp než datum, když jde o čerstvost.
+  const predKolika = (ymd) => {
+    const dnu = Math.round((new Date(today()) - new Date(ymd)) / 864e5);
+    if (dnu <= 0) return "dnes";
+    if (dnu === 1) return "včera";
+    if (dnu < 5) return `před ${dnu} dny`;
+    return fmtDate(ymd);
+  };
 
   const ulozit = async (c) => {
     setSaving(true);
@@ -16947,6 +16977,35 @@ function AsistentKlienti({ clients = [], onRefresh }) {
     );
   }
 
+  const radekKlienta = (c, i, popis) => {
+    const st = stavOf(c);
+    return (
+      <div key={c.id} onClick={()=>{ setSelId(c.id); setMode("detail"); }}
+        style={{display:"flex",alignItems:"center",gap:12,padding:"12px 4px",cursor:"pointer",
+          borderTop: i ? "1px solid rgba(0,0,0,.055)" : "none"}}>
+        <div style={{flex:"1 1 auto",minWidth:0}}>
+          <div style={{fontSize:13,color:"var(--txt)",fontWeight:500,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+            {c.name}
+            <span style={{fontSize:9.5,marginLeft:8,padding:"2px 8px",borderRadius:20,background:"rgba(28,10,99,.055)",color:"var(--mut)",fontWeight:400}}>{c.type}</span>
+            {st !== "aktivní" && <span style={{fontSize:9.5,marginLeft:4,padding:"2px 8px",borderRadius:20,background:"#FDF7EC",color:"#7A5A1A",fontWeight:400}}>{st}</span>}
+          </div>
+          <div style={{fontSize:10.5,color:"var(--mut)",marginTop:2}}>
+            {c.contact || (c.ico ? <span>IČO <span className="maux-num">{c.ico}</span></span> : "—")}
+          </div>
+        </div>
+        {popis && <div style={{fontSize:11.5,color:"var(--mut)",whiteSpace:"nowrap"}}>{popis}</div>}
+        <div style={{flex:"0 0 auto"}}><ServiceDots list={c.services || []} max={2} /></div>
+      </div>
+    );
+  };
+
+  const zalozitBtn = (
+    <button onClick={()=>{ setSelId(null); setMode("new"); }}
+      style={{padding:"10px 20px",borderRadius:11,border:"none",background:"var(--ink)",color:"#fff",fontSize:12.5,fontWeight:600,cursor:"pointer",whiteSpace:"nowrap"}}>
+      + Nový klient
+    </button>
+  );
+
   return (
     <div style={{padding:"32px 32px",display:"flex",flexDirection:"column",gap:20}}>
       <div>
@@ -16955,63 +17014,41 @@ function AsistentKlienti({ clients = [], onRefresh }) {
       </div>
 
       <div style={karta}>
-        <div style={{display:"flex",gap:8,marginBottom:14}}>
+        <div style={{display:"flex",gap:8,marginBottom:hleda||nedavni.length?18:0}}>
           <input value={q} onChange={e=>setQ(e.target.value)} placeholder="Hledat klienta, IČO, kontakt, e-mail…"
             style={{flex:1,padding:"10px 12px",border:"1px solid rgba(0,0,0,.1)",borderRadius:10,fontSize:13,outline:"none",fontFamily:"inherit",background:"#fff"}}/>
-          <button onClick={()=>{ setSelId(null); setMode("new"); }}
-            style={{padding:"10px 20px",borderRadius:11,border:"none",background:"var(--ink)",color:"#fff",fontSize:12.5,fontWeight:600,cursor:"pointer",whiteSpace:"nowrap"}}>
-            + Nový klient
-          </button>
+          {zalozitBtn}
         </div>
 
-        <div style={{display:"flex",gap:6,marginBottom:16,flexWrap:"wrap"}}>
-          {[["aktivní","Aktivní"],["spící","Spící"],["vse","Vše"]].map(([k,l])=>{
-            const on = stav === k;
-            return (
-              <span key={k} onClick={()=>setStav(k)}
-                style={{fontSize:11.5,padding:"5px 12px",borderRadius:20,cursor:"pointer",userSelect:"none",
-                  border:`1px solid ${on?"var(--ink)":"rgba(0,0,0,.11)"}`,background:on?"var(--ink)":"#fff",color:on?"#fff":"var(--mut)"}}>
-                {l} <span className="maux-num" style={{opacity:.65,marginLeft:2}}>{pocty[k]}</span>
-              </span>
-            );
-          })}
-        </div>
-
-        {filtered.length === 0 ? (
-          <div style={{textAlign:"center",padding:"36px 0",color:"var(--mut)",fontSize:12.5,lineHeight:1.7}}>
-            Nikdo takový tu není.
-            {q.trim() && <div style={{marginTop:10}}>
-              <button onClick={()=>{ setSelId(null); setMode("new"); }}
-                style={{padding:"9px 18px",borderRadius:11,border:"1px solid rgba(74,68,184,.35)",background:"#F2F1FD",color:"#4A44B8",fontSize:12,fontWeight:600,cursor:"pointer"}}>
-                Založit nového klienta
-              </button>
-            </div>}
+        {hleda ? (
+          nalezeni.length ? (
+            <div>
+              <div style={{fontSize:9,letterSpacing:".16em",textTransform:"uppercase",color:"var(--mut)",marginBottom:6}}>
+                Nalezeno <span className="maux-num">{nalezeni.length}</span>
+              </div>
+              {nalezeni.map((c,i)=>radekKlienta(c,i,null))}
+            </div>
+          ) : (
+            <div style={{textAlign:"center",padding:"30px 0 24px",color:"var(--mut)",fontSize:12.5,lineHeight:1.7}}>
+              Nikdo takový v evidenci není.
+              <div style={{marginTop:12}}>
+                <button onClick={()=>{ setSelId(null); setMode("new"); }}
+                  style={{padding:"9px 18px",borderRadius:11,border:"1px solid rgba(74,68,184,.35)",background:"#F2F1FD",color:"#4A44B8",fontSize:12,fontWeight:600,cursor:"pointer"}}>
+                  Založit klienta {dotaz}
+                </button>
+              </div>
+            </div>
+          )
+        ) : nedavni.length ? (
+          <div>
+            <div style={{fontSize:9,letterSpacing:".16em",textTransform:"uppercase",color:"var(--mut)",marginBottom:6}}>
+              Nedávno jste na nich pracoval
+            </div>
+            {nedavni.map((x,i)=>radekKlienta(x.c,i,predKolika(x.kdy)))}
           </div>
         ) : (
-          <div>
-            {filtered.map((c,i)=>{
-              const st = stavOf(c);
-              return (
-                <div key={c.id} onClick={()=>{ setSelId(c.id); setMode("detail"); }}
-                  style={{display:"flex",alignItems:"center",gap:12,padding:"12px 4px",cursor:"pointer",
-                    borderTop: i ? "1px solid rgba(0,0,0,.055)" : "none"}}>
-                  <div style={{flex:"1 1 46%",minWidth:0}}>
-                    <div style={{fontSize:13,color:"var(--txt)",fontWeight:500,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
-                      {c.name}
-                      <span style={{fontSize:9.5,marginLeft:8,padding:"2px 8px",borderRadius:20,background:"rgba(28,10,99,.055)",color:"var(--mut)",fontWeight:400}}>{c.type}</span>
-                      {st !== "aktivní" && <span style={{fontSize:9.5,marginLeft:4,padding:"2px 8px",borderRadius:20,background:"#FDF7EC",color:"#7A5A1A",fontWeight:400}}>{st}</span>}
-                    </div>
-                    {c.ico && <div style={{fontSize:10,color:"var(--mut)",marginTop:2}}>IČO <span className="maux-num">{c.ico}</span></div>}
-                  </div>
-                  <div style={{flex:"1 1 27%",minWidth:0,fontSize:12,color:"var(--mut)",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
-                    {c.contact || "—"}
-                  </div>
-                  <div style={{flex:"1 1 27%",minWidth:0}}>
-                    <ServiceDots list={c.services || []} max={2} />
-                  </div>
-                </div>
-              );
-            })}
+          <div style={{textAlign:"center",padding:"34px 0 30px",color:"var(--mut)",fontSize:12.5,lineHeight:1.7}}>
+            Napište jméno, IČO nebo kontaktní osobu.
           </div>
         )}
       </div>
@@ -18004,13 +18041,13 @@ function AsistentDochazka({ email, attendance, logs, onRefreshAttendance, onGo }
    Když s Tomem něco v Josefově pohledu upravíme, ručně zvedneme ASISTENT_BUILD
    a dopíšeme, co se změnilo. Josef to uvidí právě jednou — při nejbližším
    přihlášení. Když se nic nezmění, Josef nic neuvidí a nic se nikam nevolá.    */
-const ASISTENT_BUILD = "2026-08-05a";
+const ASISTENT_BUILD = "2026-08-05b";
 // Texty pro Josefa se píšou VYKÁNÍM a zdvořile ("Zapište prosím…", "Vaše práce").
 // Tykání se do asistentského portálu nedostane — Tom si to takhle přeje.
 const ASISTENT_BUILD_NOTE = [
-  "Přibyla záložka Klienti — najdete tam kontakty, IČO, sídlo i odkaz na spis a můžete si klienty sami zakládat a upravovat.",
-  "Klienta teď založíte i přímo ve Výkazech: napište jméno do pole Klient a v nabídce se objeví + Založit klienta.",
-  "U firmy stačí vyplnit IČO a zmáčknout ARES — název, DIČ i sídlo se doplní samy.",
+  "Přibyla záložka Klienti. Najdete v ní kontakt, IČO, sídlo i odkaz na spis — nahoře máte klienty, na kterých jste poslední měsíc pracoval, kohokoli dalšího si vyhledáte.",
+  "Klienta si teď můžete sám založit i upravit mu kontaktní údaje. U firmy stačí vyplnit IČO a zmáčknout ARES — název, DIČ i sídlo se doplní samy.",
+  "Založit klienta jde i přímo ve Výkazech: napište jméno do pole Klient a v nabídce se objeví + Založit klienta.",
 ];
 
 const HARD_RELOAD_KEYS = (() => {
@@ -18258,7 +18295,7 @@ function AsistentApp({ session, onLogout, previewMode }) {
             {mod==="prehled"  && <AsistentPrehled logs={logs} attendance={attendance} clients={clients} availability={availability} onGo={setMod} />}
             {mod==="vykaz"    && <AsistentVykazy email={email} clients={clients} onRefresh={refreshLogs} onClientsRefresh={refreshClients} />}
             {mod==="dochazka" && <AsistentDochazka email={email} attendance={attendance} logs={logs} onRefreshAttendance={refreshAtt} onGo={setMod} />}
-            {mod==="klienti" && <AsistentKlienti clients={clients} onRefresh={refreshClients} />}
+            {mod==="klienti" && <AsistentKlienti clients={clients} logs={logs} onRefresh={refreshClients} />}
             {mod==="prevody" && <PrevodyModule transfers={transfers} escrows={escrows} onSave={savePrevod} bezCen />}
             {mod==="vazba"   && <AsistentZpetnaVazba logs={logs} clients={clients} />}
           </>
