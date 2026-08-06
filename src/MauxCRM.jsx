@@ -253,7 +253,6 @@ html,body,#root{height:100%;background:#F5F4EF}
 #maux-panel-navstevnost{animation:mxSlideUp .65s cubic-bezier(.16,1,.3,1) 720ms both}
 #maux-panel-xtb{animation:mxSlideUp .65s cubic-bezier(.16,1,.3,1) 810ms both}
 #maux-panel-ziskovost{animation:mxSlideUp .65s cubic-bezier(.16,1,.3,1) 900ms both}
-#maux-panel-claude{animation:mxSlideUp .65s cubic-bezier(.16,1,.3,1) 990ms both}
 [id^="maux-panel-"]{transition:box-shadow .2s ease}
 .num{font-family:var(--mono);font-variant-numeric:tabular-nums;letter-spacing:.01em}
 .mx table td.r,.mx table th.r{text-align:right;font-family:var(--mono);font-variant-numeric:tabular-nums;letter-spacing:.01em}
@@ -8270,7 +8269,7 @@ async function buildBackupPayload() {
     result[table] = error ? { error: error.message } : data;
   }
   result["_localStorage"] = {};
-  const lsKeys = ["claude_entries","claude_settings","maux_notes","maux_panel_state","maux_backup_done_month"];
+  const lsKeys = ["maux_notes","maux_panel_state","maux_backup_done_month"];
   lsKeys.forEach(k => {
     try { result["_localStorage"][k] = JSON.parse(localStorage.getItem(k) || "null"); } catch { result["_localStorage"][k] = null; }
   });
@@ -8455,10 +8454,12 @@ function BackupReminderBanner({ onDone }) {
 // v13 (6.8.2026) — Tom: "z dashboardu přesuň Pepovu tabulku do mého přehledu na listu Josef,
 // tam to patří." Panel "josef" na Přehledu zanikl, celý JosefPanel se renderuje v AsistentPanel
 // nad záložkami administrace.
-const PANEL_LAYOUT_VERSION = 13;
+// v14 (6.8.2026) — Tom: "zůstává jen měsíční náklad luxus a hotovo". List Claude AI
+// i dlaždice na Přehledu zrušeny; předplatné je řádek v Luxus v Měsíčních výdajích.
+const PANEL_LAYOUT_VERSION = 14;
 const DEFAULT_PANELS = [
   "finance","firma","pulz",
-  "chart","ziskovost","claude"
+  "chart","ziskovost"
 ];
 function loadPanelState() {
   try {
@@ -8806,20 +8807,6 @@ function PohledavkyPanel({ financeItems, onSaveFinance, onDeleteFinance }) {
       </div>
     </div>
   );
-}
-
-// ─── helpers sdílené s Dashboard tilem ───
-function claudeLoadEntries() {
-  try { return JSON.parse(localStorage.getItem("claude_entries") || "[]"); } catch { return []; }
-}
-function claudeSaveEntries(arr) {
-  try { localStorage.setItem("claude_entries", JSON.stringify(arr)); } catch {}
-}
-function claudeLoadSettings() {
-  try { return { sub: 20, rate: 23, ...JSON.parse(localStorage.getItem("claude_settings") || "{}") }; } catch { return { sub: 20, rate: 23 }; }
-}
-function claudeSaveSettings(s) {
-  try { localStorage.setItem("claude_settings", JSON.stringify(s)); } catch {}
 }
 
 // Návštěvnost webu maux.cz — živé GA4 (Google Analytics Data API) přes serverless
@@ -10501,295 +10488,6 @@ function AkcieModule({ xtbTranches = [], onTrancheSave, onTrancheDelete, xtbTitl
   );
 }
 
-function ClaudeTracker() {
-  const [entries, setEntries] = useState(claudeLoadEntries);
-  const [settings, setSettings] = useState(claudeLoadSettings);
-  const [showSettings, setShowSettings] = useState(false);
-  const [editSettings, setEditSettings] = useState({ sub: "20", rate: "23" });
-  // Form state for adding/editing a monthly entry
-  const EMPTY_FORM = { month: new Date().toISOString().slice(0, 7), subscription_usd: "", extra_usd: "", note: "" };
-  const [showForm, setShowForm] = useState(false);
-  const [editForm, setEditForm] = useState(EMPTY_FORM);
-  const [editingId, setEditingId] = useState(null);
-
-  const currentKey = new Date().toISOString().slice(0, 7);
-
-  // ── helpers ──────────────────────────────────────────────────────────────
-  const fmtCzk = v => `${Math.round(v).toLocaleString("cs-CZ")} Kč`;
-  const fmtUsd = v => `$${Number(v).toFixed(2)}`;
-  const monthLabel = key => {
-    try { return new Date(key + "-15").toLocaleDateString("cs-CZ", { month: "long", year: "numeric" }); } catch { return key; }
-  };
-
-  // ── derived data ─────────────────────────────────────────────────────────
-  const enriched = useMemo(() => {
-    const { sub, rate } = settings;
-    return entries.map(e => {
-      const subUsd = e.subscription_usd != null ? Number(e.subscription_usd) : Number(sub);
-      const extraUsd = Number(e.extra_usd) || 0;
-      const totalUsd = subUsd + extraUsd;
-      const totalCzk = totalUsd * Number(rate);
-      return { ...e, subUsd, extraUsd, totalUsd, totalCzk };
-    }).sort((a, b) => b.month.localeCompare(a.month));
-  }, [entries, settings]);
-
-  const curEntry = enriched.find(e => e.month === currentKey);
-  const avgCzk = enriched.length > 0 ? enriched.reduce((s, e) => s + e.totalCzk, 0) / enriched.length : 0;
-  const totalCzk12 = enriched.slice(0, 12).reduce((s, e) => s + e.totalCzk, 0);
-
-  // ── actions ───────────────────────────────────────────────────────────────
-  const openAdd = () => {
-    setEditingId(null);
-    setEditForm({ ...EMPTY_FORM, subscription_usd: String(settings.sub) });
-    setShowForm(true);
-  };
-  const openEdit = (e) => {
-    setEditingId(e.id);
-    setEditForm({ month: e.month, subscription_usd: String(e.subscription_usd ?? settings.sub), extra_usd: String(e.extra_usd || 0), note: e.note || "" });
-    setShowForm(true);
-  };
-  const saveEntry = () => {
-    const next = [...entries];
-    const obj = {
-      id: editingId || `ce_${Date.now()}`,
-      month: editForm.month,
-      subscription_usd: parseFloat(editForm.subscription_usd) || 0,
-      extra_usd: parseFloat(editForm.extra_usd) || 0,
-      note: editForm.note.trim(),
-    };
-    const idx = next.findIndex(e => e.id === obj.id);
-    if (idx >= 0) next[idx] = obj; else next.push(obj);
-    claudeSaveEntries(next);
-    setEntries(next);
-    setShowForm(false);
-    setEditingId(null);
-  };
-  const deleteEntry = (id) => {
-    const next = entries.filter(e => e.id !== id);
-    claudeSaveEntries(next);
-    setEntries(next);
-  };
-  const saveSettings_ = () => {
-    const s = { sub: parseFloat(editSettings.sub) || 20, rate: parseFloat(editSettings.rate) || 23 };
-    claudeSaveSettings(s);
-    setSettings(s);
-    setShowSettings(false);
-  };
-
-  // ── shared style tokens ───────────────────────────────────────────────────
-  const card = { background: "#fff", border: "1px solid #E8E6F0", borderRadius: 16 };
-  const label = { fontSize: 10, letterSpacing: ".2em", textTransform: "uppercase", color: "var(--mut)", fontWeight: 600 };
-  const inputStyle = { width: "100%", padding: "9px 12px", border: "1px solid #E8E6F0", borderRadius: 8, fontSize: 13, color: "var(--ink)", outline: "none", background: "#FAFAFA", fontFamily: "inherit", boxSizing: "border-box" };
-  const btnPrimary = { padding: "9px 22px", background: "var(--ink)", color: "#fff", border: "none", borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: "pointer", letterSpacing: ".06em" };
-  const btnGhost = { padding: "9px 18px", background: "transparent", border: "1px solid #E8E6F0", borderRadius: 8, fontSize: 12, color: "var(--mut)", cursor: "pointer" };
-
-  return (
-    <div style={{ padding: "36px 36px 80px", maxWidth: 880 }}>
-
-      {/* ── PAGE HEADER ── */}
-      <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", marginBottom: 36 }}>
-        <div>
-          <div style={{ ...label, marginBottom: 8 }}>Správa nákladů</div>
-          <h2 style={{ fontFamily: "Fraunces,serif", fontSize: 34, fontWeight: 300, color: "var(--ink)", margin: 0, lineHeight: 1 }}>Claude AI</h2>
-          <div style={{ fontSize: 12, color: "var(--mut)", marginTop: 7, letterSpacing: ".04em" }}>
-            Ruční evidence · {settings.rate} Kč / USD
-          </div>
-        </div>
-        <div style={{ display: "flex", gap: 8 }}>
-          <button onClick={() => { setEditSettings({ sub: String(settings.sub), rate: String(settings.rate) }); setShowSettings(s => !s); }}
-            style={{ ...btnGhost, display: "flex", alignItems: "center", gap: 6 }}>
-            <span style={{ fontSize: 11 }}>⚙</span> Nastavení
-          </button>
-          <button onClick={openAdd} style={{ ...btnPrimary, display: "flex", alignItems: "center", gap: 6 }}>
-            <span style={{ fontSize: 14, lineHeight: 1 }}>+</span> Přidat měsíc
-          </button>
-        </div>
-      </div>
-
-      {/* ── SETTINGS PANEL ── */}
-      {showSettings && (
-        <div style={{ ...card, padding: 24, marginBottom: 28, maxWidth: 400 }}>
-          <div style={{ ...label, marginBottom: 18 }}>Výchozí nastavení</div>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 18 }}>
-            <div>
-              <div style={{ ...label, marginBottom: 6, fontSize: 9 }}>Předplatné (USD/měs)</div>
-              <input type="number" value={editSettings.sub} onChange={e => setEditSettings(s => ({ ...s, sub: e.target.value }))}
-                style={inputStyle} placeholder="20" />
-            </div>
-            <div>
-              <div style={{ ...label, marginBottom: 6, fontSize: 9 }}>Kurz Kč / USD</div>
-              <input type="number" value={editSettings.rate} onChange={e => setEditSettings(s => ({ ...s, rate: e.target.value }))}
-                style={inputStyle} placeholder="23" />
-            </div>
-          </div>
-          <div style={{ display: "flex", gap: 8 }}>
-            <button onClick={saveSettings_} style={btnPrimary}>Uložit</button>
-            <button onClick={() => setShowSettings(false)} style={btnGhost}>Zrušit</button>
-          </div>
-        </div>
-      )}
-
-      {/* ── ADD / EDIT FORM ── */}
-      {showForm && (
-        <div style={{ ...card, padding: 28, marginBottom: 28 }}>
-          <div style={{ ...label, marginBottom: 20 }}>{editingId ? "Upravit záznam" : "Nový záznam"}</div>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 16, marginBottom: 16 }}>
-            <div>
-              <div style={{ ...label, marginBottom: 6, fontSize: 9 }}>Měsíc</div>
-              <input type="month" value={editForm.month} onChange={e => setEditForm(f => ({ ...f, month: e.target.value }))}
-                style={inputStyle} />
-            </div>
-            <div>
-              <div style={{ ...label, marginBottom: 6, fontSize: 9 }}>Předplatné USD</div>
-              <input type="number" value={editForm.subscription_usd} onChange={e => setEditForm(f => ({ ...f, subscription_usd: e.target.value }))}
-                style={inputStyle} placeholder={String(settings.sub)} />
-            </div>
-            <div>
-              <div style={{ ...label, marginBottom: 6, fontSize: 9 }}>Extra API USD</div>
-              <input type="number" value={editForm.extra_usd} onChange={e => setEditForm(f => ({ ...f, extra_usd: e.target.value }))}
-                style={inputStyle} placeholder="0" />
-            </div>
-          </div>
-          <div style={{ marginBottom: 20 }}>
-            <div style={{ ...label, marginBottom: 6, fontSize: 9 }}>Poznámka</div>
-            <input type="text" value={editForm.note} onChange={e => setEditForm(f => ({ ...f, note: e.target.value }))}
-              style={inputStyle} placeholder="Volitelná poznámka…" />
-          </div>
-          <div style={{ display: "flex", gap: 8 }}>
-            <button onClick={saveEntry} style={btnPrimary}>Uložit</button>
-            <button onClick={() => { setShowForm(false); setEditingId(null); }} style={btnGhost}>Zrušit</button>
-          </div>
-        </div>
-      )}
-
-      {/* ── HERO KPI ── */}
-      {enriched.length > 0 && (
-        <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr", gap: 16, marginBottom: 32 }}>
-          {/* Current month big card */}
-          <div style={{ background: "#fff", border: "1px solid #E8E6F0", borderRadius: 20, padding: "32px 36px", position: "relative", overflow: "hidden" }}>
-            <div style={{ position: "absolute", top: 0, right: 0, width: 180, height: 180, borderRadius: "0 20px 0 180px", background: "rgba(53,24,165,.03)" }} />
-            <div style={{ ...label, marginBottom: 10, fontSize: 9 }}>
-              {curEntry ? monthLabel(curEntry.month) : monthLabel(currentKey)} · celkové náklady
-            </div>
-            {curEntry ? (
-              <>
-                <div style={{ fontFamily: "var(--num)", fontSize: 52, fontWeight: 600, letterSpacing: "-.025em", color: "var(--ink)", lineHeight: 1, marginBottom: 6, fontVariantNumeric: "tabular-nums" }}>
-                  {fmtCzk(curEntry.totalCzk)}
-                </div>
-                <div style={{ fontSize: 15, color: "var(--mut)", letterSpacing: ".04em", marginBottom: 24 }}>
-                  {fmtUsd(curEntry.totalUsd)}
-                </div>
-                <div style={{ display: "flex", gap: 28, paddingTop: 18, borderTop: "1px solid #F0EEF8" }}>
-                  <div>
-                    <div style={{ ...label, fontSize: 8, marginBottom: 4 }}>Předplatné</div>
-                    <div style={{ fontFamily: "monospace", fontSize: 13, color: "var(--ink)" }}>{fmtUsd(curEntry.subUsd)}</div>
-                  </div>
-                  {curEntry.extraUsd > 0 && (
-                    <div>
-                      <div style={{ ...label, fontSize: 8, marginBottom: 4 }}>Extra API</div>
-                      <div style={{ fontFamily: "monospace", fontSize: 13, color: "var(--ink)" }}>{fmtUsd(curEntry.extraUsd)}</div>
-                    </div>
-                  )}
-                  {curEntry.note && (
-                    <div>
-                      <div style={{ ...label, fontSize: 8, marginBottom: 4 }}>Poznámka</div>
-                      <div style={{ fontSize: 12, color: "var(--mut)" }}>{curEntry.note}</div>
-                    </div>
-                  )}
-                </div>
-              </>
-            ) : (
-              <div style={{ paddingTop: 16 }}>
-                <div style={{ fontSize: 13, color: "var(--mut)", marginBottom: 16 }}>Tento měsíc ještě nemáš záznam.</div>
-                <button onClick={openAdd} style={{ ...btnPrimary, fontSize: 11 }}>+ Přidat</button>
-              </div>
-            )}
-            <div style={{ position: "absolute", top: 18, right: 20, fontSize: 9, letterSpacing: ".14em", textTransform: "uppercase", color: "var(--ink)", opacity: .35, fontWeight: 700 }}>NYNÍ</div>
-          </div>
-
-          {/* Avg */}
-          <div style={{ ...card, padding: "28px 24px", display: "flex", flexDirection: "column", justifyContent: "center" }}>
-            <div style={{ ...label, fontSize: 9, marginBottom: 12 }}>Průměr / měsíc</div>
-            <div style={{ fontFamily: "var(--num)", fontSize: 28, fontWeight: 600, letterSpacing: "-.025em", color: "var(--ink)", lineHeight: 1, marginBottom: 4, fontVariantNumeric: "tabular-nums" }}>
-              {fmtCzk(avgCzk)}
-            </div>
-            <div style={{ fontFamily: "monospace", fontSize: 11, color: "var(--mut)" }}>
-              {fmtUsd(enriched.reduce((s, e) => s + e.totalUsd, 0) / enriched.length)}
-            </div>
-          </div>
-
-          {/* 12m total */}
-          <div style={{ ...card, padding: "28px 24px", display: "flex", flexDirection: "column", justifyContent: "center" }}>
-            <div style={{ ...label, fontSize: 9, marginBottom: 12 }}>Celkem 12 měsíců</div>
-            <div style={{ fontFamily: "var(--num)", fontSize: 28, fontWeight: 600, letterSpacing: "-.025em", color: "var(--ink)", lineHeight: 1, marginBottom: 4, fontVariantNumeric: "tabular-nums" }}>
-              {fmtCzk(totalCzk12)}
-            </div>
-            <div style={{ fontFamily: "monospace", fontSize: 11, color: "var(--mut)" }}>
-              {fmtUsd(enriched.slice(0, 12).reduce((s, e) => s + e.totalUsd, 0))}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ── HISTORY TABLE ── */}
-      <div style={{ ...card, overflow: "hidden" }}>
-        <div style={{ padding: "16px 24px", borderBottom: "1px solid #F0EEF8", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-          <div style={{ ...label, fontSize: 9 }}>Měsíční přehled</div>
-          <div style={{ fontSize: 11, color: "var(--mut)", fontFamily: "monospace" }}>
-            kurz {settings.rate} Kč · předpl. ${settings.sub}/měs
-          </div>
-        </div>
-        {enriched.length === 0 ? (
-          <div style={{ padding: "60px 32px", textAlign: "center" }}>
-            <div style={{ fontFamily: "Fraunces,serif", fontSize: 22, fontWeight: 300, color: "var(--mut)", marginBottom: 12 }}>Zatím žádné záznamy</div>
-            <div style={{ fontSize: 13, color: "var(--mut)", marginBottom: 24, opacity: .7 }}>Přidej první měsíc a začni sledovat náklady.</div>
-            <button onClick={openAdd} style={btnPrimary}>+ Přidat měsíc</button>
-          </div>
-        ) : (
-          <table style={{ width: "100%", borderCollapse: "collapse" }}>
-            <thead>
-              <tr style={{ background: "#FAFAF9" }}>
-                {[["Měsíc","left"],["Předplatné","right"],["Extra API","right"],["Celkem USD","right"],["Celkem Kč","right"],["","center"]].map(([h, align]) => (
-                  <th key={h} style={{ padding: "9px 20px", fontSize: 9, fontWeight: 700, letterSpacing: ".16em", textTransform: "uppercase", color: "var(--mut)", textAlign: align, borderBottom: "1px solid #F0EEF8" }}>{h}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {enriched.map(e => (
-                <tr key={e.id} style={{ borderBottom: "1px solid #F7F6FB", background: e.month === currentKey ? "rgba(53,24,165,.018)" : "transparent" }}>
-                  <td style={{ padding: "12px 20px" }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                      {e.month === currentKey && (
-                        <span style={{ fontSize: 8, background: "var(--ink)", color: "#fff", padding: "2px 7px", borderRadius: 20, letterSpacing: ".08em", fontWeight: 700 }}>NYNÍ</span>
-                      )}
-                      <span style={{ fontSize: 13, color: "var(--ink)", fontWeight: e.month === currentKey ? 600 : 400 }}>{monthLabel(e.month)}</span>
-                    </div>
-                    {e.note && <div style={{ fontSize: 11, color: "var(--mut)", marginTop: 2, opacity: .7 }}>{e.note}</div>}
-                  </td>
-                  <td style={{ padding: "12px 20px", fontFamily: "monospace", fontSize: 12, color: "var(--mut)", textAlign: "right" }}>{fmtUsd(e.subUsd)}</td>
-                  <td style={{ padding: "12px 20px", fontFamily: "monospace", fontSize: 12, color: e.extraUsd > 0 ? "var(--ink)" : "var(--mut)", textAlign: "right", opacity: e.extraUsd > 0 ? 1 : .35 }}>{fmtUsd(e.extraUsd)}</td>
-                  <td style={{ padding: "12px 20px", fontFamily: "monospace", fontSize: 12, color: "var(--ink)", textAlign: "right", fontWeight: 500 }}>{fmtUsd(e.totalUsd)}</td>
-                  <td style={{ padding: "12px 20px", fontFamily: "monospace", fontSize: 13, color: "var(--ink)", textAlign: "right", fontWeight: e.month === currentKey ? 700 : 500 }}>{fmtCzk(e.totalCzk)}</td>
-                  <td style={{ padding: "12px 16px", textAlign: "center" }}>
-                    <div style={{ display: "flex", gap: 4, justifyContent: "center" }}>
-                      <button onClick={() => openEdit(e)} style={{ background: "transparent", border: "1px solid #E8E6F0", borderRadius: 6, padding: "3px 8px", fontSize: 11, color: "var(--mut)", cursor: "pointer" }}>✎</button>
-                      <button onClick={() => deleteEntry(e.id)} style={{ background: "transparent", border: "1px solid #F0EEF8", borderRadius: 6, padding: "3px 8px", fontSize: 11, color: "#E0A0A0", cursor: "pointer" }}>✕</button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-      </div>
-
-      <div style={{ marginTop: 20, fontSize: 11, color: "var(--mut)", opacity: .5, lineHeight: 1.7 }}>
-        Data uložena v lokálním úložišti prohlížeče. Předplatné a extra API poplatky se zadávají ručně.
-      </div>
-    </div>
-  );
-}
-
 /* ═══════════════════════════════════════════════════════════════════════════
    PŘEVODY — rejstřík všeho, co Tom převádí (varianta A, schváleno 4. 8. 2026)
    Tom: „nemám přehled, jaké nemovitosti převádím."
@@ -12127,7 +11825,7 @@ function BpDelta({ value, suffix = "", size = 9.5 }) {
 const PANEL_ACCENTS = {
   finance: "#4F46E5", uschovy: "#4F46E5", trigrafy: "#4F46E5", firma: "#4F46E5",
   josef: "#4F46E5", pulz: "#4F46E5", chart: "#4F46E5", meta: "#4F46E5",
-  navstevnost: "#4F46E5", xtb: "#4F46E5", ziskovost: "#4F46E5", claude: "#4F46E5",
+  navstevnost: "#4F46E5", xtb: "#4F46E5", ziskovost: "#4F46E5",
 };
 function Panel({ id, children }) {
   const { panelState, dragOver, editLayout, handleDragStart, handleDragOver, handleDrop, setDragOver, toggleHide } = useContext(PanelCtx);
@@ -13728,41 +13426,6 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
       {/* ── ZISKOVOST ZAKÁZEK (nahradilo DPFO/úvěry — ty jsou teď v sekci Ostatní) ── */}
       <Panel id="ziskovost">
         <ZiskovostPanel workEntries={workEntries} />
-      </Panel>
-
-      {/* ── CLAUDE AI ── */}
-      <Panel id="claude">
-        {(() => {
-          const claudeEntries = claudeLoadEntries();
-          const claudeSettings = claudeLoadSettings();
-          const curKey = new Date().toISOString().slice(0,7);
-          const curEntry = claudeEntries.find(e => e.month === curKey);
-          const subUsd = curEntry?.subscription_usd ?? claudeSettings.sub;
-          const extraUsd = Number(curEntry?.extra_usd) || 0;
-          const totalUsd = Number(subUsd) + extraUsd;
-          const totalCzk = totalUsd * Number(claudeSettings.rate);
-          const monthLabel = key => { try { return new Date(key+"-15").toLocaleDateString("cs-CZ",{month:"long",year:"numeric"}); } catch { return key; } };
-          return (
-            <Card style={{padding:"16px 18px",cursor:"pointer"}} onClick={()=>onNav("claude")}>
-              <div style={{display:"flex",alignItems:"center",gap:5,marginBottom:10}}>
-                <span className="maux-dot" style={{width:5,height:5,background:"#3518A5",boxShadow:"0 0 3px rgba(53,24,165,.5)"}} />
-                <div style={{fontSize:9,letterSpacing:".2em",textTransform:"uppercase",color:"var(--mut)",fontWeight:600}}>Claude AI</div>
-              </div>
-              {curEntry ? (
-                <>
-                  <div className="maux-num" style={{fontSize:26,fontWeight:600,color:"var(--ink)",lineHeight:1,marginBottom:4}}>
-                    {Math.round(totalCzk).toLocaleString("cs-CZ")} Kč
-                  </div>
-                  <div className="maux-num" style={{fontSize:11,color:"var(--mut)"}}>{monthLabel(curEntry.month)} · ${totalUsd.toFixed(2)}</div>
-                </>
-              ) : (
-                <div style={{fontSize:12,color:"var(--mut)",opacity:.6}}>
-                  Žádný záznam pro {monthLabel(curKey)}
-                </div>
-              )}
-            </Card>
-          );
-        })()}
       </Panel>
 
     </div>
@@ -19294,7 +18957,9 @@ export default function MauxCRM() {
   // kteří volají fmtKc/fmtN/K/Kd) — žádná reálná data se tím nemění, jde čistě o masku zobrazení.
   PRIVACY_MODE = privacyMode;
   const togglePrivacy = () => { setPrivacyMode(p => { savePrivacyMode(!p); return !p; }); };
-  const [mod, setMod] = useState(() => { try { return localStorage.getItem("maux_mod") || "dashboard"; } catch { return "dashboard"; } });
+  // Uložený modul může být list, který mezitím zanikl (v14: "claude") — bez téhle stráže
+  // by se po nasazení vykreslila prázdná plocha bez nadpisu a bez zvýraznění v menu.
+  const [mod, setMod] = useState(() => { try { const m = localStorage.getItem("maux_mod"); return MODULES.some(x => x.key === m) ? m : "dashboard"; } catch { return "dashboard"; } });
   const [mode, setMode] = useState("list");
   const [modHistory, setModHistory] = useState([]);
   const navTo = (k) => { setModHistory(h => [...h, { mod, mode }]); setMod(k); try { localStorage.setItem("maux_mod", k); } catch {} setMode("list"); setSel(null); setEscrowMode("list"); setSelEscrow(null); };
@@ -20145,9 +19810,6 @@ export default function MauxCRM() {
               onDeleteFinance={deleteFinanceItem}
             />
           )}
-
-          {/* CLAUDE AI — náklady na Anthropic API */}
-          {mod === "claude" && <ClaudeTracker />}
 
           {/* ASISTENT — Tomův přehled Josefových výkazů a docházky */}
           {mod === "asistent" && !asistentPreview && (
