@@ -1375,10 +1375,22 @@ async function fetchEscrows() {
    1) oznámit úschovu PŘED přijetím peněz, 2) odeslat datum přijetí, 3) odeslat datum vyplacení.
    Nárok klienta na náhradu z Garančního fondu vzniká jen při řádném oznámení. */
 const EKU_OD = "2026-01-01"; // povinnost hlásit PŘED přijetím peněz platí od 1. 1. 2026
+// První den, kdy na úschovní účet reálně dorazily peníze. Bere i tranše složitelů —
+// úschova nemusí mít vyplněné date_received na hlavičce, když peníze chodí po částech
+// (vlastní zdroje + hypotéka). Bez tohohle EKÚ vada u takové úschovy nikdy nevyskočila.
+function escrowFirstReceived(e) {
+  const ds = (e.escrow_tranches || [])
+    .filter(t => t.party_type === 'složitel' && t.amount > 0)
+    .map(t => t.received_date)
+    .filter(Boolean);
+  if (e.date_received) ds.push(e.date_received);
+  return ds.length ? ds.sort()[0] : null;
+}
 function ekuStav(e) {
+  const prijato = escrowFirstReceived(e);
   // Historické úschovy se nesledují: uzavřené, a ty, kam peníze dorazily před účinností
   // nové stavovské úpravy — u nich už oznámení „před přijetím" nelze zpětně splnit.
-  const historicka = e.status === "ukončeno" || (e.date_received && e.date_received < EKU_OD);
+  const historicka = e.status === "ukončeno" || (prijato && prijato < EKU_OD);
   if (historicka) {
     return { sleduje: false, kroky: [], splneno: 0, ocekavano: 0, hotovo: true, vada: "" };
   }
@@ -1388,7 +1400,7 @@ function ekuStav(e) {
     { key: "eku_paid_sent",     label: "Odesláno datum vyplacení", hint: "po výplatě z úschovy", value: e.eku_paid_sent || "" },
   ];
   // Krok 2 dává smysl až po přijetí, krok 3 až po výplatě — dřív se nepočítá jako dluh
-  kroky[1].relevant = !!e.date_received;
+  kroky[1].relevant = !!prijato;
   kroky[2].relevant = !!e.date_paid;
   kroky[0].relevant = true;
 
@@ -1396,10 +1408,15 @@ function ekuStav(e) {
   const ocekavano = kroky.filter(k => k.relevant).length;
   // Nejzávažnější vada: oznámeno až po přijetí peněz, nebo vůbec, ačkoli peníze dorazily
   let vada = "";
-  if (e.date_received && !e.eku_announced) vada = "Peníze přijaty, ale úschova nebyla oznámena do EKÚ.";
-  else if (e.eku_announced && e.date_received && e.eku_announced > e.date_received)
+  if (prijato && !e.eku_announced) vada = "Peníze přijaty, ale úschova nebyla oznámena do EKÚ.";
+  else if (e.eku_announced && prijato && e.eku_announced > prijato)
     vada = "Oznámení do EKÚ je datováno až po přijetí peněz — nárok klienta na Garanční fond tím může padnout.";
-  return { sleduje: true, kroky, splneno, ocekavano, hotovo: ocekavano > 0 && splneno === ocekavano, vada };
+  // PREVENCE: peníze ještě nedorazily a oznámení chybí — tohle je jediný okamžik, kdy se to
+  // dá ještě splnit správně. Není to vada, je to varování; drží se odděleně, ať se nemíchají.
+  const varovani = (!prijato && !e.eku_announced)
+    ? "Oznámení do EKÚ musí odejít DŘÍV, než peníze dorazí — jinak klientovi padá nárok na Garanční fond ČAK."
+    : "";
+  return { sleduje: true, kroky, splneno, ocekavano, hotovo: ocekavano > 0 && splneno === ocekavano, vada, varovani, prijato };
 }
 
 /* ─── AML osoby ─── */
@@ -4487,7 +4504,11 @@ function calcEscrowInterest(escrow) {
   while (d <= today) {
     const mStart = new Date(d.getFullYear(), d.getMonth(), 1);
     const mEnd   = new Date(d.getFullYear(), d.getMonth() + 1, 0);
-    const gross  = _grossForPeriod(ivs, escrow.interest_rate, mStart, mEnd);
+    // ⚠️ Běžící měsíc se stropuje na DNEŠEK — stejně jako escrowNetForMonth. Bez toho
+    // karta hlásila „Zisk" včetně dnů, které ještě nenastaly, a rozcházela se s kalendářem
+    // i s dlaždicí Příjem 1. …  Jedno číslo, jedna metoda.
+    const isCurrent = d.getFullYear() === today.getFullYear() && d.getMonth() === today.getMonth();
+    const gross  = _grossForPeriod(ivs, escrow.interest_rate, mStart, mEnd, isCurrent ? today : null);
     if (gross > 0.5) {
       months.push({
         label:     `${['Led','Ún','Bře','Dub','Kvě','Čer','Čvn','Srp','Zář','Říj','Lis','Pro'][d.getMonth()]} ${d.getFullYear()}`,
@@ -4574,10 +4595,30 @@ function _buildBalanceIntervals(e) {
   }
 
   // — Strop pro projekci do budoucna (žádná skutečná výplata zatím nezaznamenaná) —
-  // Základní pravidlo: úschova trvá minimálně 20 dní (plomba) od připsání.
-  //   • je-li zadáno datum podání návrhu na vklad → odhad = ten den + 20 dní (ongoing, nejisté)
-  //   • jinak (návrh ještě nepodán)                → odhad = den přijetí + 20 dní (ongoing, nejisté)
-  //   • je-li známé skutečné datum vyplacení (date_paid) → definitivní strop (NE ongoing — jisté)
+  //
+  // ⚠️⚠️ LEKCE 6. 8. 2026 (Tom): STROP SE KOTVÍ NA PLOMBU, NIKDY NA VKLAD.
+  // Původní verze počítala "první vklad + 20 dní". To je špatně hned dvakrát:
+  //   1) Peníze chodí na etapy — vlastní zdroje dřív, hypotéka klidně o dva týdny později.
+  //      Strop od PRVNÍHO vkladu tak uřízl projekci dřív, než dorazila hlavní jistina.
+  //      (Reálně 010/2026 Lupačovi: vklad 20. 7. → strop 9. 8., přitom 8,3 mil. přišlo 4. 8.)
+  //   2) Dvacet dní je lhůta plomby, která běží od PODÁNÍ NÁVRHU na vklad — a ten se podává
+  //      o dny až o dva týdny později, protože se mezitím musí vyplatit zástavní věřitel.
+  //      Dokud návrh není podán, těch 20 dní vůbec nezačalo běžet.
+  //
+  // Model má proto dvě věty:
+  //   A) JISTÝ ÚROK SE POČÍTÁ VŽDY DO DNEŠKA. Zůstatek bez zaznamenané výplaty vydělává —
+  //      žádný odhadovaný strop ho nesmí uříznout do minulosti. (Tohle žralo 009_2026,
+  //      kde od 13. 7. leželo 814 tis. a appka za ně nepočítala nic.)
+  //   B) PROJEKCE DOPŘEDU jde k nejbližšímu JISTÉMU konci; když žádný není, "dnes + 20"
+  //      jako SPODNÍ hranice (ne optimismus — plomba ještě nezačala běžet).
+  //
+  // Žebříček jistoty:
+  //   1. date_paid                       → jistý strop (NE ongoing)
+  //   2. konec plomby v budoucnu         → jistý strop (NE ongoing)
+  //   3. návrh podán                     → návrh + 20 dní   (odhad, ongoing)
+  //   4. návrh nepodán                   → dnes + 20 dní    (odhad, ongoing, klouzavý)
+  //   podlaha u 3 i 4: nikdy dřív než dnes; nikdy dřív než začátek intervalu.
+  //
   // Aplikuje se jen na poslední (otevřený, "9999-01-01") interval — jakmile existuje
   // skutečná výplata tranše (is_paid+paid_date), interval je už uzavřený a tohle se neuplatní.
   // `ongoing: true` značí, že konec je jen ODHAD (ne reálná zaznamenaná událost) — používá se
@@ -4586,23 +4627,20 @@ function _buildBalanceIntervals(e) {
   if (intervals.length > 0) {
     const last = intervals[intervals.length - 1];
     if (last.to.getFullYear() === 9999) {
+      const tYmd    = today();
+      const fromYmd = localYmd(last.from);
       if (e.date_paid) {
         const capD = new Date(e.date_paid + 'T00:00:00');
         if (capD < last.from) intervals.pop();
         else last.to = capD; // jisté, ne ongoing
+      } else if (e.date_plomba_end && e.date_plomba_end >= tYmd && e.date_plomba_end >= fromYmd) {
+        last.to = new Date(e.date_plomba_end + 'T00:00:00'); // jistý konec plomby, ne ongoing
       } else {
-        const sloz2 = (e.escrow_tranches || []).filter(t => t.party_type === 'složitel' && t.amount > 0);
-        const receivedDates = sloz2.map(t => t.received_date || e.date_received).filter(Boolean);
-        if (e.date_received) receivedDates.push(e.date_received);
-        const earliest = receivedDates.length ? receivedDates.sort()[0] : null;
-        const estCap = e.date_navrh_podan ? addDays(e.date_navrh_podan, 20) : (earliest ? addDays(earliest, 20) : null);
-        if (estCap) {
-          const capD = new Date(estCap + 'T00:00:00');
-          if (capD < last.from) intervals.pop();
-          else { last.to = capD; last.ongoing = true; }
-        } else {
-          last.ongoing = true; // bez info — zůstává otevřené (9999), pořád "běžící"
-        }
+        let capYmd = e.date_navrh_podan ? addDays(e.date_navrh_podan, 20) : addDays(tYmd, 20);
+        if (capYmd < tYmd)    capYmd = tYmd;                 // A) nikdy neuříznout do minulosti
+        if (capYmd < fromYmd) capYmd = addDays(fromYmd, 20); // vklad datovaný do budoucna
+        last.to = new Date(capYmd + 'T00:00:00');
+        last.ongoing = true;
       }
     }
   }
@@ -4624,14 +4662,49 @@ function _grossForPeriod(intervals, rate, periodFrom, periodTo, capDate) {
 
 // Čistý denní úrokový přírůstek ze všech úschov pro KONKRÉTNÍ den (balance toho dne × sazba/365 × 0.85)
 function _dailyNetOnDate(escrows, date) {
-  return (escrows || []).reduce((sum, e) => {
-    if (!e.interest_rate) return sum;
-    const ivs = _buildBalanceIntervals(e);
-    const iv = ivs.find(iv => iv.from <= date && iv.to >= date);
-    if (!iv) return sum;
-    return sum + iv.balance * e.interest_rate / 365 * 0.85;
-  }, 0);
+  return _dailyNetRowsOnDate(escrows, date).reduce((s, r) => s + r.net, 0);
 }
+
+// Rozpad denního úroku po jednotlivých úschovách — "+433 Kč" samo o sobě neřekne,
+// jestli je to jedna úschova nebo tři. Používá se v tooltipu kalendáře.
+function _dailyNetRowsOnDate(escrows, date) {
+  const out = [];
+  (escrows || []).forEach(e => {
+    if (!e.interest_rate) return;
+    const iv = _buildBalanceIntervals(e).find(iv => iv.from <= date && iv.to >= date);
+    if (!iv) return;
+    out.push({
+      number:  e.escrow_number || "(bez čísla)",
+      balance: iv.balance,
+      net:     iv.balance * e.interest_rate / 365 * 0.85,
+      auto:    !!iv.ongoing,
+    });
+  });
+  return out.sort((a, b) => b.net - a.net);
+}
+
+// Stav úschovy pro alerty. Vrací null, když je vše v pořádku, jinak úroveň a kontext.
+//   'overdue' — plomba skončila, ale peníze pořád leží na účtu (nejzávažnější)
+//   'soon'    — konec plomby do 7 dnů
+//   'nonavrh' — návrh na vklad ještě nepodán, projekce úroků jede na klouzavé dnes + 20
+// Jediný zdroj pravdy pro dlaždici ALERTY i pro pruh na kartě úschovy, ať se nerozejdou.
+function escrowAlertState(e) {
+  if (!e || e.status === 'ukončeno' || e.date_paid) return null;
+  const t = new Date(); t.setHours(0, 0, 0, 0);
+  const iv = _buildBalanceIntervals(e).find(iv => iv.from <= t && iv.to >= t);
+  const balance = iv ? iv.balance : 0;
+  if (balance < 1) return null; // na účtu nic neleží — není co hlídat
+  if (e.date_plomba_end) {
+    const days = Math.round((new Date(e.date_plomba_end + 'T00:00:00') - t) / 86400000);
+    if (days < 0)   return { level: 'overdue', days: -days, balance, escrow: e };
+    if (days <= 7)  return { level: 'soon',    days,        balance, escrow: e };
+    return null;
+  }
+  if (!e.date_navrh_podan) return { level: 'nonavrh', days: 0, balance, escrow: e };
+  return null;
+}
+const ESCROW_ALERT_RANK = { overdue: 0, soon: 1, nonavrh: 2 };
+const ESCROW_ALERT_COLOR = { overdue: "#A8443C", soon: "#C6A86B", nonavrh: "#4A44B8" };
 
 // Je částka pro tento den jen ODHAD (úschova ještě nemá jistý konec — plomba/výplata
 // nepotvrzena), nebo jde o jistou/uzavřenou hodnotu? Používá se pro decentní "auto" značku v UI.
@@ -5471,7 +5544,7 @@ function MarkPaidBtn({ escrowId, tranche, onMarkPaid }) {
   );
 }
 
-function EscrowCard({ escrow, onEdit, onDelete, onMarkPaid, onPayment }) {
+function EscrowCard({ escrow, onEdit, onDelete, onMarkPaid, onPayment, onSetNavrh }) {
   const [showTranches, setShowTranches] = useState(false);
   const [showWizard, setShowWizard] = useState(false);
   const tranches = escrow.escrow_tranches || [];
@@ -5527,6 +5600,7 @@ function EscrowCard({ escrow, onEdit, onDelete, onMarkPaid, onPayment }) {
           </div>
           <div style={{fontSize:12,color:"var(--mut)",lineHeight:1.6}}>
             {escrow.date_received && <span>Přijato: <strong>{fmtDate(escrow.date_received)}</strong> · </span>}
+            {escrow.date_navrh_podan && <span>Návrh podán: <strong>{fmtDate(escrow.date_navrh_podan)}</strong> · </span>}
             {escrow.date_plomba_end && <span>Konec plomby: <strong style={{color:needsAlert?"#D97706":"inherit"}}>{fmtDate(escrow.date_plomba_end)}</strong> · </span>}
             {escrow.date_paid && <span>Vyplaceno: <strong style={{color:"#4A7C59"}}>{fmtDate(escrow.date_paid)}</strong></span>}
           </div>
@@ -5538,6 +5612,32 @@ function EscrowCard({ escrow, onEdit, onDelete, onMarkPaid, onPayment }) {
         </div>
       </div>
       {escrow.notes && <div style={{padding:"8px 18px",fontSize:12,color:"var(--mut)",borderBottom:"1px solid var(--line)",background:"#FAFAFA"}}>{escrow.notes}</div>}
+      {/* Problém patří k věci, ne jen do souhrnu — pruh sedí na kartě, které se týká.
+          Stav bere ze sdíleného escrowAlertState, ať se nerozejde s dlaždicí ALERTY. */}
+      {(() => {
+        // Jen 'overdue'. 'soon' už nese pilulka v hlavičce karty a 'nonavrh' řádek Návrh
+        // na vklad níž — dvě hlášky o téže věci na jedné kartě je šum, ne informace.
+        const a = escrowAlertState(escrow);
+        if (!a || a.level !== 'overdue') return null;
+        return (
+          <div style={{borderTop:"1px solid var(--line)",borderLeft:`2px solid ${ESCROW_ALERT_COLOR.overdue}`,borderRadius:0,background:"#FCF7F6",padding:"10px 18px",display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
+            <span style={{fontSize:12,color:"#7A322C",lineHeight:1.5}}>
+              Plomba skončila před <strong style={{fontWeight:600}}>{a.days} {a.days===1?"dnem":"dny"}</strong> a peníze jsou pořád v úschově — zkontroluj vklad nebo zadej výplatu.
+            </span>
+          </div>
+        );
+      })()}
+      {/* Návrh na vklad — datum, na kterém stojí celá projekce úroků.
+          Dokud není podán, plomba (20 dní) vůbec nezačala běžet a appka kreslí úrok
+          na klouzavé "dnes + 20". Proto musí jít doplnit rovnou odsud, ne až přes Upravit. */}
+      {isActive && !escrow.date_paid && !escrow.date_navrh_podan && depositTotal > 0 && onSetNavrh && (
+        <div style={{padding:"9px 18px",borderBottom:"1px solid var(--line)",background:"#F7F6FE",display:"flex",alignItems:"center",gap:12,flexWrap:"wrap"}}>
+          <span style={{fontSize:9,letterSpacing:".12em",textTransform:"uppercase",color:"#4A44B8",fontWeight:600}}>Návrh na vklad</span>
+          <span style={{fontSize:12,color:"var(--mut)"}}>nepodán — úroky se projektují na dnes + 20 dní</span>
+          <input type="date" value="" style={{marginLeft:"auto",fontSize:12,padding:"4px 8px",border:"1px solid #D8D5F5",borderRadius:6,background:"#fff",color:"var(--ink)"}}
+            onChange={ev => { if (ev.target.value) onSetNavrh(escrow, ev.target.value); }} />
+        </div>
+      )}
       {/* Flow: Složitelé → Oprávnění */}
       {tranches.length > 0 && (() => {
         const sloz = tranches.filter(t=>t.party_type==='složitel');
@@ -6184,6 +6284,14 @@ function EscrowForm({ init, onSave, onCancel, saving, clients = [] }) {
                   {eku.vada}
                 </div>
               )}
+              {eku.varovani && (
+                <div style={{
+                  background: "#F7F6FE", border: "1px solid #D8D5F5", borderRadius: 8,
+                  padding: "9px 12px", marginBottom: 10, fontSize: 11.5, color: "#3A3494", lineHeight: 1.5,
+                }}>
+                  {eku.varovani}
+                </div>
+              )}
               {eku.kroky.map((k, i) => (
                 <div key={k.key} style={{
                   display: "flex", alignItems: "center", gap: 11,
@@ -6711,7 +6819,7 @@ function EscrowInsights({ escrows }) {
   );
 }
 
-function EscrowList({ escrows, onNew, onEdit, onDelete, onMarkPaid, onPayment, loading }) {
+function EscrowList({ escrows, onNew, onEdit, onDelete, onMarkPaid, onPayment, onSetNavrh, loading }) {
   const [filter, setFilter] = useState("probíhající");
   const [openDetail, setOpenDetail] = useState(null); // klíč otevřeného rozpisu
   const toggleDetail = (key) => setOpenDetail(prev => prev === key ? null : key);
@@ -6752,10 +6860,29 @@ function EscrowList({ escrows, onNew, onEdit, onDelete, onMarkPaid, onPayment, l
   const runningNet = escrowRunningNet(escrows);
   const next1Label = `1. ${MESICE[(cm+1)%12]}`;
   const next2Label = `1. ${MESICE[(cm+2)%12]}`;
-  const alerts = active.filter(e => e.date_plomba_end && (() => {
-    const diff = (new Date(e.date_plomba_end) - new Date()) / 86400000;
-    return diff >= 0 && diff <= 7;
-  })());
+  // Dlaždice ALERTY dřív hlídala JEN plombu, která se blíží (0–7 dnů). Nikdy neřekla,
+  // že plomba už SKONČILA a peníze pořád leží — a přitom je to ta dražší situace.
+  const alerts = active.map(escrowAlertState).filter(Boolean)
+    .sort((a, b) => ESCROW_ALERT_RANK[a.level] - ESCROW_ALERT_RANK[b.level]);
+  const alertHead = alerts.length === 0 ? "Vše OK"
+    : alerts[0].level === 'overdue' ? (alerts.filter(a=>a.level==='overdue').length > 1 ? "Úschovy přetahují" : "Jedna úschova přetahuje")
+    : alerts[0].level === 'soon'    ? "Blíží se konec plomby"
+    : "Návrh na vklad nepodán";
+  const alertSub = alerts.length === 0 ? "Žádná plomba se neblíží"
+    : alerts[0].level === 'overdue' ? "Plomba skončila, peníze pořád leží na účtu."
+    : alerts[0].level === 'soon'    ? "Připrav výplatu z úschovy."
+    : "Úroky se projektují na klouzavé dnes + 20 dní.";
+
+  // Do kdy vůbec projekce sahá — jinak prázdná dlaždice „Příjem 1. …" neřekne, proč je prázdná.
+  const projHorizon = (() => {
+    let last = null, bezNavrhu = false;
+    active.forEach(e => {
+      _buildBalanceIntervals(e).forEach(iv => { if (!last || iv.to > last) last = iv.to; });
+      if (!e.date_paid && !e.date_navrh_podan) bezNavrhu = true;
+    });
+    if (!last) return "";
+    return `projekce do ${fmtDate(localYmd(last))}` + (bezNavrhu ? " — návrh na vklad zatím nepodán" : "");
+  })();
 
   // Precompute breakdown data
   const rows1 = escrowNetForMonthRows(escrows, cy, cm);
@@ -6807,6 +6934,9 @@ function EscrowList({ escrows, onNew, onEdit, onDelete, onMarkPaid, onPayment, l
             <div className="s" style={{color:"#065F46"}}>
               za úroky z <strong>{earnLabel2}</strong> · projekce při zachování jistin
             </div>
+            {/* Na čem projekce stojí. Prázdná dlaždice bez tohohle dovětku neřekne, PROČ je
+                prázdná — a přesně tak tu měsíc ležela nepovšimnutá chyba stropu. */}
+            <div style={{fontSize:10.5,color:"#065F46",marginTop:4,opacity:.85}}>{projHorizon}</div>
           </div>
           {openDetail==="m2" && (
             <>
@@ -6842,12 +6972,28 @@ function EscrowList({ escrows, onNew, onEdit, onDelete, onMarkPaid, onPayment, l
           </div>
           {openDetail==="tax" && <KpiBreakdown rows={rowsTax} colSet="tax" onClose={(e)=>{e.stopPropagation();setOpenDetail(null);}} />}
         </div>
-        <div className="kpi" style={{background:alerts.length>0?"#FEF3C7":"#F0FDF4",border:`1px solid ${alerts.length>0?"#FDE68A":"#BBF7D0"}`}}>
-          <div className="k" style={{color:alerts.length>0?"#92400E":"#065F46"}}>Alerty</div>
-          <div className="v" style={{color:alerts.length>0?"#D97706":"#4A7C59"}}>{alerts.length > 0 ? `${alerts.length}× ⚠` : "Vše OK"}</div>
-          <div className="s" style={{color:alerts.length>0?"#92400E":"#065F46"}}>
-            {alerts.length > 0 ? alerts.map(e=>e.escrow_number).join(", ") : "Žádná plomba se neblíží"}
-          </div>
+        <div className="kpi" style={{background:"#fff",border:`1px solid ${alerts.length?"#E6E4F2":"#BBF7D0"}`}}>
+          <div className="k" style={{color:alerts.length?"#8B87A8":"#065F46"}}>Alerty</div>
+          <div className="v" style={{color:alerts.length?"var(--ink)":"#4A7C59"}}>{alertHead}</div>
+          <div className="s" style={{color:"var(--mut)",marginBottom:alerts.length?10:0}}>{alertSub}</div>
+          {alerts.slice(0,3).map((a,i)=>(
+            <div key={a.escrow.id||i} style={{borderLeft:`2px solid ${ESCROW_ALERT_COLOR[a.level]}`,borderRadius:0,padding:"2px 0 2px 12px",marginTop:i?8:0}}>
+              <div style={{fontSize:13,color:"var(--ink)"}}>
+                {a.escrow.escrow_number}
+                <span style={{color:"var(--mut)"}}>
+                  {a.level==='overdue' ? ` · plomba skončila před ${a.days} ${a.days===1?"dnem":(a.days<5?"dny":"dny")}`
+                   : a.level==='soon'  ? ` · konec plomby za ${a.days} ${a.days===1?"den":(a.days<5?"dny":"dnů")}`
+                   : " · návrh na vklad nepodán"}
+                </span>
+              </div>
+              {a.level!=='soon' && (
+                <div className="maux-num" style={{fontSize:13,color:"var(--ink)",fontWeight:500}}>
+                  {fmtKc(Math.round(a.balance))} <span style={{fontWeight:400,color:"var(--mut)"}}>stále v úschově</span>
+                </div>
+              )}
+            </div>
+          ))}
+          {alerts.length>3 && <div style={{fontSize:11,color:"var(--mut)",marginTop:8}}>…a další {alerts.length-3}</div>}
         </div>
       </div>
       {/* Insights panel */}
@@ -6882,7 +7028,7 @@ function EscrowList({ escrows, onNew, onEdit, onDelete, onMarkPaid, onPayment, l
             return shown.length === 0 ? (
               <div className="ph"><h2 className="serif">Žádné úschovy</h2><p>Přidej první úschovu tlačítkem výše.</p></div>
             ) : (
-              shown.map(e => <EscrowCard key={e.id} escrow={e} onEdit={onEdit} onDelete={onDelete} onMarkPaid={onMarkPaid} onPayment={onPayment} />)
+              shown.map(e => <EscrowCard key={e.id} escrow={e} onEdit={onEdit} onDelete={onDelete} onMarkPaid={onMarkPaid} onPayment={onPayment} onSetNavrh={onSetNavrh} />)
             );
           })()}
         </div>
@@ -12512,27 +12658,31 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
       <BackupReminderBanner />
 
       {/* Escrow Alerts */}
+      {/* Banner četl jen "plomba do 3 dnů" — nikdy neřekl, že plomba UŽ SKONČILA a peníze
+          pořád leží. Teď jede přes sdílený escrowAlertState, stejně jako dlaždice ALERTY
+          a pruh na kartě. 'nonavrh' se sem vědomě nepouští — na Přehled patří jen to, co hoří. */}
       {!escrowAlertDismissed && (() => {
-        const alertEscrows = (escrows||[]).filter(e => {
-          if (!e.date_plomba_end) return false;
-          const diff = (new Date(e.date_plomba_end) - new Date()) / 86400000;
-          return diff >= 0 && diff <= 3;
-        });
-        if (alertEscrows.length === 0) return null;
+        const al = (escrows||[]).map(escrowAlertState).filter(a => a && a.level !== 'nonavrh')
+          .sort((a,b) => ESCROW_ALERT_RANK[a.level] - ESCROW_ALERT_RANK[b.level]);
+        if (al.length === 0) return null;
+        const overdue = al[0].level === 'overdue';
+        const col = overdue ? {bg:"#FCF7F6",br:"#E0B5B0",tx:"#7A322C",sub:"#A8443C"}
+                            : {bg:"#FDFBF5",br:"#E3D3AC",tx:"#6B551F",sub:"#96773C"};
         return (
-          <div style={{background:"#FEF3C7",border:"1px solid #F59E0B",borderRadius:10,padding:"12px 18px",display:"flex",alignItems:"center",gap:12}}>
-            <span style={{fontSize:18}}>⚠️</span>
+          <div style={{background:col.bg,border:`1px solid ${col.br}`,borderLeft:`2px solid ${ESCROW_ALERT_COLOR[al[0].level]}`,borderRadius:0,padding:"12px 18px",display:"flex",alignItems:"center",gap:12}}>
             <div style={{flex:1,cursor:"pointer"}} onClick={()=>onNav("uschovy")}>
-              <div style={{fontWeight:600,color:"#92400E",fontSize:13}}>Blíží se konec plomby</div>
-              <div style={{fontSize:12,color:"#B45309",marginTop:2}}>
-                {alertEscrows.map(e => {
-                  const days = Math.ceil((new Date(e.date_plomba_end) - new Date()) / 86400000);
-                  return `${e.escrow_number} — za ${days} ${days===1?"den":days<=4?"dny":"dní"}`;
-                }).join(" · ")}
+              <div style={{fontWeight:500,color:col.tx,fontSize:13}}>
+                {overdue ? "Úschova přetahuje" : "Blíží se konec plomby"}
+              </div>
+              <div style={{fontSize:12,color:col.sub,marginTop:2}}>
+                {al.slice(0,3).map(a => a.level === 'overdue'
+                  ? `${a.escrow.escrow_number} — plomba skončila před ${a.days} ${a.days===1?"dnem":"dny"}, ${fmtKc(Math.round(a.balance))} stále v úschově`
+                  : `${a.escrow.escrow_number} — za ${a.days} ${a.days===1?"den":a.days<=4?"dny":"dní"}`
+                ).join(" · ")}
               </div>
             </div>
-            <span style={{fontSize:11,color:"#92400E",textDecoration:"underline",cursor:"pointer"}} onClick={()=>onNav("uschovy")}>Přejít na Úschovy →</span>
-            <button onClick={()=>setEscrowAlertDismissed(true)} style={{marginLeft:8,background:"none",border:"none",fontSize:16,color:"#92400E",cursor:"pointer",padding:"0 4px",lineHeight:1}}>✕</button>
+            <span style={{fontSize:11,color:col.tx,textDecoration:"underline",cursor:"pointer"}} onClick={()=>onNav("uschovy")}>Přejít na Úschovy →</span>
+            <button onClick={()=>setEscrowAlertDismissed(true)} style={{marginLeft:8,background:"none",border:"none",fontSize:16,color:col.tx,cursor:"pointer",padding:"0 4px",lineHeight:1}}>✕</button>
           </div>
         );
       })()}
@@ -14026,6 +14176,12 @@ function VykazyCalendar({ workEntries, escrows, invoices, dense = false, onOpenF
     }
     return map;
   }, [escrows, y, m, daysInMonth, ym]);
+  // Rozpad denního úroku po úschovách — jen pro dny, kde nějaký úrok je (tooltip).
+  const escBreakdown = useMemo(() => {
+    const map = {};
+    for (const ds of Object.keys(escDayTotals)) map[ds] = _dailyNetRowsOnDate(escrows, new Date(ds + 'T00:00:00'));
+    return map;
+  }, [escrows, escDayTotals]);
   // Které dny jsou jen ODHAD (úschova ještě nemá jistý konec) — pro decentní "auto" značku.
   const escDayAuto = useMemo(() => {
     const map = {};
@@ -14238,7 +14394,14 @@ function VykazyCalendar({ workEntries, escrows, invoices, dense = false, onOpenF
                 const canAct = dense || amt > 0 || !!onAddEntry;
                 const titleBits = [];
                 if (amt > 0) titleBits.push(`+${fmtKc(amt)} práce`);
-                if (escAmt > 0) titleBits.push(`+${fmtKc(Math.round(escAmt))} úschovy${escAuto ? " (odhad — auto)" : ""}`);
+                // Rozpad po úschovách — "+433 Kč" samo neřekne, jestli je to jedna nebo tři.
+                if (escAmt > 0) {
+                  const rows = escBreakdown[ds] || [];
+                  const detail = rows.length > 1
+                    ? " (" + rows.map(r => `${r.number} ${fmtKc(Math.round(r.net))}`).join(" + ") + ")"
+                    : (rows.length === 1 ? ` (${rows[0].number})` : "");
+                  titleBits.push(`+${fmtKc(Math.round(escAmt))} úschovy${detail}${escAuto ? " · odhad" : ""}`);
+                }
                 const cellTitle = titleBits.length ? `${fmtDate(ds)} — ${titleBits.join(" · ")}` : (onAddEntry ? `${fmtDate(ds)} — přidat výkaz` : fmtDate(ds));
                 return (
                   <button key={ds}
@@ -19101,10 +19264,25 @@ export default function MauxCRM() {
     catch(e) { alert("Chyba: " + e.message); }
   };
   // Označení tranše jako vyplacené — promítne se do úroků v celé appce (interest engine čte paid_date)
+  // ⚠️ Datum bere z globálního today() (lokální kalendář). Dřív tu byl toISOString().slice(0,10),
+  // který mezi půlnocí a druhou ranní zapsal VČEREJŠÍ den a ukrojil úschově den úroku.
   const markTranchePaid = async (escrowId, tranche) => {
     try {
-      const today = new Date().toISOString().slice(0,10);
-      await upsertEscrowTranche({ ...tranche, escrow_id: escrowId, is_paid: true, paid_date: today });
+      await upsertEscrowTranche({ ...tranche, escrow_id: escrowId, is_paid: true, paid_date: today() });
+      setEscrows(await fetchEscrows());
+    } catch(e) { alert("Chyba: " + e.message); }
+  };
+  // Inline zápis data podání návrhu na vklad z karty úschovy. Na tomhle datu stojí celá
+  // projekce úroků (plomba = návrh + 20 dní), proto musí jít doplnit jedním klikem.
+  // Konec plomby dopočítáme stejně jako EscrowForm (+20 dní), ale jen když si ho Tom
+  // nenastavil ručně na něco jiného.
+  const setEscrowNavrhPodan = async (escrow, ymd) => {
+    if (!ymd) return;
+    try {
+      const autoPlomba = !escrow.date_plomba_end
+        || (escrow.date_navrh_podan && escrow.date_plomba_end === addDays(escrow.date_navrh_podan, 20));
+      await upsertEscrow({ ...escrow, date_navrh_podan: ymd,
+        date_plomba_end: autoPlomba ? addDays(ymd, 20) : escrow.date_plomba_end });
       setEscrows(await fetchEscrows());
     } catch(e) { alert("Chyba: " + e.message); }
   };
@@ -19707,6 +19885,7 @@ export default function MauxCRM() {
               onDelete={doDeleteEscrow}
               onMarkPaid={markTranchePaid}
               onPayment={handleEscrowPaymentRefresh}
+              onSetNavrh={setEscrowNavrhPodan}
             />
             </>
           )}
