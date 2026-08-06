@@ -1898,7 +1898,7 @@ function InvoiceIssueModal({ clientId, entries, clients, invoices, initialBilled
                 <div style={{ fontSize: 12.5, color: "var(--txt)", fontWeight: 500 }}>{fmtDate(e.entry_date)} — {e.description?.slice(0, 80)}</div>
                 <div style={{ fontSize: 11, color: "var(--mut)", marginTop: 2 }}>
                   {e.hours > 0 && `${e.hours} h × ${fmtKc(e.rate)}`}
-                  {e.notary_fee > 0 && ` · notář ${fmtKc(e.notary_fee)}`}
+                  {e.notary_fee > 0 && ` · notář v paušálu ${fmtKc(e.notary_fee)}`}
                   {e.admin_fee > 0 && ` · sp.pop. ${fmtKc(e.admin_fee)}`}
                   {Number(e.sig_count) > 0 && ` · prohlášení ${e.sig_count}× ${fmtKc(Number(e.sig_count) * SIGNATURE_DECL_FEE)}`}
                 </div>
@@ -3311,7 +3311,10 @@ function InvoicePrintPreview({ invoice, client, workEntries, onBack, onIssue, on
                   <tbody>
                     {pageEntries.map((e, i) => {
                       const discAmt = Math.min(Number(e.discount_amount) || 0, e.amount || 0);
-                      const lineTotal = (e.amount||0) + (Number(e.sig_count)||0) * SIGNATURE_DECL_FEE + (Number(e.admin_fee)||0) + (Number(e.notary_fee)||0);
+                      // Notář je Tomův vlastní náklad, UŽ skrytě obsažený v e.amount — na příloze
+                      // se NIKDY nepřičítá. Dřív se přičítal a řádek nesouhlasil se str. 1 faktury;
+                      // rozdíl = přesně částka notáře, kterou klient nemá vidět. Oprava 6. 8. 2026.
+                      const lineTotal = (e.amount||0) + (Number(e.sig_count)||0) * SIGNATURE_DECL_FEE + (Number(e.admin_fee)||0);
                       const lineFinal = lineTotal - discAmt;
                       return (
                       <tr key={i} style={{ background: i % 2 === 0 ? "transparent" : "rgba(53,24,165,.012)", breakInside: "avoid", pageBreakInside: "avoid" }}>
@@ -4797,7 +4800,15 @@ function escrowGrossForMonth(escrows, year, month) {
 // Proč z rekordu a ne z mety: meta má reagovat na to, co jsi dokázal, ne na to, co jsi měl.
 // Proč klouzavé okno: rohatka, která jde jen nahoru, tě po jednom výjimečném měsíci uvězní
 // v trvale červeném čísle. Tahle meta umí i klesnout (ne však pod 200 000 Kč).
-function computeMilestoneLadder(invoices, escrows, now) {
+function computeMilestoneLadder(invoices, escrows, now, workEntries) {
+  // Notář = Tomův náklad skrytý v subtotalu faktury (viz výkazy). „Vydělané" je marže,
+  // proto se od měsíce faktury odečte součet notary_fee jejích výkazů. Bez workEntries
+  // se chová jako dřív (obrat) — všechna volání v appce ale workEntries předávají. 6. 8. 2026.
+  const notaryByInv = {};
+  (workEntries || []).forEach(e => {
+    if (e && e.invoice_id && Number(e.notary_fee) > 0)
+      notaryByInv[e.invoice_id] = (notaryByInv[e.invoice_id] || 0) + Number(e.notary_fee);
+  });
   const ymSet = new Set();
   (invoices || []).forEach(i => { if (i.issue_date) ymSet.add(i.issue_date.slice(0, 7)); });
   (escrows || []).forEach(e => {
@@ -4817,7 +4828,7 @@ function computeMilestoneLadder(invoices, escrows, now) {
   const all = [];
   while (cy < now.getFullYear() || (cy === now.getFullYear() && cm <= now.getMonth())) {
     const ym = `${cy}-${String(cm + 1).padStart(2, "0")}`;
-    const invAmt = (invoices || []).filter(i => (i.issue_date || "").startsWith(ym)).reduce((s, i) => s + (i.subtotal || 0), 0);
+    const invAmt = (invoices || []).filter(i => (i.issue_date || "").startsWith(ym)).reduce((s, i) => s + (i.subtotal || 0) - (notaryByInv[i.id] || 0), 0);
     // ČISTÝ úrok (po 15% srážkové dani). Bilance i kalendář počítají čistý; žebřík dřív jediný
     // bral hrubý, takže hero připisovalo Tomovi i peníze, které banka odvedla za něj. Audit 31.7.2026.
     const escAmt = Math.round(escrowNetForMonth(escrows, cy, cm));
@@ -4860,6 +4871,36 @@ function computeMilestoneLadder(invoices, escrows, now) {
 function unbilledWorkNetNoVat(workEntries) {
   return (workEntries || []).filter(e => !e.invoice_id)
     .reduce((s, e) => s + Math.max((e.amount || 0) - (Number(e.discount_amount) || 0), 0), 0);
+}
+
+// Marže z nevyfakturované práce: jako unbilledWorkNetNoVat, ale MINUS notářský náklad
+// skrytý v amount. Používej pro „vydělané", milníky a rekordy; „Výkazy k vystavení",
+// Bilance a projekce cash flow zůstávají na fakturační hodnotě (unbilledWorkNetNoVat).
+function unbilledMarginNetNoVat(workEntries) {
+  return (workEntries || []).filter(e => !e.invoice_id)
+    .reduce((s, e) => s + Math.max((e.amount || 0) - (Number(e.discount_amount) || 0) - (Number(e.notary_fee) || 0), 0), 0);
+}
+
+// ── NOTÁŘ ↔ ODPOČET — tichá kontrola párování (6. 8. 2026) ──────────────────
+// Pravidlo: každý výkaz s notary_fee > 0 musí mít notářskou fakturu v evidenci
+// odpočtu DPH (fi_dph_odpocet — stejný log jako dlaždice v Daních). Kontrola je
+// informativní (indigo), počítá se až při renderu — žádný polling, nic na pozadí.
+// Doklad se hledá podle názvu (obsahuje „notář", bez diakritiky) v okně ±60 dní
+// od data výkazu. Částky se záměrně NEporovnávají — Tom zadává náklad „cca",
+// doklad je přesný; párování přes částku by falešně křičelo.
+function notaryDocDates(financeItems) {
+  try {
+    const p = JSON.parse(((financeItems || []).find(x => x.id === "fi_dph_odpocet")?.notes) || "{}");
+    const log = Array.isArray(p.log) ? p.log : [];
+    const bezDia = s => String(s || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+    return log.filter(d => bezDia(d.label).includes("notar")).map(d => d.date || "").filter(Boolean);
+  } catch { return []; }
+}
+function notaryEntryUnpaired(entry, notaryDates) {
+  if (!(Number(entry.notary_fee) > 0) || !entry.entry_date) return false;
+  const t = new Date(entry.entry_date + "T00:00:00").getTime();
+  const WIN = 60 * 86400000;
+  return !(notaryDates || []).some(ds => Math.abs(new Date(ds + "T00:00:00").getTime() - t) <= WIN);
 }
 
 // Průběžný čistý úrok z dosud NEVYPLACENÝCH zůstatků (accumulated do dnes).
@@ -8581,7 +8622,9 @@ function ZiskovostPanel({ workEntries }) {
   // Jediná metoda: peníze za záznam ÷ reálně odpracované hodiny. Sleva se odečítá,
   // paušály se počítají taky (u nich pojem "fakturovaná hodina" nedává smysl, ale
   // vydělané koruny za odpracovaný čas ano). Záporné nikdy — Math.max(...,0).
-  const netAmt = e => Math.max((e.amount || (e.hours || 0) * (e.rate || 0)) - (Number(e.discount_amount) || 0), 0);
+  // Notář (vlastní náklad skrytý v amount) se odečítá — hodinovka má měřit marži,
+  // ne obrat; jinak by si Tom u zakládání s.r.o. připisoval peníze notáře (6. 8. 2026).
+  const netAmt = e => Math.max((e.amount || (e.hours || 0) * (e.rate || 0)) - (Number(e.discount_amount) || 0) - (Number(e.notary_fee) || 0), 0);
   const MN = ["led", "úno", "bře", "dub", "kvě", "čvn", "čvc", "srp", "zář", "říj", "lis", "pro"];
 
   const S = useMemo(() => {
@@ -12631,9 +12674,9 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
           // STÍHÁM? — tok jako v kalendáři: výkazy dle entry_date (po slevě) + JISTÝ čistý úrok úschov do dneška
           const ymPulz = `${y}-${String(m + 1).padStart(2, "0")}`;
           const earned = (workEntries||[]).filter(e => (e.entry_date||"").startsWith(ymPulz))
-            .reduce((s,e) => s + Math.max((e.amount||0) - (Number(e.discount_amount)||0), 0), 0)
+            .reduce((s,e) => s + Math.max((e.amount||0) - (Number(e.discount_amount)||0) - (Number(e.notary_fee)||0), 0), 0)
             + Math.round(escrowNetForMonth(escrows, y, m));
-          const meta = computeMilestoneLadder(invoices, escrows, now).activeGoal || 200000;
+          const meta = computeMilestoneLadder(invoices, escrows, now, workEntries).activeGoal || 200000;
           // pro-rata po pracovních dnech Po–Pá (svátky vědomě neřeším — chyba je den, ne týden)
           const wdUpTo = (up) => { let n = 0; for (let d = 1; d <= up; d++) { const wd = new Date(y, m, d).getDay(); if (wd !== 0 && wd !== 6) n++; } return n; };
           const wdTotal = Math.max(wdUpTo(new Date(y, m + 1, 0).getDate()), 1);
@@ -12654,7 +12697,7 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
             const from = localYmd(new Date(t0.getTime() - endBack * _dayMs));
             const to = localYmd(new Date(t0.getTime() - startBack * _dayMs));
             return (workEntries||[]).filter(e => e.entry_date && e.entry_date >= from && e.entry_date <= to)
-              .reduce((s,e) => s + Math.max((e.amount||0) - (Number(e.discount_amount)||0), 0), 0) + esc;
+              .reduce((s,e) => s + Math.max((e.amount||0) - (Number(e.discount_amount)||0) - (Number(e.notary_fee)||0), 0), 0) + esc;
           };
           const last30 = winSum(0, 29), prev30 = winSum(30, 59);
           const delta30 = Math.round(last30 - prev30);
@@ -13625,8 +13668,13 @@ function WorkEntryForm({ init, prefillDate, clients, onSave, onCancel, saving })
         )}
         <div className="two" style={{ marginTop: 10 }}>
           <div className="frow" style={{ marginBottom: 0 }}>
-            <label>Notář — přefakturace (Kč, bez DPH)</label>
+            <label>Notář — můj náklad (už v paušálu; Kč bez DPH)</label>
             <input type="number" min="0" value={d.notary_fee || ""} onChange={e => set("notary_fee", e.target.value)} placeholder="0" />
+            {Number(d.notary_fee) > 0 && (
+              <div style={{ fontSize: 10.5, color: "var(--mut)", marginTop: 5 }}>
+                Na fakturu se nepřičítá — klient ho neuvidí. Odečte se z tvého „vydělaného" a appka hlídá párovou fakturu od notáře v odpočtu DPH.
+              </div>
+            )}
           </div>
           <div className="frow" style={{ marginBottom: 0 }}>
             <label>Správní poplatek (Kč, bez DPH)</label>
@@ -13763,9 +13811,11 @@ function WorkRhythmPanel({ entries }) {
   );
 }
 
-function WorkEntryList({ entries, clients, invoices, onNew, onEdit, onDelete, onGenerateInvoice, onPreviewInvoice, loading }) {
+function WorkEntryList({ entries, clients, invoices, financeItems, onNew, onEdit, onDelete, onGenerateInvoice, onPreviewInvoice, loading }) {
   const [filterClient, setFilterClient] = useState("");
   const [search, setSearch] = useState("");
+  // data notářských dokladů z odpočtu — pro tichou kontrolu párování (viz notaryDocDates)
+  const notaryDates = useMemo(() => notaryDocDates(financeItems), [financeItems]);
 
   const clientNameById = useMemo(() => {
     const map = {};
@@ -13913,10 +13963,15 @@ function WorkEntryList({ entries, clients, invoices, onNew, onEdit, onDelete, on
                     <td>
                       <div style={{ fontSize: 13, color: "var(--txt)", maxWidth: 360, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{e.description}</div>
                       {e.real_hours > 0 && <div className="t-sub">reálně: {e.real_hours} h</div>}
+                      {notaryEntryUnpaired(e, notaryDates) && (
+                        <div style={{ borderLeft: "2px solid " + BP.indigo, background: "rgba(74,68,184,.05)", padding: "3px 8px", marginTop: 4, fontSize: 10, color: BP.indigo, maxWidth: 360, borderRadius: 0 }}>
+                          Faktura od notáře zatím není v odpočtu DPH.
+                        </div>
+                      )}
                     </td>
                     <td className="t-date">{e.hours > 0 ? `${e.hours} h` : "—"}</td>
                     <td className="t-date" style={{ fontSize: 11 }}>
-                      {e.notary_fee > 0 && <div>Notář: {maskNum(new Intl.NumberFormat("cs-CZ").format(e.notary_fee))} Kč</div>}
+                      {e.notary_fee > 0 && <div>Notář (v paušálu): {maskNum(new Intl.NumberFormat("cs-CZ").format(e.notary_fee))} Kč</div>}
                       {e.admin_fee > 0 && <div>Sp.pop.: {maskNum(new Intl.NumberFormat("cs-CZ").format(e.admin_fee))} Kč</div>}
                       {Number(e.sig_count) > 0 && <div>Prohlášení: {maskNum(new Intl.NumberFormat("cs-CZ").format(Number(e.sig_count)*SIGNATURE_DECL_FEE))} Kč</div>}
                     </td>
@@ -13986,7 +14041,9 @@ function VykazyCalendar({ workEntries, escrows, invoices, dense = false, onOpenF
   const todayStr = localDs(new Date());
   const monthNamesFull = ["leden","únor","březen","duben","květen","červen","červenec","srpen","září","říjen","listopad","prosinec"];
 
-  const entryAmt = (e) => Math.max((e.amount || 0) - (Number(e.discount_amount) || 0), 0);
+  // „Vydělané" = marže: po slevě a MINUS notářský náklad (Tomova platba notáři,
+  // skrytá v amount). Klientovi jde plná částka, vydělaná je jen marže — 6. 8. 2026.
+  const entryAmt = (e) => Math.max((e.amount || 0) - (Number(e.discount_amount) || 0) - (Number(e.notary_fee) || 0), 0);
 
   // Denní součty zapsané práce (bez DPH, podle entry_date — datum vytvoření výkazu) za zobrazený měsíc
   const dayTotals = useMemo(() => {
@@ -14086,7 +14143,7 @@ function VykazyCalendar({ workEntries, escrows, invoices, dense = false, onOpenF
   const hero = useMemo(() => {
     if (dense || monthOffset !== 0 || !invoices) return null;
     const now = new Date();
-    const ladder = computeMilestoneLadder(invoices, escrows, now);
+    const ladder = computeMilestoneLadder(invoices, escrows, now, workEntries);
     const goal = ((ladder.allRows || []).slice(-1)[0] || {}).goal || 200000;
     // `ladder.rows` má na konci vždy BĚŽÍCÍ měsíc — bez filtru by se v grafu objevil dvakrát
     // a jako "minulý měsíc" by hlásil sám sebe.
@@ -14102,7 +14159,7 @@ function VykazyCalendar({ workEntries, escrows, invoices, dense = false, onOpenF
       if (dow > 0 && dow < 6) wdLeft++;
     }
     return { goal, rem, wdLeft, prevTot, closedMax, rows, closedCount: closed.length };
-  }, [dense, monthOffset, invoices, escrows, y, m, daysInMonth, heroTotal]);
+  }, [dense, monthOffset, invoices, escrows, workEntries, y, m, daysInMonth, heroTotal]);
 
   return (
     <div style={{ background: "#fff", borderRadius: dense ? 12 : BP.rInner, overflow: "hidden", height: "100%", display: "flex", flexDirection: "column" }}>
@@ -14662,7 +14719,7 @@ function InvoiceList({ invoices, clients, workEntries, escrows, onOpen, onOpenCl
                               {e.description}
                               {(e.notary_fee > 0 || e.admin_fee > 0 || Number(e.sig_count) > 0) && (
                                 <span style={{ fontSize: 10.5, color: "var(--mut)", marginLeft: 8 }}>
-                                  {e.notary_fee > 0 && `+notář ${fmtKc(e.notary_fee)}`}
+                                  {e.notary_fee > 0 && `notář v paušálu ${fmtKc(e.notary_fee)}`}
                                   {e.admin_fee > 0 && ` +sp.pop. ${fmtKc(e.admin_fee)}`}
                                   {Number(e.sig_count) > 0 && ` +prohlášení ${fmtKc(Number(e.sig_count)*SIGNATURE_DECL_FEE)}`}
                                 </span>
@@ -18950,7 +19007,7 @@ export default function MauxCRM() {
   const milestoneToCelebrate = useMemo(() => {
     if (!invoices.length && !workEntries.length) return null;
     const nowD = new Date();
-    const l = computeMilestoneLadder(invoices, escrows, nowD);
+    const l = computeMilestoneLadder(invoices, escrows, nowD, workEntries);
     const closed = l.rows.filter(r => r.milestoneNum && !r.isCurrent);
     const lastClosed = closed[closed.length - 1];
     if (lastClosed && lastClosed.ym > milestoneAck) {
@@ -18959,7 +19016,7 @@ export default function MauxCRM() {
     const nY = nowD.getMonth() === 11 ? nowD.getFullYear() + 1 : nowD.getFullYear();
     const nM = (nowD.getMonth() + 1) % 12;
     const liveYm = `${nY}-${String(nM + 1).padStart(2, "0")}`;
-    const liveInv = unbilledWorkNetNoVat(workEntries);
+    const liveInv = unbilledMarginNetNoVat(workEntries); // marže — mluví stejnou řečí jako meta
     const liveEsc = Math.round(escrowNetForMonth(escrows, nowD.getFullYear(), nowD.getMonth()));
     const liveTotal = liveInv + liveEsc;
     if (liveTotal > l.activeGoal && milestoneLiveAck !== liveYm) {
@@ -18976,11 +19033,11 @@ export default function MauxCRM() {
   const recordToShow = useMemo(() => {
     if (!workEntries.length) return null;
     const nowD = new Date();
-    const l = computeMilestoneLadder(invoices, escrows, nowD);
+    const l = computeMilestoneLadder(invoices, escrows, nowD, workEntries);
     const nY = nowD.getMonth() === 11 ? nowD.getFullYear() + 1 : nowD.getFullYear();
     const nM = (nowD.getMonth() + 1) % 12;
     const ym = `${nY}-${String(nM + 1).padStart(2, "0")}`;
-    const total = unbilledWorkNetNoVat(workEntries) + Math.round(escrowNetForMonth(escrows, nowD.getFullYear(), nowD.getMonth()));
+    const total = unbilledMarginNetNoVat(workEntries) + Math.round(escrowNetForMonth(escrows, nowD.getFullYear(), nowD.getMonth()));
     const prev = (l.allRows || []).slice(-12).reduce((m, x) => Math.max(m, x.totalM), 0);
     // Razítko je na měsíc, ne na částku — jinak by pečeť naskočila po každém dalším výkazu.
     if (total >= 100000 && prev > 0 && total > prev && recordAck !== ym) return { amount: total, prev, ym };
@@ -19699,7 +19756,7 @@ export default function MauxCRM() {
 
           {/* VÝKAZ PRÁCE */}
           {mod === "vykaz" && mode === "list" && (
-            <WorkEntryList entries={workEntries} clients={clients} invoices={invoices}
+            <WorkEntryList entries={workEntries} clients={clients} invoices={invoices} financeItems={financeItems}
               onNew={() => { setPrefillDate(null); setMode("new"); }}
               onEdit={e => { setSel(e.id); setMode("edit"); }}
               onDelete={doDeleteWorkEntry}
