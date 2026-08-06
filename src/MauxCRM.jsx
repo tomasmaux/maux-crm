@@ -12338,7 +12338,6 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
     }
   }
   const josefWageNext = JOSEF_WAGE_MANUAL_OVERRIDES[_josefNextYm] ?? Math.round(_josefNextHoursSum * assistantRateForMonth(_josefNextYm, _josefRateSched));
-  const cashflow = mRev + totalVydaje;
   // DPH — nadměrný odpočet (na žádost): kolik mi reálně ZŮSTANE díky účtenkám, které posílám Čechmanové
   // jako odpočet proti DPH z vystavených faktur. Nemění se tím "to číslo shrnující daň" v modulu Daně —
   // je to čistě nová položka v příjmech, doplňující obrázek o tom, kolik fakticky zaplatím / kolik mi zbude.
@@ -12372,10 +12371,6 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
   // nextMonthBalance: pro projekci příštího měsíce nahradíme josefWage (minulý měsíc)
   // za josefWageNext (aktuální měsíc) — v příštím měsíci se platí za práci tohoto měsíce
   const nextMonthBalance = projectedIncome + (totalNutne + totalLuxus - josefWageNext);
-  // Runway — kolik měsíců firma "ujede" ze zůstatku na spořáku při současných výdajích (V.03 — pro Pulz firmy)
-  const sporBalPulz = (financeItems||[]).find(i => i.id === "fi_sp_99")?.amount || 0;
-  const runwayPulz  = Math.abs(totalVydaje) > 0 ? sporBalPulz / Math.abs(totalVydaje) : 0;
-  const runwayMPulz = Math.floor(runwayPulz);
   // On the way = faktury vystaveny, dosud neuhrazeny
   const onTheWayInvs = invoices.filter(i => invoiceStatus(i) === "vystavena");
   const onTheWayAmt  = onTheWayInvs.reduce((s,i) => s+(i.subtotal||0), 0);
@@ -12530,29 +12525,11 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
           Všechny tři články jsou ve stejné bázi jako zbytek appky: subtotal, tedy BEZ DPH
           a bez přefakturací (notář, sp. poplatek) — Tomovy peníze, ne průtok. */}
       <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:12}}>
+        {/* Trojice Nevyfakturováno → Na cestě → Po splatnosti ZRUŠENA (Tom 6.8.2026) —
+            přestěhovala se do panelu Pulz firmy i s daty splatnosti a vystavení.
+            Jedno číslo, jedno místo. Zbylo jen datum. */}
         <div style={{fontSize:12,color:"var(--mut)",display:"flex",gap:14,flexWrap:"wrap",alignItems:"center"}}>
           <span>{now.toLocaleDateString("cs-CZ",{weekday:"long",day:"numeric",month:"long"})}</span>
-          {unbilledAmt>0 && (
-            <span style={{display:"flex",alignItems:"baseline",gap:6}}>
-              <span>Nevyfakturováno</span>
-              <b className="maux-num" style={{fontSize:13,fontWeight:600,color:"var(--txt)"}}>{fmtKc(unbilledAmt)}</b>
-            </span>
-          )}
-          {unbilledAmt>0 && onTheWayInv>0 && <span style={{color:"var(--line2)"}}>→</span>}
-          {onTheWayInv>0 && (
-            <span style={{display:"flex",alignItems:"baseline",gap:6}}>
-              <span>Na cestě</span>
-              <b className="maux-num" style={{fontSize:13,fontWeight:600,color:"#4A44B8"}}>{fmtKc(onTheWayInv)}</b>
-            </span>
-          )}
-          {onTheWayInv>0 && overdueAmt>0 && <span style={{color:"var(--line2)"}}>→</span>}
-          {overdueAmt>0 && (
-            <span style={{display:"flex",alignItems:"baseline",gap:6,color:"#A8443C"}}>
-              <span>Po splatnosti</span>
-              <b className="maux-num" style={{fontSize:13,fontWeight:600}}>{fmtKc(overdueAmt)}</b>
-              <span style={{fontSize:11}}>· {overdue.length} {overdue.length===1?"faktura":overdue.length<=4?"faktury":"faktur"}</span>
-            </span>
-          )}
         </div>
         <div style={{display:"flex",gap:8,alignItems:"center",flexShrink:0}}>
           {editLayout && (
@@ -12632,64 +12609,139 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
       {/* Panel "josef" se 6.8.2026 přestěhoval na list Josef · Asistent (AsistentPanel),
           proto PANEL_LAYOUT_VERSION 12 → 13. Na Přehledu už není. */}
 
-      {/* ─── PULZ FIRMY — překvapivá novinka V.03: jeden pohled, který spojí vše dohromady ─── */}
+      {/* ─── PULZ FIRMY — „Tři odpovědi + tichý hlídač" (Tom 6.8.2026, mockup schválen) ───
+          Skóre 0–100, body x/25, prstenec, emoji a čtyřbarevné bary ZRUŠENY — číslo bez
+          jednotky nemá akci. Panel odpovídá na tři otázky v reálných jednotkách:
+          Vydržím? (firemní rezerva BEZ peněz státu / měsíční provoz) · Stíhám? (tok jako
+          v kalendáři vs. pro-rata meta po pracovních dnech) · Co je na cestě? (subtotal
+          báze — bez DPH a přefakturací).
+          Verdikt je zároveň hlídač, priorita: spořák nekryje obálky státu → faktura po
+          splatnosti → výdrž pod měsíc. Úschovy sem vědomě NEPATŘÍ — nese je banner nahoře
+          (jedna hláška o téže věci na jedné obrazovce). Když tempo zaostává, věta MLČÍ —
+          čísla to řeknou sama; do 10. dne se měsíc „teprve rozjíždí". */}
       <Panel id="pulz">
-      <Card style={{padding:"18px 24px"}}>
+      <Card style={{padding:"22px 30px 24px"}}>
         {(() => {
-          // 4 dílčí ukazatele (každý 0–25 bodů), spojené z různých modulů — "dokonalé propojení" v praxi
-          const sCash = cashflow >= 0 ? 25 : Math.max(25 + Math.round((cashflow / Math.max(Math.abs(mRev),1)) * 25), 0);
-          const sRunway = runwayMPulz >= 6 ? 25 : runwayMPulz >= 3 ? 19 : runwayMPulz >= 1 ? 12 : 4;
-          const sNext = c35Ratio >= 1 ? 25 : c35Ratio >= 0.3 ? 20 : c35Ratio >= 0 ? 14 : c35Ratio >= -0.5 ? 7 : 2;
-          const expAll = [...nutne, ...luxus];
-          const expPaid = expAll.filter(i => (expenseChecks||[]).find(c => c.item_id === i.id && c.paid)).length;
-          const sPlatby = expAll.length > 0 ? Math.round((expPaid/expAll.length)*25) : 18;
-          const score = sCash + sRunway + sNext + sPlatby;
-          const verdict = score >= 85 ? { t: "Firma jede na plné obrátky", e: "🚀", c: "#4A7C59" }
-                        : score >= 65 ? { t: "Pevně na nohou", e: "💪", c: "#16A34A" }
-                        : score >= 45 ? { t: "Stabilní — jen hlídej tempo", e: "👀", c: "#D97706" }
-                        : score >= 25 ? { t: "Vyžaduje pozornost", e: "⚠️", c: "#EA580C" }
-                        :               { t: "Čas zpomalit a přeskupit síly", e: "🧭", c: "#A8443C" };
-          const Bar = ({label, val, max, color}) => (
-            <div style={{minWidth:108}}>
-              <div style={{fontSize:9,color:"var(--mut)",marginBottom:3,display:"flex",justifyContent:"space-between"}}>
-                <span>{label}</span><span style={{fontWeight:700,color}}>{val}/{max}</span>
-              </div>
-              <div style={{height:4,borderRadius:2,background:"var(--line)",overflow:"hidden"}}>
-                <div className="maux-bar-grow" style={{height:"100%",width:`${(val/max)*100}%`,background:color,transition:"width .6s cubic-bezier(.4,0,.2,1)"}} />
-              </div>
+          const y = now.getFullYear(), m = now.getMonth(), day = now.getDate();
+          const mesicNom = ["Leden","Únor","Březen","Duben","Květen","Červen","Červenec","Srpen","Září","Říjen","Listopad","Prosinec"][m];
+          // VYDRŽÍM? — firemní rezerva (spořák minus obálky státu) / měsíční provoz; polštář = 3 měsíce
+          const rez = computeFirmaRezerva(financeItems, invoices, dpfoMonths, loanTransactions, escrows, josefAvg3m);
+          const provoz = Math.max(Math.round(rez.polstarMonthly || 0), 1);
+          const vydrz = rez.firmaRez > 0 ? rez.firmaRez / provoz : 0;
+          // STÍHÁM? — tok jako v kalendáři: výkazy dle entry_date (po slevě) + JISTÝ čistý úrok úschov do dneška
+          const ymPulz = `${y}-${String(m + 1).padStart(2, "0")}`;
+          const earned = (workEntries||[]).filter(e => (e.entry_date||"").startsWith(ymPulz))
+            .reduce((s,e) => s + Math.max((e.amount||0) - (Number(e.discount_amount)||0), 0), 0)
+            + Math.round(escrowNetForMonth(escrows, y, m));
+          const meta = computeMilestoneLadder(invoices, escrows, now).activeGoal || 200000;
+          // pro-rata po pracovních dnech Po–Pá (svátky vědomě neřeším — chyba je den, ne týden)
+          const wdUpTo = (up) => { let n = 0; for (let d = 1; d <= up; d++) { const wd = new Date(y, m, d).getDay(); if (wd !== 0 && wd !== 6) n++; } return n; };
+          const wdTotal = Math.max(wdUpTo(new Date(y, m + 1, 0).getDate()), 1);
+          const paceTarget = Math.round(meta * (wdUpTo(day) / wdTotal));
+          const tempoDelta = earned - paceTarget;
+          // CO JE NA CESTĚ? — vystavené čekající + nevyfakturovaná práce + úrok úschov do konce měsíce
+          const escFuture = Math.max(Math.round(escrowNetThisMonth) - Math.round(escrowNetForMonth(escrows, y, m)), 0);
+          const naCeste = onTheWayInv + unbilledAmt + escFuture;
+          const dues = invoices.filter(i => ["vystavena","po_splatnosti"].includes(invoiceStatus(i))).map(i => i.due_date).filter(Boolean).sort();
+          const maxDue = dues.length ? dues[dues.length - 1] : null;
+          // Tichá delta — posledních 30 dní vs. předchozích 30 (stejný tok jako kalendář:
+          // výkazy dle entry_date + denní čistý úrok úschov). Žádné snapshoty, počítá se živě.
+          const _dayMs = 86400000;
+          const t0 = new Date(today() + "T00:00:00");
+          const winSum = (startBack, endBack) => {
+            let esc = 0;
+            for (let o = startBack; o <= endBack; o++) esc += _dailyNetOnDate(escrows, new Date(t0.getTime() - o * _dayMs));
+            const from = localYmd(new Date(t0.getTime() - endBack * _dayMs));
+            const to = localYmd(new Date(t0.getTime() - startBack * _dayMs));
+            return (workEntries||[]).filter(e => e.entry_date && e.entry_date >= from && e.entry_date <= to)
+              .reduce((s,e) => s + Math.max((e.amount||0) - (Number(e.discount_amount)||0), 0), 0) + esc;
+          };
+          const last30 = winSum(0, 29), prev30 = winSum(30, 59);
+          const delta30 = Math.round(last30 - prev30);
+          // HLÍDAČ — faktury po splatnosti od nejstarší, do důkazu až tři (jako banner úschov)
+          const odList = [...overdue].sort((a,b) => (a.due_date||"").localeCompare(b.due_date||""));
+          const odDays = (iv) => Math.max(Math.round((t0 - new Date(iv.due_date + "T00:00:00")) / _dayMs), 1);
+          const odClient = (iv) => (((clients||[]).find(c => c.id === iv.client_id) || {}).name || "klient");
+          const Sb = ({children}) => <b className="maux-num" style={{fontWeight:600,color:"var(--txt)"}}>{children}</b>;
+          const alert =
+            rez.firmaRez < 0 ? { c: "#A8443C", tint: "rgba(168,68,60,.045)", v: "Spořák nekryje obálky státu.",
+              p: <>chybí <Sb>{fmtKc(Math.abs(Math.round(rez.firmaRez)))}</Sb> — obálky {fmtKc(Math.round(rez.totalEarF))}, na spořáku {fmtKc(Math.round(rez.sporBal))}</> }
+            : overdue.length ? { c: "#A8443C", tint: "rgba(168,68,60,.045)",
+              v: overdue.length === 1 ? "Jedna faktura přetahuje splatnost." : overdue.length <= 4 ? `${overdue.length} faktury přetahují splatnost.` : `${overdue.length} faktur přetahuje splatnost.`,
+              p: <>{odList.slice(0, 3).map((iv, ix) => { const dys = odDays(iv); return (
+                    <span key={iv.id || ix}>{ix > 0 && " · "}<Sb>{iv.invoice_number || "—"}</Sb> · {odClient(iv)} · <Sb>{dys} {dys === 1 ? "den" : dys <= 4 ? "dny" : "dní"}</Sb> · <Sb>{fmtKc(Math.round(iv.subtotal || 0))}</Sb></span>
+                  ); })}{overdue.length > 1 && <> — celkem <Sb>{fmtKc(Math.round(overdueAmt))}</Sb></>}</> }
+            : vydrz < 1 ? { c: "#C6A86B", tint: "rgba(198,168,107,.08)", v: "Rezerva klesla pod měsíc provozu.",
+              p: <>rezerva <Sb>{fmtKc(Math.round(Math.max(rez.firmaRez, 0)))}</Sb> / provoz <Sb>{fmtKc(provoz)}</Sb> měsíčně</> }
+            : null;
+          const tisic = (n) => n >= 100000 ? `${maskNum(String(Math.round(n / 1000)))} tisíc` : fmtKc(Math.round(n));
+          const verdikt = alert ? null
+            : tempoDelta > 0 ? <>{mesicNom} jede o <Sb>{fmtKc(tempoDelta)}</Sb> napřed{naCeste > 0 && <> a na cestě je <Sb>{tisic(naCeste)}</Sb></>}.</>
+            : day <= 10 ? <>{mesicNom} se teprve rozjíždí{naCeste > 0 && <> — na cestě je <Sb>{tisic(naCeste)}</Sb></>}.</>
+            : naCeste > 0 ? <>Na cestě je <Sb>{tisic(naCeste)}</Sb>.</> : null;
+          const num = (n) => maskNum(new Intl.NumberFormat("cs-CZ").format(Math.round(n)));
+          const Col = ({q, children, sub, first, nav, navTitle}) => (
+            <div onClick={nav} title={navTitle} style={{flex:1, minWidth:0, padding: first ? "0 26px 0 0" : "0 26px", borderLeft: first ? "none" : "1px solid var(--line)", cursor: nav ? "pointer" : "default"}}>
+              <div style={bpLabel({marginBottom:9})}>{q}</div>
+              {children}
+              <div style={{fontSize:10.5, color:"var(--mut)", lineHeight:1.6, marginTop:10}}>{sub}</div>
+            </div>
+          );
+          const Big = ({v, unit}) => (
+            <div className="maux-num" style={{fontSize:24, fontWeight:600, color:"var(--txt)", lineHeight:1, marginBottom:12}}>
+              {v}{unit && <span style={{fontSize:12.5, fontWeight:500, color:"var(--mut)", marginLeft:4}}>{unit}</span>}
             </div>
           );
           return (
-            <div style={{display:"flex",alignItems:"center",gap:28,flexWrap:"wrap"}}>
-              <div style={{display:"flex",alignItems:"center",gap:14,minWidth:230}}>
-                <div style={{position:"relative",width:64,height:64,flexShrink:0}}>
-                  <svg width="64" height="64" viewBox="0 0 64 64">
-                    <circle cx="32" cy="32" r="27" fill="none" stroke="var(--line)" strokeWidth="6" />
-                    <circle cx="32" cy="32" r="27" fill="none" stroke={verdict.c} strokeWidth="6" strokeLinecap="round"
-                      strokeDasharray={`${(score/100)*169.6} 169.6`} transform="rotate(-90 32 32)" style={{transition:"stroke-dasharray 1s cubic-bezier(.4,0,.2,1)"}} />
-                  </svg>
-                  <div style={{position:"absolute",inset:0,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center"}}>
-                    <span className="maux-num" style={{fontSize:18,fontWeight:600,color:verdict.c,lineHeight:1}}>{score}</span>
-                    <span style={{fontSize:7,color:"var(--mut)",letterSpacing:".1em"}}>PULZ</span>
-                  </div>
-                </div>
-                <div>
-                  <div style={{display:"flex",alignItems:"center",gap:5,marginBottom:3}}>
-                    <span className="maux-dot" style={{width:5,height:5,background:"#3518A5",boxShadow:"0 0 3px rgba(53,24,165,.5)"}} />
-                    <div style={{fontSize:9,letterSpacing:".22em",textTransform:"uppercase",color:"var(--mut)",fontWeight:700}}>Pulz firmy · dnes</div>
-                  </div>
-                  <div style={{fontSize:15,fontWeight:600,color:verdict.c,display:"flex",alignItems:"center",gap:6}}>
-                    {verdict.e} {verdict.t}
-                  </div>
-                  <div style={{fontSize:9.5,color:"var(--mut)",marginTop:2}}>spočteno ze 4 ukazatelů napříč appkou — živě, při každé návštěvě</div>
-                </div>
+            <div>
+              <div style={{display:"flex", alignItems:"baseline", gap:12}}>
+                <div style={bpLabel()}>Pulz firmy · dnes</div>
+                {(last30 > 0 || prev30 > 0) && (
+                  <span className="maux-num" style={{fontSize:10.5, fontWeight:500, color:"var(--mut)"}}
+                    title="Vyděláno za posledních 30 dní proti předchozím 30 (výkazy + čistý úrok úschov)">
+                    posledních 30 dní {fmtSigned(delta30)}
+                  </span>
+                )}
               </div>
-              <div style={{width:1,alignSelf:"stretch",background:"var(--line)",margin:"0 2px",flexShrink:0}} />
-              <div style={{display:"flex",gap:18,flexWrap:"wrap",flex:1}}>
-                <Bar label="Cash flow tento měsíc" val={sCash} max={25} color="#4A7C59" />
-                <Bar label={`Běh na rezervách (${runwayMPulz} měs.)`} val={sRunway} max={25} color="#7C3AED" />
-                <Bar label="Projekce příští měsíc" val={sNext} max={25} color="#0EA5E9" />
-                <Bar label="Odškrtnuté platby" val={sPlatby} max={25} color="#A08350" />
+              {alert ? (
+                <div style={{borderLeft:`2px solid ${alert.c}`, borderRadius:0, background:alert.tint, padding:"11px 18px", margin:"10px 0 18px"}}>
+                  <div style={{fontFamily:"'Fraunces',serif", fontWeight:300, fontSize:19, color:"var(--txt)"}}>{alert.v}</div>
+                  <div style={{fontSize:11.5, color:"var(--txt)", marginTop:4}}>{alert.p}</div>
+                </div>
+              ) : verdikt ? (
+                <div style={{fontFamily:"'Fraunces',serif", fontWeight:300, fontSize:20, letterSpacing:"-.005em", color:"var(--txt)", margin:"8px 0 18px"}}>{verdikt}</div>
+              ) : (
+                <div style={{height:14}} />
+              )}
+              <div style={{display:"flex"}}>
+                <Col first q="Vydržím?" sub={<>rezerva <Sb>{fmtKc(Math.round(Math.max(rez.firmaRez, 0)))}</Sb> / provoz <Sb>{fmtKc(provoz)}</Sb> měs.<br/>bez peněz státu · polštář = 3 měs.</>}>
+                  <Big v={(Math.round(vydrz * 10) / 10).toFixed(1)} unit="měs." />
+                  <div style={{position:"relative", height:2, background:"var(--line)"}}>
+                    <div style={{position:"absolute", top:0, left:0, height:2, width:`${Math.min(vydrz / 3, 1) * 100}%`, background:BP.indigo}} />
+                    <div style={{position:"absolute", top:-3, right:0, width:1.5, height:8, background:BP.indigoInk}} />
+                  </div>
+                </Col>
+                <Col q="Stíhám?" nav={onNav ? () => onNav("vykaz") : undefined} navTitle="Přejít na Výkaz práce"
+                  sub={<>k {day}. {m + 1}. stačilo <Sb>{fmtKc(paceTarget)}</Sb> · meta <Sb>{fmtKc(meta)}</Sb><br/>výkazy + čistý úrok úschov, bez DPH</>}>
+                  <Big v={num(earned)} unit="Kč" />
+                  <div style={{position:"relative", height:2, background:"var(--line)"}}>
+                    <div style={{position:"absolute", top:0, left:0, height:2, width:`${Math.min(earned / Math.max(meta, 1), 1) * 100}%`, background:BP.indigo}} />
+                    <div style={{position:"absolute", top:-3, left:`${Math.min(paceTarget / Math.max(meta, 1), 1) * 100}%`, width:1.5, height:8, background:BP.indigoInk}} />
+                  </div>
+                </Col>
+                <Col q="Co je na cestě?" nav={onNav ? () => onNav("fakturace") : undefined} navTitle="Přejít na Fakturaci"
+                  sub={naCeste > 0
+                  ? <>{onTheWayInv > 0 && <><Sb>{fmtKc(onTheWayInv)}</Sb> splatné{maxDue ? ` do ${fmtDate(maxDue)}` : ""}</>}{unbilledAmt > 0 && <>{onTheWayInv > 0 ? " · " : ""}<Sb>{fmtKc(unbilledAmt)}</Sb> vystavíš 1. {(m + 1) % 12 + 1}.</>}{escFuture > 0 && <> · ~<Sb>{fmtKc(escFuture)}</Sb> úrok úschov</>}<br/>vše bez DPH a přefakturací</>
+                  : <>nic — všechno je vyfakturované a zaplacené</>}>
+                  <Big v={num(naCeste)} unit="Kč" />
+                  {naCeste > 0 ? (
+                    <div style={{display:"flex", gap:2, height:2}}>
+                      {onTheWayInv > 0 && <div style={{flex:onTheWayInv, background:BP.indigo}} />}
+                      {unbilledAmt > 0 && <div style={{flex:unbilledAmt, background:"#9B96D6"}} />}
+                      {escFuture > 0 && <div style={{flex:escFuture, background:"#A08350"}} />}
+                    </div>
+                  ) : <div style={{height:2, background:"var(--line)"}} />}
+                </Col>
               </div>
             </div>
           );
@@ -14104,7 +14156,7 @@ function VykazyCalendar({ workEntries, escrows, invoices, dense = false, onOpenF
                   <span style={bpHero(dense?30:52, heroTotal>0?PHOS:"var(--mut)")}>{fmtKc(heroTotal)}</span>
                   {!dense && !hero && <span style={{fontSize:12,color:"var(--mut)"}}>za měsíc, bez DPH</span>}
                   {hero && (won
-                    ? <span style={{fontSize:12,color:"#8A6D32",border:"0.5px solid rgba(198,168,107,.5)",padding:"4px 12px",borderRadius:99,whiteSpace:"nowrap"}}>+{fmtKc(over)} nad metu</span>
+                    ? <span style={{fontSize:12,color:"#3A3494",border:"0.5px solid rgba(74,68,184,.40)",padding:"4px 12px",borderRadius:99,whiteSpace:"nowrap"}}>+{fmtKc(over)} nad metu</span>
                     : <span style={{fontSize:12,color:"var(--mut)",border:"0.5px solid rgba(0,0,0,.10)",padding:"4px 12px",borderRadius:99,whiteSpace:"nowrap"}}>zbývá {fmtKc(hero.rem)}</span>)}
                 </div>
                 {/* Věta MLČÍ, když je zpráva špatná — pod metou zůstane holé číslo a laťka. */}
@@ -14114,7 +14166,8 @@ function VykazyCalendar({ workEntries, escrows, invoices, dense = false, onOpenF
                   </div>
                 )}
                 {/* Vlasová laťka — 2 px. Tlustý bar byl další křičící prvek; klid znamená, že
-                    graf jen podtrhává číslo, nesoupeří s ním. Zlatá = přesah nad metu. */}
+                    graf jen podtrhává číslo, nesoupeří s ním. Přesah nad metu = tmavší indigo —
+                    meta je firemní číslo, zlatá patří majetku a úschovám (Tom 3.8. + 6.8.2026). */}
                 {hero && (
                   <div style={{position:"relative",height:2,background:"rgba(74,68,184,.10)",margin:record?"24px 0 16px":"26px 0 16px",maxWidth:480}}>
                     <div style={{position:"absolute",left:0,top:0,bottom:0,width:`${Math.min(donePct,goalPct)}%`,background:PHOS,transition:"width .6s cubic-bezier(.16,1,.3,1)"}} />
@@ -14151,7 +14204,7 @@ function VykazyCalendar({ workEntries, escrows, invoices, dense = false, onOpenF
               {hero && sr.length > 1 && (
                 <div style={{textAlign:"right",flexShrink:0,marginTop:6}}>
                   <svg width={svgW} height={chartH + 8} style={{display:"block",overflow:"visible"}}>
-                    {yGoal !== null && <line x1={-3} y1={yGoal} x2={svgW + 3} y2={yGoal} stroke="rgba(198,168,107,.6)" strokeWidth="1" strokeDasharray="3,3" />}
+                    {yGoal !== null && <line x1={-3} y1={yGoal} x2={svgW + 3} y2={yGoal} stroke="rgba(74,68,184,.45)" strokeWidth="1" strokeDasharray="3,3" />}
                     {hero.prevTot > 0 && (
                       <line x1={-3} y1={chartH - Math.min(1, hero.prevTot / maxTotal) * chartH + 4} x2={svgW + 3}
                         y2={chartH - Math.min(1, hero.prevTot / maxTotal) * chartH + 4}
