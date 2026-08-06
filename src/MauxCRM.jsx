@@ -4898,6 +4898,56 @@ function escrowTotalTax(escrows) {
   }, 0);
 }
 
+// ─── MILNÍK OBJEMU ÚSCHOV ────────────────────────────────────────────────────
+// Kolik ještě zbývá do kulaté mety a KDY jí při dosavadním tempu dosáhneš.
+// Tempo je průměr od PRVNÍ přijaté úschovy do dneška, ne od 1. ledna — YTD by
+// v lednu dělilo jedním týdnem a odhad měsíce by lítal o roky. Jedna definice,
+// žádný ruční vstup, žádné druhé nastavitelné číslo.
+const ESCROW_MILESTONE = 100000000;
+const MS_MESIC = 1000 * 60 * 60 * 24 * 30.4375;
+// Kolik peněz do úschovy SKUTEČNĚ doteklo. Rozepsaná tranše bez data přijetí je
+// příslib, ne pohyb na účtu — do „proteklo" ani do milníku nesmí, jinak by objem
+// nafoukla úschova, kterou teprve draftuješ. Pravidlo je schválně TOTOŽNÉ s tím
+// v _buildBalanceIntervals (`t.received_date || e.date_received`), aby objem a úroky
+// mluvily o týchž penězích. Datum v budoucnu se nepočítá — peníze tam ještě nejsou.
+function escrowFlowedIn(e) {
+  const tr = e.escrow_tranches || [];
+  const dorazilo = (base) => !!base && String(base).slice(0, 10) <= today();
+  const sloz = tr.filter(t => t.party_type === 'složitel');
+  if (sloz.length > 0) {
+    return sloz.reduce((s, t) => s + (dorazilo(t.received_date || e.date_received) ? (t.amount || 0) : 0), 0);
+  }
+  // Fallback pro úschovy bez složitelských tranší — stejný jako u úrokového motoru.
+  return dorazilo(e.date_received) ? tr.reduce((s, t) => s + (t.amount || 0), 0) : 0;
+}
+function computeEscrowMilestone(escrows, target = ESCROW_MILESTONE) {
+  const list = escrows || [];
+  const flowed = list.reduce((s, e) => s + escrowFlowedIn(e), 0);
+  // Do průměru se počítají jen úschovy, kam peníze reálně dorazily — rozepsaná
+  // úschova s nulou by jmenovatel nafoukla a průměr uměle srazila.
+  const count = list.filter(e => escrowFlowedIn(e) > 0).length;
+  const firsts = list.map(e => escrowFirstReceived(e)).filter(Boolean).sort();
+  const start = firsts.length ? firsts[0] : null;
+  const done = flowed >= target;
+  const remaining = Math.max(0, target - flowed);
+  const pct = target > 0 ? flowed / target : 0;
+  // Kolik měsíců praxe už je za tebou. Bez toho se tempo nedá spočítat.
+  const months = start
+    ? (new Date(today() + "T00:00:00") - new Date(start + "T00:00:00")) / MS_MESIC
+    : 0;
+  // Poměry z nuly se nekreslí — pod půl měsícem historie tempo i odhad mlčí.
+  const pace = months > 0.5 ? flowed / months : 0;
+  const avgEscrow = count > 0 ? flowed / count : 0;
+  const escrowsLeft = avgEscrow > 0 ? Math.ceil(remaining / avgEscrow) : 0;
+  let eta = null;
+  if (!done && pace > 0) {
+    const d = new Date(today() + "T00:00:00");
+    d.setDate(d.getDate() + Math.round((remaining / pace) * 30.4375));
+    eta = { m: d.getMonth(), y: d.getFullYear() };
+  }
+  return { target, flowed, remaining, pct, pace, count, avgEscrow, escrowsLeft, eta, done, months };
+}
+
 // DPH obálka na spořáku — kolik z vybraného DPH je skutečně POTŘEBA držet pro finančák.
 // (Red team 24.7.2026: dřív se držela CELÁ vybraná DPH z uhrazených faktur a ignoroval se
 // odpočet z účtenek → rezerva byla každý měsíc mezi 1. a 25. podhodnocená o výši odpočtu.)
@@ -6864,10 +6914,10 @@ function EscrowList({ escrows, onNew, onEdit, onDelete, onMarkPaid, onPayment, o
     const paidOpr = tr.filter(t=>t.party_type==='oprávněný'&&t.is_paid).reduce((ss,t)=>ss+(t.amount||0),0);
     return s + sloz - paidOpr;
   }, 0);
-  // Historický celkový tok (všechny úschovy, složitelé)
-  const totalFlowed = escrows.reduce((s,e) => {
-    return s + (e.escrow_tranches||[]).filter(t=>t.party_type==='složitel').reduce((ss,t)=>ss+(t.amount||0),0);
-  }, 0);
+  // Historický celkový tok (všechny úschovy, složitelé). Jediný zdroj je helper
+  // milníku — jinak by se podřádek „proteklo" a laťka ke stovce mohly rozejít.
+  const mil = computeEscrowMilestone(escrows);
+  const totalFlowed = mil.flowed;
   // Celkový čistý výdělek ze všech úschov
   const totalEarned = escrowTotalNet(escrows);
   // Úrok k 1. příštího měsíce — POUZE tranše dokončující se tento měsíc (odpovídá Excelu)
@@ -6920,6 +6970,16 @@ function EscrowList({ escrows, onNew, onEdit, onDelete, onMarkPaid, onPayment, o
           <div className="k">V úschově celkem</div>
           <div className="v">{fmtKc(totalInEscrow)}</div>
           <div className="s">{active.length} aktivních · celkem proteklo {fmtKc(totalFlowed)}</div>
+          {/* MILNÍK — varianta A: holá vlasová laťka 2 px, žádný popisek. Sedí těsně pod
+              podřádkem „celkem proteklo", takže měří JEHO číslo, ne hrdinu nad sebou.
+              Čísla k metě nese dlaždice Milník o řádek níž — jedna hláška o téže věci
+              na jedné obrazovce. Vysvětlení je v titulku, ne na ploše. */}
+          {mil.flowed > 0 && (
+            <div title={`Ke stovce ${Math.min(100, mil.pct*100).toFixed(1)} %${mil.done ? "" : ` · zbývá ${(mil.remaining/1e6).toFixed(1)} mil.`}`}
+                 style={{height:2,background:"rgba(255,255,255,.20)",borderRadius:0,overflow:"hidden",marginTop:13}}>
+              <div style={{height:"100%",width:`${Math.min(100, mil.pct*100).toFixed(1)}%`,background:"#ABA6DA"}} />
+            </div>
+          )}
         </div>
         {/* Příjem 1. příštího měsíce — cash-flow protokol */}
         <div className="kpi" style={{background:"#FFFBEB",border:`1px solid ${openDetail==="m1"?"#D97706":"#FDE68A"}`,padding:0,overflow:"hidden",...kpiClickable}}
@@ -6968,8 +7028,9 @@ function EscrowList({ escrows, onNew, onEdit, onDelete, onMarkPaid, onPayment, o
           )}
         </div>
       </div>
-      {/* Souhrn – řada 2 */}
-      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:12}}>
+      {/* Souhrn – řada 2. Čtvrtá dlaždice (Milník) si bere užší sloupec než Alerty —
+          alerty musí unést tři řádky pod sebou, milník má jen verdikt a tři opěrná čísla. */}
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1.15fr 1.6fr",gap:12}}>
         {/* Celkem vydělano */}
         <div className="kpi" style={{background:"#F5F3FF",border:`1px solid ${openDetail==="total"?"#7C3AED":"#DDD6FE"}`,padding:0,overflow:"hidden",...kpiClickable}}
              onClick={()=>toggleDetail("total")}>
@@ -6991,6 +7052,55 @@ function EscrowList({ escrows, onNew, onEdit, onDelete, onMarkPaid, onPayment, o
             <div className="s" style={{color:"#991B1B"}}>15 % z hrubého úroku · klikni pro rozpis</div>
           </div>
           {openDetail==="tax" && <KpiBreakdown rows={rowsTax} colSet="tax" onClose={(e)=>{e.stopPropagation();setOpenDetail(null);}} />}
+        </div>
+        {/* MILNÍK — obrazovka nemá dávat stav, ale odpověď: KDY tam budeš.
+            Hrdina je SLOVO (měsíc), proto Fraunces; čísla pod ním jsou důkaz, proto Inter. */}
+        <div className="kpi" style={{background:"#fff",border:"1px solid #E6E4F2"}}>
+          <div className="k" style={{color:"var(--mut)"}}>Milník · {Math.round(mil.target/1e6)} mil.</div>
+          {mil.flowed <= 0 ? (
+            <div style={{fontSize:12.5,color:"var(--mut)",lineHeight:1.35}}>
+              Zatím neproteklo nic — milník se rozsvítí s první úschovou.
+            </div>
+          ) : (
+            <>
+              <div style={{fontSize:12.5,color:"var(--txt)",marginBottom:12,lineHeight:1.35}}>
+                {mil.done ? "Stovka je za tebou."
+                  : mil.eta ? `Stovky se dotkneš v ${czMes(mil.eta.m, "lok")}.`
+                  : "Na odhad měsíce je zatím málo historie."}
+              </div>
+              <div style={{fontFamily:"Fraunces,serif",fontWeight:300,fontSize:30,color:BP.indigo,lineHeight:1,whiteSpace:"nowrap"}}>
+                {mil.done ? `${(mil.flowed/1e6).toFixed(1)} mil.`
+                  : mil.eta ? `${czMes(mil.eta.m)} ${mil.eta.y}`
+                  : `${(mil.flowed/1e6).toFixed(1)} mil.`}
+              </div>
+              {/* Vlasová laťka 2 px, indigo — meta uvnitř firemního čísla se nikdy nekreslí zlatou. */}
+              <div style={{height:2,background:"rgba(74,68,184,.14)",borderRadius:0,overflow:"hidden",margin:"14px 0 9px"}}>
+                <div style={{height:"100%",width:`${Math.min(100, mil.pct*100).toFixed(1)}%`,background:BP.indigo}} />
+              </div>
+              <div style={{display:"flex",gap:22}}>
+                <div>
+                  <div style={{fontSize:9,letterSpacing:".14em",textTransform:"uppercase",color:"var(--mut)",fontWeight:600,opacity:.75}}>Zbývá</div>
+                  <div className="maux-num" style={{fontSize:14,fontWeight:600,marginTop:3}}>{(mil.remaining/1e6).toFixed(1)} mil.</div>
+                </div>
+                {mil.pace > 0 && (
+                  <div>
+                    <div style={{fontSize:9,letterSpacing:".14em",textTransform:"uppercase",color:"var(--mut)",fontWeight:600,opacity:.75}}>Tempo</div>
+                    <div className="maux-num" style={{fontSize:14,fontWeight:600,marginTop:3}}>{(mil.pace/1e6).toFixed(1)} mil./měs</div>
+                  </div>
+                )}
+                {mil.escrowsLeft > 0 && (
+                  <div>
+                    <div style={{fontSize:9,letterSpacing:".14em",textTransform:"uppercase",color:"var(--mut)",fontWeight:600,opacity:.75}}>Úschov</div>
+                    <div className="maux-num" style={{fontSize:14,fontWeight:600,marginTop:3}}>{mil.escrowsLeft}</div>
+                  </div>
+                )}
+              </div>
+              {/* Na čem odhad stojí — prázdné ani plné číslo nesmí nechat čtenáře hádat metodu. */}
+              <div style={{fontSize:10.5,color:"var(--mut)",marginTop:10,opacity:.85}}>
+                tempo = objem ÷ měsíce od první úschovy
+              </div>
+            </>
+          )}
         </div>
         <div className="kpi" style={{background:"#fff",border:`1px solid ${alerts.length?"#E6E4F2":"#BBF7D0"}`}}>
           <div className="k" style={{color:alerts.length?"#8B87A8":"#065F46"}}>Alerty</div>
