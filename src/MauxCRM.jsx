@@ -4629,18 +4629,23 @@ function _buildBalanceIntervals(e) {
     if (last.to.getFullYear() === 9999) {
       const tYmd    = today();
       const fromYmd = localYmd(last.from);
+      // `open: true` = zůstatek NEMÁ zaznamenanou výplatu, peníze pořád leží. Nezaměňovat
+      // s `ongoing`, které říká jen „konec je odhad". Interval zastropovaný známým koncem
+      // plomby je jistý, ale pořád OTEVŘENÝ — a escrowRunningNet ho musí počítat.
       if (e.date_paid) {
         const capD = new Date(e.date_paid + 'T00:00:00');
         if (capD < last.from) intervals.pop();
-        else last.to = capD; // jisté, ne ongoing
+        else last.to = capD; // jisté, ne ongoing, ne open
       } else if (e.date_plomba_end && e.date_plomba_end >= tYmd && e.date_plomba_end >= fromYmd) {
         last.to = new Date(e.date_plomba_end + 'T00:00:00'); // jistý konec plomby, ne ongoing
+        last.open = true;
       } else {
         let capYmd = e.date_navrh_podan ? addDays(e.date_navrh_podan, 20) : addDays(tYmd, 20);
         if (capYmd < tYmd)    capYmd = tYmd;                 // A) nikdy neuříznout do minulosti
         if (capYmd < fromYmd) capYmd = addDays(fromYmd, 20); // vklad datovaný do budoucna
         last.to = new Date(capYmd + 'T00:00:00');
         last.ongoing = true;
+        last.open = true;
       }
     }
   }
@@ -4739,12 +4744,20 @@ function _escrowTranches(e) {
 // Čistý úrok k 1. příštího měsíce — zahrne:
 //   • jisté:    intervaly končící v daném měsíci (plomba/výplata)
 //   • průběžné: otevřené intervaly (007 ZBYTEK) — cap na dnes (aktuální měsíc) nebo konec měsíce
-function escrowNetForMonth(escrows, year, month) {
+// ⚠️ `projected` (LEKCE 6. 8. 2026, Tom: „potřebuji to mít provázané přes celou aplikaci")
+// Běžící měsíc má DVĚ legitimní hodnoty a appka musí umět obě:
+//   • false (default) = „kolik jsem VYDĚLAL k dnešku" — hero číslo kalendáře, žebřík mety,
+//     roční graf. Sem projekce nesmí, jinak se běžící měsíc porovnává s uzavřenými jinou
+//     metodou (stejná past jako rebasování benchmarku v Akciích).
+//   • true = „kolik mi PŘIJDE 1. dne" — Příjem 1. …, Bilance příštího měsíce, Příjmy.
+//     Banka připíše úrok za CELÝ měsíc, ne za to, co proběhlo do dneška. Strop na dnešek
+//     tady prognózoval jen minulost a podhodnocoval příjem o tisíce.
+function escrowNetForMonth(escrows, year, month, projected) {
   const mStart = new Date(year, month, 1);
   const mEnd   = new Date(year, month + 1, 0);
   const today  = new Date(); today.setHours(0,0,0,0);
   const isCurrent = year === today.getFullYear() && month === today.getMonth();
-  const cap = isCurrent ? today : null;
+  const cap = (isCurrent && !projected) ? today : null;
   return (escrows || []).reduce((sum, e) => {
     if (!e.interest_rate) return sum;
     const ivs = _buildBalanceIntervals(e);
@@ -4850,12 +4863,15 @@ function unbilledWorkNetNoVat(workEntries) {
     .reduce((s, e) => s + Math.max((e.amount || 0) - (Number(e.discount_amount) || 0), 0), 0);
 }
 
-// Průběžný čistý úrok z dosud neukončených intervalů (accumulated do dnes)
+// Průběžný čistý úrok z dosud NEVYPLACENÝCH zůstatků (accumulated do dnes).
+// ⚠️ Filtruje se na `open`, ne na `ongoing`. Úschova se známým koncem plomby má jistý konec
+// (ongoing = false), ale peníze na ní pořád leží — dřív vypadávala z „průběžné" a číslo
+// „Celkem vyděláno · +X Kč průběžné" ji tiše zapomínalo.
 function escrowRunningNet(escrows) {
   const today = new Date(); today.setHours(0,0,0,0);
   return (escrows || []).reduce((sum, e) => {
     if (!e.interest_rate) return sum;
-    const ivs = _buildBalanceIntervals(e).filter(iv => iv.ongoing || iv.to.getFullYear() >= 9000);
+    const ivs = _buildBalanceIntervals(e).filter(iv => iv.open || iv.ongoing || iv.to.getFullYear() >= 9000);
     if (ivs.length === 0) return sum;
     const epoch = new Date(0);
     return sum + _grossForPeriod(ivs, e.interest_rate, epoch, today) * 0.85;
@@ -5052,12 +5068,14 @@ function computeFirmaRezerva(financeItems, invoices, dpfoMonths, loanTransaction
 //   • typ "jisté"    — interval končí V TOMTO MĚSÍCI (plomba / výplata)
 //   • typ "průběžné" — interval nemá konec (ongoing) — cap na dnes / konec měsíce
 //   • typ "vyplaceno" — info-řádek: oprávněný vyplacen PŘED tímto měsícem (0 Kč)
-function escrowNetForMonthRows(escrows, year, month) {
+// `projected` — viz escrowNetForMonth. Rozpad MUSÍ sečíst na číslo, které stojí nad ním,
+// takže se stropuje úplně stejně jako KPI.
+function escrowNetForMonthRows(escrows, year, month, projected) {
   const mStart = new Date(year, month, 1);
   const mEnd   = new Date(year, month + 1, 0);
   const today  = new Date(); today.setHours(0,0,0,0);
   const isCurrent = year === today.getFullYear() && month === today.getMonth();
-  const cap = isCurrent ? today : null;
+  const cap = (isCurrent && !projected) ? today : null;
   const rows = [];
 
   (escrows || []).forEach(e => {
@@ -6853,7 +6871,8 @@ function EscrowList({ escrows, onNew, onEdit, onDelete, onMarkPaid, onPayment, o
   // Celkový čistý výdělek ze všech úschov
   const totalEarned = escrowTotalNet(escrows);
   // Úrok k 1. příštího měsíce — POUZE tranše dokončující se tento měsíc (odpovídá Excelu)
-  const netNextMonth1 = escrowNetForMonth(escrows, cy, cm);
+  // CASH FLOW — banka připíše 30./31. úrok za CELÝ měsíc, ne jen po dnešek → projected
+  const netNextMonth1 = escrowNetForMonth(escrows, cy, cm, true);
   // Úrok k 1. přespříštího měsíce — tranše dokončující se příští měsíc
   const netNextMonth2 = escrowNetForMonth(escrows, cy, cm + 1);
   // Průběžné úschovy bez definitivního konce (007 ZBYTEK apod.) — akumulují se
@@ -6885,7 +6904,7 @@ function EscrowList({ escrows, onNew, onEdit, onDelete, onMarkPaid, onPayment, o
   })();
 
   // Precompute breakdown data
-  const rows1 = escrowNetForMonthRows(escrows, cy, cm);
+  const rows1 = escrowNetForMonthRows(escrows, cy, cm, true);
   const rows2 = escrowNetForMonthRows(escrows, cy, cm + 1);
   const rowsTax = escrowTaxRows(escrows);
   const rowsTotal = escrowTotalNetRows(escrows);
@@ -6911,8 +6930,9 @@ function EscrowList({ escrows, onNew, onEdit, onDelete, onMarkPaid, onPayment, o
             </div>
             <div className="v" style={{color:"#D97706"}}>{netNextMonth1 > 0 ? fmtKc(Math.round(netNextMonth1)) : "–"}</div>
             <div className="s" style={{color:"#92400E"}}>
-              za úroky z <strong>{earnLabel1}</strong> · narůstá každý den · klikni pro rozpis
+              za úroky z <strong>{earnLabel1}</strong> · celý měsíc včetně projekce · klikni pro rozpis
             </div>
+            <div style={{fontSize:10.5,color:"#92400E",marginTop:4,opacity:.85}}>{projHorizon}</div>
           </div>
           {openDetail==="m1" && (
             <>
@@ -12393,10 +12413,13 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
   const thisMonthName = MESICE_NOM_D[now.getMonth()];
   const nextMonthName = MESICE_NOM_D[(now.getMonth() + 1) % 12];
 
-  // Úschovy — výpočty pro dashboard
-  const escrowNetThisMonth = escrowNetForMonth(escrows, now.getFullYear(), now.getMonth());
+  // Úschovy — výpočty pro dashboard.
+  // `escrowNetThisMonth` živí VÝHRADNĚ cash-flow místa (Příjmy příštího měsíce, Bilance,
+  // motor C35, živý sloupec ročního grafu) → projektuje se na celý měsíc. Výkonnostní číslo
+  // („kolik jsem vydělal k dnešku") si kalendář i žebřík mety počítají samy, bez projekce.
+  const escrowNetThisMonth = escrowNetForMonth(escrows, now.getFullYear(), now.getMonth(), true);
   const escrowNetNextMonth = escrowNetForMonth(escrows, now.getFullYear(), now.getMonth() + 1);
-  const escrowGrossThisMonth = escrowNetForMonth(escrows, now.getFullYear(), now.getMonth()); // čistý — viz computeMilestoneLadder
+  const escrowGrossThisMonth = escrowNetThisMonth; // čistý — viz computeMilestoneLadder
   const escrowTaxTotal = escrowTotalTax(escrows);
 
   // Příjmy měsíční
@@ -13001,7 +13024,7 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
                       )}
                       {escrowNetThisMonth>0 && (
                         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"4px 0"}}>
-                          <span style={{fontSize:10,color:"var(--mut)",letterSpacing:".02em"}}>Úschovy — čistý úrok za {thisMonthName.toLowerCase()}</span>
+                          <span style={{fontSize:10,color:"var(--mut)",letterSpacing:".02em"}}>Úschovy — čistý úrok za {thisMonthName.toLowerCase()}, celý měsíc</span>
                           <span className="maux-num" style={{fontSize:11.5,fontWeight:500,color:"var(--ink)"}}>{fmtKc(Math.round(escrowNetThisMonth))}</span>
                         </div>
                       )}
@@ -14193,6 +14216,13 @@ function VykazyCalendar({ workEntries, escrows, invoices, dense = false, onOpenF
     return map;
   }, [escrows, escDayTotals]);
   const escMonthTotal = useMemo(() => Object.values(escDayTotals).reduce((s, v) => s + v, 0), [escDayTotals]);
+  // Popisek k legendě — do kdy projekce sahá. Kreslí se jen tehdy, když v zobrazeném měsíci
+  // nějaký budoucí den s úrokem vůbec je; jinak by legenda vysvětlovala neexistující stav.
+  const escProjLabel = useMemo(() => {
+    const future = Object.keys(escDayTotals).filter(ds => ds > todayStr);
+    if (future.length === 0) return "";
+    return `projekce do ${fmtDate(future.sort().slice(-1)[0])}`;
+  }, [escDayTotals, todayStr]);
 
   const dayInfo = (d) => {
     const ds = `${ym}-${String(d).padStart(2, "0")}`;
@@ -14330,7 +14360,7 @@ function VykazyCalendar({ workEntries, escrows, invoices, dense = false, onOpenF
                   {escMonthEarned > 0 && (
                     <>{monthTotal > 0 && sep}
                     <span style={{display:"inline-flex",alignItems:"center",gap:5}}>
-                      <span style={{width:6,height:6,borderRadius:"50%",background:ESC}} />{fmtKc(escMonthEarned)} úschovy
+                      <span style={{width:6,height:6,borderRadius:"50%",background:ESC}} />{fmtKc(escMonthEarned)} úschovy k dnešku
                     </span></>
                   )}
                   {hero && (
@@ -14391,6 +14421,11 @@ function VykazyCalendar({ workEntries, escrows, invoices, dense = false, onOpenF
                 const { ds, amt, escAmt, escAuto, isToday } = dayInfo(d);
                 const isSel = selectedDay === ds;
                 const isHov = hoverDay === ds;
+                // ⚠️ VARIANTA A (Tom 6. 8. 2026): SYTOST = JISTOTA.
+                // Dny po dnešku jsou projekce úroku z úschov, ne vydělané peníze — čtou se
+                // světle, včetně čísla dne. Kalendář se pak čte jako teploměr: hned vidíš,
+                // kde končí realita a začíná odhad. Žádná dělicí čára, jen sytost.
+                const isFuture = ds > todayStr;
                 const canAct = dense || amt > 0 || !!onAddEntry;
                 const titleBits = [];
                 if (amt > 0) titleBits.push(`+${fmtKc(amt)} práce`);
@@ -14411,19 +14446,16 @@ function VykazyCalendar({ workEntries, escrows, invoices, dense = false, onOpenF
                     title={cellTitle}
                     style={{
                       border: "none",
-                      background: amt > 0 ? "rgba(74,68,184,.065)" : (escAmt > 0 ? "rgba(160,131,80,.05)" : (isHov ? "rgba(74,68,184,.04)" : "none")),
+                      background: amt > 0 ? "rgba(74,68,184,.065)" : (escAmt > 0 ? (isFuture ? "rgba(74,68,184,.022)" : "rgba(160,131,80,.05)") : (isHov ? "rgba(74,68,184,.04)" : "none")),
                       borderRadius: dense ? 8 : 12, position:"relative",
                       display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:dense?1:3,
                       cursor: canAct ? "pointer" : "default",
                       padding: dense ? "3px 0" : "6px 0",
                       transition:"background .15s",
                     }}>
-                    {escAmt > 0 && escAuto && (
-                      <span title="Odhad — úschova ještě nemá jistý konec" style={{
-                        position:"absolute", top: dense?2:4, right: dense?3:6,
-                        width:4.5, height:4.5, borderRadius:"50%", background:"#C3C0E4",
-                      }}/>
-                    )}
+                    {/* Tečka „odhad" ZRUŠENA (6. 8. 2026) — variantu A nese sytost. Navíc svítila
+                        i u dnů v minulosti, jejichž úrok je dávno vydělaný. Dvě značky téže
+                        věci na jedné dlaždici je šum. */}
                     <span style={{
                       minHeight: dense?11:17, fontSize:dense?9.5:15, fontWeight:600, letterSpacing:"-.01em",
                       fontVariantNumeric:"tabular-nums", lineHeight:1, whiteSpace:"nowrap",
@@ -14433,9 +14465,9 @@ function VykazyCalendar({ workEntries, escrows, invoices, dense = false, onOpenF
                     </span>
                     {!dense && (
                       <span style={{
-                        minHeight: 11, fontSize:9.5, fontWeight:500, letterSpacing:"-.01em",
+                        minHeight: 11, fontSize:9.5, fontWeight: isFuture?400:500, letterSpacing:"-.01em",
                         fontVariantNumeric:"tabular-nums", lineHeight:1, whiteSpace:"nowrap",
-                        color: escAmt>0 ? ESC : "transparent",
+                        color: escAmt>0 ? (isFuture ? "#A9A5C4" : ESC) : "transparent",
                       }}>
                         {escAmt>0 ? `+${fmtKc(Math.round(escAmt))}` : "0"}
                       </span>
@@ -14445,7 +14477,7 @@ function VykazyCalendar({ workEntries, escrows, invoices, dense = false, onOpenF
                       display:"flex", alignItems:"center", justifyContent:"center",
                       fontSize: dense?11.5:15, fontWeight: isToday?600:400, lineHeight:1,
                       background: isToday ? "#3A3494" : "transparent",
-                      color: isToday ? "#fff" : "var(--ink)",
+                      color: isToday ? "#fff" : (isFuture ? "#A9A5C4" : "var(--ink)"),
                       boxShadow: isSel && !isToday ? "inset 0 0 0 1.5px " + PHOS : "none",
                     }}>{d}</span>
                   </button>
@@ -14454,6 +14486,11 @@ function VykazyCalendar({ workEntries, escrows, invoices, dense = false, onOpenF
             </div>
           ))}
         </div>
+        {!dense && escProjLabel && (
+          <div style={{fontSize:9,letterSpacing:".14em",textTransform:"uppercase",color:"var(--mut)",fontWeight:600,marginTop:14,opacity:.8}}>
+            Sytě = vyděláno · světle = {escProjLabel}
+          </div>
+        )}
       </div>
 
       {/* Detail vybraného dne — jen plná verze */}
