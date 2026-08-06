@@ -8342,9 +8342,12 @@ function BackupReminderBanner({ onDone }) {
 // v11 (31.7.2026) — Tom: "tohle celé mě nezajímá a nikdy na to nekoukám."
 // Zrušeny panely: meta (žebřík 12 měsíců), navstevnost (GA4), xtb (dlaždice Investice).
 // Meta jako taková ŽIJE DÁL v kalendáři (zlatá ryska + věta o rekordu) — zrušen jen výpis historie.
-const PANEL_LAYOUT_VERSION = 12;
+// v13 (6.8.2026) — Tom: "z dashboardu přesuň Pepovu tabulku do mého přehledu na listu Josef,
+// tam to patří." Panel "josef" na Přehledu zanikl, celý JosefPanel se renderuje v AsistentPanel
+// nad záložkami administrace.
+const PANEL_LAYOUT_VERSION = 13;
 const DEFAULT_PANELS = [
-  "finance","firma","josef","pulz",
+  "finance","firma","pulz",
   "chart","ziskovost","claude"
 ];
 function loadPanelState() {
@@ -12818,11 +12821,8 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
       </div>
       </Panel>
 
-      <Panel id="josef">
-        <JosefPanel logs={assistantLogs} attendance={assistantAttendance} availability={assistantAvailability}
-          clients={clients} financeItems={financeItems} onSaveFinance={onSaveFinance}
-          workEntries={workEntries} onApprove={onApproveAssistantLogs} />
-      </Panel>
+      {/* Panel "josef" se 6.8.2026 přestěhoval na list Josef · Asistent (AsistentPanel),
+          proto PANEL_LAYOUT_VERSION 12 → 13. Na Přehledu už není. */}
 
       {/* ─── PULZ FIRMY — překvapivá novinka V.03: jeden pohled, který spojí vše dohromady ─── */}
       <Panel id="pulz">
@@ -18665,11 +18665,15 @@ function AsistentApp({ session, onLogout, previewMode }) {
 }
 
 /* ── Tomův přehled asistenta ─────────────────────────────────────────────── */
-function AsistentPanel({ clients, onPreview }) {
+function AsistentPanel({ clients, onPreview, financeItems = [], onSaveFinance, workEntries = [], onApprove }) {
   const email = "asistent@maux.cz";
   const [logs, setLogs] = useState([]);
   const [attendance, setAttendance] = useState([]);
   const [availability, setAvailability] = useState(null);
+  // Přehled potřebuje plán BĚŽÍCÍHO měsíce (projekce "do konce měsíce plán X h"), záložka Plán
+  // ten příští. JosefPanel si plán bere jen tehdy, když availability.year_month === běžící měsíc —
+  // kdyby dostal ten příští, projekce nákladu by tiše zmizela.
+  const [availCur, setAvailCur] = useState(null);
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState("logs");
   // Admin docházka — inline edit
@@ -18681,17 +18685,29 @@ function AsistentPanel({ clients, onPreview }) {
     const d = new Date(); d.setMonth(d.getMonth()+1);
     return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`;
   })();
+  const curMonth = (() => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`;
+  })();
 
   useEffect(() => {
     Promise.all([
       fetchAssistantWorkLogs(email),
       fetchAssistantAttendance(email),
       fetchAssistantAvailability(email, nextMonth),
-    ]).then(([l,a,av])=>{ setLogs(l); setAttendance(a); setAvailability(av); }).catch(console.error).finally(()=>setLoading(false));
+      fetchAssistantAvailability(email, curMonth).catch(() => null),
+    ]).then(([l,a,av,avc])=>{ setLogs(l); setAttendance(a); setAvailability(av); setAvailCur(avc); }).catch(console.error).finally(()=>setLoading(false));
   }, []);
 
   const archiveLog = async (log) => {
     await upsertAssistantWorkLog({ ...log, status: log.status==="archived"?"logged":"archived" });
+    setLogs(await fetchAssistantWorkLogs(email));
+  };
+
+  // Schválení fronty píše do DB přes App (aby se srovnaly i výkazy a Přehled), ale AsistentPanel
+  // si drží vlastní kopii logů — bez tohohle refetche by fronta po schválení zůstala stát na místě.
+  const approveFromPanel = async (payload) => {
+    if (onApprove) await onApprove(payload);
     setLogs(await fetchAssistantWorkLogs(email));
   };
 
@@ -18717,7 +18733,7 @@ function AsistentPanel({ clients, onPreview }) {
       <div className="top" style={{marginBottom:0,display:"flex",alignItems:"flex-start",justifyContent:"space-between",flexWrap:"wrap",gap:12}}>
         <div>
           <h1 style={{fontFamily:"Fraunces,serif",fontWeight:300,fontSize:30}}>Josef · Asistent</h1>
-          <p style={{color:"var(--mut)",fontSize:13,marginTop:4}}>Administrace — archivace výkazů, editace docházky, export pro účetní. Výkon a přehled najdeš v Josefově pohledu.</p>
+          <p style={{color:"var(--mut)",fontSize:13,marginTop:4}}>Kolik tě stojí, co odvedl a co čeká na schválení. Pod přehledem je administrace — archivace výkazů, editace docházky, export pro účetní.</p>
         </div>
         <button onClick={onPreview}
           style={{marginTop:6,padding:"12px 24px",borderRadius:12,border:"1.5px solid var(--ink)",background:"var(--ink)",color:"#fff",fontSize:13.5,fontWeight:600,cursor:"pointer",display:"flex",alignItems:"center",gap:8,whiteSpace:"nowrap"}}>
@@ -18725,8 +18741,18 @@ function AsistentPanel({ clients, onPreview }) {
         </button>
       </div>
 
-      {/* ── Záložky ── */}
-      <div style={{display:"flex",gap:4,margin:"22px 28px 0",borderBottom:"1px solid var(--line)"}}>
+      {/* ── PŘEHLED — přestěhováno z dashboardu 6.8.2026 (panel "josef" tam zanikl).
+             Tom: "když jako admin kliknu na Josef, vidím pro mě nesmyslné informace."
+             Odpověď je nahoře a je vidět vždycky; administrativa sjela pod ni. ── */}
+      <div style={{margin:"22px 28px 0",position:"relative",borderRadius:BP.r,border:BP.frame,background:"#fff",boxShadow:BP.shadow}}>
+        <JosefPanel logs={logs} attendance={attendance} availability={availCur}
+          clients={clients} financeItems={financeItems} onSaveFinance={onSaveFinance}
+          workEntries={workEntries} onApprove={approveFromPanel} />
+      </div>
+
+      {/* ── Administrace ── */}
+      <div style={{fontSize:9,letterSpacing:".2em",textTransform:"uppercase",color:"var(--mut)",fontWeight:700,margin:"30px 28px 9px"}}>Administrace</div>
+      <div style={{display:"flex",gap:4,margin:"0 28px",borderBottom:"1px solid var(--line)"}}>
         {TABS.map(t=>(
           <button key={t.k} onClick={()=>setTab(t.k)}
             style={{padding:"8px 14px",border:"none",borderBottom:tab===t.k?"2px solid var(--ink)":"2px solid transparent",background:"none",cursor:"pointer",fontSize:12.5,fontWeight:tab===t.k?600:400,color:tab===t.k?"var(--ink)":"var(--mut)"}}>
@@ -18871,16 +18897,12 @@ function AsistentPanel({ clients, onPreview }) {
                               {lunchDeducted&&<span style={{marginLeft:4,fontSize:9,background:"#FEF9C3",color:"#854D0E",borderRadius:3,padding:"1px 4px"}}>−{LUNCH_BREAK_H}h</span>}
                             </td>
                             <td style={{padding:"10px 14px",display:"flex",gap:6,alignItems:"center"}}>
+                              {/* Mazání směny je nevratné — schované za režim úprav (Tom 6.8.2026),
+                                  aby se nedalo trefit omylem vedle tlačítka Upravit. */}
                               <button onClick={()=>isEditing?setEditingAdminAtt(null):openEdit()} title={isEditing?"Zavřít":"Upravit"}
                                 style={{padding:"4px 9px",borderRadius:6,border:"1px solid var(--line2)",background:"#fff",color:"var(--ink)",fontSize:11,cursor:"pointer",fontWeight:500}}>
                                 {isEditing?"✕ Zrušit":"✎ Upravit"}
                               </button>
-                              {!isEditing&&(
-                                <button onClick={deleteRow} title="Smazat"
-                                  style={{padding:"4px 8px",borderRadius:6,border:"1px solid #FECACA",background:"#FEF2F2",color:"#991B1B",fontSize:11,cursor:"pointer"}}>
-                                  🗑
-                                </button>
-                              )}
                             </td>
                           </tr>
                           {isEditing&&(
@@ -18901,6 +18923,10 @@ function AsistentPanel({ clients, onPreview }) {
                                   </label>
                                   <button className="btn pri" style={{fontSize:11,padding:"7px 16px"}} disabled={savingAdminAtt} onClick={saveEdit}>
                                     {savingAdminAtt?"Ukládám…":"💾 Uložit"}
+                                  </button>
+                                  <button onClick={deleteRow} disabled={savingAdminAtt} title="Smazat celý záznam docházky"
+                                    style={{marginLeft:"auto",padding:"7px 14px",borderRadius:6,border:"1px solid rgba(168,68,60,.35)",background:"#fff",color:"#A8443C",fontSize:11,fontWeight:500,cursor:"pointer"}}>
+                                    Smazat záznam
                                   </button>
                                 </div>
                               </td>
@@ -20014,7 +20040,11 @@ export default function MauxCRM() {
           {mod === "claude" && <ClaudeTracker />}
 
           {/* ASISTENT — Tomův přehled Josefových výkazů a docházky */}
-          {mod === "asistent" && !asistentPreview && <AsistentPanel clients={clients} onPreview={() => setAsistentPreview(true)} />}
+          {mod === "asistent" && !asistentPreview && (
+            <AsistentPanel clients={clients} onPreview={() => setAsistentPreview(true)}
+              financeItems={financeItems} onSaveFinance={saveFinanceItem}
+              workEntries={workEntries} onApprove={approveAssistantLogs} />
+          )}
         </div>
       </div>
 
