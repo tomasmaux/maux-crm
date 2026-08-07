@@ -7739,7 +7739,7 @@ function TriGrafyPanel({ financeItems, onSaveFinance, invoices, dpfoMonths, loan
   const stavItem   = (financeItems||[]).find(i => i.id === "fi_ma_02");
   const extraMaj   = (financeItems||[]).filter(i => i.category === "majetek" && !["fi_ma_01","fi_ma_02","fi_ma_03"].includes(i.id));
   // Jeden indigo systém, víc odstínů — Tom: "klid, jistota, žádná samostatná barva navíc"
-  const MAJ_C      = ["#3518A5","#4F46E5","#6358D4","#8A7FE0","#241177","#9D93DD"];
+  const MAJ_C      = ["#B08D42","#D9BE84","#EADCC0","#C9A86B","#8C6E2E","#E8D9BA"];
   const allMajSegs = [
     (akcieItem || akcieLive) && {
       item: akcieLive ? null : akcieItem, label: "Akcie / ETF",
@@ -7809,6 +7809,9 @@ function TriGrafyPanel({ financeItems, onSaveFinance, invoices, dpfoMonths, loan
   const [editBal,  setEditBal]  = useState(false);
   const [balInput, setBalInput] = useState(actualBal);
   const [editMaj,  setEditMaj]  = useState(false);
+  const [majHov,   setMajHov]   = useState(null);
+  const [majDrawn, setMajDrawn] = useState(false);
+  useEffect(() => { const t = setTimeout(() => setMajDrawn(true), 90); return () => clearTimeout(t); }, []);
   const [editId,   setEditId]   = useState(null);
   const [editVal,  setEditVal]  = useState(0);
   const [adding,   setAdding]   = useState(false);
@@ -7821,7 +7824,7 @@ function TriGrafyPanel({ financeItems, onSaveFinance, invoices, dpfoMonths, loan
     setNewLabel(""); setNewAmt(0); setAdding(false);
   };
 
-  const S_COL = "#3518A5", M_COL = "#3518A5";
+  const S_COL = "#3518A5", M_COL = "#A8873F";
   const R_COL = "#4F46E5";
   const R_WARN = "#A8443C";
 
@@ -7849,13 +7852,36 @@ function TriGrafyPanel({ financeItems, onSaveFinance, invoices, dpfoMonths, loan
     ...(firmaRez > 0 ? [{ label: "Rezerva", value: firmaRez, color: R_COL }] : []),
   ];
   const majGlassSegs = allMajSegs.map(s => ({ label: s.label, value: s.value, color: s.color }));
+  // ── KOLÁČ MAJETKU (7.8.2026) — stejná anatomie jako karta Spořicí účet.
+  //    Tom: "koukni, jak je horní graf hezký a ten dolní jsi odflákl." Měl pravdu:
+  //    dvě karty pod sebou mluvily jinou řečí (168 vs. 272 px, bez %, bez živého středu).
+  //    VĚDOMĚ BEZ ZÁŘE — neon je schválená výjimka jen pro spořák, nikam se nekopíruje.
+  const MAJ_HERO    = "#A8873F";
+  const R_MAJ  = 88,  CIRC_MAJ  = 2 * Math.PI * 88;
+  const R_MAJP = 118, CIRC_MAJP = 2 * Math.PI * 118;
+  const majDonut = (() => {
+    let cum = 0;
+    return allMajSegs.filter(s => s.value > 0).map(s => {
+      const pct = totalMaj > 0 ? s.value / totalMaj : 0;
+      const seg = { ...s, pct, startPct: cum };
+      cum += pct;
+      return seg;
+    });
+  })();
+  const majHovSeg  = majHov != null ? majDonut[majHov] : null;
+  // Vnější vlasový prstenec = podíl ČISTÉHO majetku. Bez dluhů plný kruh, po půjčce se ukousne.
+  const cistyPct   = totalMaj > 0 ? Math.max(Math.min(cistyMaj / totalMaj, 1), 0) : 0;
+  const topSeg     = majDonut.length ? majDonut.reduce((a2, b2) => b2.value > a2.value ? b2 : a2) : null;
+  const slozkyTvar = (n) => n === 1 ? "složka" : (n >= 2 && n <= 4 ? "složky" : "složek");
   const rezPct = planKap > 0 ? Math.min(firmaRez / planKap, 1) : 0;
   const rezGlassSegs = firmaRez >= 0
     ? [{ label: "Rezerva", value: firmaRez, color: R_COL }, ...(firmaRez < planKap ? [{ label: "Do cíle", value: planKap - firmaRez, color: "rgba(79,70,229,0.14)" }] : [])]
     : [{ label: "Deficit", value: Math.abs(firmaRez), color: R_WARN }, { label: "Do cíle", value: planKap, color: "rgba(220,38,38,0.14)" }];
 
+  // Popisek ve stejné velikosti a prostrkání jako kicker karty Spořicí účet (7.8.2026) —
+  // dvě karty pod sebou musí začínat stejným tónem hlasu.
   const secHdr = (col, text) => (
-    <div style={{ fontSize: 8.5, letterSpacing: ".24em", color: "var(--mut)", fontWeight: 700, textTransform: "uppercase", opacity: 0.7, marginBottom: 6 }}>{text}</div>
+    <div style={{ fontSize: 9.5, letterSpacing: ".16em", color: "var(--mut)", fontWeight: 600, textTransform: "uppercase" }}>{text}</div>
   );
   const secNum = (col, content) => (
     <div style={{ fontFamily: "var(--num)", fontVariantNumeric: "tabular-nums", letterSpacing: "-.025em", fontSize: 28, fontWeight: 600, color: col, lineHeight: 1, marginBottom: 2 }}>{content}</div>
@@ -7916,60 +7942,110 @@ function TriGrafyPanel({ financeItems, onSaveFinance, invoices, dpfoMonths, loan
               )}
             </div>
           ) : (
-            <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 22 }}>
-              <InteractiveRing segments={majGlassSegs} size={168} thickness={20} glowColor={M_COL}
-                centerTop="Majetek" centerMain={fmtKc(totalMaj)} legendOnly />
-              <div style={{ width: "100%", minWidth: 0, display: "flex", flexDirection: "column", gap: 10 }}>
-                {allMajSegs.map((seg, i) => (
-                  <div key={i}>
-                    <div style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 12.5 }}>
-                      <span style={{ width: 9, height: 9, borderRadius: "50%", background: seg.color, flexShrink: 0 }} />
+            <div>
+              {/* Kontextový řádek — nikdy neopakuje hrdinské číslo pod sebou (jedno číslo, jedno místo). */}
+              <div style={{ fontSize: 10.5, color: "var(--mut)", lineHeight: 1.5 }}>
+                {majDonut.length} {slozkyTvar(majDonut.length)}
+                {topSeg ? ` · ${Math.round(topSeg.pct * 100)} % z toho ${topSeg.label.toLowerCase()}` : ""}
+                {dluhy.osobni > 0 ? ` · hrubý ${fmtKc(totalMaj)}` : " · žádné osobní dluhy"}
+              </div>
+
+              {/* HRDINA — čistý majetek. Zlatá = osobní majetek (Tom 3. 8. 2026). */}
+              <div style={{ marginTop: 12 }}>
+                <div className="maux-num" style={{ fontSize: 36, fontWeight: 600, color: MAJ_HERO, lineHeight: 1, letterSpacing: "-.02em", whiteSpace: "nowrap" }}>{fmtKc(cistyMaj)}</div>
+                <div style={{ fontSize: 12, color: "var(--ink)", marginTop: 7, opacity: .8 }}>
+                  čistý majetek
+                  {dluhy.osobni > 0 ? ` — po odečtení dluhů ${fmtKc(dluhy.osobni)}` : ""}
+                  {wealthDelta ? ` · za ${wealthDelta.dni} ${dnyTvar(wealthDelta.dni)} ${wealthDelta.delta >= 0 ? "▲" : "▼"} ${fmtKc(Math.abs(wealthDelta.delta))}` : ""}
+                </div>
+              </div>
+
+              {/* VELKÝ KOLÁČ — r 88, viewBox 290, živý střed, vnější vlasový prstenec.
+                  Stejná anatomie jako Spořicí účet, ale BEZ záře a BEZ plovoucích pixelů. */}
+              <div style={{ display: "flex", justifyContent: "center", marginTop: 6 }}>
+                <svg viewBox="0 0 290 290" style={{ width: "100%", maxWidth: 272, display: "block" }}>
+                  <circle cx="145" cy="145" r={R_MAJ} fill="none" stroke="#F7F4ED" strokeWidth="34" />
+                  {majDonut.map((s, i) => (
+                    <circle key={i} cx="145" cy="145" r={R_MAJ}
+                      fill="none" stroke={s.color}
+                      strokeWidth={majHov === i ? 37 : 32}
+                      opacity={majHov == null || majHov === i ? 1 : .25}
+                      strokeDasharray={majDrawn ? `${Math.max(s.pct * CIRC_MAJ - 2, 0)} ${CIRC_MAJ}` : `0 ${CIRC_MAJ}`}
+                      transform={`rotate(${s.startPct * 360 - 90} 145 145)`}
+                      strokeLinecap="butt"
+                      onMouseEnter={() => setMajHov(i)} onMouseLeave={() => setMajHov(null)}
+                      style={{ transition: `stroke-dasharray 1.1s cubic-bezier(.4,0,.2,1) ${i * 0.12}s, stroke-width .2s, opacity .2s`, cursor: "pointer" }} />
+                  ))}
+
+                  <circle cx="145" cy="145" r={R_MAJP} fill="none" stroke="rgba(0,0,0,.05)" strokeWidth="2" />
+                  <circle cx="145" cy="145" r={R_MAJP} fill="none" stroke="#C6A86B" strokeWidth="2"
+                    strokeDasharray={majDrawn ? `${cistyPct * CIRC_MAJP} ${CIRC_MAJP}` : `0 ${CIRC_MAJP}`}
+                    transform="rotate(-90 145 145)"
+                    style={{ transition: "stroke-dasharray 1.4s cubic-bezier(.4,0,.2,1) .5s" }} />
+
+                  <text x="145" y="130" textAnchor="middle" fontSize="10" letterSpacing="2.2" fill="var(--mut)">
+                    {majHovSeg ? majHovSeg.label.toUpperCase() : "MAJETEK"}
+                  </text>
+                  <text x="145" y="158" textAnchor="middle" fontSize="23"
+                    fontFamily="Inter,ui-sans-serif,system-ui,sans-serif" fontWeight="600"
+                    fill={majHovSeg ? "var(--txt)" : MAJ_HERO}>
+                    {majHovSeg ? fmtKc(majHovSeg.value) : fmtKc(totalMaj)}
+                  </text>
+                  <text x="145" y="177" textAnchor="middle" fontSize="11" fill="var(--mut)">
+                    {majHovSeg
+                      ? (majHovSeg.note || `${Math.round(majHovSeg.pct * 100)} % majetku`)
+                      : (dluhy.osobni > 0 ? `čistého ${fmtKc(cistyMaj)}` : "čistý · bez dluhů")}
+                  </text>
+                </svg>
+              </div>
+
+              {/* LEGENDA — stejný rytmus jako u Spořicího účtu, řádky propojené s koláčem přes majHov. */}
+              <div style={{ display: "flex", flexDirection: "column", gap: 1, marginTop: 16, paddingTop: 11, borderTop: "1px solid rgba(0,0,0,.06)" }}>
+                {majDonut.map((s, i) => (
+                  <div key={i}
+                    onMouseEnter={() => setMajHov(i)} onMouseLeave={() => setMajHov(null)}
+                    style={{ padding: "5px 7px", borderRadius: 7, background: majHov === i ? "rgba(0,0,0,.025)" : "transparent", transition: "background .15s" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 9, fontSize: 11.5 }}>
+                      <span style={{ width: 8, height: 8, borderRadius: "50%", background: s.color, flexShrink: 0 }} />
                       <span style={{ flex: 1, color: "var(--mut)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
-                        title={seg.auto ? seg.autoTip : undefined}>
-                        {seg.label}
-                        {seg.note && <span style={{ fontSize: 9.5, fontStyle: "italic", marginLeft: 6, opacity: .7 }}>{seg.note}</span>}
+                        title={s.auto ? s.autoTip : undefined}>
+                        {s.label}
+                        {s.note && <span style={{ fontSize: 9.5, fontStyle: "italic", marginLeft: 6, opacity: .7 }}>{s.note}</span>}
                       </span>
-                      <span className="maux-num" style={{ color: "var(--ink)", fontWeight: 500, whiteSpace: "nowrap" }}>{fmtKc(seg.value)}</span>
+                      <span className="maux-num" style={{ color: "var(--ink)", fontWeight: 500, whiteSpace: "nowrap" }}>{fmtKc(s.value)}</span>
+                      <span className="maux-num" style={{ color: "var(--mut)", width: 34, textAlign: "right", flexShrink: 0 }}>{Math.round(s.pct * 100)} %</span>
                     </div>
-                    {/* Vlasová křivka posledních 30 snapshotů — říká SMĚR, ne hodnotu.
-                        Žádné osy, žádné popisky: číslo je na řádku nad ní. */}
-                    {seg.spark && (() => {
-                      const v = seg.spark, mn = Math.min(...v), mx = Math.max(...v), rng = mx - mn;
-                      const W = 100, H = 18;
+                    {/* Vlasová křivka posledních 30 snapshotů — říká SMĚR, ne hodnotu. */}
+                    {s.spark && (() => {
+                      const v = s.spark, mn = Math.min(...v), mx = Math.max(...v), rng = mx - mn;
+                      const W = 100, H = 16;
                       const pts = v.map((n, idx) => {
                         const x = v.length > 1 ? (idx / (v.length - 1)) * W : 0;
                         const y = rng > 0 ? H - ((n - mn) / rng) * H : H / 2;
                         return `${x.toFixed(2)},${y.toFixed(2)}`;
                       }).join(" ");
-                      const roste = v[v.length-1] >= v[0];
+                      const roste = v[v.length - 1] >= v[0];
                       return (
-                        <div style={{ marginTop: 5, marginLeft: 19, marginBottom: 2 }}>
-                          <svg viewBox={`0 -1 ${W} ${H+2}`} preserveAspectRatio="none" style={{ width: "100%", height: 20, display: "block", overflow: "visible" }}>
-                            <polyline points={pts} fill="none" stroke={seg.color} strokeWidth="1.2" strokeLinejoin="round"
+                        <div style={{ marginTop: 4, marginLeft: 17, marginBottom: 2 }}>
+                          <svg viewBox={`0 -1 ${W} ${H + 2}`} preserveAspectRatio="none" style={{ width: "100%", height: 18, display: "block", overflow: "visible" }}>
+                            <polyline points={pts} fill="none" stroke={s.color} strokeWidth="1.2" strokeLinejoin="round"
                               strokeLinecap="round" vectorEffect="non-scaling-stroke" opacity={roste ? 0.85 : 0.5} />
                           </svg>
                           <div style={{ fontSize: 9, color: "var(--mut)", opacity: .65, marginTop: 2 }}>
-                            {v.length} {dnyTvar(v.length)} · {roste ? "▲" : "▼"} {fmtKc(Math.abs(v[v.length-1] - v[0]))}
+                            {v.length} {dnyTvar(v.length)} · {roste ? "▲" : "▼"} {fmtKc(Math.abs(v[v.length - 1] - v[0]))}
                           </div>
                         </div>
                       );
                     })()}
                   </div>
                 ))}
-                {/* ⚠️ LEKCE (3.8.2026): menší číslo nesmí být nadpis. Čistý majetek stojí
-                    POD donutem jako důsledek, ne nad ním jako hero. */}
-                <div style={{ marginTop: 14, paddingTop: 12, borderTop: "1px solid rgba(0,0,0,.06)" }}>
-                  <div style={{ display: "flex", alignItems: "baseline", gap: 10, fontSize: 12.5 }}>
-                    <span style={{ flex: 1, color: "var(--mut)" }}>Čistý majetek</span>
-                    <span className="maux-num" style={{ fontSize: 15, fontWeight: 600, color: "var(--ink)", whiteSpace: "nowrap" }}>{fmtKc(cistyMaj)}</span>
-                  </div>
-                  <div style={{ fontSize: 9.5, color: "var(--mut)", opacity: .65, marginTop: 4, lineHeight: 1.5 }}>
-                    {dluhy.osobni > 0 ? `po odečtení dluhů ${fmtKc(dluhy.osobni)}` : "žádné osobní dluhy"}
-                    {dluhy.investicni > 0 && ` · investiční úvěr ${fmtKc(dluhy.investicni)} mimo — kryje ho nemovitost`}
-                    {wealthDelta && ` · za ${wealthDelta.dni} ${dnyTvar(wealthDelta.dni)} ${wealthDelta.delta >= 0 ? "▲" : "▼"} ${fmtKc(Math.abs(wealthDelta.delta))}`}
-                  </div>
-                </div>
               </div>
+
+              {dluhy.investicni > 0 && (
+                <div style={{ fontSize: 9.5, color: "var(--mut)", opacity: .65, marginTop: 10, lineHeight: 1.5 }}>
+                  Investiční úvěr {fmtKc(dluhy.investicni)} tu není — kryje ho nemovitost.
+                </div>
+              )}
             </div>
           )}
         </div>
