@@ -226,12 +226,20 @@ async function aresSearch(query, maxResults = 10) {
 const CSS = `
 @import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,300;9..144,400;9..144,500&family=Inter:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500&display=swap');
 *{box-sizing:border-box;margin:0;padding:0}
-html,body,#root{height:100%;background:#F5F4EF}
+html,body{height:100%;background:#FAFAFC}
+#root{height:100%;background:transparent}
 .mx{--ink:#3518A5;--ink2:#2810a0;--ink3:#4a2bc4;--gold:#A08350;--gold2:#CF9B3E;--green:#4A7C59;--red:#A8443C;
-    --bg:#F2F1EC;--surface:#FFFFFF;--line:#E4E4E7;--line2:#D4D4D8;--mut:#8A8A93;--txt:#16142A;
+    --aurA:.16;--aurB:.12;--aurC:.10;
+    --bg:#F4F4FA;--page:#FAFAFC;--surface:#FFFFFF;--line:#E4E4E7;--line2:#D4D4D8;--mut:#8A8A93;--txt:#16142A;
     --mono:'JetBrains Mono','SF Mono',Menlo,monospace;
     --num:'Inter',ui-sans-serif,system-ui,sans-serif;
-  font-family:'Inter',system-ui,sans-serif;color:var(--txt);background:var(--bg);min-height:100vh;display:flex;font-size:14px;line-height:1.5}
+  font-family:'Inter',system-ui,sans-serif;color:var(--txt);background:transparent;min-height:100vh;display:flex;font-size:14px;line-height:1.5}
+.mx::before{content:"";position:fixed;width:640px;height:640px;left:-180px;top:-200px;border-radius:50%;
+  background:radial-gradient(circle,rgba(74,68,184,var(--aurA)),transparent 62%);filter:blur(70px);pointer-events:none;z-index:-1}
+.mx::after{content:"";position:fixed;width:560px;height:560px;right:-160px;top:110px;border-radius:50%;
+  background:radial-gradient(circle,rgba(61,220,151,var(--aurB)),transparent 62%);filter:blur(80px);pointer-events:none;z-index:-1}
+.main::before{content:"";position:fixed;width:480px;height:480px;left:32%;bottom:-220px;border-radius:50%;
+  background:radial-gradient(circle,rgba(198,168,107,var(--aurC)),transparent 62%);filter:blur(80px);pointer-events:none;z-index:-1}
 .serif{font-family:'Fraunces',Georgia,serif}
 .maux-num{font-family:var(--num);font-variant-numeric:tabular-nums;letter-spacing:-.01em}
 @keyframes mauxNumGlow{0%,100%{text-shadow:0 0 4px rgba(53,24,165,.28),0 0 12px rgba(53,24,165,.14)}50%{text-shadow:0 0 6px rgba(53,24,165,.4),0 0 16px rgba(53,24,165,.2)}}
@@ -276,7 +284,7 @@ html,body,#root{height:100%;background:#F5F4EF}
 .sbnote textarea::placeholder{color:#B9B3A6}
 .sbfoot button{background:none;border:none;color:var(--mut);font:inherit;font-size:10.5px;cursor:pointer;padding:0;transition:.12s}
 .sbfoot button:hover{color:var(--mut)}
-.main{flex:1;display:flex;flex-direction:column;min-width:0;background:var(--bg)}
+.main{flex:1;display:flex;flex-direction:column;min-width:0;background:transparent}
 .top{padding:32px 40px 0;display:flex;align-items:flex-end;justify-content:space-between;gap:16px}
 .top-l .eyebrow{font-size:9px;letter-spacing:.3em;text-transform:uppercase;color:var(--ink);font-weight:600;opacity:.5;margin-bottom:8px}
 .top-l h1{font-family:'Fraunces',serif;font-size:32px;font-weight:300;color:var(--txt);line-height:1.1;letter-spacing:-.01em}
@@ -299,7 +307,7 @@ html,body,#root{height:100%;background:#F5F4EF}
 .pill:hover{border-color:var(--ink);color:var(--ink)}
 .pill.on{background:var(--ink);color:#fff;border-color:var(--ink)}
 .kpi-row{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:32px}
-.kpi{padding:20px 22px;border:1px solid var(--line);border-radius:12px;background:var(--surface);transition:all .18s;cursor:default}
+.kpi{padding:20px 22px;border:1px solid rgba(255,255,255,.95);border-radius:12px;background:rgba(255,255,255,.55);backdrop-filter:blur(26px) saturate(1.4);-webkit-backdrop-filter:blur(26px) saturate(1.4);box-shadow:0 1px 2px rgba(16,12,60,.04),0 22px 54px -22px rgba(28,10,99,.18);transition:all .18s;cursor:default}
 .kpi:hover{border-color:var(--ink);box-shadow:0 4px 20px rgba(53,24,165,.12);transform:translateY(-2px)}
 .kpi.hi:hover{box-shadow:0 6px 28px rgba(53,24,165,.45);transform:translateY(-2px)}
 .kpi .k{font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--mut);font-weight:500;margin-bottom:10px}
@@ -313,7 +321,7 @@ html,body,#root{height:100%;background:#F5F4EF}
 .sec-hd{font-size:10px;letter-spacing:.15em;text-transform:uppercase;color:var(--mut);font-weight:500;margin-bottom:12px;display:flex;justify-content:space-between;align-items:center}
 .sec-hd button{font-size:12px;color:var(--ink);background:none;border:none;cursor:pointer;letter-spacing:0;text-transform:none;font-weight:500;font-family:inherit;opacity:.8;transition:.12s}
 .sec-hd button:hover{opacity:1}
-.tbl{width:100%;border-collapse:collapse;margin-bottom:32px;background:var(--surface);border-radius:12px;overflow:hidden;border:1px solid var(--line)}
+.tbl{width:100%;border-collapse:collapse;margin-bottom:32px;background:rgba(255,255,255,.6);backdrop-filter:blur(22px) saturate(1.35);-webkit-backdrop-filter:blur(22px) saturate(1.35);border-radius:12px;overflow:hidden;border:1px solid rgba(255,255,255,.9);box-shadow:0 1px 2px rgba(16,12,60,.04),0 18px 44px -20px rgba(28,10,99,.14)}
 .tbl th{font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--mut);font-weight:500;padding:12px 18px;text-align:left;border-bottom:1px solid var(--line);background:var(--surface)}
 .tbl th:last-child,.tbl td:last-child{text-align:right}
 .tbl td{padding:14px 18px;border-bottom:1px solid var(--line);vertical-align:middle}
@@ -405,11 +413,11 @@ html,body,#root{height:100%;background:#F5F4EF}
 .status-aktivní{background:#ECFDF5;color:#065F46}
 .status-spící{background:#FFFBEB;color:#92400E}
 .status-ukončený{background:#FEF2F2;color:#991B1B}
-.ph{max-width:520px;background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:48px 40px;text-align:center}
+.ph{max-width:520px;background:rgba(255,255,255,.55);backdrop-filter:blur(26px) saturate(1.4);-webkit-backdrop-filter:blur(26px) saturate(1.4);border:1px solid rgba(255,255,255,.95);border-radius:12px;padding:48px 40px;text-align:center;box-shadow:0 1px 2px rgba(16,12,60,.04),0 22px 54px -22px rgba(28,10,99,.18)}
 .ph h2{font-family:'Fraunces',serif;font-size:22px;font-weight:300;color:var(--txt);margin:0 0 8px}
 .ph .ph2{display:inline-block;font-size:9px;letter-spacing:.18em;text-transform:uppercase;color:var(--ink);font-weight:600;background:#EEF2FF;border-radius:5px;padding:3px 10px;margin-bottom:14px;opacity:.8}
 .ph p{font-size:13.5px;color:var(--mut);line-height:1.65}
-.lock{flex:1;display:flex;align-items:center;justify-content:center;background:var(--bg);min-height:100vh}
+.lock{flex:1;display:flex;align-items:center;justify-content:center;background:transparent;min-height:100vh}
 .lockcard{text-align:center;max-width:360px;width:100%;padding:48px 44px;background:var(--surface);border:1px solid var(--line);border-radius:16px;box-shadow:0 4px 24px rgba(0,0,0,.06)}
 .lockcard .wm{font-family:'Fraunces',serif;font-size:30px;font-weight:400;color:var(--ink);letter-spacing:.06em}
 .lockcard .sub{font-size:7.5px;letter-spacing:.45em;text-transform:uppercase;color:var(--gold);margin-top:4px;font-weight:600}
@@ -1848,7 +1856,7 @@ function InvoiceIssueModal({ clientId, entries, clients, invoices, initialBilled
 
   return (
     <div className="ov" onClick={onCancel}>
-      <div style={{ background: "#fff", borderRadius: 16, padding: 28, maxWidth: 620, width: "100%", maxHeight: "90vh", overflowY: "auto", boxShadow: "0 24px 64px rgba(0,0,0,.18)" }}
+      <div style={{ ...MAUX_GLASS_MODAL, borderRadius: 16, padding: 28, maxWidth: 620, width: "100%", maxHeight: "90vh", overflowY: "auto" }}
         onClick={e => e.stopPropagation()}>
         <div style={{ fontFamily: "Fraunces, serif", fontSize: 20, fontWeight: 300, color: "var(--txt)", marginBottom: 4 }}>Vystavit fakturu</div>
         <div style={{ fontSize: 12.5, color: "var(--mut)", marginBottom: 12, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
@@ -2035,7 +2043,7 @@ function DraftDiscountModal({ clientId, entries, clients, onConfirm, onCancel, s
 
   return (
     <div className="ov" onClick={handleBack}>
-      <div style={{ background: "#fff", borderRadius: 16, padding: 28, maxWidth: 580, width: "100%", maxHeight: "90vh", overflowY: "auto", boxShadow: "0 24px 64px rgba(0,0,0,.18)" }}
+      <div style={{ ...MAUX_GLASS_MODAL, borderRadius: 16, padding: 28, maxWidth: 580, width: "100%", maxHeight: "90vh", overflowY: "auto" }}
         onClick={e => e.stopPropagation()}>
         <div style={{ fontFamily: "Fraunces, serif", fontSize: 20, fontWeight: 300, color: "var(--txt)", marginBottom: 4 }}>Změny — sleva na výkazech</div>
         <div style={{ fontSize: 12.5, color: "var(--mut)", marginBottom: 20 }}>
@@ -2116,7 +2124,7 @@ function AltSubjectModal({ clientId, entries, clients, initial, onConfirm, onCan
 
   return (
     <div className="ov" onClick={onCancel}>
-      <div style={{ background: "#fff", borderRadius: 16, padding: 28, maxWidth: 520, width: "100%", maxHeight: "90vh", overflowY: "auto", boxShadow: "0 24px 64px rgba(0,0,0,.18)" }}
+      <div style={{ ...MAUX_GLASS_MODAL, borderRadius: 16, padding: 28, maxWidth: 520, width: "100%", maxHeight: "90vh", overflowY: "auto" }}
         onClick={e => e.stopPropagation()}>
         <div style={{ fontFamily: "Fraunces, serif", fontSize: 20, fontWeight: 300, color: "var(--txt)", marginBottom: 4 }}>Vystavit na jiný subjekt</div>
         <div style={{ fontSize: 12.5, color: "var(--mut)", marginBottom: 20 }}>
@@ -3395,7 +3403,7 @@ function InvoicePrintPreview({ invoice, client, workEntries, onBack, onIssue, on
       )}
       {issueConfirmDialog && !previewOnly && (
         <div className="ov no-print">
-          <div style={{ background: "#fff", borderRadius: 16, padding: 28, maxWidth: 400, width: "100%", boxShadow: "0 24px 64px rgba(0,0,0,.18)" }}>
+          <div style={{ ...MAUX_GLASS_MODAL, borderRadius: 16, padding: 28, maxWidth: 400, width: "100%" }}>
             <div style={{ fontFamily: "Fraunces, serif", fontSize: 22, fontWeight: 300, color: "var(--txt)", marginBottom: 10 }}>Opravdu vystavit fakturu?</div>
             <div style={{ fontSize: 13, color: "var(--mut)", marginBottom: 24 }}>
               {invoice.invoice_number} · {client?.name}<br />
@@ -8692,7 +8700,7 @@ function AddExpenseRow({ category, color, onSaveFinance }) {
    včetně paušálů, což dává 99 %. Dvě metody pod jedním číslem.
    Teď: jedno číslo v Kč/h za měsíc + řada sedmi měsíců. Jedna metoda, jeden příběh. */
 function ZiskovostPanel({ workEntries }) {
-  const cardSt = { background: "#fff", border: "1px solid var(--line)", borderRadius: BP.r, padding: "20px 24px" };
+  const cardSt = { ...MAUX_GLASS, borderRadius: BP.r, padding: "20px 24px" };
   const lblSt  = { fontSize: 9, letterSpacing: ".2em", textTransform: "uppercase", fontWeight: 600, color: "var(--mut)" };
 
   // Jediná metoda: peníze za záznam ÷ reálně odpracované hodiny. Sleva se odečítá,
@@ -9176,10 +9184,14 @@ function inflacniHranice(rada) {
 // Tři optiky, tři řady přepínačů. Default: Procenta · 1R — odpovídá na otázku
 // „jsem lepší než trh?". Verdiktová pilulka mluví VŽDY v korunách, protože bere
 // v úvahu, kdy peníze doopravdy přišly; TWR to schválně ignoruje.
-function AkcieGraf({ serie, stav = "idle", onNacti, pf = null }) {
+function AkcieGraf({ serie, stav = "idle", onNacti, pf = null, cashOps = [], onObnovit = null, obnovuji = false, onUkazTitul = null }) {
   const [okno, setOkno] = useState("1R");
   const [rok, setRok] = useState(null);
   const [kurzor, setKurzor] = useState(null);
+  // ── kokpit (Tom 16. 8. 2026: "řídící panel akcií, vše se musí vysvětlovat") ──
+  const [kurzK, setKurzK] = useState(null);      // křížek v grafu hodnoty
+  const [vysv, setVysv] = useState(null);        // rozbalené vysvětlení vrstvy/indexu
+  const [akceOpen, setAkceOpen] = useState(null); // rozbalená kontrolka v Co teď
 
   const rada = (serie && serie.rada) || [];
 
@@ -9355,7 +9367,40 @@ function AkcieGraf({ serie, stav = "idle", onNacti, pf = null }) {
   // Hranice kupní síly — kolik z toho zisku jen dorovnalo inflaci (viz inflacniHranice).
   const zInfl = inflacniHranice(rada);
   const nadInflaci = zisk - (zInfl[zInfl.length - 1] || 0);
-  const o1 = osa(zTot.concat(zInfl), H1, true);
+  // ── KOKPIT: graf nese HODNOTU, ne zisk (Tom: "graf hodnoty portfolia je to
+  // nejdůležitější číslo"). Vklady jako indigové schody, mezera = zisk; písková
+  // čára = vklady + inflace. Zisk zvlášť kreslit netřeba — je to ta mezera.
+  const zHod = rada.map(r => r.hodnota);
+  const zVlo = rada.map(r => r.vlozeno);
+  const zInflCara = zVlo.map((v, i) => v + (zInfl[i] || 0));
+  const o1 = osa(zHod.concat([0]), H1, true);
+  const dnesDelta = rada.length > 1 ? P.hodnota - rada[rada.length - 2].hodnota : null;
+
+  // ── KONTROLKY "CO TEĎ" — jen věci s termínem nebo korunami, nikdy pohyby trhu.
+  // Kokpit stíhačky svádí k overtradingu; Tomův edge je nedělat nic. Proto tu
+  // nikdy nesmí přibýt kontrolka typu "NVDA dnes −3 %".
+  const lotsOtev = (pf && pf.lots) || [];
+  const testKonec = (d) => { const t = new Date(String(d) + "T00:00:00"); t.setFullYear(t.getFullYear() + 3); return t; };
+  const dnesuv = new Date(); dnesuv.setHours(0, 0, 0, 0);
+  const zebricek = lotsOtev.map(l => {
+    const konec = testKonec(l.datum);
+    const dni = Math.max(0, Math.ceil((konec - dnesuv) / 86400000));
+    return { ...l, konec, dni, pokrok: Math.min(1, Math.max(0, 1 - dni / 1096)) };
+  }).sort((x, y) => x.dni - y.dni);
+  const nejblizsiTest = zebricek[0] || null;
+
+  // W-8BEN: poměr sražené daně k hrubým dividendám z reálných pohybů na účtu.
+  // 15 % = formulář podepsaný a smlouva ČR–USA funguje; ~30 % = formulář chybí.
+  const divHrube = (cashOps || []).reduce((s, c) => String(c.op_type) === "Dividend" ? s + (Number(c.amount_czk) || 0) : s, 0);
+  const divSrazka = (cashOps || []).reduce((s, c) => String(c.op_type) === "Withholding tax" ? s - (Number(c.amount_czk) || 0) : s, 0);
+  const srazkaPct = divHrube > 0 ? (divSrazka / divHrube) * 100 : null;
+
+  const rokTed = String(new Date().getFullYear());
+  const trzbaLetos = ((pf && pf.roky) || []).filter(r => r.rok === rokTed).reduce((s, r) => s + (r.trzba || 0), 0);
+  const hotovostTed = (pf && pf.hotovost) || 0;
+  const cipPodil = tituly.filter(t => /NVD|AMD/.test(String(t.symbol || t.nazev || ""))).reduce((s, t) => s + (t.podil || 0), 0) * 100;
+
+  const cenyCas = serie && serie.cas && String(serie.cas).length >= 10 ? String(serie.cas) : null;
   const px1 = pxN(rada.length);
   const dno1 = o1.py(0);   // osa má nulu vždy v rámci (nuluDoRamce), takže je kam plochu posadit
   const rysky1 = ryskyZ(rada), krok1 = rysky1.length > 9 ? Math.ceil(rysky1.length / 8) : 1;
@@ -9401,20 +9446,39 @@ function AkcieGraf({ serie, stav = "idle", onNacti, pf = null }) {
   return (
     <div style={{ marginTop: 6 }}>
 
-      {/* ══ 1 · KOLIK MI MOJE PENÍZE VYDĚLALY ══════════════════════════════════ */}
-      <div style={bpLabel({ marginBottom: 10 })}>1 · Kolik mi moje peníze vydělaly</div>
-      <div style={{ ...bpHero(46) }}>{kc(zisk)}</div>
+      {/* ══ 1 · HODNOTA PORTFOLIA — kokpit (Tom 16. 8. 2026) ═══════════════════
+          Hero = hodnota. Zelená křivka = hodnota, indigové schody = vklady,
+          mezera mezi nimi = zisk, písková = vklady + inflace. Vpravo kontrolky. */}
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
+        <div style={bpLabel({ marginBottom: 10 })}>1 · Hodnota portfolia</div>
+        <button onClick={() => !obnovuji && onObnovit && onObnovit()} disabled={obnovuji}
+          title="Klikni pro obnovení cen i historie"
+          style={{ fontSize: 10.5, color: "var(--mut)", display: "inline-flex", alignItems: "center", gap: 6,
+                   border: "none", background: "none", cursor: obnovuji ? "default" : "pointer", fontFamily: "inherit", padding: 0 }}>
+          <span style={{ width: 7, height: 7, borderRadius: 99, background: obnovuji ? BP.sand : BP.ziskDeep, display: "inline-block" }} />
+          {obnovuji ? "stahuji ceny…" : <>{cenyCas ? `ceny z ${cenyCas.slice(8, 10)}. ${cenyCas.slice(5, 7)}. ${cenyCas.slice(0, 4)}` : "ceny z posledního obnovení"} · <span style={{ color: BP.indigo }}>obnovit</span></>}
+        </button>
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 5fr) minmax(230px, 2fr)", gap: 26 }}>
+      <div>
+      <div style={{ ...bpHero(46) }}>{fmtKc(Math.round(P.hodnota))}</div>
       <div style={{ fontSize: 12.5, color: "var(--mut)", marginTop: 9 }}>
-        z vložených <b style={{ color: "var(--txt)" }}>{fmtKc(Math.round(P.vlozeno))}</b>
-        {P.vlozeno > 0 && <> · <b style={{ color: "var(--txt)" }}>{pct((zisk / P.vlozeno) * 100)}</b> na vloženém kapitálu</>}
-        {" "}· od {rada[0].datum.split("-").reverse().join(". ")}
+        z toho tvých <b style={{ color: "var(--txt)" }}>{fmtKc(Math.round(P.vlozeno))}</b>
+        {" "}· vydělaly ti <b style={{ color: zisk >= 0 ? BP.ziskDeep : CIHLA }}>{kc(zisk)}</b>
+        {P.vlozeno > 0 && <> (<b style={{ color: "var(--txt)" }}>{pct((zisk / P.vlozeno) * 100)}</b>)</>}
+        {dnesDelta != null && Math.abs(dnesDelta) >= 1 && <> · poslední den <b style={{ color: dnesDelta >= 0 ? BP.ziskDeep : CIHLA }}>{kc(dnesDelta)}</b></>}
       </div>
       <div style={{ fontSize: 12.5, color: "var(--mut)", marginTop: 5 }}>
         z toho <b style={{ color: nadInflaci >= 0 ? BP.ziskDeep : CIHLA }}>{kc(nadInflaci)}</b> je skutečné zbohatnutí
         {(zInfl[zInfl.length - 1] || 0) > 0 && <> · <b style={{ color: BP.sandDeep }}>{fmtKc(Math.round(zInfl[zInfl.length - 1]))}</b> jen dorovnalo inflaci</>}
       </div>
 
-      <svg viewBox={`0 0 ${W} ${H1}`} preserveAspectRatio="none" style={{ display: "block", width: "100%", height: H1, marginTop: 16, overflow: "visible" }}>
+      <svg viewBox={`0 0 ${W} ${H1}`} preserveAspectRatio="none" style={{ display: "block", width: "100%", height: H1, marginTop: 16, overflow: "visible" }}
+        onMouseLeave={() => setKurzK(null)}
+        onMouseMove={(e) => {
+          const r = e.currentTarget.getBoundingClientRect();
+          setKurzK(Math.max(0, Math.min(rada.length - 1, Math.round(((e.clientX - r.left) / r.width) * (rada.length - 1)))));
+        }}>
         {rysky1.filter((_, k) => k % krok1 === 0).map(r => (
           <g key={"a" + r.i}>
             <line x1={px1(r.i)} y1={mt} x2={px1(r.i)} y2={H1 - mb} stroke="rgba(0,0,0,.045)" strokeWidth="1" />
@@ -9439,31 +9503,173 @@ function AkcieGraf({ serie, stav = "idle", onNacti, pf = null }) {
           {/* Vše pod pískovou čárou. Cihlový pás se tím ořízne, takže je vidět jen tam,
               kde zisk opravdu zaostal za inflací. */}
           <clipPath id="mauxPodInflaci">
-            <path d={`${cesta(zInfl, px1, o1.py)} L ${px1(rada.length - 1)} ${H1} L ${px1(0)} ${H1} Z`} />
+            <path d={`${cesta(zInflCara, px1, o1.py)} L ${px1(rada.length - 1)} ${H1} L ${px1(0)} ${H1} Z`} />
           </clipPath>
         </defs>
-        <path d={`${cesta(zTot, px1, o1.py)} L ${px1(rada.length - 1)} ${dno1} L ${px1(0)} ${dno1} Z`} fill="url(#mauxZiskFill)" />
-        <path d={`${cesta(zTot, px1, o1.py)} ${cestaZpet(zInfl, px1, o1.py)} Z`} fill="rgba(168,68,60,.18)" clipPath="url(#mauxPodInflaci)" />
-        <path d={cesta(zTot, px1, o1.py)} fill="none" stroke={BP.zisk} strokeWidth="7" strokeLinejoin="round" opacity=".36" filter="url(#mauxZiskZar)" />
-        <path d={cesta(zTot, px1, o1.py)} fill="none" stroke={BP.zisk} strokeWidth="2.4" strokeLinejoin="round" />
-        <path d={cesta(zInfl, px1, o1.py)} fill="none" stroke={BP.sandDeep} strokeWidth="1.6" strokeDasharray="5 4" />
-        <circle cx={px1(rada.length - 1)} cy={o1.py(zTot[zTot.length - 1])} r="9" fill={BP.zisk} opacity=".26" filter="url(#mauxZiskZar)" />
-        <circle cx={px1(rada.length - 1)} cy={o1.py(zTot[zTot.length - 1])} r="4.5" fill={BP.zisk} />
+        <path d={`${cesta(zHod, px1, o1.py)} L ${px1(rada.length - 1)} ${dno1} L ${px1(0)} ${dno1} Z`} fill="url(#mauxZiskFill)" />
+        <path d={`${cesta(zVlo, px1, o1.py)} L ${px1(rada.length - 1)} ${dno1} L ${px1(0)} ${dno1} Z`} fill="rgba(58,52,148,.10)" />
+        <path d={cesta(zVlo, px1, o1.py)} fill="none" stroke={BP.indigoDeep} strokeWidth="1.6" />
+        {/* cihlová jen tam, kde hodnota spadla pod vklady+inflaci — reálná ztráta kupní síly */}
+        <path d={`${cesta(zHod, px1, o1.py)} ${cestaZpet(zInflCara, px1, o1.py)} Z`} fill="rgba(168,68,60,.18)" clipPath="url(#mauxPodInflaci)" />
+        <path d={cesta(zInflCara, px1, o1.py)} fill="none" stroke={BP.sandDeep} strokeWidth="1.5" strokeDasharray="5 4" />
+        <path d={cesta(zHod, px1, o1.py)} fill="none" stroke={BP.zisk} strokeWidth="7" strokeLinejoin="round" opacity=".36" filter="url(#mauxZiskZar)" />
+        <path d={cesta(zHod, px1, o1.py)} fill="none" stroke={BP.zisk} strokeWidth="2.4" strokeLinejoin="round" />
+        <circle cx={px1(rada.length - 1)} cy={o1.py(zHod[zHod.length - 1])} r="9" fill={BP.zisk} opacity=".26" filter="url(#mauxZiskZar)" />
+        <circle cx={px1(rada.length - 1)} cy={o1.py(zHod[zHod.length - 1])} r="4.5" fill={BP.zisk} />
+        {kurzK != null && (
+          <g>
+            <line x1={px1(kurzK)} y1={mt} x2={px1(kurzK)} y2={H1 - mb} stroke="rgba(28,10,99,.4)" strokeWidth="1" />
+            <circle cx={px1(kurzK)} cy={o1.py(zHod[kurzK])} r="4.5" fill={BP.zisk} />
+          </g>
+        )}
         <line x1={ml} y1={dno1} x2={W - mr} y2={dno1} stroke="rgba(0,0,0,.14)" strokeWidth="1" />
       </svg>
 
-      {/* Legenda patří ke GRAFU — dva řádky, dvě barvy, které v grafu opravdu jsou. */}
-      <div style={{ display: "flex", flexDirection: "column", gap: 7, marginTop: 13, paddingTop: 12, borderTop: "1px solid rgba(0,0,0,.06)" }}>
-        <div style={{ display: "flex", alignItems: "baseline", gap: 9, fontSize: 12.5, flexWrap: "wrap" }}>
-          <i style={{ width: 11, height: 11, borderRadius: 3, background: BP.zisk, flex: "0 0 auto", transform: "translateY(1px)" }} />
-          <b style={{ fontWeight: 650 }}>Tvůj zisk</b>
-          <span style={{ fontSize: 11.5, color: "var(--mut)" }}>realizovaný i papírový dohromady</span>
+      <div style={{ fontSize: 11, color: "var(--mut)", marginTop: 8, minHeight: 17, fontVariantNumeric: "tabular-nums" }}>
+        {kurzK != null
+          ? <>{fmtDate(rada[kurzK].datum)} · měl jsi <b style={{ color: BP.ziskDeep }}>{fmtKc(Math.round(zHod[kurzK]))}</b>
+              {" "}· vklady <b style={{ color: "var(--txt)" }}>{fmtKc(Math.round(zVlo[kurzK]))}</b>
+              {" "}· zisk <b style={{ color: zHod[kurzK] - zVlo[kurzK] >= 0 ? BP.ziskDeep : CIHLA }}>{kc(zHod[kurzK] - zVlo[kurzK])}</b></>
+          : <>Přejeď myší po grafu — ukážu ti stav ke kterémukoli dni.</>}
+      </div>
+
+      {/* ⚠️ VŠE SE VYSVĚTLUJE (Tom 16. 8. 2026) — ale verdikt je vždy viditelný hned.
+          Klik nikdy neskrývá odpověď, jen přidává JAK se to počítá a CO s tím.
+          Tomova lekce z 30. 7.: co je schované, to se nečte — schovává se jen hloubka. */}
+      <div style={{ display: "flex", gap: 16, flexWrap: "wrap", marginTop: 13, paddingTop: 12, borderTop: "1px solid rgba(0,0,0,.06)" }}>
+        {[
+          ["hodnota", BP.zisk, 11, "Máš tam teď"],
+          ["vklady", BP.indigoDeep, 11, "Tvoje vklady"],
+          ["inflace", BP.sandDeep, 3, "Vklady + inflace"],
+        ].map(([klic, barva, vyska, text]) => (
+          <span key={klic} onClick={() => setVysv(vysv === klic ? null : klic)}
+            style={{ display: "inline-flex", alignItems: "center", gap: 7, fontSize: 12, cursor: "pointer",
+                     borderBottom: vysv === klic ? `1px solid ${BP.indigo}` : "1px dotted rgba(0,0,0,.25)", paddingBottom: 1 }}>
+            <i style={{ width: 11, height: vyska, borderRadius: vyska > 5 ? 3 : 2, background: barva, flex: "0 0 auto" }} />
+            <b style={{ fontWeight: 650 }}>{text}</b>
+          </span>
+        ))}
+      </div>
+      {vysv && (
+        <div style={{ background: "rgba(74,68,184,.05)", border: "1px solid rgba(74,68,184,.16)", borderRadius: BP.rInner, padding: "14px 18px", marginTop: 10, fontSize: 12.5, lineHeight: 1.65 }}>
+          <button onClick={() => setVysv(null)} style={{ float: "right", border: "none", background: "none", color: "var(--mut)", fontSize: 11, cursor: "pointer", fontFamily: "inherit" }}>zavřít ×</button>
+          {vysv === "hodnota" && <>
+            <b>Zelená — máš tam teď.</b> Otevřené pozice v posledních známých cenách plus hotovost na účtu.
+            Jediná čára, která se hýbe s trhem. Občerstvuje se při otevření listu a tlačítkem Obnovit —
+            razítko s datem cen je nahoře u čísla.</>}
+          {vysv === "vklady" && <>
+            <b>Indigová — tvoje vklady.</b> Peníze, které jsi na XTB poslal, mínus výběry: <b>{fmtKc(Math.round(P.vlozeno))}</b>.
+            Schody jsou jednotlivé vklady. Nákup ani prodej akcie s touhle čarou nehne — jen skutečný převod
+            z banky. <b>Mezera mezi zelenou a indigovou je tvůj zisk.</b></>}
+          {vysv === "inflace" && <>
+            <b>Písková — vklady + inflace.</b> Kolik by portfolio muselo mít, aby sis koupil totéž co v den
+            vkladu (inflace ČSÚ: 2025 = 2,5 %, 2026 = 2,0 %). Dokud je zelená nad pískovou, reálně bohatneš —
+            kdyby se protnuly, plocha mezi nimi zčervená a vyděláváš jen na papíře.</>}
+          {vysv === "index" && <>
+            <b>Proti čemu se měříš: S&P 500</b> — pětistovka největších amerických firem, přes akumulační ETF
+            (dividendy v ceně), přepočteno do korun. Neporovnává se křivka s křivkou: vezmou se <b>tvoje vklady
+            ve tvých dnech</b> a pošlou se místo do tvých titulů do indexu — pak se porovnají koruny. Měří to
+            tvůj výběr titulů i načasování peněz. Dřív ses měřil proti celému světu (FTSE All-World); Amerika
+            je přísnější metr — posledních deset let zbytek světa poráží.</>}
         </div>
-        <div style={{ display: "flex", alignItems: "baseline", gap: 9, fontSize: 12.5, flexWrap: "wrap" }}>
-          <i style={{ width: 11, height: 3, borderRadius: 2, background: BP.sandDeep, flex: "0 0 auto", transform: "translateY(-3px)" }} />
-          <b style={{ fontWeight: 650 }}>Hranice kupní síly</b>
-          <span style={{ fontSize: 11.5, color: "var(--mut)" }}>kolik jsi musel vydělat, abys nezchudl · inflace {(CPI_ROCNI[new Date().getFullYear()] != null ? CPI_ROCNI[new Date().getFullYear()] : CPI_VYCHOZI).toFixed(1).replace(".", ",")} % p. a.</span>
-        </div>
+      )}
+      </div>
+
+      {/* ── KONTROLKY „CO TEĎ" — jen termíny a koruny, nikdy pohyby trhu ────────── */}
+      <div>
+        <div style={bpLabel({ marginBottom: 10 })}>Co teď</div>
+        {(() => {
+          const kontrolky = [];
+          if (nejblizsiTest) kontrolky.push({
+            id: "test", tón: BP.sand, plocha: "rgba(198,168,107,.09)",
+            kdy: `za ${nejblizsiTest.dni} ${dnyTvar(nejblizsiTest.dni)} · ${fmtDate(localYmd(nejblizsiTest.konec))}`,
+            titulek: <>Nejbližší <b>osvobození od daně</b>: {nejblizsiTest.symbol}</>,
+            pokrok: nejblizsiTest.pokrok,
+            vic: <>Když akcii držíš 3 roky a pak prodáš, zisk se nedaní — vůbec. Test běží od data
+              každého konkrétního nákupu. Tahle tranše je z {fmtDate(nejblizsiTest.datum)}, máš za sebou
+              {" "}{Math.round(nejblizsiTest.pokrok * 100)} % cesty.
+              <div style={{ marginTop: 9, paddingTop: 8, borderTop: "1px solid rgba(0,0,0,.07)" }}>
+                {zebricek.slice(0, 6).map((l, i) => (
+                  <div key={i} onClick={(e) => { e.stopPropagation(); onUkazTitul && onUkazTitul(l.symbol); }}
+                    title="Ukázat titul v seznamu níž"
+                    style={{ display: "flex", justifyContent: "space-between", gap: 10, fontSize: 11, padding: "3px 0",
+                             cursor: onUkazTitul ? "pointer" : "default" }}>
+                    <span style={{ borderBottom: "1px dotted rgba(0,0,0,.2)" }}>{l.symbol} · koupeno {fmtDate(l.datum)}</span>
+                    <span className="maux-num" style={{ color: "var(--mut)" }}>za {l.dni} {dnyTvar(l.dni)}</span>
+                  </div>
+                ))}
+                {zebricek.length > 6 && <div style={{ fontSize: 10.5, color: "var(--mut)", marginTop: 3 }}>… a dalších {zebricek.length - 6} tranší</div>}
+              </div>
+              <div style={{ marginTop: 8, fontSize: 11, color: "var(--mut)" }}>Prodej o den dřív = daníš celý zisk. O den později = nedaníš nic.</div></>,
+          });
+          if (srazkaPct != null && srazkaPct > 20) kontrolky.push({
+            id: "w8ben", tón: "#A8443C", plocha: "rgba(168,68,60,.05)",
+            kdy: "jednou · ušetří polovinu daně z dividend",
+            titulek: <>USA ti sráží <b>{Math.round(srazkaPct)} % místo 15 %</b> — chybí <b>W-8BEN</b></>,
+            vic: <>W-8BEN je formulář, kterým americkému fisku říkáš „jsem český daňový rezident". Česko má
+              s USA smlouvu — s formulářem ti z dividend srazí 15 % místo 30 %. Poznal jsem to z tvého výpisu:
+              z hrubých dividend {fmtKc(Math.round(divHrube))} sraženo {fmtKc(Math.round(divSrazka))}.
+              V xStation: Můj účet → Dokumenty → W-8BEN, elektronicky, platí 3 roky.</>,
+          });
+          if (trzbaLetos > 100000) kontrolky.push({
+            id: "trzba", tón: BP.sand, plocha: "rgba(198,168,107,.09)",
+            kdy: "letošní prodeje",
+            titulek: <>Tržby letos <b>{fmtKc(Math.round(trzbaLetos))}</b> — drobné osvobození nevyužiješ</>,
+            vic: <>Zákon osvobozuje prodeje cenných papírů, pokud <b>tržba</b> (ne zisk!) za rok nepřekročí
+              100 000 Kč. Letos jsi prodal za víc, takže zisky z prodejů před doběhnutím 3letého testu daníš.
+              V roce, kdy plánuješ prodávat málo, se vyplatí pod limitem zůstat. Posouzení patří daňaři —
+              appka počítá, nerozhoduje.</>,
+          });
+          else kontrolky.push({
+            id: "trzba", tón: BP.indigo, plocha: "rgba(74,68,184,.045)",
+            kdy: "letošní prodeje",
+            titulek: <>Tržby letos <b>{fmtKc(Math.round(trzbaLetos))}</b> — do 100 tis. zbývá <b>{fmtKc(Math.round(100000 - trzbaLetos))}</b></>,
+            vic: <>Dokud tržby (ne zisk) z prodejů za rok nepřekročí 100 000 Kč, jsou prodeje osvobozené
+              od daně i bez 3letého testu. Rozhoduješ-li se, jestli prodat teď, nebo v lednu, tohle číslo
+              je ten metr. Posouzení patří daňaři.</>,
+          });
+          if (top4 > 70) kontrolky.push({
+            id: "konc", tón: "#A8443C", plocha: "rgba(168,68,60,.05)",
+            kdy: "trvá",
+            titulek: <><b>{Math.round(top4)} % ve čtyřech titulech</b>{cipPodil > 25 && <> · {Math.round(cipPodil)} % v čipech</>}</>,
+            vic: <>Šest titulů vypadá jako šest sázek, ale NVIDIA a AMD jedou na stejné vlně — když se zlomí
+              poptávka po čipech, spadnou spolu. Nic prodávat nemusíš (prodej = daň) — nejlevnější cesta
+              k rozložení je poslat <b>nové</b> vklady jinam. Koncentrace je zároveň důvod, proč porážíš index;
+              kontrolka neradí, jen připomíná, že výnos nese úzké hrdlo.</>,
+          });
+          kontrolky.push({
+            id: "cash",
+            tón: hotovostTed > 20000 ? BP.sand : BP.indigo,
+            plocha: hotovostTed > 20000 ? "rgba(198,168,107,.09)" : "rgba(74,68,184,.045)",
+            kdy: hotovostTed > 20000 ? "leží ladem" : "v klidu",
+            titulek: hotovostTed > 20000
+              ? <>Hotovost <b className="maux-num">{fmtKc(Math.round(hotovostTed))}</b> čeká na nákup</>
+              : <>Hotovost <b className="maux-num">{fmtKc(Math.round(hotovostTed))}</b> — nic neleží ladem</>,
+            vic: <>Peníze na XTB, které nejsou v žádné akcii. Malá hotovost = dobře, všechno pracuje.
+              Když tu delší dobu leží víc, žere to inflace — kontrolka zežloutne od 20 tisíc.</>,
+          });
+          return kontrolky.map(k => (
+            <div key={k.id} onClick={() => setAkceOpen(akceOpen === k.id ? null : k.id)}
+              style={{ borderLeft: `2px solid ${k.tón}`, background: k.plocha, padding: "10px 13px",
+                       fontSize: 12, lineHeight: 1.55, marginBottom: 8, cursor: "pointer" }}>
+              <span style={{ float: "right", color: "var(--mut)", fontSize: 10, transform: akceOpen === k.id ? "rotate(90deg)" : "none", transition: "transform .15s" }}>▸</span>
+              <span style={{ display: "block", fontSize: 9.5, letterSpacing: ".1em", textTransform: "uppercase", color: "var(--mut)", marginBottom: 3 }}>{k.kdy}</span>
+              {k.titulek}
+              {k.pokrok != null && (
+                <div style={{ height: 4, borderRadius: 2, background: "rgba(0,0,0,.07)", overflow: "hidden", marginTop: 6 }}>
+                  <div style={{ height: "100%", width: `${Math.round(k.pokrok * 100)}%`, borderRadius: 2, background: BP.sand }} />
+                </div>
+              )}
+              {akceOpen === k.id && (
+                <div style={{ marginTop: 9, paddingTop: 9, borderTop: "1px solid rgba(0,0,0,.07)", fontSize: 11.5, color: "#4A4560", lineHeight: 1.65, cursor: "default" }}
+                  onClick={(e) => e.stopPropagation()}>
+                  {k.vic}
+                </div>
+              )}
+            </div>
+          ));
+        })()}
+      </div>
       </div>
 
       {/* ⚠️ Rozklad zisku ZÁMĚRNĚ BEZ BAREVNÝCH ČTVEREČKŮ — ty barvy už v grafu nejsou
@@ -9527,7 +9733,22 @@ function AkcieGraf({ serie, stav = "idle", onNacti, pf = null }) {
 
       {/* ══ 2 · VYPLATILO SE MI VYBÍRAT SI SÁM ═════════════════════════════════ */}
       <div style={cara}>
-        <div style={bpLabel({ marginBottom: 10 })}>2 · Vyplatilo se mi vybírat si sám?</div>
+        <div style={{ display: "flex", alignItems: "baseline", gap: 12, flexWrap: "wrap", marginBottom: 10 }}>
+          <div style={bpLabel()}>2 · Vyplatilo se mi vybírat si sám?</div>
+          <span onClick={() => setVysv(vysv === "index" ? null : "index")}
+            style={{ fontSize: 11, color: BP.indigo, cursor: "pointer", borderBottom: "1px dotted rgba(74,68,184,.5)" }}>
+            proti čemu se měřím?
+          </span>
+        </div>
+        {vysv === "index" && (
+          <div style={{ background: "rgba(74,68,184,.05)", border: "1px solid rgba(74,68,184,.16)", borderRadius: BP.rInner, padding: "14px 18px", margin: "0 0 14px", fontSize: 12.5, lineHeight: 1.65 }}>
+            <button onClick={() => setVysv(null)} style={{ float: "right", border: "none", background: "none", color: "var(--mut)", fontSize: 11, cursor: "pointer", fontFamily: "inherit" }}>zavřít ×</button>
+            <b>S&P 500</b> — pětistovka největších amerických firem, přes akumulační ETF (dividendy v ceně),
+            přepočteno do korun. Neporovnává se křivka s křivkou: vezmou se <b>tvoje vklady ve tvých dnech</b>
+            a pošlou se místo do tvých titulů do indexu — pak se porovnají koruny. Měří to tvůj výběr titulů
+            i načasování peněz. Dřív ses měřil proti celému světu (FTSE All-World); Amerika je přísnější metr.
+          </div>
+        )}
         <div style={{ display: "flex", flexDirection: "column", gap: 7, marginBottom: 18 }}>
           <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
             {["1M", "3M", "YTD", "1R", "Vše"].map(k => pilulka(k, !rok && okno === k, () => { setOkno(k); setRok(null); }))}
@@ -10026,7 +10247,7 @@ function AkcieModule({ xtbTranches = [], onTrancheSave, onTrancheDelete, xtbTitl
           Tři tlačítka, každé říká, co udělá. Zrušit = neuloží se nic. */}
       {cashAsk && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(28,10,99,.35)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 9000, padding: 20 }}>
-          <div style={{ background: "#fff", borderRadius: 16, padding: "24px 28px", width: 440, maxWidth: "100%", boxShadow: BP.shadow }}>
+          <div style={{ ...MAUX_GLASS_MODAL, borderRadius: 16, padding: "24px 28px", width: 440, maxWidth: "100%" }}>
             <div style={bpLabel({ marginBottom: 14 })}>Nákup · kontrola</div>
             <div style={{ ...bpHeroText(20, "var(--txt)"), lineHeight: 1.35, marginBottom: 6 }}>
               {cashAsk.chybi === 0 && cashAsk.dup ? "Tenhle nákup už jednou zapsaný je."
@@ -10078,108 +10299,49 @@ function AkcieModule({ xtbTranches = [], onTrancheSave, onTrancheDelete, xtbTitl
         </div>
       )}
 
-      {/* ── ŽIVÉ PORTFOLIO — vložil jsi → máš teď → vydělaly ti peníze ──────────
-          Dominantní je rozdíl, ne hodnota. Ceny se tahají při otevření listu. */}
+      {/* ── ŽIVÉ CENY — jen ovládání. Hero trio (vložil → máš → vydělaly) se 16. 8. 2026
+          přestěhovalo do kokpitu níž (jedno číslo, jedno místo): hodnotu nese hero bloku 1,
+          rozklad zisku sekce "z čeho ten zisk je", hotovost kontrolka v Co teď. */}
       {pf.lots.length > 0 && (
-        <div style={{ position: "relative", background: "#fff", border: "1px solid var(--line)", borderRadius: BP.r, padding: "24px 26px" }}>
-          <BpCorners />
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-            <div style={bpLabel()}>Portfolio · živé ceny</div>
-            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-              <span style={{ fontSize: 10.5, color: "var(--mut)" }}>
-                {marketState === "loading" ? "stahuji ceny…"
-                  : marketState === "error" ? "ceny se nepodařilo načíst"
-                  : market && market.kurzy_platnost ? `kurzy ČNB ${market.kurzy_platnost}`
-                  : "ceny zatím nenačteny"}
-              </span>
-              <button
-                onClick={() => onRefreshPrices && onRefreshPrices(pf.tickery)}
-                disabled={marketState === "loading"}
-                style={{ fontSize: 11, padding: "5px 12px", borderRadius: 9, border: "1px solid rgba(28,10,99,.16)", background: "#fff", color: BP.indigoDeep, cursor: marketState === "loading" ? "default" : "pointer", fontFamily: "inherit" }}>
-                Obnovit
-              </button>
-            </div>
-          </div>
-
-          <div style={{ display: "flex", alignItems: "flex-end", gap: 30, flexWrap: "wrap", marginTop: 16 }}>
-            <div>
-              <div style={bpLabel({ marginBottom: 6 })}>Vložil jsi</div>
-              <div style={bpHero(26, "var(--txt)")}>{fmtKc(Math.round(pf.vlozeno))}</div>
-            </div>
-            <div style={{ fontSize: 19, color: "rgba(28,10,99,.2)", paddingBottom: 5 }}>→</div>
-            <div>
-              <div style={bpLabel({ marginBottom: 6 })}>Máš tam teď</div>
-              <div style={bpHero(26, "var(--txt)")}>{fmtKc(Math.round(pf.celkem))}</div>
-            </div>
-            <div style={{ paddingLeft: 28, borderLeft: "1px solid rgba(28,10,99,.1)" }}>
-              <div style={bpLabel({ marginBottom: 4 })}>Vydělaly ti peníze</div>
-              <div style={bpHero(42, pf.vydelaly >= 0 ? BP.indigoDeep : "#A8443C")}>
-                {fmtSigned(Math.round(pf.vydelaly))}
-              </div>
-            </div>
-          </div>
-
-          {pf.vlozeno > 0 && pf.vydelaly > 0 && (
-            <div style={{ marginTop: 20 }}>
-              <div style={{ display: "flex", height: 10, borderRadius: 5, overflow: "hidden", gap: 2 }}>
-                <div style={{ flex: pf.vlozeno, background: BP.indigoDeep }} />
-                <div style={{ flex: pf.vydelaly, background: BP.sand }} />
-              </div>
-              <div style={{ display: "flex", gap: 18, flexWrap: "wrap", fontSize: 11, color: "var(--mut)", marginTop: 9 }}>
-                <span><span style={{ display: "inline-block", width: 6, height: 6, borderRadius: "50%", background: BP.indigoDeep, marginRight: 6 }} />Tvoje peníze</span>
-                <span><span style={{ display: "inline-block", width: 6, height: 6, borderRadius: "50%", background: BP.sand, marginRight: 6 }} />Výnos {(pf.vydelalyPct * 100).toFixed(1).replace(".", ",")} %</span>
-              </div>
-            </div>
-          )}
-
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 16, marginTop: 20, paddingTop: 16, borderTop: "1px solid rgba(28,10,99,.07)" }}>
-            <div>
-              <div style={bpLabel({ marginBottom: 5 })}>Už realizováno</div>
-              <div style={bpHero(19, "var(--txt)")}>{fmtKc(Math.round(pf.realizovano))}</div>
-              <div style={{ fontSize: 10, color: "var(--mut)", marginTop: 3 }}>prodáno a zaúčtováno</div>
-            </div>
-            <div>
-              <div style={bpLabel({ marginBottom: 5 })}>Zatím na papíře</div>
-              <div style={bpHero(19, "var(--txt)")}>{fmtKc(Math.round(pf.nerealizovano))}</div>
-              <div style={{ fontSize: 10, color: "var(--mut)", marginTop: 3 }}>v otevřených pozicích</div>
-            </div>
-            {Math.abs(Math.round(pf.ostatni)) >= 1 && (
-              <div>
-                <div style={bpLabel({ marginBottom: 5 })}>Dividendy a poplatky</div>
-                <div style={bpHero(19, "var(--txt)")}>{fmtSigned(Math.round(pf.ostatni))}</div>
-                <div style={{ fontSize: 10, color: "var(--mut)", marginTop: 3 }}>po srážkové dani, minus poplatky</div>
-              </div>
+        <div style={{ position: "relative", ...MAUX_GLASS, borderRadius: BP.r, padding: "13px 24px", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+          <div style={bpLabel()}>Portfolio · živé ceny</div>
+          <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+            {pf.chybiCena.length > 0 && (
+              <span style={{ fontSize: 10.5, color: BP.sandDeep }}>bez ceny, drží se pořizovací: {pf.chybiCena.join(", ")}</span>
             )}
-            <div>
-              <div style={bpLabel({ marginBottom: 5 })}>Hotovost</div>
-              <div style={bpHero(19, "var(--txt)")}>{fmtKc(Math.round(pf.hotovost))}</div>
-              <div style={{ fontSize: 10, color: "var(--mut)", marginTop: 3 }}>volné na účtu</div>
-            </div>
-            <div>
-              <div style={bpLabel({ marginBottom: 5 })}>Otevřené pozice</div>
-              <div style={bpHero(19, "var(--txt)")}>{fmtKc(Math.round(pf.trzni))}</div>
-              <div style={{ fontSize: 10, color: "var(--mut)", marginTop: 3 }}>{pf.tituly.length} titulů · {pf.lots.length} tranší</div>
-            </div>
+            <span style={{ fontSize: 10.5, color: "var(--mut)" }}>
+              {marketState === "loading" ? "stahuji ceny…"
+                : marketState === "error" ? "ceny se nepodařilo načíst"
+                : market && market.kurzy_platnost ? `kurzy ČNB ${market.kurzy_platnost}`
+                : "ceny zatím nenačteny"}
+            </span>
+            <button
+              onClick={() => onRefreshPrices && onRefreshPrices(pf.tickery)}
+              disabled={marketState === "loading"}
+              style={{ fontSize: 11, padding: "5px 12px", borderRadius: 9, border: "1px solid rgba(28,10,99,.16)", background: "rgba(255,255,255,.7)", color: BP.indigoDeep, cursor: marketState === "loading" ? "default" : "pointer", fontFamily: "inherit" }}>
+              Obnovit
+            </button>
           </div>
-
-          {pf.chybiCena.length > 0 && (
-            <div style={{ marginTop: 14, fontSize: 11, color: BP.sandDeep }}>
-              U těchto titulů se nepodařilo najít cenu, počítají se pořizovací cenou: {pf.chybiCena.join(", ")}
-            </div>
-          )}
         </div>
       )}
 
       {/* ── VÝKONNOST: hromadění zisku, srovnání s S&P 500, rozklad náskoku, riziko ── */}
-      <div style={{ position: "relative", background: "#fff", border: "1px solid var(--line)", borderRadius: BP.r, padding: "22px 24px", boxShadow: BP.shadow }}>
+      <div style={{ position: "relative", ...MAUX_GLASS, borderRadius: BP.r, padding: "22px 24px" }}>
         <BpCorners />
         <div style={bpLabel({ marginBottom: 4 })}>Výkonnost proti {XTB_BENCHMARK_NAZEV}</div>
-        <AkcieGraf serie={xtbSerie} stav={serieState} pf={pf} onNacti={() => onNactiHistorii && onNactiHistorii()} />
+        <AkcieGraf serie={xtbSerie} stav={serieState} pf={pf} cashOps={xtbCashOps}
+          onNacti={() => onNactiHistorii && onNactiHistorii()}
+          obnovuji={marketState === "loading" || serieState === "loading"}
+          onObnovit={() => { onRefreshPrices && onRefreshPrices(pf.tickery); onNactiHistorii && onNactiHistorii(); }}
+          onUkazTitul={(sym) => {
+            setOpenSym(sym);
+            setTimeout(() => { const el = document.getElementById("titul-" + sym); if (el) el.scrollIntoView({ behavior: "smooth", block: "center" }); }, 80);
+          }} />
       </div>
 
       {/* ── TITULY A TRANŠE ── */}
       {true && (
-        <div style={{ position: "relative", background: "#fff", border: "1px solid var(--line)", borderRadius: BP.r, padding: "22px 24px" }}>
+        <div style={{ position: "relative", ...MAUX_GLASS, borderRadius: BP.r, padding: "22px 24px" }}>
           <BpCorners />
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
             <div style={bpLabel()}>Co držíš · {pf.lots.length} nákupů</div>
@@ -10276,7 +10438,7 @@ function AkcieModule({ xtbTranches = [], onTrancheSave, onTrancheDelete, xtbTitl
                 const akt = openSym === t.symbol;
                 const maxHod = Math.max(...pf.tituly.map(x => x.hodnota), 1);
                 return (
-                  <div key={t.symbol} onClick={() => setOpenSym(s => s === t.symbol ? null : t.symbol)}
+                  <div key={t.symbol} id={"titul-" + t.symbol} onClick={() => setOpenSym(s => s === t.symbol ? null : t.symbol)}
                     style={{
                       border: `1px solid ${akt ? "rgba(63,53,199,.32)" : "rgba(0,0,0,.06)"}`,
                       borderRadius: BP.rInner, padding: 14, cursor: "pointer", background: "#fff",
@@ -10454,7 +10616,7 @@ function AkcieModule({ xtbTranches = [], onTrancheSave, onTrancheDelete, xtbTitl
           Ne žebříček titulů (ten Tom zrušil), ale ledger: co jsem koupil, kdy jsem to
           prodal a co z toho bylo. Každý řádek je jeden pár nákup → prodej. */}
       {sortedClosedTrades.length > 0 && (
-        <div style={{ position: "relative", background: "#fff", border: "1px solid var(--line)", borderRadius: BP.r, padding: "22px 24px", boxShadow: BP.shadow }}>
+        <div style={{ position: "relative", ...MAUX_GLASS, borderRadius: BP.r, padding: "22px 24px" }}>
           <BpCorners />
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
             <div>
@@ -11429,7 +11591,7 @@ function SchvalovaciFronta({ logs = [], clients = [], workEntries = [], onApprov
         <div style={{ position: "fixed", inset: 0, background: "rgba(20,16,50,.45)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 400, padding: 20 }}
           onClick={() => !saving && setOpen(false)}>
           <div onClick={e => e.stopPropagation()}
-            style={{ background: "#fff", borderRadius: 16, padding: "24px 26px", width: "100%", maxWidth: 520, maxHeight: "88vh", overflowY: "auto" }}>
+            style={{ ...MAUX_GLASS_MODAL, borderRadius: 16, padding: "24px 26px", width: "100%", maxWidth: 520, maxHeight: "88vh", overflowY: "auto" }}>
             <div style={{ fontFamily: "Fraunces,serif", fontSize: 19, color: INK, marginBottom: 3 }}>
               {mode === "new" ? "Schválit do fakturace" : mode === "existing" ? "Připojit k existujícímu výkazu" : "Nefakturovat"}
             </div>
@@ -12004,6 +12166,27 @@ const PanelCtx = createContext(null);
    Rohové značky + prostrkané verzálkové popisky + Inter 600 na hrdinská čísla +
    dvoutón indigo/písek + delta čipy. Jeden zdroj pravdy, ať se to nerozejde.
    ═══════════════════════════════════════════════════════════════════════════ */
+// ── SKLO (Tom 16. 8. 2026, varianta 4 "Sklo+") — mléčně průsvitná karta nad aurorou.
+// Jeden recept pro celou appku; kdo staví novou kartu, rozprostře MAUX_GLASS,
+// nepíše vlastní rgba. Blur je drahý na počet vrstev — nevrstvit sklo na sklo.
+const MAUX_GLASS = {
+  background: "rgba(255,255,255,.55)",
+  backdropFilter: "blur(26px) saturate(1.4)",
+  WebkitBackdropFilter: "blur(26px) saturate(1.4)",
+  border: "1px solid rgba(255,255,255,.95)",
+  boxShadow: "0 1px 2px rgba(16,12,60,.04), 0 22px 54px -22px rgba(28,10,99,.18)",
+};
+
+// Modální tělo nad ztmaveným pozadím potřebuje hustší mléko než karta — .55 by na
+// tmavé šedlo. Jediný druhý povolený recept skla; třetí už nezaváděj.
+const MAUX_GLASS_MODAL = {
+  background: "rgba(255,255,255,.84)",
+  backdropFilter: "blur(30px) saturate(1.3)",
+  WebkitBackdropFilter: "blur(30px) saturate(1.3)",
+  border: "1px solid rgba(255,255,255,.9)",
+  boxShadow: "0 24px 64px rgba(28,10,99,.22)",
+};
+
 const BP = {
   // Tom 27.7.: "barvy nepatrně sytější, okraje apple kulaté" — o stupeň víc chroma,
   // ale pořád daleko od neonu; poloměry v apple měřítku (22/20/18).
@@ -12234,7 +12417,7 @@ function TrophyWall({ trophies }) {
   const done = trophies.filter(t => t.done).length;
   const KIND = { vykon: "Výkon", disciplina: "Disciplína", remeslo: "Řemeslo" };
   return (
-    <div style={{ marginTop: 10, background: "#fff", borderRadius: BP.rInner, boxShadow: BP.shadow, padding: "22px 24px", maxWidth: 640 }}>
+    <div style={{ marginTop: 10, ...MAUX_GLASS, borderRadius: BP.rInner, padding: "22px 24px", maxWidth: 640 }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", marginBottom: 4 }}>
         <div>
           <div style={bpLabel()}>Trofejní síň</div>
@@ -14072,7 +14255,7 @@ function WorkRhythmPanel({ entries, pick, onPick }) {
   };
 
   return (
-    <div style={{ background: "#fff", borderRadius: 14, boxShadow: "0 0 0 1px rgba(0,0,0,.06), 0 4px 16px rgba(0,0,0,.04)", padding: "18px 22px", marginBottom: 24 }}>
+    <div style={{ ...MAUX_GLASS, borderRadius: 14, padding: "18px 22px", marginBottom: 24 }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 14, flexWrap: "wrap", gap: 6 }}>
         <div style={{ fontSize: 8, letterSpacing: ".24em", textTransform: "uppercase", fontWeight: 700, color: "var(--mut)" }}>KDY JE MOJE HODINA NEJDRAŽŠÍ</div>
         <div style={{ fontSize: 10.5, color: "var(--mut)" }}>od {fmtDate(WORK_RHYTHM_CUTOFF)} · {data.post.length} záznamů</div>
