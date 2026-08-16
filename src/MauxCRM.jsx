@@ -229,17 +229,17 @@ const CSS = `
 html,body{height:100%;background:#FAFAFC}
 #root{height:100%;background:transparent}
 .mx{--ink:#3518A5;--ink2:#2810a0;--ink3:#4a2bc4;--gold:#A08350;--gold2:#CF9B3E;--green:#4A7C59;--red:#A8443C;
-    --aurA:.16;--aurB:.12;--aurC:.10;
+    --aurA:.09;--aurB:.07;--aurC:.06;
     --bg:#F4F4FA;--page:#FAFAFC;--surface:#FFFFFF;--line:#E4E4E7;--line2:#D4D4D8;--mut:#8A8A93;--txt:#16142A;
     --mono:'JetBrains Mono','SF Mono',Menlo,monospace;
     --num:'Inter',ui-sans-serif,system-ui,sans-serif;
   font-family:'Inter',system-ui,sans-serif;color:var(--txt);background:transparent;min-height:100vh;display:flex;font-size:14px;line-height:1.5}
-.mx::before{content:"";position:fixed;width:640px;height:640px;left:-180px;top:-200px;border-radius:50%;
-  background:radial-gradient(circle,rgba(74,68,184,var(--aurA)),transparent 62%);filter:blur(70px);pointer-events:none;z-index:-1}
-.mx::after{content:"";position:fixed;width:560px;height:560px;right:-160px;top:110px;border-radius:50%;
-  background:radial-gradient(circle,rgba(61,220,151,var(--aurB)),transparent 62%);filter:blur(80px);pointer-events:none;z-index:-1}
-.main::before{content:"";position:fixed;width:480px;height:480px;left:32%;bottom:-220px;border-radius:50%;
-  background:radial-gradient(circle,rgba(198,168,107,var(--aurC)),transparent 62%);filter:blur(80px);pointer-events:none;z-index:-1}
+.mx::before{content:"";position:fixed;width:820px;height:820px;left:-260px;top:-280px;border-radius:50%;
+  background:radial-gradient(circle,rgba(74,68,184,var(--aurA)) 0%,transparent 68%);pointer-events:none;z-index:-1}
+.mx::after{content:"";position:fixed;width:720px;height:720px;right:-240px;top:60px;border-radius:50%;
+  background:radial-gradient(circle,rgba(61,220,151,var(--aurB)) 0%,transparent 68%);pointer-events:none;z-index:-1}
+.main::before{content:"";position:fixed;width:640px;height:640px;left:30%;bottom:-300px;border-radius:50%;
+  background:radial-gradient(circle,rgba(198,168,107,var(--aurC)) 0%,transparent 68%);pointer-events:none;z-index:-1}
 .serif{font-family:'Fraunces',Georgia,serif}
 .maux-num{font-family:var(--num);font-variant-numeric:tabular-nums;letter-spacing:-.01em}
 @keyframes mauxNumGlow{0%,100%{text-shadow:0 0 4px rgba(53,24,165,.28),0 0 12px rgba(53,24,165,.14)}50%{text-shadow:0 0 6px rgba(53,24,165,.4),0 0 16px rgba(53,24,165,.2)}}
@@ -264,7 +264,7 @@ html,body{height:100%;background:#FAFAFC}
 [id^="maux-panel-"]{transition:box-shadow .2s ease}
 .num{font-family:var(--mono);font-variant-numeric:tabular-nums;letter-spacing:.01em}
 .mx table td.r,.mx table th.r{text-align:right;font-family:var(--mono);font-variant-numeric:tabular-nums;letter-spacing:.01em}
-.sb{width:240px;flex:0 0 240px;background:#FBFAF6;border-right:1px solid #E8E4DA;display:flex;flex-direction:column;padding:24px 14px 16px;height:100vh;overflow-y:auto;position:sticky;top:0;scrollbar-width:none}
+.sb{width:240px;flex:0 0 240px;background:rgba(255,255,255,.6);border-right:1px solid rgba(28,10,99,.07);display:flex;flex-direction:column;padding:24px 14px 16px;height:100vh;overflow-y:auto;position:sticky;top:0;scrollbar-width:none}
 .brand{padding:0 4px 34px;display:flex;align-items:center;gap:13px}
 .brand .wm{font-family:'Fraunces',serif;font-size:21px;font-weight:400;color:var(--ink);letter-spacing:.05em;line-height:1}
 .brand .sub{font-size:7px;letter-spacing:.28em;text-transform:uppercase;color:var(--mut);margin-top:6px;font-weight:600;opacity:.8}
@@ -307,7 +307,7 @@ html,body{height:100%;background:#FAFAFC}
 .pill:hover{border-color:var(--ink);color:var(--ink)}
 .pill.on{background:var(--ink);color:#fff;border-color:var(--ink)}
 .kpi-row{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:32px}
-.kpi{padding:20px 22px;border:1px solid rgba(255,255,255,.95);border-radius:12px;background:rgba(255,255,255,.55);backdrop-filter:blur(26px) saturate(1.4);-webkit-backdrop-filter:blur(26px) saturate(1.4);box-shadow:0 1px 2px rgba(16,12,60,.04),0 22px 54px -22px rgba(28,10,99,.18);transition:all .18s;cursor:default}
+.kpi{padding:20px 22px;border:1px solid rgba(255,255,255,.95);border-radius:12px;background:rgba(255,255,255,.78);box-shadow:0 1px 2px rgba(16,12,60,.04),0 22px 54px -22px rgba(28,10,99,.16);transition:all .18s;cursor:default}
 .kpi:hover{border-color:var(--ink);box-shadow:0 4px 20px rgba(53,24,165,.12);transform:translateY(-2px)}
 .kpi.hi:hover{box-shadow:0 6px 28px rgba(53,24,165,.45);transform:translateY(-2px)}
 .kpi .k{font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--mut);font-weight:500;margin-bottom:10px}
@@ -321,7 +321,7 @@ html,body{height:100%;background:#FAFAFC}
 .sec-hd{font-size:10px;letter-spacing:.15em;text-transform:uppercase;color:var(--mut);font-weight:500;margin-bottom:12px;display:flex;justify-content:space-between;align-items:center}
 .sec-hd button{font-size:12px;color:var(--ink);background:none;border:none;cursor:pointer;letter-spacing:0;text-transform:none;font-weight:500;font-family:inherit;opacity:.8;transition:.12s}
 .sec-hd button:hover{opacity:1}
-.tbl{width:100%;border-collapse:collapse;margin-bottom:32px;background:rgba(255,255,255,.6);backdrop-filter:blur(22px) saturate(1.35);-webkit-backdrop-filter:blur(22px) saturate(1.35);border-radius:12px;overflow:hidden;border:1px solid rgba(255,255,255,.9);box-shadow:0 1px 2px rgba(16,12,60,.04),0 18px 44px -20px rgba(28,10,99,.14)}
+.tbl{width:100%;border-collapse:collapse;margin-bottom:32px;background:rgba(255,255,255,.78);border-radius:12px;overflow:hidden;border:1px solid rgba(255,255,255,.9);box-shadow:0 1px 2px rgba(16,12,60,.04),0 18px 44px -20px rgba(28,10,99,.14)}
 .tbl th{font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--mut);font-weight:500;padding:12px 18px;text-align:left;border-bottom:1px solid var(--line);background:var(--surface)}
 .tbl th:last-child,.tbl td:last-child{text-align:right}
 .tbl td{padding:14px 18px;border-bottom:1px solid var(--line);vertical-align:middle}
@@ -413,7 +413,7 @@ html,body{height:100%;background:#FAFAFC}
 .status-aktivní{background:#ECFDF5;color:#065F46}
 .status-spící{background:#FFFBEB;color:#92400E}
 .status-ukončený{background:#FEF2F2;color:#991B1B}
-.ph{max-width:520px;background:rgba(255,255,255,.55);backdrop-filter:blur(26px) saturate(1.4);-webkit-backdrop-filter:blur(26px) saturate(1.4);border:1px solid rgba(255,255,255,.95);border-radius:12px;padding:48px 40px;text-align:center;box-shadow:0 1px 2px rgba(16,12,60,.04),0 22px 54px -22px rgba(28,10,99,.18)}
+.ph{max-width:520px;background:rgba(255,255,255,.78);border:1px solid rgba(255,255,255,.95);border-radius:12px;padding:48px 40px;text-align:center;box-shadow:0 1px 2px rgba(16,12,60,.04),0 22px 54px -22px rgba(28,10,99,.16)}
 .ph h2{font-family:'Fraunces',serif;font-size:22px;font-weight:300;color:var(--txt);margin:0 0 8px}
 .ph .ph2{display:inline-block;font-size:9px;letter-spacing:.18em;text-transform:uppercase;color:var(--ink);font-weight:600;background:#EEF2FF;border-radius:5px;padding:3px 10px;margin-bottom:14px;opacity:.8}
 .ph p{font-size:13.5px;color:var(--mut);line-height:1.65}
@@ -12170,19 +12170,19 @@ const PanelCtx = createContext(null);
 // Jeden recept pro celou appku; kdo staví novou kartu, rozprostře MAUX_GLASS,
 // nepíše vlastní rgba. Blur je drahý na počet vrstev — nevrstvit sklo na sklo.
 const MAUX_GLASS = {
-  background: "rgba(255,255,255,.55)",
-  backdropFilter: "blur(26px) saturate(1.4)",
-  WebkitBackdropFilter: "blur(26px) saturate(1.4)",
+  background: "rgba(255,255,255,.68)",
+  backdropFilter: "blur(14px) saturate(1.25)",
+  WebkitBackdropFilter: "blur(14px) saturate(1.25)",
   border: "1px solid rgba(255,255,255,.95)",
-  boxShadow: "0 1px 2px rgba(16,12,60,.04), 0 22px 54px -22px rgba(28,10,99,.18)",
+  boxShadow: "0 1px 2px rgba(16,12,60,.04), 0 22px 54px -22px rgba(28,10,99,.16)",
 };
 
 // Modální tělo nad ztmaveným pozadím potřebuje hustší mléko než karta — .55 by na
 // tmavé šedlo. Jediný druhý povolený recept skla; třetí už nezaváděj.
 const MAUX_GLASS_MODAL = {
-  background: "rgba(255,255,255,.84)",
-  backdropFilter: "blur(30px) saturate(1.3)",
-  WebkitBackdropFilter: "blur(30px) saturate(1.3)",
+  background: "rgba(255,255,255,.9)",
+  backdropFilter: "blur(16px) saturate(1.2)",
+  WebkitBackdropFilter: "blur(16px) saturate(1.2)",
   border: "1px solid rgba(255,255,255,.9)",
   boxShadow: "0 24px 64px rgba(28,10,99,.22)",
 };
