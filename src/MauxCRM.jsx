@@ -226,20 +226,17 @@ async function aresSearch(query, maxResults = 10) {
 const CSS = `
 @import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,300;9..144,400;9..144,500&family=Inter:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500&display=swap');
 *{box-sizing:border-box;margin:0;padding:0}
-html,body{height:100%;background:#FAFAFC}
+html{height:100%;background:#FAFAFC}
+body{height:100%;background-color:#FAFAFC;background-repeat:no-repeat;background-attachment:fixed;
+  background-image:radial-gradient(820px 820px at -60px -80px,rgba(74,68,184,.09),transparent 68%),
+  radial-gradient(720px 720px at calc(100% + 140px) 300px,rgba(61,220,151,.07),transparent 68%),
+  radial-gradient(640px 640px at 45% 110%,rgba(198,168,107,.06),transparent 68%)}
 #root{height:100%;background:transparent}
 .mx{--ink:#3518A5;--ink2:#2810a0;--ink3:#4a2bc4;--gold:#A08350;--gold2:#CF9B3E;--green:#4A7C59;--red:#A8443C;
-    --aurA:.09;--aurB:.07;--aurC:.06;
     --bg:#F4F4FA;--page:#FAFAFC;--surface:#FFFFFF;--line:#E4E4E7;--line2:#D4D4D8;--mut:#8A8A93;--txt:#16142A;
     --mono:'JetBrains Mono','SF Mono',Menlo,monospace;
     --num:'Inter',ui-sans-serif,system-ui,sans-serif;
   font-family:'Inter',system-ui,sans-serif;color:var(--txt);background:transparent;min-height:100vh;display:flex;font-size:14px;line-height:1.5}
-.mx::before{content:"";position:fixed;width:820px;height:820px;left:-260px;top:-280px;border-radius:50%;
-  background:radial-gradient(circle,rgba(74,68,184,var(--aurA)) 0%,transparent 68%);pointer-events:none;z-index:-1}
-.mx::after{content:"";position:fixed;width:720px;height:720px;right:-240px;top:60px;border-radius:50%;
-  background:radial-gradient(circle,rgba(61,220,151,var(--aurB)) 0%,transparent 68%);pointer-events:none;z-index:-1}
-.main::before{content:"";position:fixed;width:640px;height:640px;left:30%;bottom:-300px;border-radius:50%;
-  background:radial-gradient(circle,rgba(198,168,107,var(--aurC)) 0%,transparent 68%);pointer-events:none;z-index:-1}
 .serif{font-family:'Fraunces',Georgia,serif}
 .maux-num{font-family:var(--num);font-variant-numeric:tabular-nums;letter-spacing:-.01em}
 @keyframes mauxNumGlow{0%,100%{text-shadow:0 0 4px rgba(53,24,165,.28),0 0 12px rgba(53,24,165,.14)}50%{text-shadow:0 0 6px rgba(53,24,165,.4),0 0 16px rgba(53,24,165,.2)}}
