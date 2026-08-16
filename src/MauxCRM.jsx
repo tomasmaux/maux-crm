@@ -8700,7 +8700,7 @@ function ZiskovostPanel({ workEntries }) {
   // vydělané koruny za odpracovaný čas ano). Záporné nikdy — Math.max(...,0).
   // Notář (vlastní náklad skrytý v amount) se odečítá — hodinovka má měřit marži,
   // ne obrat; jinak by si Tom u zakládání s.r.o. připisoval peníze notáře (6. 8. 2026).
-  const netAmt = e => Math.max((e.amount || (e.hours || 0) * (e.rate || 0)) - (Number(e.discount_amount) || 0) - (Number(e.notary_fee) || 0), 0);
+  const netAmt = entryNetKc;   // sdílený helper — vzorec žije na jednom místě
   const MN = ["led", "úno", "bře", "dub", "kvě", "čvn", "čvc", "srp", "zář", "říj", "lis", "pro"];
 
   const S = useMemo(() => {
@@ -8756,7 +8756,8 @@ function ZiskovostPanel({ workEntries }) {
 
       <div style={{ display: "flex", alignItems: "flex-end", gap: 30 }}>
         <div style={{ flexShrink: 0, minWidth: 176 }}>
-          <div style={bpHero(38, BP.indigoInk)}>
+          {/* zelená = peníze měřené hodinou, stejná rodina jako mřížka rytmu (Tom 16. 8. 2026) */}
+          <div style={bpHero(38, BP.ziskDeep)}>
             {solid ? fmtKc(Math.round(solid.rate)) : "—"}
             <span style={{ fontSize: 19, color: "var(--mut)" }}> / h</span>
           </div>
@@ -9101,6 +9102,76 @@ function TitulLogo({ yahoo, symbol, size = 34 }) {
   );
 }
 
+// ── ČISTÁ ČÁSTKA VÝKAZU ─────────────────────────────────────────────────────
+// Jediný zdroj pravdy pro "kolik ten výkaz opravdu vynesl". Sleva se odečítá,
+// notář taky — je to Tomův vlastní náklad skrytě obsažený v amount, takže by si
+// jinak u zakládání s.r.o. připisoval peníze notáře. Záporné nikdy.
+function entryNetKc(e) {
+  if (!e) return 0;
+  const hrubo = (e.amount || (e.hours || 0) * (e.rate || 0));
+  return Math.max(hrubo - (Number(e.discount_amount) || 0) - (Number(e.notary_fee) || 0), 0);
+}
+
+// Kolik času tě výkaz doopravdy stál. real_hours má přednost — u paušální položky
+// je hours nula, takže dělit jím by hodinovku poslalo do nekonečna.
+function entryRealH(e) {
+  const r = Number(e && e.real_hours) || 0;
+  return r > 0 ? r : (Number(e && e.hours) || 0);
+}
+
+// ── INFLACE ČR — hranice kupní síly ─────────────────────────────────────────
+// ⚠️ RUČNÍ TABULKA, ZÁMĚRNĚ. Žádné API, žádný hlídač na pozadí. Jednou za rok
+// (po lednové Rychlé informaci ČSÚ) přepíšeš běžící rok na definitivní číslo
+// a přidáš řádek pro nový. Zdroj: ČSÚ, průměrná roční míra inflace.
+//   2025 = 2,5 % (definitivní) · 2026 = 2,0 % (průměr za 12 měsíců k 7/2026)
+// Nepřesnost uvnitř roku je v řádu desetin procenta — pro otázku "porazil jsem
+// inflaci?" nehraje roli, a je to poctivější než předstírat denní přesnost.
+const CPI_ROCNI = { 2023: 10.7, 2024: 2.4, 2025: 2.5, 2026: 2.0 };
+const CPI_VYCHOZI = 2.0;   // rok, který v tabulce ještě není
+
+// Kolikrát zdraží koš mezi dvěma dny. Skládá se po kalendářních rocích, uvnitř
+// roku lineárně podle dnů. Datová aritmetika nad čistými řetězci "YYYY-MM-DD".
+function cpiFaktor(od, doD) {
+  if (!od || !doD || String(doD) <= String(od)) return 1;
+  const den = (s) => Date.parse(String(s).slice(0, 10) + "T00:00:00Z");
+  let f = 1, kurzor = String(od).slice(0, 10);
+  const cil = String(doD).slice(0, 10);
+  for (let i = 0; i < 60 && kurzor < cil; i++) {         // pojistka proti zacyklení
+    const rok = +kurzor.slice(0, 4);
+    const konecRoku = rok + "-12-31";
+    const konec = cil < konecRoku ? cil : konecRoku;
+    const dnu = Math.max(0, (den(konec) - den(kurzor)) / 86400000);
+    const r = (CPI_ROCNI[rok] != null ? CPI_ROCNI[rok] : CPI_VYCHOZI) / 100;
+    f *= Math.pow(1 + r, dnu / 365);
+    if (konec === cil) break;
+    kurzor = (rok + 1) + "-01-01";
+  }
+  return f;
+}
+
+// Řada "kolik jsi musel vydělat, abys nezchudl" — ke každému dni v řadě.
+// Bere PŘÍRŮSTKY vloženého kapitálu (tedy i výběry, ty hranici zase sníží) a
+// každý zvlášť inflatuje od dne, kdy peníze dorazily. Kdyby se inflatoval jen
+// koncový stav, počítala by se inflace i penězům, které tehdy ještě neležely.
+function inflacniHranice(rada) {
+  const prir = [];
+  let predch = 0;
+  (rada || []).forEach(r => {
+    const v = Number(r.vlozeno) || 0;
+    const d = v - predch;
+    predch = v;
+    if (Math.abs(d) >= 1) prir.push([r.datum, d]);
+  });
+  return (rada || []).map(r => {
+    let ztrata = 0;
+    for (let i = 0; i < prir.length; i++) {
+      if (prir[i][0] > r.datum) break;
+      ztrata += prir[i][1] * (cpiFaktor(prir[i][0], r.datum) - 1);
+    }
+    return ztrata;
+  });
+}
+
 // ── GRAF PORTFOLIA PROTI SVĚTOVÉMU INDEXU ───────────────────────────────────
 // Tři optiky, tři řady přepínačů. Default: Procenta · 1R — odpovídá na otázku
 // „jsem lepší než trh?". Verdiktová pilulka mluví VŽDY v korunách, protože bere
@@ -9281,7 +9352,10 @@ function AkcieGraf({ serie, stav = "idle", onNacti, pf = null }) {
   // ── BLOK 1 — hromadění zisku, celá historie ──────────────────────────────────
   const H1 = 210;
   const zTot = rada.map(r => r.zisk), zReaS = rada.map(r => r.realizovano);
-  const o1 = osa(zTot.concat(zReaS), H1, true);
+  // Hranice kupní síly — kolik z toho zisku jen dorovnalo inflaci (viz inflacniHranice).
+  const zInfl = inflacniHranice(rada);
+  const nadInflaci = zisk - (zInfl[zInfl.length - 1] || 0);
+  const o1 = osa(zTot.concat(zInfl), H1, true);
   const px1 = pxN(rada.length);
   const dno1 = o1.py(0);   // osa má nulu vždy v rámci (nuluDoRamce), takže je kam plochu posadit
   const rysky1 = ryskyZ(rada), krok1 = rysky1.length > 9 ? Math.ceil(rysky1.length / 8) : 1;
@@ -9335,6 +9409,10 @@ function AkcieGraf({ serie, stav = "idle", onNacti, pf = null }) {
         {P.vlozeno > 0 && <> · <b style={{ color: "var(--txt)" }}>{pct((zisk / P.vlozeno) * 100)}</b> na vloženém kapitálu</>}
         {" "}· od {rada[0].datum.split("-").reverse().join(". ")}
       </div>
+      <div style={{ fontSize: 12.5, color: "var(--mut)", marginTop: 5 }}>
+        z toho <b style={{ color: nadInflaci >= 0 ? BP.ziskDeep : CIHLA }}>{kc(nadInflaci)}</b> je skutečné zbohatnutí
+        {(zInfl[zInfl.length - 1] || 0) > 0 && <> · <b style={{ color: BP.sandDeep }}>{fmtKc(Math.round(zInfl[zInfl.length - 1]))}</b> jen dorovnalo inflaci</>}
+      </div>
 
       <svg viewBox={`0 0 ${W} ${H1}`} preserveAspectRatio="none" style={{ display: "block", width: "100%", height: H1, marginTop: 16, overflow: "visible" }}>
         {rysky1.filter((_, k) => k % krok1 === 0).map(r => (
@@ -9343,33 +9421,73 @@ function AkcieGraf({ serie, stav = "idle", onNacti, pf = null }) {
             <text x={px1(r.i) + 4} y={H1 - 7} fontSize="9" fill="#A8A4B5" letterSpacing=".08em">{MES[+r.m.slice(5, 7) - 1]}</text>
           </g>
         ))}
-        {/* ⚠️ VRSTVY, NE PŘEKRYV. Dřív se kreslily dvě plochy od nuly přes sebe a tmavá
-            vylézala nad světlou křivku — oko nepoznalo, co je co. Teď dole sedí uzavřené
-            obchody a NA NICH leží pás otevřených pozic; horní hrana je celý zisk. */}
-        <path d={`${cesta(zReaS, px1, o1.py)} L ${px1(rada.length - 1)} ${dno1} L ${px1(0)} ${dno1} Z`} fill={BP.indigoDeep} fillOpacity=".88" />
-        <path d={`${cesta(zTot, px1, o1.py)} ${cestaZpet(zReaS, px1, o1.py)} Z`} fill="#B3AAEA" fillOpacity=".55" />
-        <path d={cesta(zReaS, px1, o1.py)} fill="none" stroke="#fff" strokeWidth="1.3" strokeOpacity=".7" />
-        <path d={cesta(zTot, px1, o1.py)} fill="none" stroke="#6F62D8" strokeWidth="2.2" strokeLinejoin="round" />
+        {/* ⚠️ JEDNA KŘIVKA, JEDNA REFERENCE (Tom 16. 8. 2026: "ten modrej pás mi nic neříká").
+            Dřív tu ležely dvě plochy — realizovaný a papírový zisk. Technicky správně, ale
+            odpovídalo to na otázku, kterou si Tom neklade, a schody vypadaly jako chyba v datech.
+            Teď: zelená = celý zisk, písková přerušovaná = hranice kupní síly. Když zelená klesne
+            POD ni, pás mezi nimi zčervená — jinak by zelená znamenala "dobře" i při reálné ztrátě.
+            Záře je gradient + jedna vrstva rozostření, stejný recept jako koláč spořáku. Žádný
+            odlesk, žádné blikání. Rozklad zisku na složky zůstal pod grafem jako text. */}
+        <defs>
+          <linearGradient id="mauxZiskFill" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor={BP.zisk} stopOpacity=".30" />
+            <stop offset="100%" stopColor={BP.zisk} stopOpacity=".02" />
+          </linearGradient>
+          <filter id="mauxZiskZar" x="-8%" y="-45%" width="116%" height="210%">
+            <feGaussianBlur stdDeviation="5.4" />
+          </filter>
+          {/* Vše pod pískovou čárou. Cihlový pás se tím ořízne, takže je vidět jen tam,
+              kde zisk opravdu zaostal za inflací. */}
+          <clipPath id="mauxPodInflaci">
+            <path d={`${cesta(zInfl, px1, o1.py)} L ${px1(rada.length - 1)} ${H1} L ${px1(0)} ${H1} Z`} />
+          </clipPath>
+        </defs>
+        <path d={`${cesta(zTot, px1, o1.py)} L ${px1(rada.length - 1)} ${dno1} L ${px1(0)} ${dno1} Z`} fill="url(#mauxZiskFill)" />
+        <path d={`${cesta(zTot, px1, o1.py)} ${cestaZpet(zInfl, px1, o1.py)} Z`} fill="rgba(168,68,60,.18)" clipPath="url(#mauxPodInflaci)" />
+        <path d={cesta(zTot, px1, o1.py)} fill="none" stroke={BP.zisk} strokeWidth="7" strokeLinejoin="round" opacity=".36" filter="url(#mauxZiskZar)" />
+        <path d={cesta(zTot, px1, o1.py)} fill="none" stroke={BP.zisk} strokeWidth="2.4" strokeLinejoin="round" />
+        <path d={cesta(zInfl, px1, o1.py)} fill="none" stroke={BP.sandDeep} strokeWidth="1.6" strokeDasharray="5 4" />
+        <circle cx={px1(rada.length - 1)} cy={o1.py(zTot[zTot.length - 1])} r="9" fill={BP.zisk} opacity=".26" filter="url(#mauxZiskZar)" />
+        <circle cx={px1(rada.length - 1)} cy={o1.py(zTot[zTot.length - 1])} r="4.5" fill={BP.zisk} />
         <line x1={ml} y1={dno1} x2={W - mr} y2={dno1} stroke="rgba(0,0,0,.14)" strokeWidth="1" />
       </svg>
 
-      <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 14, paddingTop: 13, borderTop: "1px solid rgba(0,0,0,.06)" }}>
-        {/* ⚠️ Popisky NESMÍ tvrdit, že realizovaný zisk je v bezpečí. Peníze z uzavřené
-            pozice nezůstávají ležet — obratem se z nich kupují nové tituly, takže je trh
-            může vzít úplně stejně. Jediné, co je na uzavřeném obchodu jisté, je to, že se
-            zpětně nezmění — a že je to daňová událost. Původní text „vybráno, trh ti to
-            nevezme" byl věcně nepravdivý. Opraveno 31. 7. 2026 na Tomovu připomínku. */}
-        {[
-          [BP.indigoDeep, "Z uzavřených obchodů", zRea, "hotová věc — ale peníze jsou zpátky ve hře"],
-          ["#B3AAEA", "Z otevřených pozic", zPap, "žije dál s trhem · daň zatím neběží"],
-          [BP.sand, "Dividendy", zDiv + zOst, "čistého po srážkové dani, včetně úroků a poplatků"],
-        ].map(([b, nazev, castka, popis]) => (
-          <div key={nazev} style={{ display: "flex", alignItems: "baseline", gap: 9, fontSize: 12.5, flexWrap: "wrap" }}>
-            <i style={{ width: 11, height: 11, borderRadius: 3, background: b, flex: "0 0 auto", transform: "translateY(1px)" }} />
-            <b style={{ fontWeight: 650 }}>{nazev} {fmtKc(Math.round(castka))}</b>
-            <span style={{ fontSize: 11.5, color: "var(--mut)" }}>{popis}</span>
-          </div>
-        ))}
+      {/* Legenda patří ke GRAFU — dva řádky, dvě barvy, které v grafu opravdu jsou. */}
+      <div style={{ display: "flex", flexDirection: "column", gap: 7, marginTop: 13, paddingTop: 12, borderTop: "1px solid rgba(0,0,0,.06)" }}>
+        <div style={{ display: "flex", alignItems: "baseline", gap: 9, fontSize: 12.5, flexWrap: "wrap" }}>
+          <i style={{ width: 11, height: 11, borderRadius: 3, background: BP.zisk, flex: "0 0 auto", transform: "translateY(1px)" }} />
+          <b style={{ fontWeight: 650 }}>Tvůj zisk</b>
+          <span style={{ fontSize: 11.5, color: "var(--mut)" }}>realizovaný i papírový dohromady</span>
+        </div>
+        <div style={{ display: "flex", alignItems: "baseline", gap: 9, fontSize: 12.5, flexWrap: "wrap" }}>
+          <i style={{ width: 11, height: 3, borderRadius: 2, background: BP.sandDeep, flex: "0 0 auto", transform: "translateY(-3px)" }} />
+          <b style={{ fontWeight: 650 }}>Hranice kupní síly</b>
+          <span style={{ fontSize: 11.5, color: "var(--mut)" }}>kolik jsi musel vydělat, abys nezchudl · inflace {(CPI_ROCNI[new Date().getFullYear()] != null ? CPI_ROCNI[new Date().getFullYear()] : CPI_VYCHOZI).toFixed(1).replace(".", ",")} % p. a.</span>
+        </div>
+      </div>
+
+      {/* ⚠️ Rozklad zisku ZÁMĚRNĚ BEZ BAREVNÝCH ČTVEREČKŮ — ty barvy už v grafu nejsou
+          a čtvereček, který na nic neukazuje, je horší než žádný.
+          ⚠️ Popisky NESMÍ tvrdit, že realizovaný zisk je v bezpečí. Peníze z uzavřené
+          pozice nezůstávají ležet — obratem se z nich kupují nové tituly, takže je trh
+          může vzít úplně stejně. Jediné, co je na uzavřeném obchodu jisté, je to, že se
+          zpětně nezmění — a že je to daňová událost. Původní text „vybráno, trh ti to
+          nevezme" byl věcně nepravdivý. Opraveno 31. 7. 2026 na Tomovu připomínku. */}
+      <div style={{ marginTop: 16, paddingTop: 13, borderTop: "1px solid rgba(0,0,0,.06)" }}>
+        <div style={bpLabel({ marginBottom: 9 })}>z čeho ten zisk je</div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
+          {[
+            ["Z uzavřených obchodů", zRea, "hotová věc — ale peníze jsou zpátky ve hře"],
+            ["Z otevřených pozic", zPap, "žije dál s trhem · daň zatím neběží"],
+            ["Dividendy", zDiv + zOst, "čistého po srážkové dani, včetně úroků a poplatků"],
+          ].map(([nazev, castka, popis]) => (
+            <div key={nazev} style={{ display: "flex", alignItems: "baseline", gap: 9, fontSize: 12.5, flexWrap: "wrap" }}>
+              <span style={{ color: "#B9B5C4", flex: "0 0 auto" }}>·</span>
+              <b style={{ fontWeight: 650 }}>{nazev} {fmtKc(Math.round(castka))}</b>
+              <span style={{ fontSize: 11.5, color: "var(--mut)" }}>{popis}</span>
+            </div>
+          ))}
+        </div>
       </div>
 
       {/* ── DAŇOVÝ PODKLAD — patří k uzavřeným obchodům, ne k celkovému zisku ──── */}
@@ -11891,6 +12009,11 @@ const BP = {
   // ale pořád daleko od neonu; poloměry v apple měřítku (22/20/18).
   indigo: "#4A44B8", indigoDeep: "#3A3494", indigoInk: "#2B2478",
   sand: "#C6A86B", sandDeep: "#96773C",
+  // ⚠️ ZELENÁ = PENÍZE V TRŽNÍM RIZIKU (Tom 16. 8. 2026: "radioaktivní neonová,
+  // odměňující, svítivá, klidná"). Platí JEN na svět peněz, které pracují na trhu
+  // nebo se měří sazbou — graf zisku v Akciích a heatmapa hodinovky. NIKDY plošně:
+  // indigo zůstává firma, písek osobní majetek.
+  zisk: "#3DDC97", ziskDeep: "#22C98A",
   live: "#DAD8EF", liveEdge: "#6E68C4",
   up: "#4A7C59", down: "#A8443C",
   corner: "#ABA6DA",
@@ -13793,42 +13916,110 @@ function WorkEntryForm({ init, prefillDate, clients, onSave, onCancel, saving })
 
 // Od kdy Tom vede výkazy čistě přes tento systém (jeho zadání) — dřívější záznamy
 // se do analýzy pracovního rytmu nezapočítávají, ať není zkreslená historickými daty.
+// ── RYTMUS: den v týdnu × denní doba ────────────────────────────────────────
+// Top-level, protože z toho čte i seznam výkazů (kliknutí do mřížky filtruje seznam).
+// ⚠️ Den se bere z entry_date (KDY jsi pracoval), denní doba z created_at (KDY jsi to
+// zapsal). Jsou to dvě různé osy a schválně — Tom zapisuje převážně týž den, takže
+// doba zápisu je nejlepší dostupný odhad doby práce. Kdyby se to rozešlo, pozná se to
+// právě tady: mřížka zřídne a čísla přestanou dávat smysl.
+const RYTMUS_BUCKETS = [
+  { label: "Noc",          kratce: "Noc",    from: 0,  to: 6  },
+  { label: "Ráno",         kratce: "Ráno",   from: 6,  to: 9  },
+  { label: "Dopoledne",    kratce: "Dopol.", from: 9,  to: 12 },
+  { label: "Odpoledne",    kratce: "Odpol.", from: 12, to: 15 },
+  { label: "Večer",        kratce: "Večer",  from: 15, to: 19 },
+  { label: "Pozdní večer", kratce: "Pozdě",  from: 19, to: 24 },
+];
+const RYTMUS_DOW = ["Po","Út","St","Čt","Pá","So","Ne"];
+const RYTMUS_DOW_V = { Po:"v pondělí", Út:"v úterý", St:"ve středu", Čt:"ve čtvrtek", Pá:"v pátek", So:"v sobotu", Ne:"v neděli" };
+const RYTMUS_DOW_1 = { Po:"pondělí", Út:"úterý", St:"středa", Čt:"čtvrtek", Pá:"pátek", So:"sobota", Ne:"neděle" };
+
+// Pondělí = 0. getDay() vrací neděli jako 0, proto ten posun.
+function rytmusDow(entryDate) {
+  if (!entryDate) return -1;
+  const d = new Date(String(entryDate) + "T00:00:00");
+  if (isNaN(d)) return -1;
+  return (d.getDay() + 6) % 7;
+}
+function rytmusBucket(createdAt) {
+  if (!createdAt) return -1;
+  const d = new Date(createdAt);
+  if (isNaN(d)) return -1;
+  const h = d.getHours();
+  return RYTMUS_BUCKETS.findIndex(b => h >= b.from && h < b.to);
+}
+
 const WORK_RHYTHM_CUTOFF = "2026-06-01";
 
 /* ─── ANALÝZA "KDY VYKAZUJI PRÁCI NEJVÍCE" — den v týdnu + denní doba zadání ─── */
-function WorkRhythmPanel({ entries }) {
+function WorkRhythmPanel({ entries, pick, onPick }) {
+  const [hover, setHover] = useState(null);
   const fmtH = (h) => `${(h || 0).toLocaleString("cs-CZ", { maximumFractionDigits: 1 })} h`;
-  const DOW_LABELS = ["Po","Út","St","Čt","Pá","So","Ne"];
-  const DOW_FULL = { Po:"v pondělí", Út:"v úterý", St:"ve středu", Čt:"ve čtvrtek", Pá:"v pátek", So:"v sobotu", Ne:"v neděli" };
+  const PRAH = 3;   // pod tři záznamy se pole nekreslí — jedna tučná faktura by jinak přebarvila celý týden
 
   const data = useMemo(() => {
     const post = (entries || []).filter(e => (e.entry_date || "") >= WORK_RHYTHM_CUTOFF);
-    const byDow = DOW_LABELS.map(label => ({ label, hours: 0, count: 0 }));
-    const buckets = [
-      { label: "Noc",          from: 0,  to: 6  },
-      { label: "Ráno",         from: 6,  to: 9  },
-      { label: "Dopoledne",    from: 9,  to: 12 },
-      { label: "Odpoledne",    from: 12, to: 15 },
-      { label: "Večer",        from: 15, to: 19 },
-      { label: "Pozdní večer", from: 19, to: 24 },
-    ].map(b => ({ ...b, hours: 0, count: 0 }));
+    const prazdna = () => ({ kc: 0, h: 0, n: 0 });
+    const mrizka = RYTMUS_BUCKETS.map(() => RYTMUS_DOW.map(prazdna));
+    const dowSum = RYTMUS_DOW.map(prazdna);
+    const bucSum = RYTMUS_BUCKETS.map(prazdna);
+    let kcCelkem = 0, hCelkem = 0, realH = 0, faktH = 0, parovych = 0;
+    const podleDne = RYTMUS_DOW.map(() => []);   // pro trend
 
     post.forEach(e => {
-      const d = new Date((e.entry_date || "") + "T00:00:00");
-      const dow = (d.getDay() + 6) % 7;
-      if (byDow[dow]) { byDow[dow].hours += (e.hours || 0); byDow[dow].count += 1; }
-      if (e.created_at) {
-        const h = new Date(e.created_at).getHours();
-        const b = buckets.find(b => h >= b.from && h < b.to);
-        if (b) { b.hours += (e.hours || 0); b.count += 1; }
+      const kc = entryNetKc(e), h = entryRealH(e);
+      const dow = rytmusDow(e.entry_date), bi = rytmusBucket(e.created_at);
+      kcCelkem += kc; hCelkem += h;
+      if (dow >= 0) {
+        dowSum[dow].kc += kc; dowSum[dow].h += h; dowSum[dow].n += 1;
+        podleDne[dow].push({ datum: e.entry_date, kc, h });
+        if (bi >= 0) {
+          bucSum[bi].kc += kc; bucSum[bi].h += h; bucSum[bi].n += 1;
+          const c = mrizka[bi][dow]; c.kc += kc; c.h += h; c.n += 1;
+        }
       }
+      const rh = Number(e.real_hours) || 0, fh = Number(e.hours) || 0;
+      if (rh > 0 && fh > 0) { realH += rh; faktH += fh; parovych += 1; }
     });
 
-    const maxDowHours = Math.max(1, ...byDow.map(d => d.hours));
-    const maxBucketCount = Math.max(1, ...buckets.map(b => b.count));
-    const topDow = [...byDow].sort((a, b) => b.hours - a.hours)[0];
-    const topBucket = [...buckets].sort((a, b) => b.count - a.count)[0];
-    return { post, byDow, buckets, maxDowHours, maxBucketCount, topDow, topBucket };
+    const sazba = (c) => (c && c.h > 0 && c.n >= PRAH ? c.kc / c.h : null);
+    const bunky = mrizka.flat().map(sazba).filter(v => v != null);
+    const prumer = hCelkem > 0 ? kcCelkem / hCelkem : 0;
+
+    // ⚠️ VERDIKT Z OKRAJOVÝCH SOUČTŮ, NE Z BUŇKY. Řádek i sloupec mají desítky
+    // záznamů, buňka jen pár — kdyby verdikt stál na buňce, převrátila by ho jedna
+    // faktura. Mřížka je detail, věta stojí na marginálech.
+    const topDow = dowSum.map((c, k) => ({ ...c, i: k, label: RYTMUS_DOW[k], sazba: c.h > 0 && c.n >= PRAH ? c.kc / c.h : null }))
+      .filter(x => x.sazba != null).sort((a, b) => b.sazba - a.sazba);
+    const topBuc = bucSum.map((c, k) => ({ ...c, i: k, label: RYTMUS_BUCKETS[k].label, sazba: c.h > 0 && c.n >= PRAH ? c.kc / c.h : null }))
+      .filter(x => x.sazba != null).sort((a, b) => b.sazba - a.sazba);
+    const nejcastejsi = bucSum.map((c, k) => ({ ...c, label: RYTMUS_BUCKETS[k].label })).sort((a, b) => b.n - a.n)[0];
+
+    // Sloupce dnů, ve kterých vůbec nic není (typicky sobota), se do mřížky nekreslí.
+    const dnyVidet = RYTMUS_DOW.map((_, k) => k).filter(k => dowSum[k].n > 0);
+
+    // TREND nejdražšího dne — dvě poloviny období proti sobě. Ukáže se jen tehdy,
+    // když má KAŽDÁ polovina aspoň PRAH záznamů; jinak by to byl šum s šipkou.
+    let trend = null;
+    if (topDow.length) {
+      const zaz = podleDne[topDow[0].i].slice().sort((a, b) => String(a.datum).localeCompare(String(b.datum)));
+      const del = Math.floor(zaz.length / 2);
+      const stara = zaz.slice(0, del), nova = zaz.slice(del);
+      const sz = (arr) => { const h = arr.reduce((s, x) => s + x.h, 0); return h > 0 ? arr.reduce((s, x) => s + x.kc, 0) / h : null; };
+      if (stara.length >= PRAH && nova.length >= PRAH) {
+        const a = sz(stara), b = sz(nova);
+        if (a != null && b != null && a > 0) trend = { pct: ((b / a) - 1) * 100, drive: a, ted: b };
+      }
+    }
+
+    return {
+      post, mrizka, dowSum, bucSum, prumer, kcCelkem, dnyVidet, trend, sazba, parovych,
+      lo: bunky.length ? Math.min(...bunky) : 0,
+      hi: bunky.length ? Math.max(...bunky) : 1,
+      topDow, topBuc, nejcastejsi,
+      hodinyDow: dowSum.map(c => c.h),
+      realH, faktH,
+    };
   }, [entries]);
 
   if (data.post.length < 3) {
@@ -13839,50 +14030,161 @@ function WorkRhythmPanel({ entries }) {
     );
   }
 
+  const kcH = (v) => v == null ? "—" : Math.round(v).toLocaleString("cs-CZ") + " Kč/h";
+  const rozpeti = Math.max(1, data.hi - data.lo);
+  // světlá → BP.ziskDeep; zelená = peníze měřené sazbou
+  const barva = (t) => {
+    const a = [246, 250, 248], b = [34, 201, 138];
+    return `rgb(${a.map((v, k) => Math.round(v + (b[k] * 0.88 - v) * t)).join(",")})`;
+  };
+  const nej = data.topDow[0];
+  const nejhorsi = data.topBuc.length > 1 ? data.topBuc[data.topBuc.length - 1] : null;
+  const nadPrumer = nej && data.prumer > 0 ? ((nej.sazba / data.prumer) - 1) * 100 : null;
+  const podilObratu = data.nejcastejsi && data.kcCelkem > 0 ? (data.nejcastejsi.kc / data.kcCelkem) * 100 : null;
+  const darovano = data.realH - data.faktH;
+  const t = data.trend;
+
+  const bunka = (ri, di) => {
+    const c = data.mrizka[ri][di];
+    const s = data.sazba(c);
+    const q = s == null ? 0 : Math.min(1, Math.max(0, (s - data.lo) / rozpeti));
+    const on = hover && hover.r === ri && hover.d === di;
+    const akt = pick && pick.r === ri && pick.d === di;
+    const klik = s == null ? null : () => onPick && onPick(akt ? null : { r: ri, d: di });
+    return (
+      <div key={ri + "-" + di}
+        onMouseEnter={() => s != null && setHover({ r: ri, d: di })}
+        onMouseLeave={() => setHover(null)}
+        onClick={klik}
+        title={s == null ? "" : "Zobrazit tyto výkazy v seznamu"}
+        style={{
+          height: 30, borderRadius: 5, display: "flex", alignItems: "center", justifyContent: "center",
+          background: s == null ? "rgba(0,0,0,.022)" : barva(q),
+          color: s == null ? "#C4C0CE" : (q > 0.55 ? "#fff" : "#2A3B33"),
+          fontFamily: "var(--num)", fontVariantNumeric: "tabular-nums", fontSize: 10.5, fontWeight: akt ? 700 : 500,
+          cursor: s == null ? "default" : "pointer",
+          outline: akt ? `2px solid ${BP.indigoInk}` : (on ? `1.5px solid ${BP.ziskDeep}` : "none"),
+          outlineOffset: akt ? 1 : 0, transition: "outline .12s",
+        }}>
+        {s == null ? "—" : (s / 1000).toFixed(1).replace(".", ",")}
+      </div>
+    );
+  };
+
   return (
     <div style={{ background: "#fff", borderRadius: 14, boxShadow: "0 0 0 1px rgba(0,0,0,.06), 0 4px 16px rgba(0,0,0,.04)", padding: "18px 22px", marginBottom: 24 }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 16, flexWrap: "wrap", gap: 6 }}>
-        <div style={{ fontSize: 8, letterSpacing: ".24em", textTransform: "uppercase", fontWeight: 700, color: "var(--mut)" }}>KDY VYKAZUJI PRÁCI NEJVÍCE</div>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 14, flexWrap: "wrap", gap: 6 }}>
+        <div style={{ fontSize: 8, letterSpacing: ".24em", textTransform: "uppercase", fontWeight: 700, color: "var(--mut)" }}>KDY JE MOJE HODINA NEJDRAŽŠÍ</div>
         <div style={{ fontSize: 10.5, color: "var(--mut)" }}>od {fmtDate(WORK_RHYTHM_CUTOFF)} · {data.post.length} záznamů</div>
       </div>
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 28 }}>
-        {/* Podle dne v týdnu */}
+
+      {/* ⚠️ VĚTA ZÁVĚRU NAD ČÍSLY. Starý panel říkal „nejvíc pracuješ v úterý" — pravda,
+          se kterou se nedá nic dělat. Tohle říká, kde vzniká marže. */}
+      <div style={{ fontSize: 14, color: "#3A3550", lineHeight: 1.6, marginBottom: 16, maxWidth: "74ch" }}>
+        {nej && <>Nejdražší je <b>{RYTMUS_DOW_1[nej.label]}</b> — <b style={{ color: BP.ziskDeep }}>{kcH(nej.sazba)}</b>
+          {nadPrumer != null && nadPrumer > 1 && <>, o <b>{Math.round(nadPrumer)} %</b> nad tvým průměrem</>}.</>}
+        {nejhorsi && <> Nejlevnější denní doba je <b>{nejhorsi.label.toLowerCase()}</b>: <b>{kcH(nejhorsi.sazba)}</b>.</>}
+        {t && Math.abs(t.pct) >= 4 && (
+          <span style={{ display: "block", marginTop: 7, fontSize: 12.5, color: "var(--mut)" }}>
+            <span style={{ color: t.pct >= 0 ? BP.ziskDeep : BP.down, fontWeight: 700 }}>{t.pct >= 0 ? "↑" : "↓"} {Math.abs(Math.round(t.pct))} %</span>
+            {" "}proti první polovině období — {RYTMUS_DOW_1[nej.label]} {t.pct >= 0 ? "zdražuje" : "zlevňuje"} ({kcH(t.drive)} → {kcH(t.ted)}).
+          </span>
+        )}
+        {t && Math.abs(t.pct) < 4 && (
+          <span style={{ display: "block", marginTop: 7, fontSize: 12.5, color: "var(--mut)" }}>
+            Sazba {RYTMUS_DOW_V[nej.label]} je stabilní — proti první polovině období se nehnula.
+          </span>
+        )}
+      </div>
+
+      {/* mřížka: denní doba × den v týdnu, obarvená podle Kč/h. Dny bez jediného záznamu se nekreslí. */}
+      <div style={{ display: "grid", gridTemplateColumns: `62px repeat(${data.dnyVidet.length},1fr)`, gap: 4 }}>
+        <div />
+        {data.dnyVidet.map(k => (
+          <div key={k} style={{ fontSize: 10, color: "var(--mut)", textAlign: "center", paddingBottom: 2 }}>{RYTMUS_DOW[k]}</div>
+        ))}
+        {RYTMUS_BUCKETS.map((b, ri) => (
+          <Fragment key={b.label}>
+            <div style={{ fontSize: 10.5, color: "var(--mut)", display: "flex", alignItems: "center", height: 30 }}>{b.kratce}</div>
+            {data.dnyVidet.map(di => bunka(ri, di))}
+          </Fragment>
+        ))}
+      </div>
+
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 10, marginTop: 10, flexWrap: "wrap" }}>
+        <div style={{ fontSize: 11, color: "var(--mut)" }}>
+          {hover && data.sazba(data.mrizka[hover.r][hover.d]) != null
+            ? <>{RYTMUS_DOW_V[RYTMUS_DOW[hover.d]]} · {RYTMUS_BUCKETS[hover.r].label.toLowerCase()} — <b style={{ color: BP.ziskDeep }}>{kcH(data.sazba(data.mrizka[hover.r][hover.d]))}</b> · {fmtH(data.mrizka[hover.r][hover.d].h)} · {data.mrizka[hover.r][hover.d].n}× · <span style={{ color: BP.indigo }}>klikni pro výpis</span></>
+            : <>Číslo v poli = tisíce Kč za hodinu. Sytější pole vydělává víc. Pole s méně než {PRAH} záznamy zůstává prázdné.</>}
+        </div>
+        <div style={{ fontSize: 11, color: "var(--mut)" }}>průměr <b style={{ color: "var(--txt)" }}>{kcH(data.prumer)}</b></div>
+      </div>
+
+      <div style={{ marginTop: 18, paddingTop: 14, borderTop: "1px solid rgba(0,0,0,.06)", display: "grid", gridTemplateColumns: "1fr 1fr", gap: 26 }}>
         <div>
-          <div style={{ fontSize: 10, color: "#3518A5", fontWeight: 700, marginBottom: 10, textTransform: "uppercase", letterSpacing: ".06em" }}>Podle dne v týdnu</div>
-          <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
-            {data.byDow.map(d => (
-              <div key={d.label} style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                <span style={{ width: 20, fontSize: 11.5, color: "var(--mut)", fontWeight: d.label === data.topDow.label ? 700 : 400 }}>{d.label}</span>
-                <div style={{ flex: 1, height: 8, borderRadius: 4, background: "rgba(53,24,165,.06)", overflow: "hidden" }}>
-                  <div style={{ height: "100%", width: `${(d.hours / data.maxDowHours) * 100}%`, borderRadius: 4, background: d.label === data.topDow.label ? "#3518A5" : "#9D93DD", transition: "width .5s" }} />
+          <div style={{ fontSize: 9.5, letterSpacing: ".16em", textTransform: "uppercase", fontWeight: 600, color: "var(--mut)", marginBottom: 10 }}>Kolik hodin který den</div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            {data.dnyVidet.map(k => {
+              const h = data.hodinyDow[k], max = Math.max(1, ...data.hodinyDow);
+              return (
+                <div key={k} style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <span style={{ width: 20, fontSize: 11.5, color: "var(--mut)" }}>{RYTMUS_DOW[k]}</span>
+                  <div style={{ flex: 1, height: 6, borderRadius: 3, background: "rgba(53,24,165,.06)", overflow: "hidden" }}>
+                    <div style={{ height: "100%", width: `${(h / max) * 100}%`, borderRadius: 3, background: BP.indigo, opacity: h === max ? 1 : .55 }} />
+                  </div>
+                  <span className="maux-num" style={{ fontSize: 11, color: "var(--mut)", minWidth: 46, textAlign: "right" }}>{fmtH(h)}</span>
                 </div>
-                <span style={{ fontSize: 11, color: "var(--mut)", minWidth: 60, textAlign: "right" }}>{fmtH(d.hours)} · {d.count}×</span>
-              </div>
-            ))}
-          </div>
-          <div style={{ fontSize: 11, color: "var(--mut)", marginTop: 12, lineHeight: 1.5 }}>
-            Nejvíc pracuješ <strong style={{ color: "#3518A5" }}>{DOW_FULL[data.topDow.label]}</strong> ({fmtH(data.topDow.hours)} celkem).
+              );
+            })}
           </div>
         </div>
-        {/* Podle denní doby zadání */}
         <div>
-          <div style={{ fontSize: 10, color: "#16A34A", fontWeight: 700, marginBottom: 10, textTransform: "uppercase", letterSpacing: ".06em" }}>Podle denní doby (kdy zapisuješ)</div>
-          <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
-            {data.buckets.map(b => (
-              <div key={b.label} style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                <span style={{ width: 84, fontSize: 11.5, color: "var(--mut)", fontWeight: b.label === data.topBucket.label ? 700 : 400 }}>{b.label}</span>
-                <div style={{ flex: 1, height: 8, borderRadius: 4, background: "rgba(22,163,74,.06)", overflow: "hidden" }}>
-                  <div style={{ height: "100%", width: `${(b.count / data.maxBucketCount) * 100}%`, borderRadius: 4, background: b.label === data.topBucket.label ? "#16A34A" : "#86EFAC", transition: "width .5s" }} />
+          <div style={{ fontSize: 9.5, letterSpacing: ".16em", textTransform: "uppercase", fontWeight: 600, color: "var(--mut)", marginBottom: 10 }}>Kolik nese která doba</div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            {RYTMUS_BUCKETS.map((b, k) => {
+              const c = data.bucSum[k], s = data.sazba(c);
+              const max = Math.max(1, ...data.bucSum.map(x => data.sazba(x) || 0));
+              return (
+                <div key={b.label} style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <span style={{ width: 72, fontSize: 11.5, color: "var(--mut)" }}>{b.label}</span>
+                  <div style={{ flex: 1, height: 6, borderRadius: 3, background: "rgba(34,201,138,.08)", overflow: "hidden" }}>
+                    <div style={{ height: "100%", width: `${s == null ? 0 : (s / max) * 100}%`, borderRadius: 3, background: BP.ziskDeep, opacity: s === max ? 1 : .55 }} />
+                  </div>
+                  <span className="maux-num" style={{ fontSize: 11, color: "var(--mut)", minWidth: 62, textAlign: "right" }}>{kcH(s)}</span>
                 </div>
-                <span style={{ fontSize: 11, color: "var(--mut)", minWidth: 30, textAlign: "right" }}>{b.count}×</span>
-              </div>
-            ))}
-          </div>
-          <div style={{ fontSize: 11, color: "var(--mut)", marginTop: 12, lineHeight: 1.5 }}>
-            Nejčastěji zapisuješ výkazy <strong style={{ color: "#16A34A" }}>{data.topBucket.label.toLowerCase()}</strong> ({data.topBucket.count}× z {data.post.length}).
+              );
+            })}
           </div>
         </div>
       </div>
+
+      {podilObratu != null && data.nejcastejsi && data.nejcastejsi.n >= PRAH && (
+        <div style={{ borderLeft: `2px solid ${BP.sand}`, background: "rgba(198,168,107,.09)", padding: "11px 15px", marginTop: 16, fontSize: 12.5, lineHeight: 1.6 }}>
+          Nejvíc výkazů zapisuješ <b>{data.nejcastejsi.label.toLowerCase()}</b> — <b className="maux-num">{data.nejcastejsi.n}</b> ze <b className="maux-num">{data.post.length}</b>,
+          ale jen <b className="maux-num">{Math.round(podilObratu)} %</b> obratu. Levné agendy ti berou nejvíc zápisů.
+        </div>
+      )}
+
+      {/* ── HODINY, KTERÉ NEJSOU NA ŽÁDNÉ FAKTUŘE ────────────────────────────────
+          Tom vyplňuje real_hours (kolik ho to stálo) i hours (co naúčtoval). Appka
+          z toho počítá „Hodnotu tvé hodiny", ale samotný ROZDÍL nikde vidět nebyl. */}
+      {data.parovych >= 3 && darovano > 0.4 && (
+        <div style={{ marginTop: 16, paddingTop: 14, borderTop: "1px solid rgba(0,0,0,.06)" }}>
+          <div style={{ fontSize: 9.5, letterSpacing: ".16em", textTransform: "uppercase", fontWeight: 600, color: "var(--mut)", marginBottom: 9 }}>Hodiny, které jsi nenaúčtoval</div>
+          <div style={{ display: "flex", alignItems: "baseline", gap: 12, flexWrap: "wrap" }}>
+            <span className="maux-num" style={{ fontSize: 26, fontWeight: 600, letterSpacing: "-.025em", color: BP.indigoInk }}>{fmtH(darovano)}</span>
+            <span style={{ fontSize: 12.5, color: "var(--mut)" }}>
+              odpracoval jsi <b style={{ color: "var(--txt)" }}>{fmtH(data.realH)}</b>, naúčtoval <b style={{ color: "var(--txt)" }}>{fmtH(data.faktH)}</b>
+              {data.realH > 0 && <> · <b style={{ color: "var(--txt)" }}>{Math.round((darovano / data.realH) * 100)} %</b> tvého času</>}
+              {data.prumer > 0 && <> · v tvé sazbě <b style={{ color: "var(--txt)" }}>{fmtKc(Math.round(darovano * data.prumer))}</b></>}
+            </span>
+          </div>
+          <div style={{ fontSize: 11, color: "var(--mut)", marginTop: 8, lineHeight: 1.55, maxWidth: "76ch" }}>
+            Ze {data.parovych} výkazů, kde máš vyplněné reálné i fakturované hodiny. Část z toho je vědomá sleva a část
+            vlastní režie — appka to nerozliší. Ukazuje jen rozsah.
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -13890,6 +14192,8 @@ function WorkRhythmPanel({ entries }) {
 function WorkEntryList({ entries, clients, invoices, financeItems, onNew, onEdit, onDelete, onGenerateInvoice, onPreviewInvoice, loading }) {
   const [filterClient, setFilterClient] = useState("");
   const [search, setSearch] = useState("");
+  // Kliknutí do mřížky rytmu — { r: index denní doby, d: index dne v týdnu }.
+  const [rytmus, setRytmus] = useState(null);
   // data notářských dokladů z odpočtu — pro tichou kontrolu párování (viz notaryDocDates)
   const notaryDates = useMemo(() => notaryDocDates(financeItems), [financeItems]);
 
@@ -13909,8 +14213,14 @@ function WorkEntryList({ entries, clients, invoices, financeItems, onNew, onEdit
         return desc.includes(q) || cname.includes(q);
       });
     }
+    // Výběr z mřížky rytmu — stejná dvojice os jako v panelu (den z entry_date,
+    // doba ze created_at), aby seznam ukázal přesně ty záznamy, které pole tvoří.
+    if (rytmus) {
+      list = list.filter(e => (e.entry_date || "") >= WORK_RHYTHM_CUTOFF
+        && rytmusDow(e.entry_date) === rytmus.d && rytmusBucket(e.created_at) === rytmus.r);
+    }
     return list;
-  }, [entries, filterClient, search, clientNameById]);
+  }, [entries, filterClient, search, clientNameById, rytmus]);
 
   const unbilled = filtered.filter(e => !e.invoice_id);
   const unbilledByMonth = useMemo(() => {
@@ -13955,7 +14265,21 @@ function WorkEntryList({ entries, clients, invoices, financeItems, onNew, onEdit
         </div>
       </div>
 
-      <WorkRhythmPanel entries={entries} />
+      <WorkRhythmPanel entries={entries} pick={rytmus} onPick={setRytmus} />
+
+      {rytmus && (
+        <div style={{ borderLeft: `2px solid ${BP.indigo}`, background: "rgba(74,68,184,.045)", padding: "11px 15px", marginBottom: 16,
+                      fontSize: 12.5, display: "flex", alignItems: "baseline", gap: 12, flexWrap: "wrap" }}>
+          <span>
+            Výkazy <b>{RYTMUS_DOW_V[RYTMUS_DOW[rytmus.d]]}</b> zapsané <b>{RYTMUS_BUCKETS[rytmus.r] ? RYTMUS_BUCKETS[rytmus.r].label.toLowerCase() : ""}</b>
+            {" "}— celkem <b className="maux-num">{filtered.length}</b>, z toho nevyfakturovaných <b className="maux-num">{unbilled.length}</b>.
+            {unbilled.length === 0
+              ? <> Seznam níž je prázdný proto, že všechny tyhle výkazy už jsou na faktuře.</>
+              : <> Seznam níž ukazuje právě je.</>}
+          </span>
+          <button className="btn gho" style={{ fontSize: 12, color: BP.indigo, marginLeft: "auto" }} onClick={() => setRytmus(null)}>Zrušit výběr ×</button>
+        </div>
+      )}
 
       <div style={{ display: "flex", gap: 8, marginBottom: 16, alignItems: "center", flexWrap: "wrap" }}>
         <select value={filterClient} onChange={e => setFilterClient(e.target.value)}
