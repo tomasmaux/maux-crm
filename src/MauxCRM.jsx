@@ -50,6 +50,7 @@ const MODULES = [
   { key: "rejstriky",  label: "Rejstříky",    live: true, group: 2 },
   { key: "akcie",      label: "Akcie",        live: true, group: 3 },
   { key: "dane",       label: "Daně",         live: true, group: 3 },
+  { key: "provoz",     label: "Provoz",       live: true, group: 3 },
   { key: "ostatni",    label: "Ostatní",      live: true, group: 3 },
   // group 0 = v MODULES zůstává (curMod?.live podle něj vykresluje modul),
   // ale do sidebaru se nekreslí — Josef má vlastní řádek ve spodní kotvě.
@@ -668,7 +669,9 @@ function transferPhase(t, escrow) {
     || (escrow.date_navrh_podan ? addDays(escrow.date_navrh_podan, 20) : null);
   if (konecPlomby && konecPlomby <= today()) return "zapsano";
   if (escrow.date_navrh_podan) return "vklad";
-  if (escrow.date_received) return "podpis";
+  // Hlavičkové date_received se u nových úschov už nevyplňuje — první přijetí peněz
+  // se čte z tranší (escrowFirstReceived bere obojí). 19. 8. 2026.
+  if (escrowFirstReceived(escrow)) return "podpis";
   return "priprava";
 }
 
@@ -696,7 +699,7 @@ function transferData(t, escrow) {
     seller: z.seller || t?.seller || "",
     buyer:  z.buyer  || t?.buyer  || "",
     price:  z.price ?? (t?.price ?? null),
-    zahajeno: escrow?.date_received || t?.date_vklad || t?.created_at || "",
+    zahajeno: (escrow ? escrowFirstReceived(escrow) : "") || t?.date_vklad || t?.created_at || "",
   };
 }
 
@@ -4554,11 +4557,20 @@ function _buildBalanceIntervals(e) {
   const add = (dateStr, delta) => { changeMap[dateStr] = (changeMap[dateStr] || 0) + delta; };
 
   // — Složitelé: každý vklad zvyšuje zůstatek den po přijetí
+  //
+  // ⚠️⚠️ LEKCE 19. 8. 2026 (Tom): DATUM V TRANŠI JE JEDINÝ SPOUŠTĚČ ÚROKŮ.
+  // Tranše bez data přijetí = peníze ještě NEDORAZILY (hypotéka na cestě) — nesmí
+  // zdědit datum z hlavičky. Dřív ho dědila každá tranše bez data a 011/2026 úročila
+  // 8 mil. z hypoték, které nepřišly (Zisk 786 Kč místo 134 Kč). Fallback na hlavičkové
+  // e.date_received zůstává JEN pro historické úschovy, kde ŽÁDNÁ složitelská tranše
+  // vlastní datum nemá (evidovalo se jedno datum na hlavičce). Tom hlavičkové „Přijato"
+  // u nových úschov už nevyplňuje — data píše do tranší.
   const sloz = (e.escrow_tranches || []).filter(t => t.party_type === 'složitel');
+  const maVlastniData = sloz.some(t => t.received_date);
   if (sloz.length > 0) {
     sloz.forEach(t => {
       if (!t.amount || t.amount <= 0) return;
-      const base = t.received_date || e.date_received;
+      const base = t.received_date || (maVlastniData ? null : e.date_received);
       if (!base) return;
       const d = new Date(base); d.setDate(d.getDate() + 1);
       add(d.toISOString().slice(0, 10), +t.amount);
@@ -4953,14 +4965,18 @@ const MS_MESIC = 1000 * 60 * 60 * 24 * 30.4375;
 // Kolik peněz do úschovy SKUTEČNĚ doteklo. Rozepsaná tranše bez data přijetí je
 // příslib, ne pohyb na účtu — do „proteklo" ani do milníku nesmí, jinak by objem
 // nafoukla úschova, kterou teprve draftuješ. Pravidlo je schválně TOTOŽNÉ s tím
-// v _buildBalanceIntervals (`t.received_date || e.date_received`), aby objem a úroky
-// mluvily o týchž penězích. Datum v budoucnu se nepočítá — peníze tam ještě nejsou.
+// v _buildBalanceIntervals (datum tranše; hlavička jen když žádná tranše datum nemá),
+// aby objem a úroky mluvily o týchž penězích. Datum v budoucnu se nepočítá — peníze
+// tam ještě nejsou.
 function escrowFlowedIn(e) {
   const tr = e.escrow_tranches || [];
   const dorazilo = (base) => !!base && String(base).slice(0, 10) <= today();
   const sloz = tr.filter(t => t.party_type === 'složitel');
   if (sloz.length > 0) {
-    return sloz.reduce((s, t) => s + (dorazilo(t.received_date || e.date_received) ? (t.amount || 0) : 0), 0);
+    // LEKCE 19. 8. 2026: fallback na hlavičku jen když ŽÁDNÁ tranše nemá vlastní datum
+    // (historické úschovy) — jinak tranše bez data = peníze na cestě, nepočítají se.
+    const maVlastniData = sloz.some(t => t.received_date);
+    return sloz.reduce((s, t) => s + (dorazilo(t.received_date || (maVlastniData ? null : e.date_received)) ? (t.amount || 0) : 0), 0);
   }
   // Fallback pro úschovy bez složitelských tranší — stejný jako u úrokového motoru.
   return dorazilo(e.date_received) ? tr.reduce((s, t) => s + (t.amount || 0), 0) : 0;
@@ -5483,10 +5499,9 @@ function PaymentWizard({ escrow, onClose, onSuccess }) {
 
   const selTranche = unpaid.find(t => t.id === selId);
 
-  // Aktuální zůstatek úschovy v den výplaty — pro přehled
-  const depositTotal = (escrow.escrow_tranches || [])
-    .filter(t => t.party_type === 'složitel')
-    .reduce((s,t) => s + (t.amount || 0), 0);
+  // Aktuální zůstatek úschovy v den výplaty — pro přehled. Jen peníze, které reálně
+  // dorazily (escrowFlowedIn) — nedá se vyplácet hypotéka, která ještě nepřišla. 19. 8. 2026.
+  const depositTotal = escrowFlowedIn(escrow);
   const alreadyPaid = tranches
     .filter(t => t.is_paid)
     .reduce((s,t) => s + (t.amount || 0), 0);
@@ -5662,9 +5677,21 @@ function EscrowCard({ escrow, onEdit, onDelete, onMarkPaid, onPayment, onSetNavr
   const [showWizard, setShowWizard] = useState(false);
   const tranches = escrow.escrow_tranches || [];
   const total = tranches.reduce((s,t) => s + (t.amount||0), 0);
-  const slozTotal = tranches.filter(t=>t.party_type==='složitel').reduce((s,t)=>s+(t.amount||0),0);
+  // „V úschově" = jen peníze, které REÁLNĚ dorazily (escrowFlowedIn — tranše s datem
+  // přijetí ≤ dnes). Rozepsaná hypotéka bez data je příslib, ne zůstatek na účtu. 19. 8. 2026.
+  const slozTotal = escrowFlowedIn(escrow);
   const paidOprTotal = tranches.filter(t=>t.party_type==='oprávněný'&&t.is_paid).reduce((s,t)=>s+(t.amount||0),0);
   const depositTotal = slozTotal - paidOprTotal; // aktuální zůstatek v úschově
+  // Tranše „na cestě" = složitelská platba, která ještě nedorazila. Stejné pravidlo
+  // jako úrokový motor: rozhoduje datum tranše; hlavička jen u starých úschov bez
+  // tranšových dat. 19. 8. 2026.
+  const slozMaData = tranches.some(t => t.party_type === 'složitel' && t.received_date);
+  const trancheDorazila = t => {
+    const base = t.received_date || (slozMaData ? null : escrow.date_received);
+    return !!base && String(base).slice(0, 10) <= today();
+  };
+  const naCeste = tranches.filter(t => t.party_type === 'složitel' && !trancheDorazila(t))
+    .reduce((s, t) => s + (t.amount || 0), 0);
   const interest = calcEscrowInterest(escrow); // per-tranšový výpočet, sedí s ČSOB
   const isActive = !['ukončeno'].includes(escrow.status);
   const needsAlert = escrow.date_plomba_end && (() => {
@@ -5712,7 +5739,7 @@ function EscrowCard({ escrow, onEdit, onDelete, onMarkPaid, onPayment, onSetNavr
             {needsAlert && <span style={{fontSize:9,padding:"2px 7px",borderRadius:4,background:"#FEF3C7",color:"#92400E",fontWeight:700}}>⚠ Blíží se konec plomby</span>}
           </div>
           <div style={{fontSize:12,color:"var(--mut)",lineHeight:1.6}}>
-            {escrow.date_received && <span>Přijato: <strong>{fmtDate(escrow.date_received)}</strong> · </span>}
+            {escrowFirstReceived(escrow) && <span>Přijato: <strong>{fmtDate(escrowFirstReceived(escrow))}</strong> · </span>}
             {escrow.date_navrh_podan && <span>Návrh podán: <strong>{fmtDate(escrow.date_navrh_podan)}</strong> · </span>}
             {escrow.date_plomba_end && <span>Konec plomby: <strong style={{color:needsAlert?"#D97706":"inherit"}}>{fmtDate(escrow.date_plomba_end)}</strong> · </span>}
             {escrow.date_paid && <span>Vyplaceno: <strong style={{color:"#4A7C59"}}>{fmtDate(escrow.date_paid)}</strong></span>}
@@ -5720,7 +5747,7 @@ function EscrowCard({ escrow, onEdit, onDelete, onMarkPaid, onPayment, onSetNavr
         </div>
         <div style={{textAlign:"right"}}>
           <div style={{fontFamily:"Inter,ui-sans-serif,system-ui,sans-serif",fontVariantNumeric:"tabular-nums",fontSize:20,fontWeight:600,color:"var(--gold)"}}>{fmtKc(depositTotal)}</div>
-          <div style={{fontSize:11,color:"var(--mut)"}}>v úschově · sazba {(escrow.interest_rate*100).toFixed(1)}%</div>
+          <div style={{fontSize:11,color:"var(--mut)"}}>{isActive && naCeste > 0.5 ? <>dorazilo z {fmtKc(depositTotal + naCeste)} · </> : <>v úschově · </>}sazba {(escrow.interest_rate*100).toFixed(1)}%</div>
           {isActive && interest.totalNet > 0 && <div style={{fontSize:11,color:"#4A7C59",fontWeight:500,marginTop:2}}>Zisk: {fmtKc(interest.totalNet)} čistého</div>}
         </div>
       </div>
@@ -5763,7 +5790,10 @@ function EscrowCard({ escrow, onEdit, onDelete, onMarkPaid, onPayment, onSetNavr
               {sloz.map((t,i)=>(
                 <div key={i} style={{paddingBottom:6,marginBottom:i<sloz.length-1?6:0,borderBottom:i<sloz.length-1?"1px solid #E0E7FF":"none"}}>
                   <div style={{fontSize:12,fontWeight:500,color:"var(--ink)",lineHeight:1.3}}>{t.party_name}</div>
-                  <div style={{fontFamily:"Inter,ui-sans-serif,system-ui,sans-serif",fontVariantNumeric:"tabular-nums",fontWeight:600,fontSize:14,color:"var(--gold)"}}>{fmtKc(t.amount)}</div>
+                  <div style={{display:"flex",alignItems:"center",gap:6,flexWrap:"wrap"}}>
+                    <span style={{fontFamily:"Inter,ui-sans-serif,system-ui,sans-serif",fontVariantNumeric:"tabular-nums",fontWeight:600,fontSize:14,color:"var(--gold)"}}>{fmtKc(t.amount)}</span>
+                    {isActive && !trancheDorazila(t) && <span style={{fontSize:9,padding:"1px 6px",borderRadius:3,background:"#EEF2FF",color:"#4A44B8",fontWeight:600,letterSpacing:".04em"}}>na cestě</span>}
+                  </div>
                 </div>
               ))}
             </div>
@@ -5787,6 +5817,11 @@ function EscrowCard({ escrow, onEdit, onDelete, onMarkPaid, onPayment, onSetNavr
           </div>
         );
       })()}
+      {isActive && naCeste > 0.5 && (
+        <div style={{borderLeft:"2px solid #4A44B8",borderRadius:0,background:"#F7F6FE",padding:"8px 18px",borderBottom:"1px solid var(--line)",fontSize:12,color:"var(--mut)",lineHeight:1.5}}>
+          Na cestě <strong style={{fontWeight:600,color:"var(--ink)"}}>{fmtKc(naCeste)}</strong> — až dorazí, přibude ~{fmtKc(Math.round(naCeste * (escrow.interest_rate || 0) / 365 * 0.85))}/den čistého.
+        </div>
+      )}
       <div style={{padding:"8px 14px",display:"flex",gap:8,background:"#FAFAFA",flexWrap:"wrap"}}>
         <button className="btn gho" style={{fontSize:11}} onClick={()=>setShowTranches(p=>!p)}>
           {showTranches?"Skrýt detail":"Detail + úroky"}
@@ -6342,8 +6377,11 @@ function EscrowForm({ init, onSave, onCancel, saving, clients = [] }) {
         </div>
         <div style={{ ...S.cardBody, display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 12 }}>
           <div>
-            <label style={S.label}>Přijato</label>
-            <input style={S.input} type="date" value={d.date_received || ""} onChange={e => set("date_received", e.target.value)} />
+            <label style={{ ...S.label, color: "#9CA3AF" }}>Přijato — už nevyplňuj</label>
+            <input style={{ ...S.input, opacity: .55 }} type="date" value={d.date_received || ""} onChange={e => set("date_received", e.target.value)} />
+            <div style={{ fontSize: 9.5, color: "#9CA3AF", marginTop: 4, lineHeight: 1.4 }}>
+              Data přijetí patří k platbám složitelů níž. Pole zůstává jen pro staré úschovy.
+            </div>
           </div>
           <div>
             <label style={S.label}>Návrh podán</label>
@@ -6474,6 +6512,9 @@ function EscrowForm({ init, onSave, onCancel, saving, clients = [] }) {
               <div style={{ fontSize: 9, letterSpacing: ".15em", textTransform: "uppercase", fontWeight: 700, color: "#3730A3", marginBottom: 10 }}>Složitelé</div>
               {Object.entries(slozGroups).map(([stranaName, rows]) => {
                 const celkem = rows.reduce((s, t) => s + (t.amount || 0), 0);
+                // Dorazilo = jen platby s datem přijetí ≤ dnes (stejné pravidlo jako úroky).
+                const dorazilo = rows.reduce((s, t) => s + ((t.received_date && t.received_date <= today()) ? (t.amount || 0) : 0), 0);
+                const maData = rows.some(t => t.received_date);
                 return (
                   <div key={stranaName} style={{ marginBottom: 13, border: "1.5px solid #DDD9F3", borderRadius: 10, overflow: "hidden" }}>
                     <div style={{ background: "#F5F4FC", padding: "10px 13px", display: "flex", alignItems: "center", gap: 12, borderBottom: "1px solid #E9E6F7" }}>
@@ -6481,7 +6522,9 @@ function EscrowForm({ init, onSave, onCancel, saving, clients = [] }) {
                         {stranaName || "(bez jména)"}
                       </span>
                       <span style={{ fontSize: 11, color: "#374151" }}>
-                        Vloženo: <strong style={{ fontFamily:"Inter,ui-sans-serif,system-ui,sans-serif",fontVariantNumeric:"tabular-nums", fontSize: 14 }}>{fmtKc(celkem)}</strong>
+                        {maData && dorazilo < celkem - 0.5
+                          ? <>Dorazilo: <strong style={{ fontFamily:"Inter,ui-sans-serif,system-ui,sans-serif",fontVariantNumeric:"tabular-nums", fontSize: 14 }}>{fmtKc(dorazilo)}</strong> z {fmtKc(celkem)}</>
+                          : <>Vloženo: <strong style={{ fontFamily:"Inter,ui-sans-serif,system-ui,sans-serif",fontVariantNumeric:"tabular-nums", fontSize: 14 }}>{fmtKc(celkem)}</strong></>}
                       </span>
                     </div>
 
@@ -6518,6 +6561,9 @@ function EscrowForm({ init, onSave, onCancel, saving, clients = [] }) {
                               <input type="date" style={{ ...S.input, width: 148, fontSize: 12 }}
                                 value={t.received_date || ""}
                                 onChange={e => updateTranche(t.id, { received_date: e.target.value || null })} />
+                              {t.received_date
+                                ? <div style={{ fontSize: 10, color: "#4A44B8", marginTop: 3 }}>úročí se od {fmtDate(addDays(t.received_date, 1))}</div>
+                                : <div style={{ fontSize: 10, color: "#9CA3AF", marginTop: 3 }}>na cestě — neúročí se</div>}
                             </td>
                             <td style={S.td}>
                               {rows.length > 1 && (
@@ -6955,7 +7001,9 @@ function EscrowList({ escrows, onNew, onEdit, onDelete, onMarkPaid, onPayment, o
   const active = escrows.filter(e => e.status !== 'ukončeno');
   const totalInEscrow = active.reduce((s,e) => {
     const tr = e.escrow_tranches || [];
-    const sloz = tr.filter(t=>t.party_type==='složitel').reduce((ss,t)=>ss+(t.amount||0),0);
+    // Jen peníze, které reálně dorazily (escrowFlowedIn) — tranše bez data přijetí
+    // je příslib (hypotéka na cestě), ne zůstatek na účtu. 19. 8. 2026.
+    const sloz = escrowFlowedIn(e);
     const paidOpr = tr.filter(t=>t.party_type==='oprávněný'&&t.is_paid).reduce((ss,t)=>ss+(t.amount||0),0);
     return s + sloz - paidOpr;
   }, 0);
@@ -8302,6 +8350,9 @@ function FirmaBar({ financeItems, invoices, dpfoMonths, loanTransactions, escrow
       {!allDone && showDetail && onNav && (
         <button className="btn gho" style={{fontSize:10,margin:"12px auto 0",display:"block",opacity:.5,border:"none",borderTop:"1px solid rgba(0,0,0,.04)",borderRadius:0,paddingTop:8}} onClick={()=>onNav("vykaz")}>+ Nový výkaz práce</button>
       )}
+
+      {/* Provoz kanceláře — vstup do modulu + hlídač nezatříděných dokladů */}
+      <ProvozTile financeItems={financeItems} onNav={onNav} />
 
       <style>{`
         @keyframes expensePulse { 0%,100%{transform:scale(1)} 50%{transform:scale(1.15)} }
@@ -15873,12 +15924,13 @@ const JULY_2026_RECEIPTS = [
 const ANTHROPIC_VAT_NOTE = " · vratka DPH již obdržena mimo standardní platbu (neuplatňuje se v odpočtu)";
 const isAnthropicDoc = (label) => /anthropic|claude/i.test(label || "");
 
-function DphKalkulacka({ odpItem, onSaveFinance }) {
+function DphKalkulacka({ odpItem, onSaveFinance, financeItems, onNav }) {
   const [open, setOpen] = useState(false);
   const [label, setLabel] = useState("");
   const [gross, setGross] = useState("");
   const [rate, setRate] = useState(21);
   const [date, setDate] = useState(today());
+  const [newCat, setNewCat] = useState(null); // kategorie pro Provoz — nepovinná, zapíše se do fi_provoz
   const [expanded, setExpanded] = useState(null); // klíč "YYYY-MM" rozbaleného měsíce v archivu (null = nejnovější)
 
   // Celý meta objekt (log + paid + cokoliv dalšího) — při KAŽDÉM zápisu se musí
@@ -15928,7 +15980,14 @@ function DphKalkulacka({ odpItem, onSaveFinance }) {
     return (mi >= 0 && mi < 12) ? `${CZ_MONTHS_FULL[mi]} ${y}` : key;
   };
 
-  const add = () => {
+  // Kategorie pro Provoz kanceláře — návrh z paměti dodavatelů (fi_provoz), viz modul Provoz.
+  // Nepovinné: bez štítku doklad skončí ve frontě K zatřídění v Provozu.
+  const provozItemK = (financeItems || []).find(x => x.id === PROVOZ_ID) || null;
+  const provozMetaK = provozParseMeta(provozItemK);
+  const catSug = (!newCat && label.trim()) ? provozSuggest(provozMetaK.suppliers, label) : null;
+  const catEff = newCat || (catSug ? catSug.cat : null);
+
+  const add = async () => {
     const lbl = label.trim();
     if (!lbl || g <= 0) return;
     // Anthropic/Claude doklady se evidují s nulovým odpočtem (vratka už proběhla — viz konstanta výše)
@@ -15936,12 +15995,21 @@ function DphKalkulacka({ odpItem, onSaveFinance }) {
     const effVat = isAnt ? 0 : vat;
     const entry = { id: uid(), date: date || today(), label: isAnt ? lbl + ANTHROPIC_VAT_NOTE : lbl,
                     gross: g, rate, vat: effVat, ...(isAnt ? { vat_original: vat } : {}) };
-    onSaveFinance({
+    // Nejdřív DPH evidence, pak teprve kategorie — sekvenčně, ať se refetche nepředběhnou
+    await onSaveFinance({
       ...odpItem,
       amount: (odpItem.amount || 0) + effVat,
       notes: JSON.stringify({ ...metaK, log: [entry, ...log] }),
     });
-    setLabel(""); setGross(""); setDate(today()); setOpen(false);
+    if (catEff) {
+      const cats = { ...provozMetaK.cats, [entry.id]: { c: catEff, src: newCat ? "ty" : "auto" } };
+      const suppliers = { ...provozMetaK.suppliers };
+      const key = provozSupKey(lbl);
+      if (newCat && key.length >= 3) suppliers[key] = catEff;
+      const baseP = provozItemK || { id: PROVOZ_ID, category: "provoz", label: "Provoz kanceláře — data", amount: 0 };
+      await onSaveFinance({ ...baseP, amount: 0, notes: JSON.stringify({ ...provozMetaK, cats, suppliers }) });
+    }
+    setLabel(""); setGross(""); setDate(today()); setNewCat(null); setOpen(false);
   };
 
   const removeEntry = (id) => {
@@ -16009,8 +16077,16 @@ function DphKalkulacka({ odpItem, onSaveFinance }) {
 
   return (
     <div style={{ marginTop: 18, paddingTop: 16, borderTop: "1px solid var(--line)" }}>
-      <div style={{ fontSize: 9, letterSpacing: ".22em", textTransform: "uppercase", color: "var(--mut)", fontWeight: 700, marginBottom: 10 }}>
-        Evidence účtenek — historická databáze odpočtu
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 12, marginBottom: 10 }}>
+        <div style={{ fontSize: 9, letterSpacing: ".22em", textTransform: "uppercase", color: "var(--mut)", fontWeight: 700 }}>
+          Evidence účtenek — historická databáze odpočtu
+        </div>
+        {onNav && (
+          <span onClick={() => onNav("provoz")} title="Stejné doklady po kategoriích nákladů"
+            style={{ fontSize: 10, color: "#3518A5", cursor: "pointer", fontWeight: 600, whiteSpace: "nowrap" }}>
+            Provoz kanceláře →
+          </span>
+        )}
       </div>
 
       {pendingImports.length > 0 && (
@@ -16031,6 +16107,7 @@ function DphKalkulacka({ odpItem, onSaveFinance }) {
           <span style={{ fontSize:14 }}>+</span> spočítat účtenku a přičíst DPH do odpočtu
         </div>
       ) : (
+        <div>
         <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
           <input autoFocus value={label} onChange={e => setLabel(e.target.value)} placeholder="Za co (např. Notářka)"
             onKeyDown={e => { if (e.key === "Enter" && g > 0) add(); if (e.key === "Escape") setOpen(false); }}
@@ -16053,6 +16130,30 @@ function DphKalkulacka({ odpItem, onSaveFinance }) {
           )}
           <button onClick={add} title="Přičíst do odpočtu DPH" style={{ fontSize: 13, color: "#4A7C59", border: "none", background: "none", cursor: "pointer", padding: "0 2px" }}>✓</button>
           <button onClick={() => setOpen(false)} title="Zrušit" style={{ fontSize: 12, color: "var(--mut)", border: "none", background: "none", cursor: "pointer", padding: "0 2px" }}>✕</button>
+        </div>
+        {/* Kategorie provozu — nepovinná; návrh se předvyplní z paměti dodavatelů */}
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 5, marginTop: 8, alignItems: "center" }}>
+          <span style={{ fontSize: 8.5, letterSpacing: ".14em", textTransform: "uppercase", color: "var(--mut)", fontWeight: 700, marginRight: 3 }}>Provoz</span>
+          {PROVOZ_CATS.map(c => {
+            const isSug = !newCat && catSug && catSug.cat === c.k;
+            const isOn = newCat === c.k;
+            return (
+              <span key={c.k} onClick={() => setNewCat(isOn ? null : c.k)}
+                title={isSug ? "Návrh podle dřívějšího zatřídění dodavatele" : "Zatřídit do kategorie provozu"}
+                style={{ border: isSug ? "1px dashed #4A44B8" : `1px solid ${isOn ? "#4A44B8" : "var(--line2)"}`,
+                  background: isOn ? "#4A44B8" : isSug ? "#F4F3FA" : "#fff",
+                  color: isOn ? "#fff" : isSug ? "#3A3494" : "var(--txt)",
+                  borderRadius: 13, padding: "3px 9px", fontSize: 10, fontWeight: (isOn || isSug) ? 600 : 400,
+                  cursor: "pointer", whiteSpace: "nowrap", display: "inline-flex", alignItems: "center", gap: 4 }}>
+                {c.label}
+                {isSug && <span style={{ fontSize: 7, letterSpacing: ".07em", textTransform: "uppercase", opacity: .65 }}>návrh</span>}
+              </span>
+            );
+          })}
+          <span style={{ fontSize: 9.5, color: "var(--mut)" }}>
+            {catEff ? "zapíše se rovnou do Provozu" : "nepovinné — bez štítku skončí ve frontě v Provozu"}
+          </span>
+        </div>
         </div>
       )}
 
@@ -16315,7 +16416,537 @@ function DphOdpocetTile({ invoices, financeItems, onSaveFinance, onNav, dashNadm
         )}
       </div>
 
-      <DphKalkulacka odpItem={odpItem} onSaveFinance={onSaveFinance} />
+      <DphKalkulacka odpItem={odpItem} onSaveFinance={onSaveFinance} financeItems={financeItems} onNav={onNav} />
+    </div>
+  );
+}
+
+/* ─── PROVOZ KANCELÁŘE — dávka 1 (mockup v3 schválen 16. 8. 2026) ───
+   Jedna evidence, žádný dvojí zápis: doklady tečou z fi_dph_odpocet
+   (Evidence účtenek v Daních), ručně se přidávají JEN náklady mimo DPH.
+   Kategorie, paměť dodavatelů i položky mimo DPH žijí v samostatném řádku
+   fi_provoz — do DPH evidence se odsud NIKDY nezapisuje, takže sesouhlasení
+   s účetní zůstává čisté (viz skill uctenky).
+   Náklad = gross − DPH: co tě doklad reálně stojí po odpočtu. U Anthropic
+   se odečítá vat_original (vratka proběhla mimo standardní platbu DPH),
+   u přenesené povinnosti §92a nic (vat 0, čistý efekt nula, gross = základ).
+   Rozpočty kategorií a metriky (režie na hodinu, polštář z reálných čísel)
+   jsou dávka 2 — datový model s nimi počítá (fi_provoz.notes je JSON,
+   při zápisu VŽDY zachovat ostatní klíče spreadem). */
+const PROVOZ_ID = "fi_provoz";
+const PROVOZ_CATS = [
+  { k: "najem",    label: "Nájem a energie" },
+  { k: "it",       label: "IT a software" },
+  { k: "sluzby",   label: "Odborné služby" },
+  { k: "vybaveni", label: "Vybavení" },
+  { k: "material", label: "Spotřební materiál" },
+  { k: "ostatni",  label: "Ostatní" },
+];
+const provozCatLabel = (k) => ((PROVOZ_CATS.find(c => c.k === k) || {}).label) || k || "";
+// Normalizace pro párování dodavatelů — bez diakritiky (kombinující znaky unicode
+// escapem, viz pasti) a bez číslic (číslo faktury se mění, dodavatel zůstává).
+const _provozNorm = (s) => String(s || "").toLowerCase().normalize("NFD")
+  .replace(/[̀-ͯ]/g, "").replace(/[0-9]+/g, " ").replace(/[^a-z ]/g, " ")
+  .replace(/ +/g, " ").trim();
+// Klíč dodavatele = první slovo labelu (aspoň 3 znaky), jinak první dvě slova.
+const provozSupKey = (label) => {
+  const toks = _provozNorm(label).split(" ").filter(t => t.length >= 2);
+  if (toks.length === 0) return "";
+  return toks[0].length >= 3 ? toks[0] : toks.slice(0, 2).join(" ");
+};
+// Návrh kategorie z paměti dodavatelů — nejdelší klíč obsažený v labelu vyhrává.
+const provozSuggest = (suppliers, label) => {
+  const n = _provozNorm(label);
+  let bestKey = "", bestCat = null;
+  for (const key of Object.keys(suppliers || {})) {
+    if (key.length >= 3 && n.includes(key) && key.length > bestKey.length) { bestKey = key; bestCat = suppliers[key]; }
+  }
+  return bestCat ? { cat: bestCat, key: bestKey } : null;
+};
+const provozParseMeta = (item) => {
+  try {
+    const p = JSON.parse((item && item.notes) || "{}");
+    return { ...p, cats: p.cats || {}, suppliers: p.suppliers || {}, extra: Array.isArray(p.extra) ? p.extra : [] };
+  } catch { return { cats: {}, suppliers: {}, extra: [] }; }
+};
+// Sjednocený seznam nákladů: doklady z Evidence účtenek + ruční položky mimo DPH.
+const provozData = (financeItems) => {
+  const provozItem = (financeItems || []).find(x => x.id === PROVOZ_ID) || null;
+  const meta = provozParseMeta(provozItem);
+  let log = [];
+  try {
+    const p = JSON.parse(((financeItems || []).find(x => x.id === "fi_dph_odpocet") || {}).notes || "{}");
+    log = Array.isArray(p.log) ? p.log : [];
+  } catch { /* prázdná evidence není chyba */ }
+  const docs = log.map(e => {
+    const as = meta.cats[e.id];
+    return {
+      id: e.id, date: e.date || "", label: e.label || "",
+      cost: Math.round((e.gross || 0) - (e.vat || e.vat_original || 0)),
+      src: "dph", cat: as ? as.c : null, catAuto: !!(as && as.src === "auto"),
+    };
+  });
+  const extras = meta.extra.map(x => ({
+    id: x.id, date: x.date || "", label: (x.label || "") + (x.supplier ? " · " + x.supplier : ""),
+    cost: Math.round(x.amount || 0), src: "extra", cat: x.cat || null, catAuto: false,
+  }));
+  const all = [...docs, ...extras].sort((a, b) => (b.date || "").localeCompare(a.date || ""));
+  return { provozItem, meta, all, queue: all.filter(d => !d.cat) };
+};
+const provozPluralNezatridene = (n) => n === 1 ? "1 nezatříděný" : n <= 4 ? `${n} nezatříděné` : `${n} nezatříděných`;
+
+// Řádek dole v kartě Výdaje na Přehledu — vstup do modulu + počet nezatříděných,
+// aby se fronta nikdy tiše nenaplnila (schváleno s mockupem v3).
+function ProvozTile({ financeItems, onNav }) {
+  const { all, queue } = provozData(financeItems);
+  const mKey = today().slice(0, 7);
+  const mSum = all.filter(d => (d.date || "").startsWith(mKey)).reduce((s, d) => s + d.cost, 0);
+  return (
+    <div onClick={() => onNav && onNav("provoz")} title="Otevřít Provoz kanceláře"
+      style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, marginTop: 12,
+        paddingTop: 10, borderTop: "1px solid rgba(53,24,165,.08)", cursor: "pointer", position: "relative", zIndex: 6 }}>
+      <span style={{ fontSize: 9.5, fontWeight: 600, letterSpacing: ".08em", textTransform: "uppercase", color: "var(--mut)" }}>
+        Provoz kanceláře →
+      </span>
+      <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        {queue.length > 0 && (
+          <span style={{ fontSize: 8.5, fontWeight: 600, letterSpacing: ".05em", textTransform: "uppercase",
+            color: BP.indigoDeep, background: "#EFEEF8", borderRadius: 3, padding: "2px 7px" }}>
+            {provozPluralNezatridene(queue.length)}
+          </span>
+        )}
+        <span className="maux-num" style={{ fontSize: 12, fontWeight: 600, color: "var(--txt)" }}>{fmtKc(mSum)}</span>
+      </span>
+    </div>
+  );
+}
+
+function ProvozModule({ financeItems, onSaveFinance, onNav }) {
+  const [view, setView] = useState("rok");          // "rok" | "mesic"
+  const [monthOffset, setMonthOffset] = useState(0); // listování historií: 0 = běžící měsíc
+  const [pickerId, setPickerId] = useState(null);   // doklad s rozbaleným přepínačem kategorie
+  const [addOpen, setAddOpen] = useState(false);
+  const [exDate, setExDate] = useState(today());
+  const [exLabel, setExLabel] = useState("");
+  const [exSup, setExSup] = useState("");
+  const [exAmount, setExAmount] = useState("");
+  const [exCat, setExCat] = useState(null);
+
+  const { provozItem, meta, all, queue } = provozData(financeItems);
+
+  const now = new Date();
+  const year = now.getFullYear();
+  const mIdx = now.getMonth();
+  // Listovaný měsíc (šipkami v hlavičce) — Rok pohled jede vždy na běžícím roce
+  const vm = new Date(now.getFullYear(), now.getMonth() - monthOffset, 1);
+  const vYear = vm.getFullYear();
+  const vIdx = vm.getMonth();
+  const mKey = `${vYear}-${String(vIdx + 1).padStart(2, "0")}`;
+  const scoped = all.filter(d => (d.date || "").startsWith(view === "rok" ? String(year) : mKey));
+  const total = scoped.reduce((s, d) => s + d.cost, 0);
+
+  // Součty kategorií — nezatříděné jako vlastní řádek, ať dominanta sedí se součtem řádků
+  const catSum = (k) => scoped.filter(d => d.cat === k).reduce((s, d) => s + d.cost, 0);
+  const rows = PROVOZ_CATS.map(c => ({ ...c, sum: catSum(c.k) })).sort((a, b) => b.sum - a.sum);
+  const unSum = scoped.filter(d => !d.cat).reduce((s, d) => s + d.cost, 0);
+  const unCount = scoped.filter(d => !d.cat).length;
+  const maxSum = Math.max(...rows.map(r => r.sum), unSum, 0);
+
+  // Měsíční řada pro sparkline — v měsíčním pohledu rok listovaného měsíce
+  const serieYear = view === "mesic" ? vYear : year;
+  const serie = Array.from({ length: 12 }, (_, i) => {
+    const key = `${serieYear}-${String(i + 1).padStart(2, "0")}`;
+    return all.filter(d => (d.date || "").startsWith(key)).reduce((s, d) => s + d.cost, 0);
+  });
+  const serieMax = Math.max(...serie, 0);
+  const serieHl = view === "mesic" ? vIdx : (year === now.getFullYear() ? mIdx : -1);
+
+  // Jednorázové investice (Vybavení) — roční seznam, ať velký nákup nesplyne s běžným provozem
+  const invYear = view === "mesic" ? vYear : year;
+  const invest = all.filter(d => d.cat === "vybaveni" && (d.date || "").startsWith(String(invYear)));
+
+  const fmtTis = (v) => Math.abs(v) >= 1000 ? (v / 1000).toFixed(1) + " tis." : fmtKc(v);
+  const fmtCost = (v) => v < 0 ? "−" + fmtKc(Math.abs(v)) : fmtKc(v);
+  const fmtDM = (ds) => {
+    const p = String(ds || "").split("-");
+    return p.length === 3 ? `${Number(p[2])}. ${Number(p[1])}.` : ds || "";
+  };
+  const monthsElapsed = mIdx + 1;
+  const avg = monthsElapsed > 0 ? total / monthsElapsed : 0;
+
+  const saveMeta = (m) => {
+    const base = provozItem || { id: PROVOZ_ID, category: "provoz", label: "Provoz kanceláře — data", amount: 0 };
+    onSaveFinance({ ...base, amount: 0, notes: JSON.stringify(m) });
+  };
+
+  // Zatřídění z fronty. Jedním klikem se naučí dodavatele a zatřídí i všechny
+  // starší nezatříděné doklady stejného dodavatele (src "auto").
+  const categorize = (doc, catK, viaSuggest) => {
+    if (doc.src === "extra") {
+      saveMeta({ ...meta, extra: meta.extra.map(x => x.id === doc.id ? { ...x, cat: catK } : x) });
+      return;
+    }
+    const cats = { ...meta.cats, [doc.id]: { c: catK, src: viaSuggest ? "auto" : "ty" } };
+    const suppliers = { ...meta.suppliers };
+    const key = provozSupKey(doc.label);
+    if (key.length >= 3) {
+      suppliers[key] = catK;
+      for (const q of queue) {
+        if (q.id !== doc.id && q.src === "dph" && !cats[q.id] && _provozNorm(q.label).includes(key)) {
+          cats[q.id] = { c: catK, src: "auto" };
+        }
+      }
+    }
+    saveMeta({ ...meta, cats, suppliers });
+  };
+
+  // Přepnutí kategorie ze seznamu — cíleně jen tenhle doklad (žádné hromadné přepisy),
+  // paměť dodavatele se ale aktualizuje, ať příští návrhy sedí.
+  const recat = (doc, catK) => {
+    if (doc.src === "extra") {
+      saveMeta({ ...meta, extra: meta.extra.map(x => x.id === doc.id ? { ...x, cat: catK } : x) });
+    } else {
+      const suppliers = { ...meta.suppliers };
+      const key = provozSupKey(doc.label);
+      if (key.length >= 3) suppliers[key] = catK;
+      saveMeta({ ...meta, cats: { ...meta.cats, [doc.id]: { c: catK, src: "ty" } }, suppliers });
+    }
+    setPickerId(null);
+  };
+
+  const removeExtra = (id) => { saveMeta({ ...meta, extra: meta.extra.filter(x => x.id !== id) }); setPickerId(null); };
+
+  const exAmt = Number(exAmount) || 0;
+  const exValid = exLabel.trim().length > 0 && exAmt !== 0 && !!exCat;
+  const addExtra = () => {
+    if (!exValid) return;
+    const item = { id: uid(), date: exDate || today(), label: exLabel.trim(), supplier: exSup.trim(), amount: exAmt, cat: exCat };
+    saveMeta({ ...meta, extra: [item, ...meta.extra] });
+    setExLabel(""); setExSup(""); setExAmount(""); setExCat(null); setExDate(today()); setAddOpen(false);
+  };
+
+  const card = { background: "var(--surface)", border: "1px solid var(--line)", borderRadius: 18, padding: "26px 28px", position: "relative" };
+  const Chip = ({ on, dashed, onClick, title, children }) => (
+    <span onClick={onClick} title={title}
+      style={{ border: dashed ? `1px dashed ${BP.indigo}` : `1px solid ${on ? BP.indigo : "var(--line2)"}`,
+        background: on ? BP.indigo : dashed ? "#F4F3FA" : "var(--surface)",
+        color: on ? "#fff" : dashed ? BP.indigoDeep : "var(--txt)",
+        borderRadius: 15, padding: "4px 11px", fontSize: 11, fontWeight: (on || dashed) ? 500 : 400,
+        cursor: "pointer", whiteSpace: "nowrap", display: "inline-flex", alignItems: "center", gap: 5 }}>
+      {children}
+    </span>
+  );
+  const CatPill = ({ d }) => (
+    <span onClick={() => setPickerId(pickerId === d.id ? null : d.id)} title="Kliknutím změníš kategorii"
+      style={{ fontSize: 9, fontWeight: 600, letterSpacing: ".05em", textTransform: "uppercase",
+        color: BP.indigoDeep, background: "#EFEEF8", padding: "3px 8px", borderRadius: 3, cursor: "pointer", whiteSpace: "nowrap" }}>
+      {provozCatLabel(d.cat)}
+      {d.catAuto && <span className="maux-num" style={{ fontSize: 7.5, opacity: .55, marginLeft: 5 }}>AUTO</span>}
+    </span>
+  );
+  const Picker = ({ d }) => (
+    <div style={{ gridColumn: "1 / -1", background: "var(--bg)", border: "1px solid var(--line)", borderRadius: 10, padding: "11px 13px", margin: "2px 0 8px" }}>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 6, alignItems: "center" }}>
+        {PROVOZ_CATS.map(c => (
+          <Chip key={c.k} on={d.cat === c.k} onClick={() => recat(d, c.k)}>{c.label}</Chip>
+        ))}
+        {d.src === "extra" && (
+          <span onClick={() => removeExtra(d.id)}
+            style={{ fontSize: 10.5, color: BP.down, cursor: "pointer", marginLeft: "auto", fontWeight: 600 }}>
+            Smazat záznam
+          </span>
+        )}
+      </div>
+    </div>
+  );
+
+  const showDocs = scoped.slice(0, 20);
+
+  // Export CSV pro účetní — středník + BOM kvůli českému Excelu, částky v celých Kč
+  const exportCsv = () => {
+    const head = ["datum", "doklad", "kategorie", "castka_bez_dph_kc", "zdroj"];
+    const lines = scoped.map(d => [
+      d.date, String(d.label || "").replace(/"/g, "'"),
+      d.cat ? provozCatLabel(d.cat) : "nezatříděno", d.cost,
+      d.src === "extra" ? "mimo DPH" : "Evidence účtenek",
+    ]);
+    const csv = "\uFEFF" + [head, ...lines].map(r => r.map(v => `"${String(v)}"`).join(";")).join("\r\n");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = view === "rok" ? `provoz_${year}.csv` : `provoz_${vYear}_${String(vIdx + 1).padStart(2, "0")}.csv`;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+  };
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 14, maxWidth: 980 }}>
+
+      {/* ── Hlavní karta: verdikt, dominanta, kategorie ── */}
+      <div style={card}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 14, flexWrap: "wrap" }}>
+          <div style={bpLabel()}>Provoz kanceláře · {view === "rok" ? year : `${CZ_MONTHS_FULL[vIdx]} ${vYear}`}</div>
+          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            {view === "mesic" && (
+              <span style={{ display: "flex", gap: 2 }}>
+                <span onClick={() => setMonthOffset(o => o + 1)} title="Starší měsíc"
+                  style={{ fontSize: 14, color: "var(--mut)", cursor: "pointer", padding: "0 7px", userSelect: "none" }}>‹</span>
+                <span onClick={() => setMonthOffset(o => Math.max(o - 1, 0))} title="Novější měsíc"
+                  style={{ fontSize: 14, color: monthOffset === 0 ? "var(--line2)" : "var(--mut)",
+                    cursor: monthOffset === 0 ? "default" : "pointer", padding: "0 7px", userSelect: "none" }}>›</span>
+              </span>
+            )}
+            <div style={{ display: "flex", gap: 3, background: "var(--bg)", borderRadius: 8, padding: 3 }}>
+              {[["mesic", "Měsíc"], ["rok", "Rok"]].map(([k, l]) => (
+                <span key={k} onClick={() => { setView(k); setMonthOffset(0); }}
+                  style={{ fontSize: 11, fontWeight: 600, padding: "4px 13px", borderRadius: 6, cursor: "pointer",
+                    color: view === k ? "var(--ink)" : "var(--mut)",
+                    background: view === k ? "var(--surface)" : "transparent",
+                    boxShadow: view === k ? "0 1px 2px rgba(53,24,165,.10)" : "none" }}>{l}</span>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        {all.length === 0 ? (
+          <div style={{ fontFamily: "Fraunces,serif", fontWeight: 300, fontSize: 22, color: "var(--txt)", marginTop: 12, lineHeight: 1.3 }}>
+            Zatím žádné náklady — doklady sem vtečou samy z Evidence účtenek v Daních.
+          </div>
+        ) : (
+          <div style={{ fontFamily: "Fraunces,serif", fontWeight: 300, fontSize: 24, color: "var(--txt)", marginTop: 12, lineHeight: 1.3 }}>
+            {view === "rok"
+              ? <>Provoz tě letos stojí {fmtTis(avg)} měsíčně.</>
+              : monthOffset === 0
+                ? <>Za {CZ_MONTHS_FULL[vIdx]} tě provoz zatím stojí {fmtTis(total)}.</>
+                : <>Za {CZ_MONTHS_FULL[vIdx]}{vYear !== year ? ` ${vYear}` : ""} tě provoz stál {fmtTis(total)}.</>}
+          </div>
+        )}
+
+        {all.length > 0 && (
+          <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", gap: 28, marginTop: 20, paddingBottom: 20, borderBottom: "1px solid var(--line)" }}>
+            <div>
+              <div style={{ fontSize: 10.5, color: "var(--mut)", fontWeight: 500, marginBottom: 6 }}>
+                {view === "rok" ? "Letos celkem" : "Utraceno v měsíci"}
+              </div>
+              <div style={bpHero(34, "var(--txt)")}>{fmtCost(total)}</div>
+              <div style={{ fontSize: 10, color: "var(--mut)", marginTop: 7, maxWidth: 380, lineHeight: 1.45 }}>
+                Částky bez DPH — to, co tě doklad reálně stojí po odpočtu. Doklady mimo DPH v plné výši.
+              </div>
+            </div>
+            {serieMax > 0 && (
+              <div>
+                <div style={{ display: "flex", alignItems: "flex-end", gap: 4, height: 46 }}>
+                  {serie.map((v, i) => (
+                    <div key={i} title={`${CZ_MONTHS_FULL[i]} · ${fmtCost(v)}`}
+                      style={{ width: 12, borderRadius: 1, height: `${Math.max(v > 0 ? Math.round(v / serieMax * 100) : 0, v > 0 ? 4 : 0)}%`,
+                        background: i === serieHl ? BP.indigo : "#DDDBEF" }} />
+                  ))}
+                </div>
+                <div style={{ fontSize: 9.5, color: "var(--mut)", fontWeight: 500, textAlign: "right", marginTop: 5 }}>
+                  leden — prosinec {serieYear}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {all.length > 0 && (
+          <div style={{ marginTop: 18 }}>
+            {rows.map(r => (
+              <div key={r.k} style={{ display: "grid", gridTemplateColumns: "170px 1fr 96px 46px", gap: 16, alignItems: "center", padding: "10px 0", borderBottom: "1px solid rgba(53,24,165,.05)" }}>
+                <div style={{ fontSize: 13, fontWeight: 500, color: r.sum === 0 ? "var(--mut)" : "var(--txt)" }}>{r.label}</div>
+                <div style={{ height: 2, background: "#EEEDE8", borderRadius: 1, position: "relative" }}>
+                  {maxSum > 0 && r.sum > 0 && (
+                    <div style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: `${Math.round(r.sum / maxSum * 100)}%`, background: BP.indigo, borderRadius: 1 }} />
+                  )}
+                </div>
+                <div className="maux-num" style={{ fontSize: 13, fontWeight: 600, textAlign: "right", color: r.sum === 0 ? "var(--mut)" : "var(--txt)" }}>
+                  {r.sum === 0 ? "—" : fmtCost(r.sum)}
+                </div>
+                <div className="maux-num" style={{ fontSize: 10.5, fontWeight: 500, textAlign: "right", color: "var(--mut)" }}>
+                  {total > 0 && r.sum > 0 ? Math.round(r.sum / total * 100) + " %" : ""}
+                </div>
+              </div>
+            ))}
+            {unCount > 0 && (
+              <div style={{ display: "grid", gridTemplateColumns: "170px 1fr 96px 46px", gap: 16, alignItems: "center", padding: "10px 0" }}>
+                <div style={{ fontSize: 13, fontWeight: 500, color: "var(--mut)" }}>Nezatříděno ({unCount})</div>
+                <div style={{ height: 2, background: "#EEEDE8", borderRadius: 1, position: "relative" }}>
+                  {maxSum > 0 && unSum > 0 && (
+                    <div style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: `${Math.round(unSum / maxSum * 100)}%`, background: "#B9B5D8", borderRadius: 1 }} />
+                  )}
+                </div>
+                <div className="maux-num" style={{ fontSize: 13, fontWeight: 600, textAlign: "right", color: "var(--mut)" }}>{fmtCost(unSum)}</div>
+                <div />
+              </div>
+            )}
+          </div>
+        )}
+
+        {all.length > 0 && invest.length > 0 && (
+          <div style={{ marginTop: 20, paddingTop: 18, borderTop: "1px solid var(--line)" }}>
+            <div style={bpLabel()}>Jednorázové investice · {invYear}</div>
+            <div style={{ marginTop: 6 }}>
+              {invest.map(d => (
+                <div key={d.id} style={{ display: "flex", justifyContent: "space-between", gap: 14, padding: "8px 0", borderBottom: "1px solid rgba(53,24,165,.05)", alignItems: "baseline" }}>
+                  <span style={{ fontSize: 12.5, color: "var(--txt)", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {d.label} <span style={{ color: "var(--mut)", fontSize: 11.5 }}>· {fmtDM(d.date)}</span>
+                  </span>
+                  <span className="maux-num" style={{ fontSize: 12.5, fontWeight: 600, whiteSpace: "nowrap" }}>{fmtCost(d.cost)}</span>
+                </div>
+              ))}
+            </div>
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, alignItems: "baseline", paddingTop: 9 }}>
+              <span style={{ fontSize: 10.5, color: "var(--mut)", fontWeight: 500 }}>
+                {invYear === year ? "Letos do vybavení" : `Za ${invYear} do vybavení`}
+              </span>
+              <span className="maux-num" style={{ fontSize: 14, fontWeight: 600, color: "var(--ink)" }}>{fmtCost(invest.reduce((s, d) => s + d.cost, 0))}</span>
+            </div>
+            <div style={{ fontSize: 10, color: "var(--mut)", marginTop: 2 }}>
+              V součtech nahoře jsou započítané — tady stojí pohromadě, ať velký nákup odlišíš od běžného provozu.
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* ── Fronta k zatřídění ── */}
+      {queue.length > 0 && (
+        <div style={card}>
+          <div style={bpLabel()}>K zatřídění · {provozPluralNezatridene(queue.length)}</div>
+          {queue.slice(0, 6).map(d => {
+            const sug = d.src === "dph" ? provozSuggest(meta.suppliers, d.label) : null;
+            return (
+              <div key={d.id} style={{ padding: "14px 0 12px", borderBottom: "1px solid rgba(53,24,165,.05)" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 14, marginBottom: 9 }}>
+                  <span style={{ fontSize: 13, fontWeight: 500, color: "var(--txt)", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {d.label} <span style={{ color: "var(--mut)", fontWeight: 400, fontSize: 12 }}>· {fmtDM(d.date)}</span>
+                  </span>
+                  <span className="maux-num" style={{ fontSize: 13, fontWeight: 600, whiteSpace: "nowrap" }}>{fmtCost(d.cost)}</span>
+                </div>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                    {PROVOZ_CATS.map(c => sug && sug.cat === c.k ? (
+                      <Chip key={c.k} dashed onClick={() => categorize(d, c.k, true)} title="Návrh appky — kliknutím potvrdíš">
+                        {c.label}
+                        <span style={{ fontSize: 8, letterSpacing: ".07em", textTransform: "uppercase", opacity: .65, fontWeight: 600 }}>návrh</span>
+                      </Chip>
+                    ) : (
+                      <Chip key={c.k} onClick={() => categorize(d, c.k, false)}>{c.label}</Chip>
+                    ))}
+                  </div>
+                  {sug && <button className="btn pri" style={{ fontSize: 11.5, padding: "6px 14px" }} onClick={() => categorize(d, sug.cat, true)}>Potvrdit</button>}
+                </div>
+                <div style={{ fontSize: 11, color: "var(--mut)", marginTop: 7, lineHeight: 1.45 }}>
+                  {sug
+                    ? "Návrh podle dřívějšího zatřídění dodavatele — potvrď, nebo klikni jiný štítek."
+                    : "Nový dodavatel — zatřiď jednou. Appka si ho zapamatuje a zatřídí i jeho starší nezatříděné doklady."}
+                </div>
+              </div>
+            );
+          })}
+          {queue.length > 6 && (
+            <div style={{ fontSize: 11, color: "var(--mut)", marginTop: 10 }}>
+              … a dalších {queue.length - 6} čeká. Zatřiď dodavatele výš a ubydou samy.
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── Doklady + náklad mimo DPH ── */}
+      <div style={card}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 14, flexWrap: "wrap" }}>
+          <div style={bpLabel()}>Doklady · {view === "rok" ? year : `${CZ_MONTHS_FULL[vIdx]} ${vYear}`}</div>
+          <div style={{ display: "flex", gap: 14, alignItems: "baseline" }}>
+            {scoped.length > 0 && (
+              <span onClick={exportCsv} title="Stáhnout doklady zobrazeného období jako CSV pro účetní"
+                style={{ fontSize: 10.5, color: "var(--mut)", cursor: "pointer", fontWeight: 600 }}>
+                export CSV
+              </span>
+            )}
+            {!addOpen && (
+              <span onClick={() => setAddOpen(true)} style={{ fontSize: 11, color: "var(--ink)", cursor: "pointer", fontWeight: 600 }}>
+                + náklad mimo DPH
+              </span>
+            )}
+          </div>
+        </div>
+
+        {addOpen && (
+          <div style={{ background: "var(--bg)", border: "1px solid var(--line)", borderRadius: 12, padding: "14px 16px", marginTop: 12 }}>
+            <div style={{ fontSize: 10, color: "var(--mut)", fontWeight: 600, letterSpacing: ".06em", textTransform: "uppercase", marginBottom: 10 }}>
+              Náklad mimo DPH — jediné místo, kde něco píšeš ručně
+            </div>
+            <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+              <input autoFocus value={exLabel} onChange={e => setExLabel(e.target.value)} placeholder="Za co (např. Vyúčtování energií)"
+                onKeyDown={e => { if (e.key === "Enter" && exValid) addExtra(); if (e.key === "Escape") setAddOpen(false); }}
+                style={{ fontSize: 11.5, padding: "6px 9px", border: "1px solid var(--line2)", borderRadius: 6, flex: 1, minWidth: 150 }} />
+              <input value={exSup} onChange={e => setExSup(e.target.value)} placeholder="Dodavatel"
+                style={{ fontSize: 11.5, padding: "6px 9px", border: "1px solid var(--line2)", borderRadius: 6, width: 120 }} />
+              <input type="number" value={exAmount} onChange={e => setExAmount(e.target.value)} placeholder="Částka"
+                onKeyDown={e => { if (e.key === "Enter" && exValid) addExtra(); if (e.key === "Escape") setAddOpen(false); }}
+                style={{ fontSize: 11.5, padding: "6px 9px", border: "1px solid var(--line2)", borderRadius: 6, width: 95 }} />
+              <input type="date" value={exDate} onChange={e => setExDate(e.target.value)}
+                style={{ fontSize: 11.5, padding: "6px 9px", border: "1px solid var(--line2)", borderRadius: 6, width: 130 }} />
+            </div>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 10, alignItems: "center" }}>
+              {PROVOZ_CATS.map(c => (
+                <Chip key={c.k} on={exCat === c.k} onClick={() => setExCat(exCat === c.k ? null : c.k)}>{c.label}</Chip>
+              ))}
+              <span style={{ marginLeft: "auto", display: "flex", gap: 6 }}>
+                <button className="btn pri" style={{ fontSize: 11.5, padding: "6px 14px", opacity: exValid ? 1 : .45 }} onClick={addExtra}>Uložit</button>
+                <button className="btn gho" style={{ fontSize: 11.5, padding: "6px 10px" }} onClick={() => setAddOpen(false)}>Zrušit</button>
+              </span>
+            </div>
+            <div style={{ fontSize: 10, color: "var(--mut)", marginTop: 8 }}>
+              Sem patří jen doklady bez odpočtu (energie od neplátce, hotovost bez DPH). Doklad s DPH zapiš v Daních — sem vteče sám.
+            </div>
+          </div>
+        )}
+
+        <div style={{ fontSize: 10, color: "var(--mut)", margin: "10px 0 2px" }}>
+          U kategorie: AUTO = zatřídila appka · bez značky = zatřídil jsi ty. Štítek je klikací.
+        </div>
+
+        {showDocs.length === 0 && (
+          <div style={{ fontSize: 12, color: "var(--mut)", marginTop: 10 }}>
+            V tomhle období nejsou žádné doklady{view === "mesic" ? " — přepni na Rok" : ""}.
+          </div>
+        )}
+
+        {showDocs.map(d => (
+          <Fragment key={d.id}>
+            <div style={{ display: "grid", gridTemplateColumns: "46px 1fr auto 92px", gap: 12, alignItems: "center", padding: "9px 0", borderBottom: "1px solid rgba(53,24,165,.05)" }}>
+              <div className="maux-num" style={{ fontSize: 11.5, fontWeight: 500, color: "var(--mut)" }}>{fmtDM(d.date)}</div>
+              <div style={{ fontSize: 12.5, color: "var(--txt)", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{d.label}</div>
+              <div style={{ display: "flex", gap: 5, alignItems: "center" }}>
+                {d.cat ? <CatPill d={d} /> : (
+                  <span onClick={() => setPickerId(pickerId === d.id ? null : d.id)}
+                    style={{ fontSize: 9, fontWeight: 600, letterSpacing: ".05em", textTransform: "uppercase",
+                      color: "var(--mut)", background: "var(--bg)", border: "1px dashed var(--line2)", padding: "3px 8px", borderRadius: 3, cursor: "pointer" }}>
+                    zatřídit
+                  </span>
+                )}
+                {d.src === "extra" && (
+                  <span style={{ fontSize: 9, fontWeight: 600, letterSpacing: ".05em", textTransform: "uppercase", color: "var(--mut)", background: "#F3F2EE", padding: "3px 8px", borderRadius: 3 }}>
+                    mimo DPH
+                  </span>
+                )}
+              </div>
+              <div className="maux-num" style={{ fontSize: 12.5, fontWeight: 600, textAlign: "right", color: "var(--txt)" }}>{fmtCost(d.cost)}</div>
+            </div>
+            {pickerId === d.id && <Picker d={d} />}
+          </Fragment>
+        ))}
+
+        <div style={{ fontSize: 10.5, color: "var(--mut)", marginTop: 10 }}>
+          {scoped.length > showDocs.length ? `Zobrazeno posledních ${showDocs.length} z ${scoped.length} · ` : ""}
+          Doklady s DPH zapisuješ v{" "}
+          <span onClick={() => onNav && onNav("dane")} style={{ color: "var(--ink)", cursor: "pointer", fontWeight: 600 }}>
+            Evidenci účtenek v Daních
+          </span>
+          {" "}— sem vtékají samy, i s kategorií, kterou jim tam dáš.
+        </div>
+      </div>
     </div>
   );
 }
@@ -20466,6 +21097,11 @@ export default function MauxCRM() {
               onSaveFinance={saveFinanceItem}
               onNav={navTo}
             />
+          )}
+
+          {/* PROVOZ KANCELÁŘE — kategorie nákladů nad Evidencí účtenek (dávka 1) */}
+          {mod === "provoz" && (
+            <ProvozModule financeItems={financeItems} onSaveFinance={saveFinanceItem} onNav={navTo} />
           )}
 
           {/* PŘEVODY — rejstřík nemovitostí, úschovy se natáhnou samy */}
