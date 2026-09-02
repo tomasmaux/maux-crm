@@ -13036,13 +13036,23 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
                 <span style={{display:"block",fontSize:10.5,color:"var(--mut)",marginTop:1}}>Každý měsíc připomínám, dokud nepotvrdíš odeslání</span>
               </div>
             </div>
-            <button
-              className="btn"
-              style={{fontSize:11,background:"#3518A5",color:"#fff",border:"none",flexShrink:0,padding:"6px 14px"}}
-              onClick={() => { localStorage.setItem(dochazkaKey, "1"); setDochazkaOdeslana(true); }}
-            >
-              ✓ Odesláno účetní
-            </button>
+            <div style={{display:"flex",gap:8,flexShrink:0}}>
+              {/* Stáhnout CSV za minulý měsíc rovnou z připomínky — Tom 2.9.2026 */}
+              <button
+                className="btn"
+                style={{fontSize:11,background:"#fff",color:"#3518A5",border:"1px solid #3518A5",padding:"6px 14px"}}
+                onClick={() => downloadDochazkaCsv(assistantAttendance, prevMonthStr)}
+              >
+                ⬇ Stáhnout CSV
+              </button>
+              <button
+                className="btn"
+                style={{fontSize:11,background:"#3518A5",color:"#fff",border:"none",padding:"6px 14px"}}
+                onClick={() => { localStorage.setItem(dochazkaKey, "1"); setDochazkaOdeslana(true); }}
+              >
+                ✓ Odesláno účetní
+              </button>
+            </div>
           </div>
         );
       })()}
@@ -17521,7 +17531,7 @@ function AsistentPrehled({ logs, attendance, clients, availability, onGo }) {
   const MUT   = "var(--mut)";
   const LINE  = "rgba(0,0,0,.07)";
 
-  const fmtH = (h) => { if(!h||h<=0) return "0 h"; const f=Math.floor(h), m=Math.round((h-f)*60); return m>0?`${f}h ${m}m`:`${f} h`; };
+  const fmtH = fmtHodMin; // sdílené — viz fmtHodMin (oprava zaokrouhlení 60 min)
   const fmtClock = (d) => d.toLocaleTimeString("cs-CZ",{hour:"2-digit",minute:"2-digit"});
   const MONTHS_CS = ["leden","únor","březen","duben","květen","červen","červenec","srpen","září","říjen","listopad","prosinec"];
   const dnyWord = (n) => n===1?"den":n<5?"dny":"dní";
@@ -18798,154 +18808,66 @@ function AsistentVykazy({ email, clients, onRefresh, onClientsRefresh }) {
   );
 }
 
-function AsistentDochazka({ email, attendance, logs, onRefreshAttendance, onGo }) {
-  const [availThis, setAvailThis] = useState(null);
-  const [availNext, setAvailNext] = useState(null);
-  const [expYm, setExpYm]         = useState("");
-  const [savingAvail, setSavingAvail] = useState(false);
-  const thisMonth = (() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`; })();
-  const nextMonth = (() => { const d = new Date(); d.setMonth(d.getMonth()+1); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`; })();
-  const [saving, setSaving]             = useState(false);
-  const [now, setNow] = useState(new Date());
-  // confirm dialog for adding a past/future day
-  const [confirmDay, setConfirmDay] = useState(null); // dateStr
-  // attendance inline edit
-  const [editingAtt, setEditingAtt] = useState(null); // { id, date, check_in, check_out } or "new:YYYY-MM-DD"
-  const [editDraft, setEditDraft]   = useState({});
-  const [savingAtt, setSavingAtt]   = useState(false);
-  const [gate, setGate] = useState(null);   // null | "block" | "warn"
 
-  useEffect(() => { const id = setInterval(()=>setNow(new Date()), 30000); return ()=>clearInterval(id); }, []);
-  useEffect(() => {
-    Promise.all([
-      fetchAssistantAvailability(email, thisMonth),
-      fetchAssistantAvailability(email, nextMonth),
-    ]).then(([at, an]) => { setAvailThis(at); setAvailNext(an); }).catch(console.error);
-  }, [email]);
+// ── Docházka — sdílené výpočty (Tom 2.9.2026) ─────────────────────────────────
+// Jediný zdroj pravdy pro Tomovu administraci, Pepův export i připomínku na Přehledu.
+const DOCHAZKA_MESICE = ["leden","únor","březen","duben","květen","červen","červenec","srpen","září","říjen","listopad","prosinec"];
+// „8h 60m" (22. 7. 2026) — minuty zaokrouhlené zvlášť přetekly na 60. Zaokrouhli celek na minuty a teprve pak děl.
+const fmtHodMin = (h, sepH = "h ", sepM = "m") => {
+  if (!h || h <= 0) return "0 h";
+  const t = Math.round(h * 60), f = Math.floor(t / 60), m = t % 60;
+  return m > 0 ? `${f}${sepH}${m}${sepM}` : `${f} h`;
+};
+const dochazkaYm = (d) => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`;
+// Uzavřené směny (příchod i odchod); ym = "YYYY-MM", prázdné = všechny. Vzestupně podle data.
+const dochazkaClosedRows = (attendance, ym) => (attendance || [])
+  .filter(a => a.check_in && a.check_out && (!ym || (a.date || "").startsWith(ym)))
+  .sort((a, b) => a.date.localeCompare(b.date));
+// Měsíce s alespoň jednou uzavřenou směnou, nejnovější první; běžící měsíc vždy přidán.
+const dochazkaMonths = (attendance) => {
+  const cur = dochazkaYm(new Date());
+  const s = new Set((attendance || []).filter(a => a.check_in && a.check_out && (a.date || "").length >= 7).map(a => a.date.slice(0, 7)));
+  s.add(cur);
+  return [...s].sort().reverse();
+};
+const dochazkaLabel = (ym) => {
+  const [y, m] = ym.split("-").map(Number);
+  const n = DOCHAZKA_MESICE[m-1];
+  return `${n.charAt(0).toUpperCase()}${n.slice(1)} ${y}${ym === dochazkaYm(new Date()) ? " (probíhá)" : ""}`;
+};
+const dochazkaStats = (rows) => {
+  const gross = rows.reduce((s, a) => s + (new Date(a.check_out) - new Date(a.check_in)) / 36e5, 0);
+  const net   = rows.reduce((s, a) => s + netAttHours(a.check_in, a.check_out), 0);
+  return { days: rows.length, gross, net, wage: Math.round(net * ASSISTANT_HOURLY_RATE) };
+};
+// CSV pro účetní za jeden měsíc (nebo vše), se součtovým řádkem. Název souboru = vybraný měsíc, ne dnešek.
+function downloadDochazkaCsv(attendance, ym) {
+  const rows = dochazkaClosedRows(attendance, ym);
+  if (rows.length === 0) { alert(`Žádná uzavřená směna za ${ym ? dochazkaLabel(ym) : "celé období"}.`); return; }
+  const fmtTs = ts => ts ? new Date(ts).toLocaleTimeString("cs-CZ", { hour: "2-digit", minute: "2-digit" }) : "";
+  const out = [["Datum","Příchod","Odchod","Hrubé hodiny","Čisté hodiny","Pauza","Odměna (Kč)"]];
+  let sGross = 0, sNet = 0, sLunch = 0, sWage = 0;
+  rows.forEach(a => {
+    const gross = (new Date(a.check_out) - new Date(a.check_in)) / 36e5;
+    const net   = netAttHours(a.check_in, a.check_out);
+    const lunch = gross >= LUNCH_THRESHOLD_H ? LUNCH_BREAK_H : 0;
+    const wage  = Math.round(net * ASSISTANT_HOURLY_RATE);
+    sGross += gross; sNet += net; sLunch += lunch; sWage += wage;
+    out.push([a.date, fmtTs(a.check_in), fmtTs(a.check_out), gross.toFixed(2), net.toFixed(2), lunch, wage]);
+  });
+  out.push([`Celkem (${rows.length} dní)`, "", "", sGross.toFixed(2), sNet.toFixed(2), sLunch, sWage]);
+  const csv  = out.map(r => r.join(";")).join("\n");
+  const blob = new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8;" });
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement("a");
+  a.href = url; a.download = `dochazka_Josef_${ym || "vse"}.csv`; a.click();
+  URL.revokeObjectURL(url);
+}
 
-  const todayStr = localDs(now);
-  const todayRec = attendance.find(a=>a.date===todayStr);
-  const plannedDates = [...(availThis?.planned_dates || []), ...(availNext?.planned_dates || [])];
-
-  // ── Nedokončené dny: příchod bez odchodu, starší než 24 h ──
-  // Takový den se nepočítá do utilizace, takže Josefovi tiše ukrajuje výsledky.
-  const openDays = attendance
-    .filter(a => a.check_in && !a.check_out && (now - new Date(a.check_in)) > 24*36e5)
-    .sort((a,b) => b.date.localeCompare(a.date));
-
-  const fmtTime = (ts) => ts ? new Date(ts).toLocaleTimeString("cs-CZ",{hour:"2-digit",minute:"2-digit"}) : null;
-  const fmtH    = (h)  => { if(!h||h<=0)return"0 h"; const f=Math.floor(h),m=Math.round((h-f)*60); return m>0?`${f}h ${m}m`:`${f} h`; };
-
-  // ── Pure toggle — žádné undo okno, prostý toggle on/off ──
-  const toggleCheckIn = async () => {
-    if(saving) return; setSaving(true);
-    try {
-      if(todayRec?.check_in) {
-        await upsertAssistantAttendance({ id:todayRec.id, assistant_email:email, date:todayStr, check_in:null, check_out:null });
-      } else {
-        await upsertAssistantAttendance({ id:todayRec?.id||uid(), assistant_email:email, date:todayStr, check_in:new Date().toISOString(), check_out:todayRec?.check_out||null });
-      }
-      await onRefreshAttendance?.();
-    } catch(e){alert("Chyba: "+e.message);} finally{setSaving(false);}
-  };
-  // ── BRÁNA PŘED ODCHODEM ──────────────────────────────────────────────────
-  // Žádný tvrdý zámek. Appka Josefovi nezabrání odejít z kanceláře, jen zapsat
-  // odchod — a den bez odchodu je horší než den s neúplným výkazem: chybí pak
-  // oba údaje a nikdo nedopočítá, kdy odešel.
-  // Proto vždycky ukážeme čísla a nabídneme doplnit výkaz, ale úniková cesta
-  // "I přesto uzavřít směnu a odejít" zůstává otevřená v obou případech.
-  const GATE_TOLERANCE_H = 0.5;
-  const todayLogs = (logs||[]).filter(l => l.status!=="deleted" && l.entry_date===todayStr);
-  const todayLoggedH = todayLogs.reduce((acc,l)=>acc+(l.hours||0),0);
-  const todayNetH = todayRec?.check_in
-    ? (()=>{ const d=(now-new Date(todayRec.check_in))/36e5; return Math.max(0, d>=LUNCH_THRESHOLD_H ? d-LUNCH_BREAK_H : d); })()
-    : 0;
-  const todayMissH = Math.max(0, todayNetH-todayLoggedH);
-
-  const requestCheckOut = () => {
-    if (todayRec?.check_out) { toggleCheckOut(); return; }        // vracení odchodu neblokujeme
-    if (todayLogs.length === 0) { setGate("block"); return; }     // ani jeden zápis — tvrdý zámek
-    if (todayMissH >= GATE_TOLERANCE_H) { setGate("warn"); return; }
-    toggleCheckOut();
-  };
-
-  const toggleCheckOut = async () => {
-    if(saving) return; setSaving(true);
-    try {
-      if(todayRec?.check_out) {
-        await upsertAssistantAttendance({ id:todayRec.id, assistant_email:email, date:todayStr, check_in:todayRec.check_in, check_out:null });
-      } else {
-        const ci = todayRec?.check_in || new Date().toISOString();
-        await upsertAssistantAttendance({ id:todayRec?.id||uid(), assistant_email:email, date:todayStr, check_in:ci, check_out:new Date().toISOString() });
-      }
-      await onRefreshAttendance?.();
-    } catch(e){alert("Chyba: "+e.message);} finally{setSaving(false);}
-  };
-
-  const liveDur = todayRec?.check_in
-    ? (todayRec.check_out?(new Date(todayRec.check_out)-new Date(todayRec.check_in))/36e5:(now-new Date(todayRec.check_in))/36e5)
-    : 0;
-
-  // Plan calendar
-  const commitToggleDay = async (dateStr) => {
-    const ym = dateStr.slice(0,7);
-    const isNext = ym === nextMonth;
-    const avail = isNext ? availNext : availThis;
-    const setAvail = isNext ? setAvailNext : setAvailThis;
-    const prevDates = avail?.planned_dates || [];
-    const newDates = prevDates.includes(dateStr) ? prevDates.filter(d=>d!==dateStr) : [...prevDates, dateStr].sort();
-    setSavingAvail(true);
-    try {
-      const rec = { id: avail?.id||uid(), assistant_email:email, year_month:ym, planned_dates:newDates };
-      await upsertAssistantAvailability(rec); setAvail(rec);
-    } catch(e){alert("Chyba: "+e.message);} finally{setSavingAvail(false);}
-  };
-  const toggleDay = (dateStr) => {
-    const isPast = dateStr < todayStr, isSel = plannedDates.includes(dateStr);
-    if (isPast && !isSel) { setConfirmDay(dateStr); return; } // confirm before marking past day
-    commitToggleDay(dateStr);
-  };
-
-  // ── Attendance edit helpers ──
-  const openEditAtt = (a) => {
-    const toTimeInput = (ts) => ts ? new Date(ts).toLocaleTimeString("cs-CZ",{hour:"2-digit",minute:"2-digit",hour12:false}) : "";
-    setEditDraft({ date: a.date, check_in_t: toTimeInput(a.check_in), check_out_t: toTimeInput(a.check_out) });
-    setEditingAtt(a.id);
-  };
-  const openNewAtt = (dateStr) => {
-    setEditDraft({ date: dateStr, check_in_t: "", check_out_t: "" });
-    setEditingAtt("new:" + dateStr);
-  };
-  const saveEditAtt = async (origId) => {
-    const toISO = (dateStr, timeStr) => {
-      if (!timeStr) return null;
-      const [h,m] = timeStr.split(":").map(Number);
-      const d = new Date(dateStr + "T00:00:00");
-      d.setHours(h, m, 0, 0);
-      return d.toISOString();
-    };
-    const isNew = String(origId).startsWith("new:");
-    const id = isNew ? uid() : origId;
-    const rec = {
-      id, assistant_email: email, date: editDraft.date,
-      check_in:  toISO(editDraft.date, editDraft.check_in_t),
-      check_out: toISO(editDraft.date, editDraft.check_out_t),
-    };
-    setSavingAtt(true);
-    try { await upsertAssistantAttendance(rec); await onRefreshAttendance?.(); setEditingAtt(null); }
-    catch(e) { alert("Chyba: "+e.message); } finally { setSavingAtt(false); }
-  };
-  const monthNames = ["leden","únor","březen","duben","květen","červen","červenec","srpen","září","říjen","listopad","prosinec"];
-  const monthNamesGen = ["ledna","února","března","dubna","května","června","července","srpna","září","října","listopadu","prosince"];
-  const getWorkDays = (ym) => {
-    const [y,m] = ym.split("-").map(Number);
-    const days=[]; const d=new Date(y,m-1,1);
-    while(d.getMonth()===m-1){if(d.getDay()!==0&&d.getDay()!==6)days.push({ds:localDs(d),dow:d.getDay(),dayNum:d.getDate()});d.setDate(d.getDate()+1);}
-    return days;
-  };
-
-  // ── Export docházky za uzavřený měsíc — Tom 1.7.2026 ──
-  const exportDochazka = (ym) => {
+// ── Export docházky (HTML výkaz k tisku/PDF) — Tom 1.7.2026, top-level od 2.9.2026 ──
+// Volá ho Pepův pohled (AsistentDochazka) i Tomova administrace (AsistentPanel).
+function exportDochazkaHtml(attendance, ym, email) {
+    const monthNames = DOCHAZKA_MESICE;
     const [ey, em] = ym.split("-").map(Number);
     const rows = attendance
       .filter(a => (a.date || "").startsWith(ym) && a.check_in && a.check_out)
@@ -18953,11 +18875,7 @@ function AsistentDochazka({ email, attendance, logs, onRefreshAttendance, onGo }
     if (rows.length === 0) { alert(`Žádné záznamy docházky za ${monthNames[em-1]} ${ey}.`); return; }
 
     const toT = (ts) => new Date(ts).toLocaleTimeString("cs-CZ", { hour: "2-digit", minute: "2-digit" });
-    const fmtHm = (h) => {
-      if (!h || h <= 0) return "0 h";
-      const fl = Math.floor(h), m = Math.round((h - fl) * 60);
-      return m > 0 ? `${fl} h ${m} min` : `${fl} h`;
-    };
+    const fmtHm = (h) => fmtHodMin(h, " h ", " min");
     const totalNet = rows.reduce((s, a) => s + netAttHours(a.check_in, a.check_out), 0);
     const totalWage = Math.round(totalNet * ASSISTANT_HOURLY_RATE);
     const nowD = new Date();
@@ -19074,7 +18992,156 @@ function AsistentDochazka({ email, attendance, logs, onRefreshAttendance, onGo }
     const w = window.open("", "_blank", "width=800,height=900");
     w.document.write(html);
     w.document.close();
+}
+
+function AsistentDochazka({ email, attendance, logs, onRefreshAttendance, onGo }) {
+  const [availThis, setAvailThis] = useState(null);
+  const [availNext, setAvailNext] = useState(null);
+  const [expYm, setExpYm]         = useState("");
+  const [savingAvail, setSavingAvail] = useState(false);
+  const thisMonth = (() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`; })();
+  const nextMonth = (() => { const d = new Date(); d.setMonth(d.getMonth()+1); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`; })();
+  const [saving, setSaving]             = useState(false);
+  const [now, setNow] = useState(new Date());
+  // confirm dialog for adding a past/future day
+  const [confirmDay, setConfirmDay] = useState(null); // dateStr
+  // attendance inline edit
+  const [editingAtt, setEditingAtt] = useState(null); // { id, date, check_in, check_out } or "new:YYYY-MM-DD"
+  const [editDraft, setEditDraft]   = useState({});
+  const [savingAtt, setSavingAtt]   = useState(false);
+  const [gate, setGate] = useState(null);   // null | "block" | "warn"
+
+  useEffect(() => { const id = setInterval(()=>setNow(new Date()), 30000); return ()=>clearInterval(id); }, []);
+  useEffect(() => {
+    Promise.all([
+      fetchAssistantAvailability(email, thisMonth),
+      fetchAssistantAvailability(email, nextMonth),
+    ]).then(([at, an]) => { setAvailThis(at); setAvailNext(an); }).catch(console.error);
+  }, [email]);
+
+  const todayStr = localDs(now);
+  const todayRec = attendance.find(a=>a.date===todayStr);
+  const plannedDates = [...(availThis?.planned_dates || []), ...(availNext?.planned_dates || [])];
+
+  // ── Nedokončené dny: příchod bez odchodu, starší než 24 h ──
+  // Takový den se nepočítá do utilizace, takže Josefovi tiše ukrajuje výsledky.
+  const openDays = attendance
+    .filter(a => a.check_in && !a.check_out && (now - new Date(a.check_in)) > 24*36e5)
+    .sort((a,b) => b.date.localeCompare(a.date));
+
+  const fmtTime = (ts) => ts ? new Date(ts).toLocaleTimeString("cs-CZ",{hour:"2-digit",minute:"2-digit"}) : null;
+  const fmtH    = fmtHodMin; // sdílené — viz fmtHodMin (oprava zaokrouhlení 60 min)
+
+  // ── Pure toggle — žádné undo okno, prostý toggle on/off ──
+  const toggleCheckIn = async () => {
+    if(saving) return; setSaving(true);
+    try {
+      if(todayRec?.check_in) {
+        await upsertAssistantAttendance({ id:todayRec.id, assistant_email:email, date:todayStr, check_in:null, check_out:null });
+      } else {
+        await upsertAssistantAttendance({ id:todayRec?.id||uid(), assistant_email:email, date:todayStr, check_in:new Date().toISOString(), check_out:todayRec?.check_out||null });
+      }
+      await onRefreshAttendance?.();
+    } catch(e){alert("Chyba: "+e.message);} finally{setSaving(false);}
   };
+  // ── BRÁNA PŘED ODCHODEM ──────────────────────────────────────────────────
+  // Žádný tvrdý zámek. Appka Josefovi nezabrání odejít z kanceláře, jen zapsat
+  // odchod — a den bez odchodu je horší než den s neúplným výkazem: chybí pak
+  // oba údaje a nikdo nedopočítá, kdy odešel.
+  // Proto vždycky ukážeme čísla a nabídneme doplnit výkaz, ale úniková cesta
+  // "I přesto uzavřít směnu a odejít" zůstává otevřená v obou případech.
+  const GATE_TOLERANCE_H = 0.5;
+  const todayLogs = (logs||[]).filter(l => l.status!=="deleted" && l.entry_date===todayStr);
+  const todayLoggedH = todayLogs.reduce((acc,l)=>acc+(l.hours||0),0);
+  const todayNetH = todayRec?.check_in
+    ? (()=>{ const d=(now-new Date(todayRec.check_in))/36e5; return Math.max(0, d>=LUNCH_THRESHOLD_H ? d-LUNCH_BREAK_H : d); })()
+    : 0;
+  const todayMissH = Math.max(0, todayNetH-todayLoggedH);
+
+  const requestCheckOut = () => {
+    if (todayRec?.check_out) { toggleCheckOut(); return; }        // vracení odchodu neblokujeme
+    if (todayLogs.length === 0) { setGate("block"); return; }     // ani jeden zápis — tvrdý zámek
+    if (todayMissH >= GATE_TOLERANCE_H) { setGate("warn"); return; }
+    toggleCheckOut();
+  };
+
+  const toggleCheckOut = async () => {
+    if(saving) return; setSaving(true);
+    try {
+      if(todayRec?.check_out) {
+        await upsertAssistantAttendance({ id:todayRec.id, assistant_email:email, date:todayStr, check_in:todayRec.check_in, check_out:null });
+      } else {
+        const ci = todayRec?.check_in || new Date().toISOString();
+        await upsertAssistantAttendance({ id:todayRec?.id||uid(), assistant_email:email, date:todayStr, check_in:ci, check_out:new Date().toISOString() });
+      }
+      await onRefreshAttendance?.();
+    } catch(e){alert("Chyba: "+e.message);} finally{setSaving(false);}
+  };
+
+  const liveDur = todayRec?.check_in
+    ? (todayRec.check_out?(new Date(todayRec.check_out)-new Date(todayRec.check_in))/36e5:(now-new Date(todayRec.check_in))/36e5)
+    : 0;
+
+  // Plan calendar
+  const commitToggleDay = async (dateStr) => {
+    const ym = dateStr.slice(0,7);
+    const isNext = ym === nextMonth;
+    const avail = isNext ? availNext : availThis;
+    const setAvail = isNext ? setAvailNext : setAvailThis;
+    const prevDates = avail?.planned_dates || [];
+    const newDates = prevDates.includes(dateStr) ? prevDates.filter(d=>d!==dateStr) : [...prevDates, dateStr].sort();
+    setSavingAvail(true);
+    try {
+      const rec = { id: avail?.id||uid(), assistant_email:email, year_month:ym, planned_dates:newDates };
+      await upsertAssistantAvailability(rec); setAvail(rec);
+    } catch(e){alert("Chyba: "+e.message);} finally{setSavingAvail(false);}
+  };
+  const toggleDay = (dateStr) => {
+    const isPast = dateStr < todayStr, isSel = plannedDates.includes(dateStr);
+    if (isPast && !isSel) { setConfirmDay(dateStr); return; } // confirm before marking past day
+    commitToggleDay(dateStr);
+  };
+
+  // ── Attendance edit helpers ──
+  const openEditAtt = (a) => {
+    const toTimeInput = (ts) => ts ? new Date(ts).toLocaleTimeString("cs-CZ",{hour:"2-digit",minute:"2-digit",hour12:false}) : "";
+    setEditDraft({ date: a.date, check_in_t: toTimeInput(a.check_in), check_out_t: toTimeInput(a.check_out) });
+    setEditingAtt(a.id);
+  };
+  const openNewAtt = (dateStr) => {
+    setEditDraft({ date: dateStr, check_in_t: "", check_out_t: "" });
+    setEditingAtt("new:" + dateStr);
+  };
+  const saveEditAtt = async (origId) => {
+    const toISO = (dateStr, timeStr) => {
+      if (!timeStr) return null;
+      const [h,m] = timeStr.split(":").map(Number);
+      const d = new Date(dateStr + "T00:00:00");
+      d.setHours(h, m, 0, 0);
+      return d.toISOString();
+    };
+    const isNew = String(origId).startsWith("new:");
+    const id = isNew ? uid() : origId;
+    const rec = {
+      id, assistant_email: email, date: editDraft.date,
+      check_in:  toISO(editDraft.date, editDraft.check_in_t),
+      check_out: toISO(editDraft.date, editDraft.check_out_t),
+    };
+    setSavingAtt(true);
+    try { await upsertAssistantAttendance(rec); await onRefreshAttendance?.(); setEditingAtt(null); }
+    catch(e) { alert("Chyba: "+e.message); } finally { setSavingAtt(false); }
+  };
+  const monthNames = ["leden","únor","březen","duben","květen","červen","červenec","srpen","září","říjen","listopad","prosinec"];
+  const monthNamesGen = ["ledna","února","března","dubna","května","června","července","srpna","září","října","listopadu","prosince"];
+  const getWorkDays = (ym) => {
+    const [y,m] = ym.split("-").map(Number);
+    const days=[]; const d=new Date(y,m-1,1);
+    while(d.getMonth()===m-1){if(d.getDay()!==0&&d.getDay()!==6)days.push({ds:localDs(d),dow:d.getDay(),dayNum:d.getDate()});d.setDate(d.getDate()+1);}
+    return days;
+  };
+
+  // Export výkazu (HTML/PDF) — sdílená top-level funkce, volá ji i Tomova administrace
+  const exportDochazka = (ym) => exportDochazkaHtml(attendance, ym, email);
 
   // Toggle card component
   const ToggleCard = ({label,subOn,subOff,isOn,color,onToggle,disabled}) => (
@@ -19770,6 +19837,8 @@ function AsistentPanel({ clients, onPreview, financeItems = [], onSaveFinance, w
   const [availCur, setAvailCur] = useState(null);
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState("logs");
+  // Admin docházka — vybraný měsíc (null = výchozí, tj. minulý měsíc; "" = Vše) — Tom 2.9.2026
+  const [admYm, setAdmYm] = useState(null);
   // Admin docházka — inline edit
   const [editingAdminAtt, setEditingAdminAtt] = useState(null);
   const [editAdminDraft, setEditAdminDraft] = useState({});
@@ -19807,7 +19876,7 @@ function AsistentPanel({ clients, onPreview, financeItems = [], onSaveFinance, w
 
   const clientName = (id) => clients.find(c=>c.id===id)?.name || "—";
   const fmtTime    = (ts) => ts ? new Date(ts).toLocaleTimeString("cs-CZ",{hour:"2-digit",minute:"2-digit"}) : "—";
-  const fmtH       = (h)  => { if(!h||h<=0)return"0 h"; const f=Math.floor(h),m=Math.round((h-f)*60); return m>0?`${f}h ${m}m`:`${f} h`; };
+  const fmtH       = fmtHodMin; // sdílené — viz fmtHodMin (oprava zaokrouhlení 60 min)
   const monthNames = ["leden","únor","březen","duben","květen","červen","červenec","srpen","září","říjen","listopad","prosinec"];
   const [nmy, nmm] = nextMonth.split("-").map(Number);
 
@@ -19901,40 +19970,59 @@ function AsistentPanel({ clients, onPreview, financeItems = [], onSaveFinance, w
 
         {/* Docházka — admin správa */}
         {tab==="dochazka" && (
-          attendance.length===0 ? <div style={{color:"var(--mut)",fontSize:13}}>Žádné záznamy docházky.</div> : (
+          attendance.length===0 ? <div style={{color:"var(--mut)",fontSize:13}}>Žádné záznamy docházky.</div> : (() => {
+            // Měsíc řídí celou záložku (Tom 2.9.2026, varianta B): pilulky → filtr tabulky → shrnutí → export.
+            const months = dochazkaMonths(attendance);
+            const prevYm = dochazkaYm(new Date(now.getFullYear(), now.getMonth()-1, 1));
+            const defYm  = months.includes(prevYm) ? prevYm : (months.find(m => m !== curMonth) || months[0]);
+            const sel    = admYm === null ? defYm : admYm;              // "" = Vše
+            const admRows = attendance.filter(a => !sel || (a.date||"").startsWith(sel));
+            const st = dochazkaStats(dochazkaClosedRows(attendance, sel));
+            const openCnt = admRows.filter(a => a.check_in && !a.check_out).length;
+            const sklon = n => n===1 ? "den" : (n>=2 && n<=4 ? "dny" : "dní");
+            const pill = (on) => ({padding:"6px 12px",borderRadius:999,border:`1px solid ${on?"#3518A5":"var(--line)"}`,background:on?"rgba(53,24,165,.05)":"#fff",color:on?"#3518A5":"var(--ink)",fontSize:12,fontWeight:on?600:400,cursor:"pointer",font:"inherit",display:"flex",gap:6,alignItems:"baseline"});
+            const verdict = !sel
+              ? `Celá evidence: ${st.days} ${sklon(st.days)}, ${fmtH(st.net)} čistého.`
+              : st.days === 0
+                ? (sel === curMonth ? "Tento měsíc Josef zatím nemá uzavřenou směnu." : `Za ${dochazkaLabel(sel)} není žádná uzavřená směna.`)
+                : `${dochazkaLabel(sel)}: ${st.days} ${sklon(st.days)}, odměna ${st.wage.toLocaleString("cs-CZ")} Kč${sel===curMonth?" — měsíc ještě běží, export bude neúplný":""}.`;
+            return (
             <div>
+              {/* Pilulky měsíců */}
+              <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:12}}>
+                {months.map(ym => { const s = dochazkaStats(dochazkaClosedRows(attendance, ym)); return (
+                  <button key={ym} onClick={()=>setAdmYm(ym)} style={{...pill(sel===ym), borderStyle: ym===curMonth ? "dashed" : "solid"}}>
+                    {dochazkaLabel(ym)}
+                    <span className="maux-num" style={{fontSize:10.5,color:"var(--mut)",fontWeight:500}}>{s.days ? `${s.days} d · ${fmtH(s.net)}` : "—"}</span>
+                  </button>
+                );})}
+                <button onClick={()=>setAdmYm("")} style={pill(sel==="")}>Vše</button>
+              </div>
+              {/* Shrnutí — věta nahoře, čísla jako důkaz */}
+              <div style={{display:"flex",gap:26,alignItems:"center",padding:"12px 16px",borderLeft:"2px solid #3518A5",background:"rgba(53,24,165,.03)",marginBottom:12,flexWrap:"wrap"}}>
+                <div style={{flex:1,fontSize:13,color:"var(--ink)",minWidth:220}}>
+                  {verdict}
+                  {openCnt>0 && <span style={{display:"block",fontSize:11,color:"var(--mut)",marginTop:2}}>{openCnt} {openCnt===1?"záznam má":"záznamy mají"} jen příchod bez odchodu — do exportu nejde, doplň odchod přes Upravit.</span>}
+                </div>
+                {st.days>0 && <>
+                  <div style={{fontSize:10.5,color:"var(--mut)"}}>Dní<b className="maux-num" style={{display:"block",fontSize:17,color:"var(--ink)"}}>{st.days}</b></div>
+                  <div style={{fontSize:10.5,color:"var(--mut)"}}>Čistých hodin<b className="maux-num" style={{display:"block",fontSize:17,color:"var(--ink)"}}>{fmtH(st.net)}</b></div>
+                  <div style={{fontSize:10.5,color:"var(--mut)"}}>Odměna {ASSISTANT_HOURLY_RATE} Kč/h<b className="maux-num" style={{display:"block",fontSize:17,color:"var(--ink)"}}>{st.wage.toLocaleString("cs-CZ")} Kč</b></div>
+                </>}
+              </div>
               {/* Toolbar: info + export */}
               <div style={{marginBottom:12,display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
                 <div style={{flex:1,padding:"8px 12px",background:"rgba(53,24,165,.04)",borderRadius:8,display:"flex",alignItems:"center",gap:8}}>
-                  <span style={{fontSize:11}}>ℹ️</span>
-                  <span style={{fontSize:10.5,color:"var(--mut)"}}>Ze směn ≥ {LUNCH_THRESHOLD_H} h se odečítá {LUNCH_BREAK_H} h pauza. Čisté hodiny = základ pro odměnu (170 Kč/h).</span>
+                  <span style={{fontSize:10.5,color:"var(--mut)"}}>Ze směn ≥ {LUNCH_THRESHOLD_H} h se odečítá {LUNCH_BREAK_H} h pauza. Export stáhne {sel ? `dochazka_Josef_${sel}.csv` : "dochazka_Josef_vse.csv"} — jen řádky z tabulky níže, plus součtový řádek.</span>
                 </div>
-                <button
-                  onClick={() => {
-                    const rows = [["Datum","Příchod","Odchod","Hrubé hodiny","Čisté hodiny","Pauza","Odměna (Kč)"]];
-                    attendance.forEach(a => {
-                      const fmtTs = ts => ts ? new Date(ts).toLocaleTimeString("cs-CZ",{hour:"2-digit",minute:"2-digit"}) : "";
-                      const gross = a.check_in&&a.check_out?(new Date(a.check_out)-new Date(a.check_in))/36e5:null;
-                      const net   = gross!=null ? netAttHours(a.check_in,a.check_out) : null;
-                      const lunch = gross!=null&&gross>=LUNCH_THRESHOLD_H ? LUNCH_BREAK_H : 0;
-                      rows.push([
-                        a.date,
-                        fmtTs(a.check_in),
-                        fmtTs(a.check_out),
-                        gross!=null ? gross.toFixed(2) : "",
-                        net!=null   ? net.toFixed(2)   : "",
-                        lunch,
-                        net!=null   ? Math.round(net*ASSISTANT_HOURLY_RATE) : "",
-                      ]);
-                    });
-                    const csv = rows.map(r => r.join(";")).join("\n");
-                    const blob = new Blob(["﻿"+csv],{type:"text/csv;charset=utf-8;"});
-                    const url  = URL.createObjectURL(blob);
-                    const a    = document.createElement("a");
-                    a.href = url; a.download = `dochazka_Josef_${new Date().toISOString().slice(0,7)}.csv`; a.click();
-                    URL.revokeObjectURL(url);
-                  }}
-                  style={{padding:"8px 14px",borderRadius:8,border:"1px solid var(--line2)",background:"#fff",color:"var(--ink)",fontSize:12,fontWeight:500,cursor:"pointer",whiteSpace:"nowrap",display:"flex",alignItems:"center",gap:6}}>
+                {sel && (
+                  <button onClick={() => exportDochazkaHtml(attendance, sel, email)} disabled={st.days===0} title="Brandovaný výkaz k tisku / uložení jako PDF"
+                    style={{padding:"8px 14px",borderRadius:8,border:"1px solid var(--line2)",background:"#fff",color:"var(--ink)",fontSize:12,fontWeight:500,cursor:st.days?"pointer":"default",opacity:st.days?1:.45,whiteSpace:"nowrap"}}>
+                    Výkaz PDF
+                  </button>
+                )}
+                <button onClick={() => downloadDochazkaCsv(attendance, sel)} disabled={st.days===0}
+                  style={{padding:"8px 14px",borderRadius:8,border:"1px solid #3518A5",background:"#3518A505",color:"#3518A5",fontSize:12,fontWeight:500,cursor:st.days?"pointer":"default",opacity:st.days?1:.45,whiteSpace:"nowrap",display:"flex",alignItems:"center",gap:6}}>
                   ⬇ Export pro účetní
                 </button>
               </div>
@@ -19946,7 +20034,7 @@ function AsistentPanel({ clients, onPreview, financeItems = [], onSaveFinance, w
                     ))}
                   </tr></thead>
                   <tbody>
-                    {attendance.map((a,i)=>{
+                    {admRows.map((a,i)=>{
                       const grossDur = a.check_in&&a.check_out?(new Date(a.check_out)-new Date(a.check_in))/36e5:null;
                       const net = grossDur!=null?netAttHours(a.check_in,a.check_out):null;
                       const lunchDeducted = grossDur!=null&&grossDur>=LUNCH_THRESHOLD_H;
@@ -20033,7 +20121,8 @@ function AsistentPanel({ clients, onPreview, financeItems = [], onSaveFinance, w
                 </table>
               </div>
             </div>
-          )
+          );
+          })()
         )}
 
         {/* Plán */}
