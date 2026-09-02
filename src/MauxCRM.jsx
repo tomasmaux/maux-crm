@@ -13041,9 +13041,9 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
               <button
                 className="btn"
                 style={{fontSize:11,background:"#fff",color:"#3518A5",border:"1px solid #3518A5",padding:"6px 14px"}}
-                onClick={() => downloadDochazkaCsv(assistantAttendance, prevMonthStr)}
+                onClick={() => exportDochazkaHtml(assistantAttendance, prevMonthStr, "asistent@maux.cz")}
               >
-                ⬇ Stáhnout CSV
+                ⬇ Výkaz · {DOCHAZKA_MESICE[new Date(prevMonthStr+"-01").getMonth()]}
               </button>
               <button
                 className="btn"
@@ -18846,16 +18846,17 @@ function downloadDochazkaCsv(attendance, ym) {
   if (rows.length === 0) { alert(`Žádná uzavřená směna za ${ym ? dochazkaLabel(ym) : "celé období"}.`); return; }
   const fmtTs = ts => ts ? new Date(ts).toLocaleTimeString("cs-CZ", { hour: "2-digit", minute: "2-digit" }) : "";
   const out = [["Datum","Příchod","Odchod","Hrubé hodiny","Čisté hodiny","Pauza","Odměna (Kč)"]];
-  let sGross = 0, sNet = 0, sLunch = 0, sWage = 0;
+  let sGross = 0, sNet = 0, sLunch = 0;
   rows.forEach(a => {
     const gross = (new Date(a.check_out) - new Date(a.check_in)) / 36e5;
     const net   = netAttHours(a.check_in, a.check_out);
     const lunch = gross >= LUNCH_THRESHOLD_H ? LUNCH_BREAK_H : 0;
     const wage  = Math.round(net * ASSISTANT_HOURLY_RATE);
-    sGross += gross; sNet += net; sLunch += lunch; sWage += wage;
+    sGross += gross; sNet += net; sLunch += lunch;
     out.push([a.date, fmtTs(a.check_in), fmtTs(a.check_out), gross.toFixed(2), net.toFixed(2), lunch, wage]);
   });
-  out.push([`Celkem (${rows.length} dní)`, "", "", sGross.toFixed(2), sNet.toFixed(2), sLunch, sWage]);
+  // Součet odměny stejnou metodou jako výkaz i shrnutí: round(Σ čistých hodin × sazba). Σ zaokrouhlených dnů dávala o 1 Kč víc.
+  out.push([`Celkem (${rows.length} dní)`, "", "", sGross.toFixed(2), sNet.toFixed(2), sLunch, Math.round(sNet * ASSISTANT_HOURLY_RATE)]);
   const csv  = out.map(r => r.join(";")).join("\n");
   const blob = new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8;" });
   const url  = URL.createObjectURL(blob);
@@ -20013,18 +20014,19 @@ function AsistentPanel({ clients, onPreview, financeItems = [], onSaveFinance, w
               {/* Toolbar: info + export */}
               <div style={{marginBottom:12,display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
                 <div style={{flex:1,padding:"8px 12px",background:"rgba(53,24,165,.04)",borderRadius:8,display:"flex",alignItems:"center",gap:8}}>
-                  <span style={{fontSize:10.5,color:"var(--mut)"}}>Ze směn ≥ {LUNCH_THRESHOLD_H} h se odečítá {LUNCH_BREAK_H} h pauza. Export stáhne {sel ? `dochazka_Josef_${sel}.csv` : "dochazka_Josef_vse.csv"} — jen řádky z tabulky níže, plus součtový řádek.</span>
+                  <span style={{fontSize:10.5,color:"var(--mut)"}}>Ze směn ≥ {LUNCH_THRESHOLD_H} h se odečítá {LUNCH_BREAK_H} h pauza. Výkaz pro účetní = brandovaná listina MAUX za {sel ? dochazkaLabel(sel) : "vybraný měsíc"} (otevře se k tisku / uložení do PDF). CSV jsou surová data se součtovým řádkem.</span>
                 </div>
+                {/* Účetní dostává brandovaný výkaz MAUX (jako historicky) — CSV je jen tichá druhá volba (Tom 2.9.2026) */}
+                <button onClick={() => downloadDochazkaCsv(attendance, sel)} disabled={st.days===0} title="Surová data (CSV) — jen když je někdo výslovně chce"
+                  style={{padding:"8px 12px",borderRadius:8,border:"1px solid var(--line2)",background:"#fff",color:"var(--mut)",fontSize:11,fontWeight:500,cursor:st.days?"pointer":"default",opacity:st.days?1:.45,whiteSpace:"nowrap"}}>
+                  CSV
+                </button>
                 {sel && (
-                  <button onClick={() => exportDochazkaHtml(attendance, sel, email)} disabled={st.days===0} title="Brandovaný výkaz k tisku / uložení jako PDF"
-                    style={{padding:"8px 14px",borderRadius:8,border:"1px solid var(--line2)",background:"#fff",color:"var(--ink)",fontSize:12,fontWeight:500,cursor:st.days?"pointer":"default",opacity:st.days?1:.45,whiteSpace:"nowrap"}}>
-                    Výkaz PDF
+                  <button onClick={() => exportDochazkaHtml(attendance, sel, email)} disabled={st.days===0} title="Brandovaný výkaz MAUX Legal k tisku / uložení jako PDF"
+                    style={{padding:"8px 14px",borderRadius:8,border:"1px solid #3518A5",background:"#3518A505",color:"#3518A5",fontSize:12,fontWeight:500,cursor:st.days?"pointer":"default",opacity:st.days?1:.45,whiteSpace:"nowrap",display:"flex",alignItems:"center",gap:6}}>
+                    ⬇ Výkaz pro účetní
                   </button>
                 )}
-                <button onClick={() => downloadDochazkaCsv(attendance, sel)} disabled={st.days===0}
-                  style={{padding:"8px 14px",borderRadius:8,border:"1px solid #3518A5",background:"#3518A505",color:"#3518A5",fontSize:12,fontWeight:500,cursor:st.days?"pointer":"default",opacity:st.days?1:.45,whiteSpace:"nowrap",display:"flex",alignItems:"center",gap:6}}>
-                  ⬇ Export pro účetní
-                </button>
               </div>
               <div style={{border:"1px solid var(--line)",borderRadius:12,overflow:"hidden"}}>
                 <table style={{width:"100%",borderCollapse:"collapse"}}>
