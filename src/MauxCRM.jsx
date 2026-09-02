@@ -19890,7 +19890,16 @@ function AsistentPanel({ clients, onPreview, financeItems = [], onSaveFinance, w
   const mBdH  = bdHoursOf(mLogs);
   const mDays = new Set(mLogs.map(l=>l.entry_date)).size;
   const mAtt  = attendance.filter(a=>a.date.startsWith(mKey)&&a.check_in).length;
-  const TABS = [{k:"logs",l:"Výkazy"},{k:"dochazka",l:"Docházka"},{k:"plan",l:`Plán ${monthNames[nmm-1]}`}];
+  const TABS = [{k:"logs",l:"Výkazy"},{k:"dochazka",l:"Docházka · editace"},{k:"plan",l:`Plán ${monthNames[nmm-1]}`}];
+
+  // ── Docházka pro účetní — vybraný měsíc sdílí karta nahoře i záložka s tabulkou (Tom 2.9.2026, varianta A).
+  // Roletka, ne pilulky ("zbytečně zabírá prostor"). Výchozí = minulý měsíc, tj. ten, který posílá účetní.
+  const admMonths = dochazkaMonths(attendance);
+  const admPrevYm = dochazkaYm(new Date(now.getFullYear(), now.getMonth()-1, 1));
+  const admDefYm  = admMonths.includes(admPrevYm) ? admPrevYm : (admMonths.find(m => m !== curMonth) || admMonths[0]);
+  const admSel    = admYm === null ? admDefYm : admYm;
+  const admSt     = dochazkaStats(dochazkaClosedRows(attendance, admSel));
+  const admOpen   = attendance.filter(a => (a.date||"").startsWith(admSel) && a.check_in && !a.check_out).length;
 
   return (
     <div className="body">
@@ -19913,6 +19922,49 @@ function AsistentPanel({ clients, onPreview, financeItems = [], onSaveFinance, w
           clients={clients} financeItems={financeItems} onSaveFinance={onSaveFinance}
           workEntries={workEntries} onApprove={approveFromPanel} />
       </div>
+
+      {/* ── Docházka pro účetní — vlastní karta, ne záložka (Tom 2.9.2026: "je to pro mne důležité").
+             Roletka měsíce → brandovaný výkaz jedním klikem. Čísla tichá, dominantou je akce. ── */}
+      {attendance.length>0 && (
+        <div style={{margin:"16px 28px 0",display:"flex",alignItems:"center",justifyContent:"space-between",gap:20,flexWrap:"wrap",padding:"18px 24px",borderRadius:BP.r,border:BP.frame,background:"#fff",boxShadow:BP.shadow}}>
+          <div style={{display:"flex",alignItems:"center",gap:12,flexWrap:"wrap"}}>
+            <div style={{marginRight:6}}>
+              <div style={{fontSize:8,letterSpacing:".25em",textTransform:"uppercase",fontWeight:600,color:"var(--mut)",marginBottom:4}}>Docházka pro účetní</div>
+              <div style={{fontFamily:"Fraunces,serif",fontWeight:300,fontSize:22,color:"var(--txt)",lineHeight:1.1}}>{dochazkaLabel(admSel).replace(" (probíhá)","")}</div>
+            </div>
+            <div style={{position:"relative",display:"inline-flex"}}>
+              <select value={admSel} onChange={e=>setAdmYm(e.target.value)}
+                style={{appearance:"none",WebkitAppearance:"none",font:"inherit",fontSize:13,fontWeight:600,color:"var(--ink)",padding:"9px 32px 9px 13px",borderRadius:9,border:"1px solid var(--line2)",background:"#fff",cursor:"pointer"}}>
+                {admMonths.map(ym => <option key={ym} value={ym}>{dochazkaLabel(ym)}</option>)}
+              </select>
+              <span style={{position:"absolute",right:13,top:"50%",width:6,height:6,borderRight:"1.5px solid #3518A5",borderBottom:"1.5px solid #3518A5",transform:"translateY(-70%) rotate(45deg)",pointerEvents:"none"}} />
+            </div>
+            <button onClick={() => exportDochazkaHtml(attendance, admSel, email)} disabled={admSt.days===0} title="Brandovaný výkaz MAUX Legal k tisku / uložení jako PDF"
+              style={{padding:"9px 16px",borderRadius:9,border:"1px solid #3518A5",background:"rgba(53,24,165,.03)",color:"#3518A5",fontSize:12.5,fontWeight:600,cursor:admSt.days?"pointer":"default",opacity:admSt.days?1:.45,whiteSpace:"nowrap"}}>
+              ⬇ Výkaz pro účetní
+            </button>
+            <button onClick={() => downloadDochazkaCsv(attendance, admSel)} disabled={admSt.days===0} title="Surová data (CSV) se součtovým řádkem"
+              style={{padding:"9px 10px",borderRadius:9,border:"1px solid var(--line2)",background:"#fff",color:"var(--mut)",fontSize:11,fontWeight:500,cursor:admSt.days?"pointer":"default",opacity:admSt.days?1:.45}}>
+              CSV
+            </button>
+          </div>
+          {admSt.days>0 ? (
+            <div style={{display:"flex",gap:26,alignItems:"flex-end"}}>
+              <div style={{fontSize:10.5,color:"var(--mut)"}}>Dní<b className="maux-num" style={{display:"block",fontSize:17,color:"var(--txt)",marginTop:2}}>{admSt.days}</b></div>
+              <div style={{fontSize:10.5,color:"var(--mut)"}}>Čistých hodin<b className="maux-num" style={{display:"block",fontSize:17,color:"var(--txt)",marginTop:2}}>{fmtH(admSt.net)}</b></div>
+              <div style={{fontSize:10.5,color:"var(--mut)"}}>Odměna {ASSISTANT_HOURLY_RATE} Kč/h<b className="maux-num" style={{display:"block",fontSize:17,color:"var(--txt)",marginTop:2}}>{admSt.wage.toLocaleString("cs-CZ")} Kč</b></div>
+            </div>
+          ) : (
+            <div style={{fontSize:12,color:"var(--mut)"}}>{admSel===curMonth ? "Tento měsíc Josef zatím nemá uzavřenou směnu." : "Za tento měsíc není žádná uzavřená směna."}</div>
+          )}
+          {(admSel===curMonth && admSt.days>0 || admOpen>0) && (
+            <div style={{flexBasis:"100%",fontSize:11,color:"var(--mut)",marginTop:-6}}>
+              {admSel===curMonth && admSt.days>0 ? "Měsíc ještě běží — výkaz bude neúplný. " : ""}
+              {admOpen>0 ? `${admOpen} ${admOpen===1?"záznam má":"záznamy mají"} jen příchod bez odchodu — do výkazu nejde, doplň odchod v Docházka · editace.` : ""}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* ── Administrace ── */}
       <div style={{fontSize:9,letterSpacing:".2em",textTransform:"uppercase",color:"var(--mut)",fontWeight:700,margin:"30px 28px 9px"}}>Administrace</div>
@@ -19972,61 +20024,14 @@ function AsistentPanel({ clients, onPreview, financeItems = [], onSaveFinance, w
         {/* Docházka — admin správa */}
         {tab==="dochazka" && (
           attendance.length===0 ? <div style={{color:"var(--mut)",fontSize:13}}>Žádné záznamy docházky.</div> : (() => {
-            // Měsíc řídí celou záložku (Tom 2.9.2026, varianta B): pilulky → filtr tabulky → shrnutí → export.
-            const months = dochazkaMonths(attendance);
-            const prevYm = dochazkaYm(new Date(now.getFullYear(), now.getMonth()-1, 1));
-            const defYm  = months.includes(prevYm) ? prevYm : (months.find(m => m !== curMonth) || months[0]);
-            const sel    = admYm === null ? defYm : admYm;              // "" = Vše
-            const admRows = attendance.filter(a => !sel || (a.date||"").startsWith(sel));
-            const st = dochazkaStats(dochazkaClosedRows(attendance, sel));
-            const openCnt = admRows.filter(a => a.check_in && !a.check_out).length;
-            const sklon = n => n===1 ? "den" : (n>=2 && n<=4 ? "dny" : "dní");
-            const pill = (on) => ({padding:"6px 12px",borderRadius:999,border:`1px solid ${on?"#3518A5":"var(--line)"}`,background:on?"rgba(53,24,165,.05)":"#fff",color:on?"#3518A5":"var(--ink)",fontSize:12,fontWeight:on?600:400,cursor:"pointer",font:"inherit",display:"flex",gap:6,alignItems:"baseline"});
-            const verdict = !sel
-              ? `Celá evidence: ${st.days} ${sklon(st.days)}, ${fmtH(st.net)} čistého.`
-              : st.days === 0
-                ? (sel === curMonth ? "Tento měsíc Josef zatím nemá uzavřenou směnu." : `Za ${dochazkaLabel(sel)} není žádná uzavřená směna.`)
-                : `${dochazkaLabel(sel)}: ${st.days} ${sklon(st.days)}, odměna ${st.wage.toLocaleString("cs-CZ")} Kč${sel===curMonth?" — měsíc ještě běží, export bude neúplný":""}.`;
+            // Editace řádků. Měsíc řídí roletka v kartě „Docházka pro účetní" nahoře (Tom 2.9.2026, varianta A).
+            const admRows = attendance.filter(a => (a.date||"").startsWith(admSel));
             return (
             <div>
-              {/* Pilulky měsíců */}
-              <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:12}}>
-                {months.map(ym => { const s = dochazkaStats(dochazkaClosedRows(attendance, ym)); return (
-                  <button key={ym} onClick={()=>setAdmYm(ym)} style={{...pill(sel===ym), borderStyle: ym===curMonth ? "dashed" : "solid"}}>
-                    {dochazkaLabel(ym)}
-                    <span className="maux-num" style={{fontSize:10.5,color:"var(--mut)",fontWeight:500}}>{s.days ? `${s.days} d · ${fmtH(s.net)}` : "—"}</span>
-                  </button>
-                );})}
-                <button onClick={()=>setAdmYm("")} style={pill(sel==="")}>Vše</button>
-              </div>
-              {/* Shrnutí — věta nahoře, čísla jako důkaz */}
-              <div style={{display:"flex",gap:26,alignItems:"center",padding:"12px 16px",borderLeft:"2px solid #3518A5",background:"rgba(53,24,165,.03)",marginBottom:12,flexWrap:"wrap"}}>
-                <div style={{flex:1,fontSize:13,color:"var(--ink)",minWidth:220}}>
-                  {verdict}
-                  {openCnt>0 && <span style={{display:"block",fontSize:11,color:"var(--mut)",marginTop:2}}>{openCnt} {openCnt===1?"záznam má":"záznamy mají"} jen příchod bez odchodu — do exportu nejde, doplň odchod přes Upravit.</span>}
-                </div>
-                {st.days>0 && <>
-                  <div style={{fontSize:10.5,color:"var(--mut)"}}>Dní<b className="maux-num" style={{display:"block",fontSize:17,color:"var(--ink)"}}>{st.days}</b></div>
-                  <div style={{fontSize:10.5,color:"var(--mut)"}}>Čistých hodin<b className="maux-num" style={{display:"block",fontSize:17,color:"var(--ink)"}}>{fmtH(st.net)}</b></div>
-                  <div style={{fontSize:10.5,color:"var(--mut)"}}>Odměna {ASSISTANT_HOURLY_RATE} Kč/h<b className="maux-num" style={{display:"block",fontSize:17,color:"var(--ink)"}}>{st.wage.toLocaleString("cs-CZ")} Kč</b></div>
-                </>}
-              </div>
-              {/* Toolbar: info + export */}
               <div style={{marginBottom:12,display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
-                <div style={{flex:1,padding:"8px 12px",background:"rgba(53,24,165,.04)",borderRadius:8,display:"flex",alignItems:"center",gap:8}}>
-                  <span style={{fontSize:10.5,color:"var(--mut)"}}>Ze směn ≥ {LUNCH_THRESHOLD_H} h se odečítá {LUNCH_BREAK_H} h pauza. Výkaz pro účetní = brandovaná listina MAUX za {sel ? dochazkaLabel(sel) : "vybraný měsíc"} (otevře se k tisku / uložení do PDF). CSV jsou surová data se součtovým řádkem.</span>
+                <div style={{flex:1,padding:"8px 12px",background:"rgba(53,24,165,.04)",borderRadius:8,fontSize:10.5,color:"var(--mut)"}}>
+                  {dochazkaLabel(admSel)} · {admRows.length} {admRows.length===1?"záznam":admRows.length<5?"záznamy":"záznamů"} — měsíc měníš roletkou v kartě nahoře. Ze směn ≥ {LUNCH_THRESHOLD_H} h se odečítá {LUNCH_BREAK_H} h pauza.
                 </div>
-                {/* Účetní dostává brandovaný výkaz MAUX (jako historicky) — CSV je jen tichá druhá volba (Tom 2.9.2026) */}
-                <button onClick={() => downloadDochazkaCsv(attendance, sel)} disabled={st.days===0} title="Surová data (CSV) — jen když je někdo výslovně chce"
-                  style={{padding:"8px 12px",borderRadius:8,border:"1px solid var(--line2)",background:"#fff",color:"var(--mut)",fontSize:11,fontWeight:500,cursor:st.days?"pointer":"default",opacity:st.days?1:.45,whiteSpace:"nowrap"}}>
-                  CSV
-                </button>
-                {sel && (
-                  <button onClick={() => exportDochazkaHtml(attendance, sel, email)} disabled={st.days===0} title="Brandovaný výkaz MAUX Legal k tisku / uložení jako PDF"
-                    style={{padding:"8px 14px",borderRadius:8,border:"1px solid #3518A5",background:"#3518A505",color:"#3518A5",fontSize:12,fontWeight:500,cursor:st.days?"pointer":"default",opacity:st.days?1:.45,whiteSpace:"nowrap",display:"flex",alignItems:"center",gap:6}}>
-                    ⬇ Výkaz pro účetní
-                  </button>
-                )}
               </div>
               <div style={{border:"1px solid var(--line)",borderRadius:12,overflow:"hidden"}}>
                 <table style={{width:"100%",borderCollapse:"collapse"}}>
