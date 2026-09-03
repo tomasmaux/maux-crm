@@ -2805,6 +2805,56 @@ function InvoicePrintPreview({ invoice, client, workEntries, onBack, onIssue, on
   const [issueConfirmDialog, setIssueConfirmDialog] = useState(false);
   const [editConfirmDialog, setEditConfirmDialog] = useState(false);
   const [issued, setIssued] = useState(false);
+  // ⚠️ FIT-TO-PAGE strany 1 (3. 9. 2026, faktura 076/2026 Buldok): 4 paušální řádky
+  // + přefakturace přetekly A4 o ~25 mm, tiskárna rozřízla patičku s QR a udělala z ní
+  // druhou, jinak prázdnou stranu. Pravidlo: strana 1 se VŽDY vejde na jeden list.
+  // Obsah strany 1 (hlavička → patička) se změří v px a když je vyšší než 297 mm,
+  // zmenší se CSS `zoom` (Chrome ho respektuje v tisku, na rozdíl od transform mění layout).
+  // Podlaha 0.72 — pod ni už by faktura nebyla čitelná; tam přebírá slovo
+  // break-inside:avoid na patičce (přejde celá, nikdy rozříznutá).
+  // Platí pro KAŽDÝ list s atributem data-fit (strana 1 i všechny strany výkazu práce —
+  // chunkWorkEntriesForPrint řádky jen odhaduje v mm, tohle je měřená pojistka).
+  const printRootRef = useRef(null);
+  const [fitZoom, setFitZoom] = useState({});
+  useEffect(() => {
+    const root = printRootRef.current;
+    if (!root) return;
+    const A4_PX = 297 * 96 / 25.4;   // 1122.5 — CSS mm→px je pevných 96 dpi i v tisku
+    const LIMIT = A4_PX - 4;
+    const measureOne = (el) => {
+      const cur = parseFloat(el.style.zoom) || 1;
+      el.style.zoom = "1";
+      const h1 = el.getBoundingClientRect().height;
+      el.style.zoom = String(cur);
+      let z;
+      if (h1 <= LIMIT) z = 1;
+      else {
+        // Zoom není přesně lineární (řádky textu se zaokrouhlují na celé px na každé úrovni),
+        // proto se dolaďuje iterativně: každé přeměření (ResizeObserver) zoom jen zmenšuje,
+        // dokud se skutečná výška nevejde. Nikdy nezvětšuje — žádná oscilace.
+        const actual = cur === 1 ? h1 : el.getBoundingClientRect().height;
+        z = actual <= LIMIT ? cur : Math.floor((cur * (LIMIT / actual)) * 1000) / 1000 - 0.002;
+        z = Math.max(0.72, z);
+      }
+      return z;
+    };
+    const els = Array.from(root.querySelectorAll("[data-fit]"));
+    const measure = () => {
+      const next = {};
+      els.forEach(el => { next[el.dataset.fit] = measureOne(el); });
+      setFitZoom(prev => {
+        const keys = Object.keys(next);
+        const same = keys.length === Object.keys(prev).length && keys.every(k => Math.abs((prev[k] ?? 1) - next[k]) <= 0.0015);
+        return same ? prev : next;
+      });
+    };
+    measure();
+    const t = setTimeout(measure, 400);
+    if (document.fonts?.ready) document.fonts.ready.then(measure);
+    const ro = typeof ResizeObserver !== "undefined" ? new ResizeObserver(measure) : null;
+    els.forEach(el => ro?.observe(el));
+    return () => { clearTimeout(t); ro?.disconnect(); };
+  }, [qrUrl, workEntries, invoice, client]);
 
   const ibanRaw = FIRMA.iban.replace(/\s/g, "");
   // POZOR: invoice.total je už v celých Kč (viz fmtKc/celá appka — nikdy se nedělí 100),
@@ -2964,7 +3014,7 @@ function InvoicePrintPreview({ invoice, client, workEntries, onBack, onIssue, on
       </div>
 
       {/* Preview wrapper */}
-      <div className="print-root">
+      <div className="print-root" ref={printRootRef}>
 
         {/* PAGE 1 — FAKTURA */}
         <div className="inv-page" style={{ boxShadow: "0 16px 60px rgba(0,0,0,.22)", fontFamily: "'Cormorant Garamond', 'Inter', serif" }}>
@@ -2972,7 +3022,7 @@ function InvoicePrintPreview({ invoice, client, workEntries, onBack, onIssue, on
           {/* Logo watermark — canvas odstranil bílé px, proto jen opacity (funguje v tisku) */}
           {wmSrc && <div aria-hidden="true" style={{ position: "absolute", inset: 0, backgroundImage: `url(${wmSrc})`, backgroundRepeat: "no-repeat", backgroundPosition: "center", backgroundSize: "60%", opacity: 0.038, pointerEvents: "none", zIndex: 0 }} />}
 
-          <div style={{ position: "relative", zIndex: 1 }}>
+          <div data-fit="p1" style={{ position: "relative", zIndex: 1, zoom: fitZoom.p1 || 1 }}>
             {/* ── INDIGO HEADER ── */}
             <div style={{ background: "#3518A5", position: "relative", overflow: "hidden" }}>
               {/* Header watermark */}
@@ -3027,7 +3077,9 @@ function InvoicePrintPreview({ invoice, client, workEntries, onBack, onIssue, on
                       {/* Nepodnikající fyzická osoba (bez IČO) — na faktuře místo IČO datum narození */}
                       {!client?.ico && client?.birth_date && <>Datum narození: {fmtDate(client.birth_date)}<br /></>}
                       {client?.reg && <>{client.reg.split("\n").map((l,i)=><span key={i}>{l}<br /></span>)}</>}
-                      {!client?.ico && !client?.reg && !client?.birth_date && <span style={{ color: "#D4CEEA" }}>—</span>}
+                      {/* Tom 3. 9. 2026: e-mail odběratele z evidence — stejně decentně jako u dodavatele */}
+                      {(client?.emails || [])[0] && <span style={{ color: "#5B3FC8" }}>{client.emails[0]}</span>}
+                      {!client?.ico && !client?.reg && !client?.birth_date && !(client?.emails || [])[0] && <span style={{ color: "#D4CEEA" }}>—</span>}
                     </div>
                   </>
                 )}
@@ -3089,21 +3141,25 @@ function InvoicePrintPreview({ invoice, client, workEntries, onBack, onIssue, on
                         </tr>
                       );
                     }
-                    paushalEnt.forEach((e, idx) => {
+                    // Tom 3. 9. 2026: opakované paušály se slučují do JEDNOHO řádku
+                    // („· 3 úkony"), detail nese příloha č. 1. Faktura 076/2026 měla 3× stejný řádek.
+                    if (paushalEnt.length > 0) {
+                      const n = paushalEnt.length;
+                      const ukony = n === 1 ? "" : `${n} ${n < 5 ? "úkony" : "úkonů"} · `;
                       rows.push(
-                        <tr key={`paushal-${idx}`} style={{ breakInside: "avoid", pageBreakInside: "avoid" }}>
+                        <tr key="paushal" style={{ breakInside: "avoid", pageBreakInside: "avoid" }}>
                           <td style={{ padding: "11px 0", borderBottom: ".5px solid rgba(53,24,165,.05)", fontSize: 11.5, color: "#3a3355", fontFamily: "'Inter', sans-serif", fontWeight: 300 }}>
                             Paušální odměna za právní služby
-                            <div style={{ fontSize: 9, color: "#D4CEEA", marginTop: 3, fontFamily: "'Inter', sans-serif" }}>detail dle přílohy č. 1</div>
+                            <div style={{ fontSize: 9, color: "#D4CEEA", marginTop: 3, fontFamily: "'Inter', sans-serif" }}>{ukony}detail dle přílohy č. 1</div>
                           </td>
                           <td style={{ padding: "11px 0 11px 8px", borderBottom: ".5px solid rgba(53,24,165,.05)", textAlign: "right", fontSize: 11, color: "#D4CEEA", fontFamily: "'Inter', sans-serif", fontWeight: 300, whiteSpace: "nowrap" }}>—</td>
                           <td style={{ padding: "11px 0 11px 8px", borderBottom: ".5px solid rgba(53,24,165,.05)", textAlign: "right", fontSize: 11, color: "#D4CEEA", fontFamily: "'Inter', sans-serif", fontWeight: 300, whiteSpace: "nowrap" }}>paušál</td>
                           <td style={{ padding: "11px 0 11px 8px", borderBottom: ".5px solid rgba(53,24,165,.05)", textAlign: "right", fontSize: 11.5, color: "#2d2840", fontFamily: "'Inter', sans-serif", fontWeight: 400, whiteSpace: "nowrap" }}>
-                            {fmtKc(e.amount || 0)}
+                            {fmtKc(paushalSubtotal)}
                           </td>
                         </tr>
                       );
-                    });
+                    }
                     return rows;
                   })()}
                   {/* No-VAT items — sp. poplatek a zákonné poplatky (statutory_note) se zobrazují
@@ -3125,7 +3181,7 @@ function InvoicePrintPreview({ invoice, client, workEntries, onBack, onIssue, on
             </div>
 
             {/* ── DUAL-PROMINENCE TOTALS ── */}
-            <div style={{ padding: "5mm 18mm 7mm", display: "flex", justifyContent: "flex-end", alignItems: "flex-end", gap: 0 }}>
+            <div style={{ padding: "5mm 18mm 7mm", display: "flex", justifyContent: "flex-end", alignItems: "flex-end", gap: 0, breakInside: "avoid", pageBreakInside: "avoid" }}>
               {/* Left: detail */}
               <div style={{ display: "flex", flexDirection: "column", gap: 7, paddingRight: "8mm", borderRight: ".5px solid rgba(53,24,165,.1)", minWidth: 200 }}>
                 {invoice.subtotal > 0 && (
@@ -3191,7 +3247,7 @@ function InvoicePrintPreview({ invoice, client, workEntries, onBack, onIssue, on
             </div>
 
             {/* ── FOOTER ── */}
-            <div style={{ padding: "6mm 18mm 7mm", display: "grid", gridTemplateColumns: "1fr auto", gap: "10mm", alignItems: "flex-end" }}>
+            <div style={{ padding: "6mm 18mm 7mm", display: "grid", gridTemplateColumns: "1fr auto", gap: "10mm", alignItems: "flex-end", breakInside: "avoid", pageBreakInside: "avoid" }}>
               <div>
                 <div style={{ fontSize: 7, letterSpacing: "0.35em", color: "#D4CEEA", textTransform: "uppercase", fontFamily: "'Inter', sans-serif", marginBottom: 9 }}>Platební údaje</div>
                 <div style={{ fontSize: 10, color: "#7A7494", lineHeight: 2.2, fontFamily: "'Inter', sans-serif", fontWeight: 300 }}>
@@ -3265,7 +3321,7 @@ function InvoicePrintPreview({ invoice, client, workEntries, onBack, onIssue, on
             {/* Logo watermark — stejný jako str.1 */}
             {wmSrc && <div aria-hidden="true" style={{ position: "absolute", inset: 0, backgroundImage: `url(${wmSrc})`, backgroundRepeat: "no-repeat", backgroundPosition: "center", backgroundSize: "60%", opacity: 0.038, pointerEvents: "none", zIndex: 0 }} />}
 
-            <div style={{ position: "relative", zIndex: 1 }}>
+            <div data-fit={"a" + pageIdx} style={{ position: "relative", zIndex: 1, zoom: fitZoom["a" + pageIdx] || 1 }}>
               {/* ── HEADER ── */}
               <div style={{ background: "#3518A5", position: "relative", overflow: "hidden" }}>
                 <div style={{ position: "absolute", inset: 0, backgroundImage: `url(${LOGO_WM})`, backgroundRepeat: "no-repeat", backgroundPosition: "center", backgroundSize: "68%", opacity: .07, pointerEvents: "none" }} />
