@@ -20883,9 +20883,10 @@ export default function MauxCRM() {
       const [updatedInvoices, updatedWork] = await Promise.all([fetchInvoices(), fetchWorkEntries()]);
       setInvoices(updatedInvoices);
       setWorkEntries(updatedWork);
-      setSel(inv.id);
+      // Tom 3. 9. 2026: po vystavení zpět na SEZNAM faktur. Původní trojice
+      // setSel → navTo → setMode("detail") se v jednom renderu srazila (navTo nuluje sel),
+      // výsledek byl mode "detail" bez vybrané faktury = prázdná stránka Fakturace.
       navTo("fakturace");
-      setMode("detail");
     } catch (err) { alert("Chyba: " + err.message); } finally { setSaving(false); }
   };
 
