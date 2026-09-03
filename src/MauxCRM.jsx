@@ -3241,7 +3241,7 @@ function InvoicePrintPreview({ invoice, client, workEntries, onBack, onIssue, on
               <div style={{ display: "flex", gap: 20, flexWrap: "wrap" }}>
                 <span style={{ fontSize: 9.5, color: "#9C96B5", fontFamily: "'Inter', sans-serif", fontWeight: 300, display: "flex", alignItems: "center", gap: 7 }}>
                   <span style={{ width: 3, height: 3, borderRadius: "50%", background: "rgba(53,24,165,.25)", display: "inline-block" }} />
-                  Příloha č. 1 — Výkaz práce za {prevMonthLabel()} ({workEntries?.length || 0} položek)
+                  Příloha č. 1 — Soupis právních úkonů za {prevMonthLabel()} ({workEntries?.length || 0} položek)
                 </span>
               </div>
             </div>
@@ -3328,7 +3328,7 @@ function InvoicePrintPreview({ invoice, client, workEntries, onBack, onIssue, on
                 <div style={{ position: "relative", zIndex: 1, padding: "11mm 18mm 9mm" }}>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 24 }}>
                     <div>
-                      <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 30, fontWeight: 400, color: "#fff", letterSpacing: "0.2em", lineHeight: 1 }}>VÝKAZ PRÁCE</div>
+                      <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 24, fontWeight: 400, color: "#fff", letterSpacing: "0.16em", lineHeight: 1, whiteSpace: "nowrap" }}>SOUPIS PRÁVNÍCH ÚKONŮ</div>
                       <div style={{ fontSize: 7.5, letterSpacing: "0.4em", color: "rgba(255,255,255,.32)", marginTop: 8, textTransform: "uppercase", fontWeight: 300 }}>
                         Příloha č. 1 k faktuře {invoice.invoice_number}{pages.length > 1 ? ` — str. ${pageIdx + 1}/${pages.length}` : ""}
                       </div>
@@ -3428,7 +3428,7 @@ function InvoicePrintPreview({ invoice, client, workEntries, onBack, onIssue, on
               {/* ── FOOTER ── */}
               <div style={{ margin: "0 18mm", paddingTop: "5mm", borderTop: ".5px solid rgba(53,24,165,.07)", paddingBottom: "6mm", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                 <div style={{ fontSize: 8.5, color: "#C4BDDC", fontWeight: 300, letterSpacing: "0.04em" }}>
-                  Výkaz práce je nedílnou součástí faktury {invoice.invoice_number} · {FIRMA.name} · IČO {FIRMA.ico}
+                  Soupis právních úkonů je nedílnou součástí faktury {invoice.invoice_number} · {FIRMA.name} · IČO {FIRMA.ico}
                 </div>
                 <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 11, color: "rgba(53,24,165,.3)", letterSpacing: "0.2em" }}>MAUX LEGAL</div>
               </div>
