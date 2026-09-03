@@ -112,13 +112,6 @@ function loadZapisnicekOpen() {
 function saveZapisnicekOpen(v) {
   try { localStorage.setItem("maux_zapisnicek_open", v ? "1" : "0"); } catch (e) {}
 }
-// ── Zapsat práci (rychlý zápis v menu): pamatuje si posledního klienta a sazbu ──
-function loadQuickLast() {
-  try { return JSON.parse(localStorage.getItem("maux_quick_last") || "null") || {}; } catch (e) { return {}; }
-}
-function saveQuickLast(v) {
-  try { localStorage.setItem("maux_quick_last", JSON.stringify(v || {})); } catch (e) {}
-}
 
 const fmtKc = (n) => maskNum(new Intl.NumberFormat("cs-CZ").format(Math.round(n || 0))) + " Kč";
 // Znaménko se nikdy nelepí natvrdo před hodnotu — vždycky přes tohle.
@@ -291,36 +284,10 @@ body{height:100%;background-color:#FAFAFC;background-repeat:no-repeat;background
 .sbfoot button:hover{color:var(--mut)}
 .qk{margin:0 0 22px;border-radius:12px;background:rgba(255,255,255,.85);border:1px solid rgba(28,10,99,.12);overflow:hidden;box-shadow:0 8px 20px -10px rgba(53,24,164,.55);transition:box-shadow .15s,transform .12s;flex-shrink:0}
 .qk:hover{transform:translateY(-1px)}
-.qk.open{box-shadow:0 14px 32px -14px rgba(28,10,99,.45);transform:none}
 .qk .qkh{display:flex;align-items:center;gap:10px;width:100%;padding:11px 14px;cursor:pointer;font:inherit;font-weight:600;font-size:14px;color:#fff;background:linear-gradient(135deg,#3518A4,#1C0A63);border:none;text-align:left;user-select:none}
 .qk .qkh:hover{background:linear-gradient(135deg,#3B1DB5,#22106F)}
 .qk .qkp{width:22px;height:22px;border-radius:7px;background:rgba(255,255,255,.16);color:#fff;display:grid;place-items:center;font-size:17px;font-weight:400;line-height:1;transition:transform .18s;flex-shrink:0}
-.qk.open .qkp{transform:rotate(45deg)}
 .qk .qkk{margin-left:auto;font-size:10px;font-weight:500;opacity:.6;border:1px solid currentColor;border-radius:4px;padding:1px 5px;letter-spacing:.04em}
-.qk .qkb{padding:2px 12px 12px}
-.qkf{display:flex;flex-direction:column;gap:7px;margin-top:10px;position:relative}
-.qkf input,.qkf textarea{width:100%;font:inherit;font-size:12.5px;padding:7px 9px;border:1px solid transparent;border-radius:8px;background:var(--bg);color:var(--txt);outline:none}
-.qkf input:focus,.qkf textarea:focus{border-color:var(--indigo,#4A44B8);background:#fff}
-.qkf textarea{resize:none;height:56px;line-height:1.45}
-.qkf .qkrow{display:flex;gap:7px}
-.qkf .qkrow input{font-family:var(--num);font-variant-numeric:tabular-nums;min-width:0}
-.qkf .qkpill{display:flex;gap:4px}
-.qkf .qkpill button{flex:1;border:none;background:var(--bg);font:inherit;font-size:11.5px;padding:6px 0;border-radius:7px;cursor:pointer;color:var(--mut)}
-.qkf .qkpill button.on{background:#fff;color:var(--ink);font-weight:600;box-shadow:0 1px 2px rgba(28,10,99,.1)}
-.qkf .qksave{display:flex;align-items:center;gap:8px;margin-top:4px}
-.qkf .qksave button.qkgo{border:none;background:var(--ink);color:#fff;font:inherit;font-weight:600;font-size:12.5px;padding:8px 14px;border-radius:8px;cursor:pointer}
-.qkf .qksave button.qkgo:disabled{opacity:.4;cursor:default}
-.qkf .qksave .qkhint{font-size:11px;color:var(--mut)}
-.qkf .qksum{font-family:var(--num);font-variant-numeric:tabular-nums;font-weight:600;font-size:13px;color:var(--ink);margin-left:auto}
-.qkf .qkfull{background:none;border:none;font:inherit;font-size:11px;color:var(--mut);cursor:pointer;padding:2px 0 0;text-align:left}
-.qkf .qkfull:hover{color:var(--ink)}
-.qkcl{position:absolute;left:0;right:0;top:36px;z-index:20;background:#fff;border:1px solid rgba(28,10,99,.12);border-radius:9px;box-shadow:0 10px 24px -12px rgba(28,10,99,.35);overflow:hidden}
-.qkcl button{display:block;width:100%;text-align:left;border:none;background:none;font:inherit;font-size:12.5px;padding:7px 10px;cursor:pointer;color:var(--txt)}
-.qkcl button:hover{background:#F3F0FF;color:var(--ink)}
-.niplus{margin-left:auto;width:20px;height:20px;border-radius:6px;display:grid;place-items:center;font-size:15px;line-height:1;color:var(--mut);opacity:0;transition:opacity .13s,background .13s;flex-shrink:0}
-.ni:hover .niplus,.ni.on .niplus{opacity:1}
-.niplus:hover{background:var(--ink);color:#fff}
-.qktoast{position:fixed;left:50%;bottom:26px;transform:translate(-50%,0);background:var(--ink);color:#fff;padding:9px 16px;border-radius:9px;font-size:12.5px;z-index:400;box-shadow:0 10px 30px -10px rgba(28,10,99,.5);pointer-events:none}
 .main{flex:1;display:flex;flex-direction:column;min-width:0;background:transparent}
 .top{padding:32px 40px 0;display:flex;align-items:flex-end;justify-content:space-between;gap:16px}
 .top-l .eyebrow{font-size:9px;letter-spacing:.3em;text-transform:uppercase;color:var(--ink);font-weight:600;opacity:.5;margin-bottom:8px}
@@ -3528,138 +3495,22 @@ function ServiceDots({ list, max = 3 }) {
   );
 }
 
-/* ── Zapsat práci — rychlý zápis přímo v menu (Tom 3. 9. 2026, varianta B) ──
-   Miniformulář: klient · hodinově/paušál · datum · hodiny · sazba · popis · Uložit.
-   Ukládá přes stejný upsert jako plný formulář, jen NEODCHÁZÍ z obrazovky.
-   Sleva, notář, přefakturace zůstávají v plném formuláři („celý formulář →"). */
-function QuickEntry({ clients, onSave, onFull, saving, openSignal }) {
-  const blank = () => {
-    const last = loadQuickLast();
-    return { client_id: last.client_id && clients.some(c => c.id === last.client_id) ? last.client_id : "",
-      billing_type: "hourly", entry_date: today(), hours: "", rate: last.rate || 2000, flat_amount: "", description: "" };
-  };
-  const [open, setOpen] = useState(false);
-  const [d, setD] = useState(blank);
-  const [clientQ, setClientQ] = useState("");
-  const [clientOpen, setClientOpen] = useState(false);
-  const [toast, setToast] = useState(null);
-  const clientRef = useRef(null);
-  const descRef = useRef(null);
-  const toastTimer = useRef(null);
-  const set = (k, v) => setD(p => ({ ...p, [k]: v }));
-
-  // otevření zvenčí (klávesa N) — přepíná
-  useEffect(() => { if (openSignal) setOpen(o => !o); }, [openSignal]);
-  // při otevření: předvyplnit posledního klienta a dát fokus tam, kde je nejspíš potřeba
-  useEffect(() => {
-    if (!open) return;
-    const b = blank();
-    setD(b);
-    const c = clients.find(x => x.id === b.client_id);
-    setClientQ(c ? c.name : "");
-    setTimeout(() => { (c ? descRef.current : clientRef.current)?.focus(); }, 30);
-  }, [open]);
-  useEffect(() => () => { if (toastTimer.current) clearTimeout(toastTimer.current); }, []);
-
-  const filtered = (() => {
-    const q = clientQ.trim().toLowerCase();
-    return clients
-      .filter(c => !q || (c.name || "").toLowerCase().includes(q) || (c.ico || "").includes(q))
-      .sort((a, b) => (a.name || "").localeCompare(b.name || "", "cs"))
-      .slice(0, 6);
-  })();
-  const pickClient = (c) => {
-    set("client_id", c.id);
-    if (c.hourly_rate > 0) set("rate", c.hourly_rate);
-    setClientQ(c.name); setClientOpen(false);
-    setTimeout(() => descRef.current?.focus(), 20);
-  };
-
-  const isFlat = d.billing_type === "flat_rate";
-  const amount = isFlat
-    ? Math.round(Number(d.flat_amount) || 0)
-    : Math.round((Number(d.hours) || 0) * (Number(d.rate) || 0));
-  const canSave = !!d.client_id && !!d.description.trim() && amount > 0 && !saving;
-
-  const showToast = (msg) => {
-    setToast(msg);
-    if (toastTimer.current) clearTimeout(toastTimer.current);
-    toastTimer.current = setTimeout(() => setToast(null), 3200);
-  };
-
-  const save = async () => {
-    if (!canSave) return;
-    const c = clients.find(x => x.id === d.client_id);
-    const entry = {
-      id: uid(), client_id: d.client_id, entry_date: d.entry_date || today(),
-      description: d.description.trim(), notes: "",
-      billing_type: isFlat ? "flat_rate" : "hourly",
-      hours: isFlat ? 0 : (Number(d.hours) || 0),
-      rate: isFlat ? 0 : (Number(d.rate) || 2000),
-      flat_amount: isFlat ? amount : 0,
-      amount, notary_fee: 0, admin_fee: 0, sig_count: 0, real_hours: 0,
-    };
-    const ok = await onSave(entry);
-    if (!ok) return;
-    saveQuickLast({ client_id: d.client_id, rate: isFlat ? (loadQuickLast().rate || 2000) : entry.rate });
-    setOpen(false);
-    showToast("Uloženo · " + (c ? c.name : "") + (isFlat ? "" : " · " + entry.hours + " h") + " · " + fmtKc(amount));
-  };
-  const onKey = (e) => {
-    if ((e.metaKey || e.ctrlKey) && e.key === "Enter") { e.preventDefault(); save(); }
-    if (e.key === "Escape") { setOpen(false); }
-  };
-
+/* ── Zapsat práci — tlačítko v menu (Tom 3. 9. 2026). Klik = rovnou celý formulář
+   Nový záznam; klávesa N totéž. Miniformulář v menu Tom zkusil a zamítl — chce plný formulář hned. */
+function QuickEntry({ onFull }) {
   return (
-    <>
-      <div className={"qk" + (open ? " open" : "")}>
-        <button type="button" className="qkh" onClick={() => setOpen(o => !o)} title={open ? "Zavřít (Esc)" : "Zapsat práci (N)"}>
-          <span className="qkp">+</span> Zapsat práci <span className="qkk">N</span>
-        </button>
-        {open && (
-          <div className="qkb">
-            <div className="qkf" onKeyDown={onKey}>
-              <input ref={clientRef} value={clientQ} placeholder="Klient…"
-                onChange={e => { setClientQ(e.target.value); set("client_id", ""); setClientOpen(true); }}
-                onFocus={() => setClientOpen(true)}
-                onBlur={() => setTimeout(() => setClientOpen(false), 150)} />
-              {clientOpen && filtered.length > 0 && (
-                <div className="qkcl">
-                  {filtered.map(c => <button type="button" key={c.id} onMouseDown={e => e.preventDefault()} onClick={() => pickClient(c)}>{c.name}</button>)}
-                </div>
-              )}
-              <div className="qkpill">
-                <button type="button" className={isFlat ? "" : "on"} onClick={() => set("billing_type", "hourly")}>hodinově</button>
-                <button type="button" className={isFlat ? "on" : ""} onClick={() => set("billing_type", "flat_rate")}>paušál</button>
-              </div>
-              <div className="qkrow">
-                <input type="date" value={d.entry_date} onChange={e => set("entry_date", e.target.value)} style={{ flex: 1 }} />
-                {isFlat
-                  ? <input type="number" placeholder="Kč" value={d.flat_amount} onChange={e => set("flat_amount", e.target.value)} style={{ flex: "0 0 84px" }} />
-                  : <>
-                      <input type="number" step="0.25" placeholder="h" value={d.hours} onChange={e => set("hours", e.target.value)} style={{ flex: "0 0 56px" }} />
-                      <input type="number" placeholder="Kč/h" value={d.rate} onChange={e => set("rate", e.target.value)} style={{ flex: "0 0 68px" }} />
-                    </>}
-              </div>
-              <textarea ref={descRef} placeholder="Co jsi udělal…" value={d.description} onChange={e => set("description", e.target.value)} />
-              <div className="qksave">
-                <button type="button" className="qkgo" disabled={!canSave} onClick={save}>{saving ? "Ukládám…" : "Uložit"}</button>
-                <span className="qkhint">⌘↩</span>
-                <span className="qksum">{amount > 0 ? fmtKc(amount) : ""}</span>
-              </div>
-              <button type="button" className="qkfull" onClick={() => { setOpen(false); onFull(); }}>celý formulář → (sleva, notář, přefakturace)</button>
-            </div>
-          </div>
-        )}
-      </div>
-      {toast && <div className="qktoast">{toast}</div>}
-    </>
+    <div className="qk">
+      <button type="button" className="qkh" onClick={onFull} title="Zapsat práci (N)">
+        <span className="qkp">+</span> Zapsat práci <span className="qkk">N</span>
+      </button>
+    </div>
   );
 }
 
-function Sidebar({ mod, setMod, onLogout, privacyMode, onTogglePrivacy, clients = [], onQuickSave, onNewEntry, saving }) {
-  // — Zapsat práci: klávesa N přepíná rychlý zápis (mimo pole formulářů) —
-  const [quickSignal, setQuickSignal] = useState(0);
+function Sidebar({ mod, setMod, onLogout, privacyMode, onTogglePrivacy, onNewEntry }) {
+  // — Zapsat práci: klávesa N otevře celý formulář (mimo pole formulářů) —
+  // ref, aby listener nedržel zastaralou navigaci (navToNewWorkEntry čte aktuální mod/mode)
+  const onNewRef = useRef(onNewEntry); onNewRef.current = onNewEntry;
   useEffect(() => {
     const h = (e) => {
       if (e.key !== "n" && e.key !== "N") return;
@@ -3667,7 +3518,7 @@ function Sidebar({ mod, setMod, onLogout, privacyMode, onTogglePrivacy, clients 
       const t = e.target;
       if (t && (/INPUT|TEXTAREA|SELECT/.test(t.tagName) || t.isContentEditable)) return;
       e.preventDefault();
-      setQuickSignal(s => s + 1);
+      onNewRef.current && onNewRef.current();
     };
     document.addEventListener("keydown", h);
     return () => document.removeEventListener("keydown", h);
@@ -3726,9 +3577,7 @@ function Sidebar({ mod, setMod, onLogout, privacyMode, onTogglePrivacy, clients 
       </div>
 
       {/* Zapsat práci — jediný sytý prvek v menu, mezi značkou a navigací (Tom 3. 9. 2026). */}
-      {onQuickSave && (
-        <QuickEntry clients={clients} onSave={onQuickSave} onFull={onNewEntry} saving={saving} openSignal={quickSignal} />
-      )}
+      {onNewEntry && <QuickEntry onFull={onNewEntry} />}
 
       {/* Skupiny dělí JEN vzduch — žádné popisky, žádné linky. */}
       <nav className="nav">
@@ -3738,10 +3587,6 @@ function Sidebar({ mod, setMod, onLogout, privacyMode, onTogglePrivacy, clients 
             <button className={"ni g" + m.group + (mod === m.key ? " on" : "")} onClick={() => setMod(m.key)}>
               {m.label}
               {!m.live && <span className="soon">brzy</span>}
-              {m.key === "vykaz" && onNewEntry && (
-                <span className="niplus" title="Nový záznam (celý formulář)"
-                  onClick={e => { e.stopPropagation(); onNewEntry(); }}>+</span>
-              )}
             </button>
           </Fragment>
         ))}
@@ -20915,15 +20760,6 @@ export default function MauxCRM() {
     catch(e) { alert("Chyba: " + e.message); }
   };
 
-  // Rychlý zápis z menu: uloží a přepočítá, ale NEPŘEPÍNÁ obrazovku (Tom zůstává, kde je).
-  const quickSaveWorkEntry = async (e) => {
-    setSaving(true);
-    try {
-      await upsertWorkEntry(e);
-      setWorkEntries(await fetchWorkEntries());
-      return true;
-    } catch (err) { alert("Chyba: " + err.message); return false; } finally { setSaving(false); }
-  };
   const saveWorkEntry = async (e) => {
     setSaving(true);
     try {
@@ -21272,7 +21108,7 @@ export default function MauxCRM() {
       )}
       <Sidebar mod={mod} setMod={navTo} onLogout={handleLogout}
         privacyMode={privacyMode} onTogglePrivacy={togglePrivacy}
-        clients={clients} onQuickSave={quickSaveWorkEntry} onNewEntry={() => navToNewWorkEntry(null)} saving={saving} />
+        onNewEntry={() => navToNewWorkEntry(null)} />
       <div className="main">
         {/* Horní pruh "Tento měsíc" ZRUŠEN (Tom, 31.7.2026). Ukazoval totéž velké číslo jako
             hlavička kalendáře, jen jinak spočítané. Meta, věta, sparkline i řádek Dnes/Meta/
