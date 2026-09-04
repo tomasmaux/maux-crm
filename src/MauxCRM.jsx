@@ -12003,7 +12003,7 @@ function JosefPanel({ logs, attendance: attendanceProp, availability, clients = 
         const nakladM = roiYm === ym ? wageToDate : ((costMonths.find(c => c.m === roiYm) || {}).cost || 0);
         const roi = computeJosefRoi(mLogsApproved, workEntries, nakladM);
         if (!roi.pocetVykazu) return null;
-        const roiMesic = CZM[Number(String(roiYm).slice(5,7)) - 1] || monthNameJP;
+        const roiMesic = czMes(Number(String(roiYm).slice(5,7)) - 1) || monthNameJP;
         const kladny = roi.cisty >= 0;
         return (
           <div style={{ margin: "0 22px 6px", padding: "13px 15px", borderRadius: BP.rInner, background: "rgba(74,68,184,.035)" }}>
@@ -12719,7 +12719,7 @@ function MilestoneCelebration({ row, nextGoal, variant = "closed", onClose }) {
         <div style={{ ...bpHero(42), marginTop: 10 }}>{fmtKc(row.totalM)}</div>
         <div style={{ fontSize: 11.5, color: "#96773C", fontWeight: 600, marginTop: 4 }}>
           {live
-            ? `průběžně za ${MILESTONE_MONTHS[monIdx]} ${row.ym.slice(0, 4)} · meta je ${fmtKc(row.goal)}`
+            ? `průběžně za ${czMes(monIdx)} ${row.ym.slice(0, 4)} · meta je ${fmtKc(row.goal)}`
             : `v ${MILESTONE_MONTHS[monIdx]} ${row.ym.slice(0, 4)} · meta byla ${fmtKc(row.goal)}`}
         </div>
         <div style={{ height: 1, background: "rgba(0,0,0,.06)", margin: "18px 0" }} />
@@ -14727,7 +14727,7 @@ function WorkEntryList({ entries, clients, invoices, financeItems, onNew, onEdit
             Vyfakturované záznamy ({entries.filter(e => e.invoice_id).length})
           </summary>
           <table className="tbl" style={{ marginTop: 12 }}>
-            <thead><tr><th>Datum</th><th>Klient</th><th>Popis</th><th>Hodiny</th><th style={{ textAlign: "right" }}>Bez DPH</th></tr></thead>
+            <thead><tr><th>Datum</th><th>Klient</th><th>Faktura</th><th>Popis</th><th>Hodiny</th><th style={{ textAlign: "right" }}>Bez DPH</th></tr></thead>
             <tbody>
               {entries.filter(e => e.invoice_id && (!filterClient || e.client_id === filterClient))
                 .slice(0, 20).map(e => {
@@ -14737,6 +14737,7 @@ function WorkEntryList({ entries, clients, invoices, financeItems, onNew, onEdit
                   <tr key={e.id} style={{ opacity: .6 }}>
                     <td className="t-date">{fmtDate(e.entry_date)}</td>
                     <td className="t-date">{clientName(e)}</td>
+                    <td className="t-date maux-num" style={{ whiteSpace: "nowrap", color: inv ? "var(--ink)" : "#A8443C" }}>{inv ? inv.invoice_number : "faktura smazána"}</td>
                     <td style={{ fontSize: 13 }}>
                       {e.description?.slice(0,80)}
                       {disc && <span style={{ marginLeft: 6, fontSize: 10.5, color: "#A8527A" }}>(sleva −{fmtKc(disc.amount)} na faktuře {inv.invoice_number})</span>}
@@ -15152,7 +15153,32 @@ function VykazyCalendar({ workEntries, escrows, invoices, dense = false, onOpenF
 }
 
 /* ─── FAKTURACE ─── */
-function InvoiceList({ invoices, clients, workEntries, escrows, onOpen, onOpenClient, onToggleStatus, onGenerateInvoice, onPreviewInvoice, onEditInvoice, onOpenDiscountModal, onOpenAltSubjectModal, altSubjects, onAddWorkEntry, onRevertInvoice, onIssueExistingInvoice, onDeleteDraftInvoice, loading }) {
+/* ─── SIROTCI — výkaz s vazbou na fakturu, na které ale není (Tom 4. 9. 2026, 080/2026) ───
+   Výkaz má být buď volný (bez faktury → K vystavení), nebo na faktuře (vazba + řádek).
+   „Vazba bez řádku" vznikala u vrácené faktury po odškrtnutí výkazu — práce zmizela z obou
+   míst. Tahle kontrola ji najde: vazba na smazanou fakturu, nebo na vystavenou fakturu,
+   kde popis ani (částka + hodiny) nesedí na žádnou položku. Drafty (pripravena) se
+   nekontrolují — tam výkazy legitimně visí v „Vráceno k vystavení". Výkazy bez částky
+   (čistá přefakturace) se přeskakují — na faktuře jsou jako průběžná položka. */
+function orphanWorkEntries(workEntries, invoices) {
+  const byId = {};
+  (invoices || []).forEach(i => { byId[i.id] = i; });
+  return (workEntries || []).filter(e => {
+    if (!e.invoice_id) return false;
+    if ((Number(e.amount) || 0) <= 0) return false;
+    const inv = byId[e.invoice_id];
+    if (!inv) return true;
+    if (inv.status === "pripravena") return false;
+    const items = (inv.items || []).filter(it => !it.no_vat);
+    const desc = String(e.description || "").trim();
+    return !items.some(it =>
+      String(it.description || "").trim() === desc ||
+      ((Number(it.amount) || 0) === (Number(e.amount) || 0) && (Number(it.hours) || 0) === (Number(e.hours) || 0))
+    );
+  });
+}
+
+function InvoiceList({ invoices, clients, workEntries, escrows, onOpen, onOpenClient, onToggleStatus, onGenerateInvoice, onPreviewInvoice, onEditInvoice, onOpenDiscountModal, onOpenAltSubjectModal, altSubjects, onAddWorkEntry, onRevertInvoice, onIssueExistingInvoice, onDeleteDraftInvoice, onFreeOrphans, loading }) {
   const [search, setSearch] = useState("");
   const [filterStatus, setFilterStatus] = useState("vse");
   const [filterClient, setFilterClient] = useState("");
@@ -15207,6 +15233,8 @@ function InvoiceList({ invoices, clients, workEntries, escrows, onOpen, onOpenCl
 
   const [expandedDraft, setExpandedDraft] = useState(null);
   const [expandedDraftInv, setExpandedDraftInv] = useState(null);
+  const orphans = useMemo(() => orphanWorkEntries(workEntries, invoices), [workEntries, invoices]);
+  const orphanSum = orphans.reduce((s, e) => s + (Number(e.amount) || 0), 0);
 
   const filtered = useMemo(() => {
     let list = filterStatus === "pripravena" ? [...invoices] : invoices.filter(i => i.status !== 'pripravena');
@@ -15279,6 +15307,29 @@ function InvoiceList({ invoices, clients, workEntries, escrows, onOpen, onOpenCl
 
   return (
     <>
+      {/* ── SIROTCI: vazba na fakturu bez řádku na ní ── */}
+      {!loading && orphans.length > 0 && (
+        <div style={{ marginBottom: 22, padding: "12px 16px", borderLeft: "2px solid #A8443C", borderRadius: 0, background: "rgba(168,68,60,.05)", display: "flex", alignItems: "center", gap: 16 }}>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontSize: 13, color: "var(--txt)", fontWeight: 500 }}>
+              {orphans.length === 1 ? "Jeden výkaz visí bez faktury" : orphans.length < 5 ? `${orphans.length} výkazy visí bez faktury` : `${orphans.length} výkazů visí bez faktury`}
+              <span className="maux-num" style={{ marginLeft: 8, color: "var(--mut)", fontWeight: 500 }}>{fmtKc(orphanSum)} bez DPH</span>
+            </div>
+            <div style={{ fontSize: 11.5, color: "var(--mut)", marginTop: 3 }}>
+              Mají vazbu na fakturu, na které nejsou — nejsou k vystavení ani vyfakturované. Uvolněním spadnou zpět do K vystavení.
+            </div>
+            <div style={{ fontSize: 11, color: "var(--mut)", marginTop: 5 }}>
+              {orphans.slice(0, 4).map(e => {
+                const inv = invoices.find(i => i.id === e.invoice_id);
+                return <div key={e.id}>{fmtDate(e.entry_date)} · {e.clients?.name || clients.find(c => c.id === e.client_id)?.name || "—"} · {String(e.description || "").slice(0, 60)} · <span className="maux-num">{fmtKc(e.amount)}</span> · {inv ? inv.invoice_number : "faktura smazána"}</div>;
+              })}
+              {orphans.length > 4 && <div>… a {orphans.length - 4} dalších</div>}
+            </div>
+          </div>
+          <button className="btn" style={{ fontSize: 12, flexShrink: 0 }} onClick={() => onFreeOrphans && onFreeOrphans(orphans)}>Uvolnit</button>
+        </div>
+      )}
+
       {/* ── VRÁCENÉ FAKTURY K OPĚTOVNÉMU VYSTAVENÍ ── */}
       {draftInvoices.length > 0 && (
         <div style={{ marginBottom: 28 }}>
@@ -15287,7 +15338,7 @@ function InvoiceList({ invoices, clients, workEntries, escrows, onOpen, onOpenCl
               Vráceno k vystavení · {draftInvoices.length} {draftInvoices.length === 1 ? "faktura" : "faktury"}
             </span>
             <span style={{ fontSize: 12, color: "var(--mut)", fontWeight: 400, textTransform: "none", letterSpacing: 0 }}>
-              Napárované výkazy zůstávají zachovány
+              Výkazy zůstávají navěšené · co při vystavení odškrtneš, se uvolní do K vystavení
             </span>
           </div>
           <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
@@ -15578,7 +15629,7 @@ function InvoiceList({ invoices, clients, workEntries, escrows, onOpen, onOpenCl
                     onClick={() => onEditInvoice && onEditInvoice(inv)}>✎ Upravit</button>
                   {invoiceStatus(inv) === "vystavena" && (
                     <button className="btn gho" style={{ fontSize: 11, padding: "4px 8px", color: "#7C3AED" }}
-                      title="Vrátit do nevystavených"
+                      title="Faktura se vrátí mezi drafty. Výkazy zůstávají navěšené — co při novém vystavení odškrtneš, se uvolní zpět do K vystavení."
                       onClick={() => onRevertInvoice && onRevertInvoice(inv)}>↩ Vrátit</button>
                   )}
                   <button className="btn gho" style={{ fontSize: 11, padding: "4px 8px", color: "#A8443C" }}
@@ -16431,8 +16482,8 @@ function DphOdpocetTile({ invoices, financeItems, onSaveFinance, onNav, dashNadm
   const kpis = [
     { label: `DPH z faktur · ${prevMonthName}`, value: fmtKc(dphFakturyPrev), color: "var(--txt)", hint: "určuje, kolik dostaneš 25. " + CZM[now.getMonth()] },
     { label: `Odpočet z účtenek · ${prevMonthName}`, value: "−" + fmtKc(odpocetPrev), color: "#3518A5", hint: "uplatněný k tomuto vyúčtování" },
-    { label: "K úhradě Čechmanové do 25. " + CZM[now.getMonth()], value: kUhradePrev>0 ? fmtKc(kUhradePrev) : "✓ kryto", color: kUhradePrev>0 ? "#A8443C" : "#4A7C59", hint: `vyúčtování za ${prevMonthName}`, big: true },
-    { label: `Odhad za ${CZM[now.getMonth()]} (do 25. ${dueMonthName})`, value: kUhrade>0 ? fmtKc(kUhrade) : "✓ kryto", color: kUhrade>0 ? "#B45309" : "#4A7C59", hint: "orientační — měsíc se ještě tvoří" },
+    { label: "K úhradě Čechmanové do 25. " + CZM[now.getMonth()], value: kUhradePrev>0 ? fmtKc(kUhradePrev) : "✓ kryto", color: kUhradePrev>0 ? "#A8443C" : "#4A7C59", hint: `vyúčtování za ${czMes((now.getMonth() + 11) % 12)}`, big: true },
+    { label: `Odhad za ${czMes(now.getMonth())} (do 25. ${dueMonthName})`, value: kUhrade>0 ? fmtKc(kUhrade) : "✓ kryto", color: kUhrade>0 ? "#B45309" : "#4A7C59", hint: "orientační — měsíc se ještě tvoří" },
   ];
   if (prevodPrev > 0) kpis.push({ label: `Přesah odpočtu · ${prevMonthName}`, value: fmtKc(prevodPrev), color: "#7C3AED", hint: "nadměrný odpočet — převádí se dál" });
 
@@ -16502,7 +16553,7 @@ function DphOdpocetTile({ invoices, financeItems, onSaveFinance, onNav, dashNadm
               <b style={{ color:"var(--txt)" }}>Načasování:</b> DPH se neplatí za běžící měsíc, ale až zpětně — přiznání a platba
               za daný měsíc je splatná až <b>25. dne měsíce následujícího</b> (přesně takhle postupuje i Čechmanová). Číslo
               „K úhradě Čechmanové do 25. {CZM[now.getMonth()]}" je dopočítané z uzavřeného měsíce <b>{prevMonthName}</b> — ze
-              stejných dvou věcí jako u ní: DPH z faktur za {prevMonthName} a odpočet uplatněný za {prevMonthName} v archivu
+              stejných dvou věcí jako u ní: DPH z faktur za {czMes((now.getMonth() + 11) % 12)} a odpočet uplatněný za {czMes((now.getMonth() + 11) % 12)} v archivu
               níže. Mělo by se tedy shodovat (s drobnými odchylkami v zaokrouhlení) s částkou od Čechmanové. Druhé číslo,
               „Odhad za {CZM[now.getMonth()]}", je orientační výhled na příští platbu (splatnou 25. {dueMonthName}) — měnící
               se s každou novou fakturou i účtenkou tento měsíc.
@@ -20922,7 +20973,14 @@ export default function MauxCRM() {
     try {
       await upsertInvoice(inv);
       const entriesToMark = workEntries.filter(e => selectedEntryIds.includes(e.id));
-      await Promise.all(entriesToMark.map(e => upsertWorkEntry({ ...e, invoice_id: inv.id })));
+      // Tom 4. 9. 2026 (faktura 080/2026, tři výkazy Na Hrázi): u VRÁCENÉ faktury měly odškrtnuté
+      // výkazy pořád vazbu z původního vystavení — nebyly na faktuře ani v K vystavení, prostě
+      // zmizely. Vazba bez řádku na faktuře nesmí existovat: co není zaškrtnuté, se uvolní.
+      const entriesToFree = workEntries.filter(e => e.invoice_id === inv.id && !selectedEntryIds.includes(e.id));
+      await Promise.all([
+        ...entriesToMark.map(e => upsertWorkEntry({ ...e, invoice_id: inv.id })),
+        ...entriesToFree.map(e => upsertWorkEntry({ ...e, invoice_id: null })),
+      ]);
       const [updatedInvoices, updatedWork] = await Promise.all([fetchInvoices(), fetchWorkEntries()]);
       setInvoices(updatedInvoices);
       setWorkEntries(updatedWork);
@@ -20933,8 +20991,20 @@ export default function MauxCRM() {
     } catch (err) { alert("Chyba: " + err.message); } finally { setSaving(false); }
   };
 
+  // Sirotci (viz orphanWorkEntries): zruší vazbu na fakturu, výkazy spadnou do K vystavení.
+  const freeOrphanEntries = async (entries) => {
+    if (!entries || !entries.length) return;
+    if (!window.confirm(`Uvolnit ${entries.length} ${entries.length === 1 ? "výkaz" : entries.length < 5 ? "výkazy" : "výkazů"} zpět do K vystavení? Faktury se nemění.`)) return;
+    setSaving(true);
+    try {
+      await Promise.all(entries.map(e => upsertWorkEntry({ ...e, invoice_id: null })));
+      const updWE = await fetchWorkEntries();
+      setWorkEntries(updWE);
+    } catch (err) { alert("Chyba: " + err.message); } finally { setSaving(false); }
+  };
+
   const revertInvoiceToDraft = async (inv) => {
-    if (!window.confirm(`Vrátit ${inv.invoice_number || inv.id} zpět do nevystavených?`)) return;
+    if (!window.confirm(`Vrátit ${inv.invoice_number || inv.id} zpět mezi drafty?\n\nFaktura zůstane se svým číslem a výkazy zůstanou navěšené. Co při novém vystavení odškrtneš, se uvolní zpět do K vystavení.`)) return;
     setSaving(true);
     try {
       const { clients: _c, ...cleanInv } = inv;
@@ -21201,6 +21271,7 @@ export default function MauxCRM() {
               onRevertInvoice={revertInvoiceToDraft}
               onIssueExistingInvoice={issueExistingInvoice}
               onDeleteDraftInvoice={doDeleteInvoice}
+              onFreeOrphans={freeOrphanEntries}
               loading={dataLoading}
             />
           )}
