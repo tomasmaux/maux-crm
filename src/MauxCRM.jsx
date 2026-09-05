@@ -17408,19 +17408,20 @@ function DaneModule({ year, taxRecords, financeItems, invoices, dpfoMonths, escr
         .dn .dn-orbit .lg{position:absolute;bottom:-6px;left:0;right:0;display:flex;justify-content:center;gap:16px;font-size:10.5px;color:var(--mut);letter-spacing:.04em;white-space:nowrap}
         .dn .dn-orbit .lg i{display:inline-block;width:14px;height:3px;border-radius:2px;background:var(--ink);opacity:.6;margin-right:6px;vertical-align:2px}
         .dn .dn-orbit .lg i.d{background:repeating-linear-gradient(90deg,rgba(28,10,99,.5) 0 2px,transparent 2px 5px)}
-        .dn .dn-row{display:grid;grid-template-columns:132px 1fr auto;align-items:center;gap:20px;padding:20px 0;border-top:1px solid rgba(28,10,99,.08);transition:opacity .25s}
+        .dn .dn-row{display:grid;grid-template-columns:1fr auto;grid-template-areas:"nm send" "mid mid";align-items:center;column-gap:20px;row-gap:12px;padding:20px 0;border-top:1px solid rgba(28,10,99,.08);transition:opacity .25s}
+        .dn .dn-row .nm{grid-area:nm} .dn .dn-row .send{grid-area:send} .dn .dn-row .mid{grid-area:mid}
         .dn .dn-row:last-child{border-bottom:1px solid rgba(28,10,99,.08)}
         .dn .dn-rows.hov .dn-row:not(.on){opacity:.3}
         .dn .dn-row .nm{font-family:'Fraunces',serif;font-size:20px;color:var(--ink);display:flex;align-items:center;gap:10px;font-weight:400}
         .dn .dn-row .nm i{width:8px;height:8px;border-radius:50%;background:var(--c);box-shadow:0 0 0 3px color-mix(in srgb,var(--c) 18%,transparent);flex-shrink:0}
         .dn .dn-row .nm small{display:block;font-family:var(--num);font-size:11px;color:var(--mut);margin-top:2px;font-weight:400}
-        .dn .dn-row .mid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr)) 70px;gap:10px;align-items:end}
+        .dn .dn-row .mid{display:grid;grid-template-columns:repeat(4,minmax(96px,1fr)) 80px;gap:14px;align-items:end}
         .dn .dn-row .mid .v{font-size:16px;letter-spacing:-.02em;color:var(--ink);white-space:nowrap}
         .dn .dn-row .mid .k{font-size:9.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--mut);margin-top:3px;font-weight:600}
         .dn .dn-bars{display:flex;align-items:flex-end;gap:3px;height:26px}
         .dn .dn-bars b{flex:1;background:var(--c);opacity:.45;border-radius:2px 2px 0 0;min-height:2px}
         .dn .dn-bars b.p{opacity:.15;background:repeating-linear-gradient(0deg,var(--c) 0 2px,transparent 2px 4px)}
-        .dn .dn-row .send{text-align:right;min-width:170px;max-width:230px}
+        .dn .dn-row .send{text-align:right;min-width:190px;max-width:300px}
         .dn .dn-row .send .k{font-size:9.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--mut);font-weight:600}
         .dn .dn-row .send .n{font-size:31px;letter-spacing:-.035em;color:var(--c);line-height:1;margin-top:4px}
         .dn .dn-row .send .e{font-size:12px;color:var(--mut);margin-top:6px;line-height:1.5}
