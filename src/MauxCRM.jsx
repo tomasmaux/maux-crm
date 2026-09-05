@@ -17571,6 +17571,11 @@ function DaneModule({ year, taxRecords, financeItems, invoices, dpfoMonths, escr
           {showLog && (
             <>
               <div className="dn-chips">{[["all", "vše"], ["soc", "ČSSZ"], ["vzp", "VZP"], ["dan", "FÚ"], ["2025", `jen rok ${year - 1}`]].map(c => <button key={c[0]} className={filt === c[0] ? "on" : ""} onClick={() => setFilt(c[0])}>{c[1]}</button>)}</div>
+              {!dbErr && !(ledger || []).length && (
+                <div style={{ fontSize: 12.5, color: "var(--mut)", padding: "0 0 10px" }}>
+                  Z portálů zatím nic — <span onClick={seedFromPortals} style={{ color: "#4A44B8", cursor: "pointer", fontWeight: 600 }}>naplnit log z kalibrace 5. 9. 2026</span>
+                </div>
+              )}
               {logShown.length === 0 ? (
                 <div style={{ fontSize: 12.5, color: "var(--mut)", padding: "10px 0" }}>
                   Log je prázdný. {!dbErr && <span onClick={seedFromPortals} style={{ color: "#4A44B8", cursor: "pointer", fontWeight: 600 }}>Naplnit z portálů (kalibrace 5. 9. 2026)</span>}
@@ -21044,6 +21049,34 @@ export default function MauxCRM() {
     try { await upsertFinanceItem(item); setFinanceItems(await fetchFinanceItems()); }
     catch(e) { alert("Chyba: " + e.message); }
   };
+  /* ── VÝDAJE ↔ DANĚ (5. 9. 2026, Tom: „výdaje na Přehledu nejsou spárované") ──────
+     Položky Sociálka / VZP / DPFO ve Výdajích dostávají částku „pošli tento měsíc"
+     z listu Daně automaticky — jednou za měsíc, když se načtou faktury. Bez ledgeru
+     (migrace neproběhla) se nic nepřepisuje. Po zápisu se financeItems načtou znovu;
+     efekt na ně nezávisí, takže se neroztočí. Odškrtnutá platba částku nemění —
+     ta už odešla, přepočet se týká dalších měsíců (a ty přijdou s 1. dnem). */
+  const taxSyncDone = useRef("");
+  useEffect(() => {
+    if (!(invoices || []).length || !(financeItems || []).length) return;
+    const y = new Date().getFullYear(), stamp = `${y}-${new Date().getMonth()}-${invoices.length}`;
+    if (taxSyncDone.current === stamp) return;
+    taxSyncDone.current = stamp;
+    (async () => {
+      try {
+        const [s, l] = await Promise.all([fetchTaxSettings(y), fetchTaxLedger()]);
+        if (!l.length) return;                     // bez kalibrace z portálů nepřepisuj ruční čísla
+        const T = computeTaxYear({ year: y, invoices, escrows, dpfoMonths, ledger: l, settings: s || taxDefaultSettings(y) });
+        let changed = false;
+        for (const it of financeItems.filter(i => ["nutne", "luxus"].includes(i.category))) {
+          const acct = taxAcctForExpenseItem(it) || (isDpfoExpenseItem(it) ? "dan" : null);
+          if (!acct) continue;
+          const v = T.per[acct], signed = (it.amount || 0) < 0 ? -v : v;
+          if (Math.round(it.amount || 0) !== Math.round(signed)) { await upsertFinanceItem({ ...it, amount: signed }); changed = true; }
+        }
+        if (changed) setFinanceItems(await fetchFinanceItems());
+      } catch (e) { console.warn("tax sync:", e.message); }
+    })();
+  }, [invoices, dpfoMonths, escrows]);
   const handleDpfoToggle = async (row) => {
     const updated = await toggleDpfoMonth(row);
     setDpfoMonths(p => p.map(m => m.id === row.id ? updated : m));
