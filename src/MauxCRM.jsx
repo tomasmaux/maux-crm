@@ -8457,7 +8457,7 @@ function FirmaBar({ financeItems, invoices, dpfoMonths, loanTransactions, escrow
 /* ─── BACKUP ─── */
 const BACKUP_TABLES = [
   "clients","invoices","work_entries","finance_items",
-  "dpfo_months","tax_records","expense_checklist",
+  "dpfo_months","tax_records","expense_checklist","tax_ledger","tax_settings",
   "loan_trackers","loan_transactions",
   "escrows","escrow_tranches","escrow_aml_persons",
   "assistant_work_logs","assistant_availability","assistant_attendance"
@@ -17104,147 +17104,549 @@ function ProvozModule({ financeItems, onSaveFinance, onNav }) {
   );
 }
 
+/* ═══════════════════════════════════════════════════════════════════════════
+   DANĚ — „Orbit" (5. 9. 2026, Tom: „musíš letos · poslal jsi · zbývá")
+   Jeden zdroj pravdy pro tři účty (ČSSZ · VZP · FÚ): kolik letos musíš,
+   kolik jsi poslal, kolik zbývá a kolik poslat tento měsíc, aby duben 2027
+   skončil na nule. Musíš letos = jisté (faktury s DUZP letos, bez DPH) + odhad
+   (zbývající měsíce × průměr posledních tří). Přepočet je čistá funkce dat —
+   nic neběží na pozadí, čísla se hnou jen s novou fakturou nebo pohybem v logu.
+
+   Log plateb (tabulka tax_ledger): kalibrace z portálů (DIS+, ePortál ČSSZ,
+   Moje VZP) + odškrtnutí ve Výdajích na Přehledu (toggleExpenseCheck) +
+   mimořádné platby z tohohle listu. Daň na spořák jede dál přes dpfo_months.
+   Nastavení roku (tax_settings.data): sazby, minima, zálohy FÚ, doplatky 2025.
+   ═══════════════════════════════════════════════════════════════════════════ */
+const TAX_ACCTS = ["soc", "vzp", "dan"];
+const TAX_COL   = { soc: "#22C98A", vzp: "#4A44B8", dan: "#A8443C" };
+const TAX_GRAD  = { soc: ["#3DDC97", "#1FB57C"], vzp: ["#6C5FF5", "#3B2FD0"], dan: ["#D2655C", "#A8443C"] };
+const TAX_NAME  = { soc: "ČSSZ", vzp: "VZP", dan: "Finanční úřad" };
+const TAX_SUB   = { soc: "sociální · do konce měsíce", vzp: "zdravotní · do 8. dne dalšího", dan: "daň z příjmu · spořák" };
+const TAX_RING_R = { soc: 196, vzp: 158, dan: 120 };
+
+// Výchozí kalibrace 2026 — čísla z DIS+, ePortálu ČSSZ, Moje VZP a výměru FÚ 2025
+// (vše přečteno 5. 9. 2026). Tom je přepíše v Kalibraci; uložené nastavení má přednost.
+function taxDefaultSettings(year) {
+  return {
+    year,
+    avg_wage: 48967, pausal_rate: 0.40, pausal_cap: 800000, sleva: 30840,
+    rate_soc: 0.292, base_soc: 0.55, rate_vzp: 0.135, base_vzp: 0.50,
+    min_soc: 13616, min_vzp: 5723,
+    radni: 133055,          // základ § 6 (odměna radního) — z výměru 2025
+    srazeno6: null,         // daň sražená městem; null = 15 % z radni
+    fu_zalohy: [{ date: `${year}-06-15`, amount: 34900 }, { date: `${year}-12-15`, amount: 55200 }],
+    doplatek25: { soc: 54460, vzp: 22890, dan: 0 },   // jistý nedoplatek za minulý rok
+    est_months_avg: 3, target_cushion: 0,
+    calibrated_at: "2026-09-05",
+    sources: { dis: "5. 9. 2026", cssz: "2. 9. 2026", vzp: "10. 8. 2026" },
+  };
+}
+
+// Kalibrační log z portálů (5. 9. 2026). Idempotentní ID — tlačítko v Kalibraci
+// ho může spustit opakovaně, nic se nezdvojí.
+const TAX_SEED_2026 = [
+  ...[["2026-01-15",11100],["2026-02-12",12045],["2026-03-05",12045],["2026-04-16",11100],["2026-05-08",12045],["2026-06-15",11100],["2026-07-15",12045],["2026-08-04",12045]]
+    .map(([d,a],i) => ({ id:`tl_seed_soc_${i}`, account:"soc", tax_year:2026, date:d, amount:a, kind:"zaloha", source:"ePortál ČSSZ", note:"záloha" })),
+  { id:"tl_seed_soc_ref", account:"soc", tax_year:2025, date:"2026-07-08", amount:-36076, kind:"refund", source:"ePortál ČSSZ", note:"vrácený přeplatek 2025 (chybný přehled)" },
+  ...[["2026-01-15",5050],["2026-02-12",5063],["2026-03-05",5063],["2026-04-16",5065],["2026-05-08",5065],["2026-06-12",5065],["2026-07-15",5065],["2026-08-04",5065]]
+    .map(([d,a],i) => ({ id:`tl_seed_vzp_${i}`, account:"vzp", tax_year:2026, date:d, amount:a, kind:"zaloha", source:"Moje VZP", note:"záloha" })),
+  { id:"tl_seed_vzp_ref", account:"vzp", tax_year:2025, date:"2026-07-17", amount:-34591, kind:"refund", source:"Moje VZP", note:"vrácený přeplatek 2025 (chybný přehled)" },
+  { id:"tl_seed_dan_0", account:"dan", tax_year:2025, date:"2026-05-05", amount:74640, kind:"doplatek", source:"DIS+", note:"daň 2025 — původní přiznání" },
+  { id:"tl_seed_dan_1", account:"dan", tax_year:2026, date:"2026-07-03", amount:34900, kind:"zaloha", source:"DIS+", note:"záloha 15. 6. (uhrazena 3. 7.)" },
+  { id:"tl_seed_dan_2", account:"dan", tax_year:2025, date:"2026-08-14", amount:50865, kind:"doplatek", source:"DIS+", note:"doplatek 2025 — dodatečné přiznání" },
+];
+
+async function fetchTaxSettings(year) {
+  const { data, error } = await supabase.from("tax_settings").select("*").eq("year", year).maybeSingle();
+  if (error) throw error;
+  return data?.data || null;
+}
+async function saveTaxSettings(year, data) {
+  const { error } = await supabase.from("tax_settings").upsert({ year, data, updated_at: new Date().toISOString() });
+  if (error) throw error;
+}
+async function fetchTaxLedger() {
+  const { data, error } = await supabase.from("tax_ledger").select("*").order("date");
+  if (error) throw error;
+  return data || [];
+}
+async function upsertTaxLedger(row) {
+  const { error } = await supabase.from("tax_ledger").upsert({ ...row, updated_at: new Date().toISOString() });
+  if (error) throw error;
+}
+async function deleteTaxLedger(id) {
+  const { error } = await supabase.from("tax_ledger").delete().eq("id", id);
+  if (error) throw error;
+}
+// Který odvod je položka ve Výdajích na Přehledu. Kmen "sociálk" — Tomova položka
+// se jmenuje „Sociálka" (audit 31. 7. 2026), /sociáln/ ji nenašel.
+function taxAcctForExpenseItem(item) {
+  const l = item?.label || "";
+  if (/sociál|socialk|čssz|cssz/i.test(l)) return "soc";
+  if (/zdravot|vzp/i.test(l)) return "vzp";
+  return null;
+}
+const taxLedgerCheckId = (acct, y, m) => `tl_chk_${acct}_${y}_${m}`;
+const taxCeil100 = (n) => Math.ceil(Math.max(0, n) / 100) * 100;
+
+// ── VÝPOČET ROKU — čistá funkce, jediný zdroj pravdy pro list Daně i Výdaje ──
+function computeTaxYear({ year, invoices, escrows, dpfoMonths, ledger, settings, now = new Date() }) {
+  const S = settings;
+  const isCur = year === now.getFullYear();
+  const curM = isCur ? now.getMonth() : 11;                 // 0-based
+  const byMonth = Array(12).fill(0);
+  (invoices || []).forEach(i => {
+    const k = vatPeriodKey(i) || "";
+    if (!k.startsWith(String(year))) return;
+    byMonth[Number(k.slice(5, 7)) - 1] += (i.subtotal || 0);
+  });
+  // Faktury za měsíc M vznikají 1. M+1 → poslední uzavřený měsíc je ten minulý.
+  const lastClosed = isCur ? curM - 1 : 11;
+  const certainInc = byMonth.slice(0, lastClosed + 1).reduce((a, b) => a + b, 0);
+  const closed = byMonth.slice(0, lastClosed + 1).filter(v => v > 0);
+  const lastN = closed.slice(-(S.est_months_avg || 3));
+  const avg = lastN.length ? lastN.reduce((a, b) => a + b, 0) / lastN.length : 0;
+  const estMonths = Math.max(0, 11 - lastClosed);
+  const income = certainInc + estMonths * avg;
+
+  // Úroky z úschov — hrubé, naběhlé do dneška (jisté). Tom: 15 % daň, bez pojistného.
+  let interest = 0;
+  for (let m = 0; m <= curM; m++) interest += escrowGrossForMonth(escrows || [], year, m);
+  interest = Math.round(interest);
+
+  const pausal = inc => Math.min(inc * S.pausal_rate, S.pausal_cap);
+  const zd7 = inc => inc - pausal(inc);
+  const srazeno6 = S.srazeno6 == null ? Math.round((S.radni || 0) * 0.15) : Number(S.srazeno6);
+  const taxOf = (inc) => {
+    const zdc = Math.floor((zd7(inc) + (S.radni || 0) + interest) / 100) * 100;
+    const th = 36 * S.avg_wage;
+    const t = zdc <= th ? zdc * 0.15 : th * 0.15 + (zdc - th) * 0.23;
+    return Math.max(0, t - S.sleva - srazeno6);
+  };
+  const must = { soc: zd7(income) * S.base_soc * S.rate_soc, vzp: zd7(income) * S.base_vzp * S.rate_vzp, dan: taxOf(income) };
+  const cert = { soc: zd7(certainInc) * S.base_soc * S.rate_soc, vzp: zd7(certainInc) * S.base_vzp * S.rate_vzp, dan: taxOf(certainInc) };
+
+  const L = ledger || [];
+  const sumL = (acct, ty, pred = () => true) => L.filter(e => e.account === acct && Number(e.tax_year) === ty && pred(e)).reduce((a, e) => a + Number(e.amount || 0), 0);
+  // Spořák = obálka DPFO: odložené (kladné, is_paid) − odeslané FÚ (záporné). Stejná
+  // definice jako computeSporakEnvelopes — nikdy nepočítej podruhé jinak.
+  const sporak = (dpfoMonths || []).filter(m => m.year === year && m.is_paid).reduce((s, m) => s + (m.amount || 0), 0);
+  const fuZalohyPaid = sumL("dan", year, e => e.kind === "zaloha");
+  const paid = { soc: sumL("soc", year, e => e.kind !== "refund"), vzp: sumL("vzp", year, e => e.kind !== "refund"), dan: fuZalohyPaid + sporak };
+  const debt = {};
+  TAX_ACCTS.forEach(a => { debt[a] = Math.max(0, (S.doplatek25?.[a] || 0) - sumL(a, year - 1, e => e.kind === "doplatek")); });
+
+  const todayS = localYmd(now);
+  const fuFuture = (S.fu_zalohy || []).filter(z => z.date > todayS).sort((a, b) => a.date < b.date ? -1 : 1);
+  const nearest = fuFuture[0] || null;
+  const monthsTo = (ds) => { const d = new Date(ds); return Math.max(0.5, (d.getFullYear() - now.getFullYear()) * 12 + d.getMonth() - now.getMonth() - (d.getDate() < 15 ? 0.5 : 0)); };
+  const leftPay = { soc: 12 - curM, vzp: 12 - curM, dan: (12 - curM) + 4 };
+  const cushion = S.target_cushion || 0;
+  const per = {};
+  per.soc = taxCeil100(Math.max(S.min_soc, (must.soc + cushion - paid.soc) / leftPay.soc));
+  per.vzp = taxCeil100(Math.max(S.min_vzp, (must.vzp + cushion - paid.vzp) / leftPay.vzp));
+  const danNeed = (must.dan + cushion - paid.dan) / leftPay.dan;
+  const danGuard = nearest ? (nearest.amount - sporak) / monthsTo(nearest.date) : 0;
+  per.dan = taxCeil100(Math.max(danNeed, danGuard));
+  const end = {}; TAX_ACCTS.forEach(a => { end[a] = paid[a] + leftPay[a] * per[a] - must[a]; });
+  const sporakAtNearest = nearest ? sporak + Math.ceil(monthsTo(nearest.date)) * per.dan : sporak;
+  const sure = {}; TAX_ACCTS.forEach(a => { sure[a] = Math.max(0, cert[a] - paid[a]) + debt[a]; });
+
+  return { year, byMonth, certainInc, estMonths, avg, income, interest, zd7: zd7(income), zdc: Math.floor((zd7(income) + (S.radni || 0) + interest) / 100) * 100,
+           must, cert, paid, debt, sure, per, end, leftPay, sporak, fuZalohyPaid, nearest, sporakAtNearest, srazeno6, lastClosed, curM,
+           total: per.soc + per.vzp + per.dan, debtAll: debt.soc + debt.vzp + debt.dan };
+}
+
 function DaneModule({ year, taxRecords, financeItems, invoices, dpfoMonths, escrows, onSaveTax, onSaveFinance, onNav }) {
-  const now = new Date();
-  const monthsElapsed = (year === now.getFullYear()) ? now.getMonth() + 1 : 12;
+  // DPH — zrcadlo výpočtu „nadměrný odpočet" z Dashboardu pro dlaždici Evidence účtenek
+  // (stejné vstupy, stejná formule; když se vzorec na Dashboardu změní, změň i tenhle blok).
+  const dashNadmernyOdpocet = (() => {
+    const now = new Date();
+    const key = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,"0")}`;
+    const item = (financeItems || []).find(i => i.id === "fi_dph_odpocet");
+    let log = []; try { const p = JSON.parse(item?.notes || "{}"); log = Array.isArray(p.log) ? p.log : []; } catch {}
+    return log.filter(e => (e.date || "").startsWith(key)).reduce((s, e) => s + (e.vat || 0), 0);
+  })();
+  const [settings, setSettings] = useState(null);
+  const [ledger, setLedger] = useState([]);
+  const [dbErr, setDbErr] = useState(null);
+  const [hov, setHov] = useState(null);
+  const [drawn, setDrawn] = useState(false);
+  const [filt, setFilt] = useState("all");
+  const [showLog, setShowLog] = useState(true);
+  const [showCal, setShowCal] = useState(false);
+  const [newest, setNewest] = useState(null);
+  const [form, setForm] = useState({ account: "soc", amount: "", date: today(), tax_year: year, note: "" });
+  const [cal, setCal] = useState(null);
 
-  // DPH ZAPLACENÁ ZA ROK — vlastní daň (ř. 64) za období, jejichž termín už uplynul.
-  // Dřív se tu sčítaly faktury se stavem "uhrazena", což je úplně jiná věc: stav znamená
-  // "klient zaplatil", ne "odvedl jsem FÚ". Tom navíc faktury přepíná rovnou na "dph_odvedeno",
-  // takže tenhle součet ukazoval napořád 0 Kč, i když každý měsíc platil desetitisíce.
-  // Metodika účetní: výstup podle DUZP, odpočet podle data dokladu, splatnost 25. dne M+1.
-  const dphAuto = (() => {
-    const logY = (() => {
-      try { const p = JSON.parse(((financeItems||[]).find(x => x.id === "fi_dph_odpocet")?.notes) || "{}");
-            return Array.isArray(p.log) ? p.log : []; } catch { return []; }
-    })();
-    let sum = 0;
-    for (let m = 0; m < 12; m++) {
-      const key = `${year}-${String(m+1).padStart(2,"0")}`;
-      // Období je vypořádané, až uplynul 25. den následujícího měsíce.
-      if (new Date(year, m + 1, 25) > now) break;
-      const out = invoices.filter(i => vatPeriodKey(i) === key).reduce((s,i) => s + (i.vat_amount||0), 0);
-      const inp = logY.filter(e => (e.date||"").startsWith(key)).reduce((s,e) => s + (e.vat||0), 0);
-      sum += Math.max(out - inp, 0);
+  const reload = async () => {
+    try {
+      const [s, l] = await Promise.all([fetchTaxSettings(year), fetchTaxLedger()]);
+      setSettings(s || taxDefaultSettings(year)); setLedger(l); setDbErr(null);
+    } catch (e) {
+      setSettings(taxDefaultSettings(year)); setLedger([]);
+      setDbErr(e.message || String(e));
     }
-    return sum;
-  })();
-  const dpfoYear = (dpfoMonths||[]).filter(m => m.year === year);
-  const dpfoPaid = dpfoYear.filter(m => m.is_paid);
-  // `|| 0`, nikdy `|| 8050` — fantomový fallback nafukoval součet u měsíce s prázdnou částkou
-  const dpfoAcc  = dpfoPaid.reduce((s,m) => s + (m.amount||0), 0);
-  const danUschov = Math.round(escrowTotalTax(escrows));
+  };
+  useEffect(() => { reload(); }, [year]);
+  useEffect(() => { const t = setTimeout(() => setDrawn(true), 120); return () => clearTimeout(t); }, [settings]);
+  useEffect(() => { if (settings) setCal(JSON.parse(JSON.stringify(settings))); }, [settings]);
 
-  // Sociální/zdravotní pojištění zatím nemá appka vlastní evidenci jako DPFO —
-  // dohledáváme je mezi pravidelnými výdaji podle názvu a odhadujeme zaplaceno
-  // za uplynulé měsíce. Až budou mít vlastní tracker, stačí tu vyměnit zdroj dat.
-  const findMonthly = (re) => (financeItems||[]).filter(i => (i.category === "nutne" || i.category === "luxus") && re.test(i.label||""))
-                                                 .reduce((s,i) => s + Math.abs(i.amount||0), 0);
-  // Pozor na kmen: Tomova položka se jmenuje "Sociálka", ne "Sociální" — vzor /sociáln/
-  // ji nikdy nenašel a přehled hlásil 0 Kč místo 7 × 12 045 Kč (audit 31.7.2026).
-  const socialMonthly = findMonthly(/sociál|socialk|sociáln/i);
-  const zdravMonthly  = findMonthly(/zdravot|vzp/i);
-  const socialEst = Math.round(socialMonthly * monthsElapsed);
-  const zdravEst  = Math.round(zdravMonthly * monthsElapsed);
+  const T = useMemo(() => settings ? computeTaxYear({ year, invoices, escrows, dpfoMonths, ledger, settings }) : null, [year, invoices, escrows, dpfoMonths, ledger, settings]);
 
-  // DPH — zrcadlo výpočtu "nadměrný odpočet" z Dashboardu (Dashboard(), řádky kolem
-  // dphFakturyMesic/dphOdpocet/nadmernyOdpocet), ČISTĚ pro zobrazení na téhle stránce.
-  // Tom chtěl, ať modul Daně "vyladěně komunikuje" s Dashboardem o tom, kolik z odpočtu
-  // se reálně promítne do Bilance příštího měsíce — ale neukládáme/nepřepočítáváme nic,
-  // jen ZRCADLÍME stejnou formuli na stejných vstupech (invoices + fi_dph_odpocet log),
-  // aby tu zobrazené číslo vždy přesně sedělo s tím na Dashboardu. Pokud se vzorec na
-  // Dashboardu někdy změní, je třeba změnit i tento blok.
-  const dmKeyOf = (d) => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`;
-  const dmThisMonth = dmKeyOf(now);
-  const dmFakturyMesic = invoices.filter(i => vatPeriodKey(i) === dmThisMonth).reduce((s,i)=>s+(i.vat_amount||0),0);
-  const dmOdpItem = (financeItems||[]).find(i => i.id === "fi_dph_odpocet");
-  const dmOdpocetLogVse = (() => {
-    try { const p = JSON.parse(dmOdpItem?.notes || "{}"); return Array.isArray(p.log) ? p.log : []; }
-    catch { return []; }
-  })();
-  const dmOdpocet = dmOdpocetLogVse.filter(e => (e.date||"").startsWith(dmThisMonth)).reduce((s,e)=>s+(e.vat||0),0);
-  const dashNadmernyOdpocet = dmOdpocet; // zrcadlo Dashboardu — bez stropu, viz komentář tam
+  // Log pro zobrazení: ledger + spořicí řádky DPFO z trackeru (kladné, is_paid)
+  const logRows = useMemo(() => {
+    const rows = (ledger || []).map(e => ({ ...e, amount: Number(e.amount || 0) }));
+    (dpfoMonths || []).filter(m => m.is_paid && (m.amount || 0) > 0).forEach(m => rows.push({
+      id: `dp_${m.id}`, account: "dan", tax_year: m.year, date: m.paid_at ? m.paid_at.slice(0, 10) : `${m.year}-${String(m.month).padStart(2, "0")}-01`,
+      amount: m.amount, kind: "sporak", source: "Přehled · spořák", note: `odloženo za ${m.month}/${m.year}`, ro: true,
+    }));
+    return rows.sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
+  }, [ledger, dpfoMonths]);
+  const logShown = logRows.filter(e => filt === "all" ? true : filt === "2025" ? Number(e.tax_year) === year - 1 : e.account === filt);
 
-  // DPFO: `dpfoAcc` je ZŮSTATEK obálky (naspořeno minus odvedeno FÚ), ne "zaplacené zálohy".
-  // Starý popisek "N / 12 měsíců × 8 050 Kč" sliboval jiné číslo, než pod ním stálo, a navíc
-  // do N počítal i řádky plateb na FÚ (mají is_paid = true a zápornou částku). Audit 31.7.2026.
-  const dpfoSavedRows = dpfoPaid.filter(m => (m.amount || 0) >= 0);
-  const dpfoSavedSum  = dpfoSavedRows.reduce((s, m) => s + (m.amount || 0), 0);
-  const dpfoOdvedeno  = dpfoPaid.filter(m => (m.amount || 0) < 0).reduce((s, m) => s + Math.abs(m.amount || 0), 0);
-
-  const AUTO = {
-    dpfo:      { paid: dpfoAcc,   basis: `naspořeno ${dpfoSavedRows.length}× ${fmtKc(dpfoSavedSum)} · odvedeno FÚ ${fmtKc(dpfoOdvedeno)} · zbývá na spořáku`, hasData: true },
-    socialni:  { paid: socialEst, basis: socialMonthly > 0 ? `odhad: ${monthsElapsed} měs. × ${fmtKc(socialMonthly)} z evidence výdajů` : "položku jsem v appce nenašel — doplň skutečnost ručně", hasData: socialMonthly > 0 },
-    zdravotni: { paid: zdravEst,  basis: zdravMonthly > 0 ? `odhad: ${monthsElapsed} měs. × ${fmtKc(zdravMonthly)} z evidence výdajů` : "položku jsem v appce nenašel — doplň skutečnost ručně", hasData: zdravMonthly > 0 },
-    dph:       { paid: dphAuto,   basis: "vlastní daň za vypořádaná období (výstup dle DUZP − odpočet)", hasData: true },
+  const addManual = async () => {
+    const a = Number(String(form.amount).replace(/[^\d.-]/g, ""));
+    if (!a) return;
+    const id = `tl_man_${Date.now()}`;
+    try {
+      await upsertTaxLedger({ id, account: form.account, tax_year: Number(form.tax_year), date: form.date || today(), amount: a,
+        kind: Number(form.tax_year) < year ? "doplatek" : "zaloha", source: "ručně · mimořádná", note: form.note || "mimořádná platba" });
+      setNewest(id); setForm(f => ({ ...f, amount: "", note: "" })); setShowLog(true);
+      await reload();
+    } catch (e) { alert("Nepodařilo se zapsat: " + e.message); }
+  };
+  const removeRow = async (e) => {
+    if (e.ro || !/ručně/.test(e.source || "")) return;
+    if (!confirm("Smazat tuhle mimořádnou platbu z logu?")) return;
+    try { await deleteTaxLedger(e.id); await reload(); } catch (err) { alert("Chyba: " + err.message); }
+  };
+  const seedFromPortals = async () => {
+    try { for (const r of TAX_SEED_2026) await upsertTaxLedger(r); await reload(); }
+    catch (e) { alert("Nepodařilo se naplnit log: " + e.message); }
+  };
+  const saveCal = async () => {
+    try { await saveTaxSettings(year, cal); setSettings(cal); setShowCal(false); }
+    catch (e) { alert("Nepodařilo se uložit kalibraci: " + e.message); }
+  };
+  // Propíše „pošli tento měsíc" do částek položek Sociálka / VZP / DPFO ve Výdajích.
+  const pushToExpenses = async () => {
+    if (!T) return;
+    const items = (financeItems || []).filter(i => ["nutne", "luxus"].includes(i.category));
+    let n = 0;
+    for (const it of items) {
+      const acct = taxAcctForExpenseItem(it) || (isDpfoExpenseItem(it) ? "dan" : null);
+      if (!acct) continue;
+      const v = T.per[acct]; const signed = (it.amount || 0) < 0 ? -v : v;
+      if (Math.round(it.amount || 0) !== Math.round(signed)) { await onSaveFinance({ ...it, amount: signed }); n++; }
+    }
+    alert(n ? `Propsáno do Výdajů: ${n} položky. Od teď v nich uvidíš částky z listu Daně.` : "Výdaje už sedí — nebylo co měnit.");
   };
 
-  const records = useMemo(() => {
-    const order = ["dpfo","socialni","zdravotni","dph"];
-    return order.map(cat => taxRecords.find(r => r.category === cat)).filter(Boolean);
-  }, [taxRecords]);
+  if (!settings || !T) return <div style={{ padding: 40, color: "var(--mut)", fontSize: 13 }}>Načítám daně…</div>;
 
-  const totalPaid = Object.values(AUTO).reduce((s,a) => s + a.paid, 0);
-  const haveAllSettlements = records.length > 0 && records.every(r => r.actual_settlement != null && r.actual_settlement !== "");
-  const totalSettled = records.reduce((s,r) => s + (r.actual_settlement != null ? Number(r.actual_settlement) : 0), 0);
-  const totalDiff = haveAllSettlements ? (totalPaid - totalSettled) : null;
+  const F = (n) => fmtKc(n);
+  const Fn = (n) => maskNum(new Intl.NumberFormat("cs-CZ").format(Math.round(n || 0)));
+  const allOk = TAX_ACCTS.every(a => T.end[a] >= 0);
+  const daysTo = (ds) => Math.round((new Date(ds) - new Date()) / 864e5);
+  const monthName = ["ledna","února","března","dubna","května","června","července","srpna","září","října","listopadu","prosince"];
+  const monthNom  = ["leden","únor","březen","duben","květen","červen","červenec","srpen","září","říjen","listopad","prosinec"];
+
+  // Osa do uzávěrky
+  const events = (() => {
+    const ev = [{ d: today(), t: "dnes", a: null }];
+    for (let m = T.curM; m <= 11; m++) {
+      const last = new Date(year, m + 1, 0);
+      ev.push({ d: localYmd(last), t: "ČSSZ · VZP · spořák", a: m % 2 ? "vzp" : "soc" });
+    }
+    (settings.fu_zalohy || []).filter(z => z.date > today()).forEach(z => ev.push({ d: z.date, t: `záloha FÚ · ${F(z.amount)}`, a: "dan", big: true }));
+    ev.push({ d: `${year + 1}-01-08`, t: `poslední VZP za ${year}`, a: "vzp" });
+    ev.push({ d: `${year + 1}-04-01`, t: `přiznání · přehledy ${year}`, a: "dan", big: true });
+    return ev.sort((x, y) => x.d < y.d ? -1 : 1);
+  })();
+  const evLabel = (d) => { const x = new Date(d); return `${x.getDate()}. ${x.getMonth() + 1}.`; };
+
+  const ring = (k) => {
+    const must = T.must[k] + T.debt[k], pct = Math.min(1, T.paid[k] / must), spct = Math.min(1, (T.paid[k] + T.sure[k]) / must);
+    const r = TAX_RING_R[k], c = 2 * Math.PI * r, dim = hov && hov !== k;
+    const off = drawn ? c * (1 - pct) : c;
+    return (
+      <g key={k} opacity={dim ? .22 : 1} style={{ transition: "opacity .25s" }} onMouseEnter={() => setHov(k)} onMouseLeave={() => setHov(null)}>
+        <circle cx="220" cy="220" r={r} fill="none" stroke="rgba(28,10,99,.06)" strokeWidth="14" />
+        <circle cx="220" cy="220" r={r} fill="none" stroke="rgba(28,10,99,.11)" strokeWidth="14" strokeDasharray="2 7" strokeDashoffset={-c * spct} />
+        <circle cx="220" cy="220" r={r} fill="none" stroke="#1C0A63" strokeWidth="14" strokeDasharray={`${c * (spct - pct)} ${c}`} strokeDashoffset={-c * pct} opacity=".55" />
+        <circle cx="220" cy="220" r={r} fill="none" stroke={`url(#dnG${k})`} strokeWidth="14" strokeLinecap="round" opacity=".32" filter="url(#dnSoft)" strokeDasharray={c} strokeDashoffset={off} style={{ transition: "stroke-dashoffset 1.2s cubic-bezier(.2,.8,.2,1)" }} />
+        <circle cx="220" cy="220" r={r} fill="none" stroke={`url(#dnG${k})`} strokeWidth="14" strokeLinecap="round" strokeDasharray={c} strokeDashoffset={off} style={{ transition: "stroke-dashoffset 1.2s cubic-bezier(.2,.8,.2,1)" }} />
+        <circle cx="220" cy="220" r={r} fill="none" stroke="transparent" strokeWidth="22" />
+      </g>
+    );
+  };
+
+  const stale = (ds) => { const m = /(\d+)\. (\d+)\. (\d+)/.exec(ds || ""); if (!m) return false; return (new Date() - new Date(+m[3], +m[2] - 1, +m[1])) / 864e5 > 60; };
+  const pill = (label, val, old) => (
+    <span className="dn-pill"><i style={{ background: old ? BP.sand : BP.ziskDeep }} />{label} <b>{val}</b>{old ? " · obnovit" : ""}</span>
+  );
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-      {/* Závažné daňové upozornění — OSVČ vs. s.r.o. (na základě fakturace a sazeb 21 % / 23 %) */}
-      <SroOptimizationPanel year={year} invoices={invoices} />
+    <div className="dn">
+      <style>{`
+        .dn{--c:#4A44B8}
+        .dn .dn-eye{font-size:10.5px;letter-spacing:.22em;text-transform:uppercase;color:var(--mut);font-weight:600}
+        .dn .dn-verdict{font-family:'Fraunces',serif;font-weight:300;font-size:23px;line-height:1.4;color:var(--ink);margin:14px 0 0;max-width:760px}
+        .dn .dn-verdict b{font-family:var(--num);font-weight:600;font-variant-numeric:tabular-nums;letter-spacing:-.02em}
+        .dn .dn-pill{display:inline-flex;align-items:center;gap:7px;font-size:11px;color:var(--mut);background:rgba(255,255,255,.7);border:1px solid rgba(255,255,255,.95);border-radius:99px;padding:6px 11px}
+        .dn .dn-pill i{width:6px;height:6px;border-radius:50%;display:inline-block}
+        .dn .dn-pill b{color:var(--txt);font-weight:600}
+        .dn .dn-hero{display:grid;grid-template-columns:400px 1fr;gap:44px;align-items:center;margin-top:34px}
+        @media (max-width:1240px){.dn .dn-hero{grid-template-columns:1fr}.dn .dn-orbit{margin:0 auto}}
+        .dn .dn-orbit{position:relative;width:400px;height:400px}
+        .dn .dn-orbit svg{width:100%;height:100%;transform:rotate(-90deg)}
+        .dn .dn-orbit .c{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;pointer-events:none}
+        .dn .dn-orbit .c .l{font-size:10px;letter-spacing:.22em;text-transform:uppercase;color:var(--mut);font-weight:600}
+        .dn .dn-orbit .c .n{font-size:42px;letter-spacing:-.035em;color:var(--ink);line-height:1;margin-top:8px;font-weight:600}
+        .dn .dn-orbit .c .s{font-family:'Fraunces',serif;font-size:14px;color:var(--mut);margin-top:8px;font-weight:300}
+        .dn .dn-orbit .lg{position:absolute;bottom:-6px;left:0;right:0;display:flex;justify-content:center;gap:16px;font-size:10.5px;color:var(--mut);letter-spacing:.04em;white-space:nowrap}
+        .dn .dn-orbit .lg i{display:inline-block;width:14px;height:3px;border-radius:2px;background:var(--ink);opacity:.6;margin-right:6px;vertical-align:2px}
+        .dn .dn-orbit .lg i.d{background:repeating-linear-gradient(90deg,rgba(28,10,99,.5) 0 2px,transparent 2px 5px)}
+        .dn .dn-row{display:grid;grid-template-columns:132px 1fr auto;align-items:center;gap:20px;padding:20px 0;border-top:1px solid rgba(28,10,99,.08);transition:opacity .25s}
+        .dn .dn-row:last-child{border-bottom:1px solid rgba(28,10,99,.08)}
+        .dn .dn-rows.hov .dn-row:not(.on){opacity:.3}
+        .dn .dn-row .nm{font-family:'Fraunces',serif;font-size:20px;color:var(--ink);display:flex;align-items:center;gap:10px;font-weight:400}
+        .dn .dn-row .nm i{width:8px;height:8px;border-radius:50%;background:var(--c);box-shadow:0 0 0 3px color-mix(in srgb,var(--c) 18%,transparent);flex-shrink:0}
+        .dn .dn-row .nm small{display:block;font-family:var(--num);font-size:11px;color:var(--mut);margin-top:2px;font-weight:400}
+        .dn .dn-row .mid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr)) 70px;gap:10px;align-items:end}
+        .dn .dn-row .mid .v{font-size:16px;letter-spacing:-.02em;color:var(--ink);white-space:nowrap}
+        .dn .dn-row .mid .k{font-size:9.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--mut);margin-top:3px;font-weight:600}
+        .dn .dn-bars{display:flex;align-items:flex-end;gap:3px;height:26px}
+        .dn .dn-bars b{flex:1;background:var(--c);opacity:.45;border-radius:2px 2px 0 0;min-height:2px}
+        .dn .dn-bars b.p{opacity:.15;background:repeating-linear-gradient(0deg,var(--c) 0 2px,transparent 2px 4px)}
+        .dn .dn-row .send{text-align:right;min-width:170px;max-width:230px}
+        .dn .dn-row .send .k{font-size:9.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--mut);font-weight:600}
+        .dn .dn-row .send .n{font-size:31px;letter-spacing:-.035em;color:var(--c);line-height:1;margin-top:4px}
+        .dn .dn-row .send .e{font-size:12px;color:var(--mut);margin-top:6px;line-height:1.5}
+        .dn .g{color:#22C98A;font-weight:600}.dn .r{color:#A8443C;font-weight:600}
+        .dn .dn-hd{display:flex;justify-content:space-between;align-items:baseline}
+        .dn .dn-hd .t{font-family:'Fraunces',serif;font-size:21px;color:var(--ink);font-weight:300}
+        .dn .dn-hd .s{font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:var(--mut);font-weight:600}
+        .dn .dn-tl{position:relative;height:84px;margin-top:20px;overflow:visible}
+        .dn .dn-tl .line{position:absolute;left:0;right:0;top:30px;height:1px;background:rgba(28,10,99,.14)}
+        .dn .dn-tl .now{position:absolute;top:20px;width:1px;height:21px;background:var(--ink)}
+        .dn .dn-tl .ev{position:absolute;top:0;transform:translateX(-50%);text-align:center;width:112px}
+        .dn .dn-tl .ev i{display:block;width:9px;height:9px;border-radius:50%;margin:26px auto 8px;box-shadow:0 0 0 5px #FAFAFC}
+        .dn .dn-tl .ev b{font-size:12px;color:var(--ink);display:block;font-weight:600}
+        .dn .dn-tl .ev span{font-size:10.5px;color:var(--mut);display:block;line-height:1.35;margin-top:2px}
+        .dn .dn-moves{display:grid;grid-template-columns:360px 1fr;gap:22px;margin-top:44px;align-items:start}
+        @media (max-width:1100px){.dn .dn-moves{grid-template-columns:1fr}}
+        .dn .dn-glass{border-radius:20px;padding:22px 24px}
+        .dn .dn-glass .t{font-family:'Fraunces',serif;font-size:20px;color:var(--ink);font-weight:300;margin-bottom:4px}
+        .dn .dn-glass .d{font-size:12px;color:var(--mut);line-height:1.5;margin-bottom:14px}
+        .dn .dn-f{display:flex;flex-direction:column;gap:9px}
+        .dn .dn-f label{font-size:9.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--mut);font-weight:600}
+        .dn .dn-f input,.dn .dn-f select{border:1px solid rgba(74,68,184,.22);border-radius:10px;padding:9px 12px;font:inherit;font-size:14px;background:#fff;color:var(--txt);width:100%}
+        .dn .dn-f input.n{font-family:var(--num);font-weight:600;font-size:20px;text-align:right}
+        .dn .dn-seg{display:flex;gap:6px}
+        .dn .dn-seg button{flex:1;border:1px solid rgba(74,68,184,.2);background:#fff;color:var(--mut);border-radius:10px;padding:8px 6px;font:inherit;font-size:12.5px;cursor:pointer}
+        .dn .dn-btn{border:0;background:var(--indigo,#4A44B8);color:#fff;border-radius:12px;padding:11px 14px;font:inherit;font-size:13.5px;font-weight:600;cursor:pointer;margin-top:4px}
+        .dn .dn-btn:hover{background:#3A3494}
+        .dn .dn-btn.ghost{background:#fff;color:#4A44B8;border:1px solid rgba(74,68,184,.25)}
+        .dn .dn-chips{display:flex;gap:6px;margin-bottom:10px;flex-wrap:wrap}
+        .dn .dn-chips button{border:1px solid rgba(28,10,99,.12);background:transparent;color:var(--mut);border-radius:99px;padding:5px 12px;font:inherit;font-size:12px;cursor:pointer}
+        .dn .dn-chips button.on{background:var(--ink);color:#fff;border-color:var(--ink)}
+        .dn table.dn-log{width:100%;border-collapse:collapse;font-size:12.5px}
+        .dn table.dn-log th{text-align:left;font-size:9.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--mut);font-weight:600;padding:9px 8px;border-bottom:1px solid rgba(28,10,99,.1)}
+        .dn table.dn-log td{padding:8px 8px;border-bottom:1px solid rgba(28,10,99,.05);vertical-align:middle}
+        .dn table.dn-log td.n{text-align:right}
+        .dn table.dn-log tr.new td{background:rgba(198,168,107,.10)}
+        .dn .dn-tag{font-size:9.5px;letter-spacing:.08em;text-transform:uppercase;font-weight:600;padding:2px 8px;border-radius:99px;background:rgba(74,68,184,.09);color:#4A44B8;white-space:nowrap}
+        .dn .dn-tag.man{background:rgba(28,10,99,.06);color:var(--mut)} .dn .dn-tag.x{background:rgba(198,168,107,.18);color:#96773C} .dn .dn-tag.y25{background:rgba(168,68,60,.1);color:#A8443C}
+        .dn .dn-foot{margin-top:34px;padding-top:16px;border-top:1px solid rgba(28,10,99,.08);font-size:12px;color:var(--mut);line-height:1.6}
+        .dn .dn-foot b{color:var(--txt);font-weight:600}
+        .dn .dn-cal{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px}
+        .dn .dn-cal label{font-size:9.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--mut);font-weight:600;display:block;margin-bottom:4px}
+        .dn .dn-cal input{border:1px solid rgba(74,68,184,.22);border-radius:9px;padding:8px 10px;font:inherit;font-size:13.5px;background:#fff;color:var(--txt);width:100%;font-family:var(--num);font-weight:600}
+        .dn .dn-warn{margin-top:14px;padding:10px 14px;background:rgba(168,68,60,.06);border-left:2px solid #A8443C;font-size:12.5px;color:var(--txt);line-height:1.5}
+      `}</style>
+      <svg width="0" height="0" style={{ position: "absolute" }}><defs>
+        {TAX_ACCTS.map(k => <linearGradient key={k} id={`dnG${k}`} x1="0" y1="0" x2="1" y2="1"><stop offset="0" stopColor={TAX_GRAD[k][0]} /><stop offset="1" stopColor={TAX_GRAD[k][1]} /></linearGradient>)}
+        <filter id="dnSoft" x="-20%" y="-20%" width="140%" height="140%"><feGaussianBlur stdDeviation="7" /></filter>
+      </defs></svg>
 
-      {/* DPH — měsíční odpočet: kolik na konci měsíce zaplatím Čechmanové po odečtení účtenek (na žádost) */}
-      <DphOdpocetTile invoices={invoices} financeItems={financeItems} onSaveFinance={onSaveFinance} onNav={onNav} dashNadmernyOdpocet={dashNadmernyOdpocet} />
+      {dbErr && <div className="dn-warn">Tabulky <b>tax_ledger</b> a <b>tax_settings</b> ještě nejsou v Supabase — spusť <b>sql/DANE_migrace.sql</b> (SQL Editor). Do té doby počítám z výchozí kalibrace bez logu. ({dbErr})</div>}
 
-      {/* Souhrnná karta — daňový přehled roku, ve stylu "Bilance" dlaždice na Dashboardu */}
-      <div style={{ background: "#fff", borderRadius: 14, overflow: "hidden", border: "1px solid var(--line)", borderTop: "1px solid rgba(0,0,0,.05)", boxShadow: "0 1px 3px rgba(53,24,165,.06)", padding: "20px 22px" }}>
-        <div style={{ display:"flex", alignItems:"center", gap:7, marginBottom: 14 }}>
-          <span className="maux-dot" style={{ width:6, height:6, background:"#3518A5", boxShadow:"0 0 4px rgba(53,24,165,.5)" }} />
-          <div style={{ fontSize: 10, letterSpacing: ".22em", textTransform: "uppercase", fontWeight: 800, color: "#3518A5" }}>
-            Daňový přehled {year}
-          </div>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", gap: 16, flexWrap: "wrap" }}>
+        <div><div className="dn-eye">MAUX Legal · odvody OSVČ · rok {year}</div></div>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          {pill("faktury", `1–${T.lastClosed + 1} · živě`, false)}
+          {pill("DIS+", settings.sources?.dis || "—", stale(settings.sources?.dis))}
+          {pill("ePortál ČSSZ", settings.sources?.cssz || "—", stale(settings.sources?.cssz))}
+          {pill("Moje VZP", settings.sources?.vzp || "—", stale(settings.sources?.vzp))}
         </div>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(150px,1fr))", gap: 1, background: "var(--line)" }}>
-          <div style={{ background:"#fff", padding:"4px 16px 4px 0" }}>
-            <div style={{ fontSize: 9.5, color: "var(--mut)" }}>Zaplaceno na zálohách (YTD, auto)</div>
-            <div style={{ fontFamily:"Inter,ui-sans-serif,system-ui,sans-serif",fontVariantNumeric:"tabular-nums", fontSize: 23, fontWeight:600, color: "var(--txt)", marginTop:3 }}>{fmtKc(totalPaid)}</div>
-          </div>
-          <div style={{ background:"#fff", padding:"4px 16px" }}>
-            <div style={{ fontSize: 9.5, color: "var(--mut)" }}>Skutečné vyúčtování (ruční)</div>
-            <div style={{ fontFamily:"Inter,ui-sans-serif,system-ui,sans-serif",fontVariantNumeric:"tabular-nums", fontSize: 23, fontWeight:600, color: haveAllSettlements ? "var(--txt)" : "var(--mut)", marginTop:3 }}>
-              {haveAllSettlements ? fmtKc(totalSettled) : "doplň ↓"}
-            </div>
-          </div>
-          {totalDiff != null && (
-            <div style={{ background:"#fff", padding:"4px 16px" }}>
-              <div style={{ fontSize: 9.5, color: "var(--mut)" }}>{totalDiff >= 0 ? "Přeplatek celkem" : "Nedoplatek celkem"}</div>
-              <div style={{ fontFamily:"Inter,ui-sans-serif,system-ui,sans-serif",fontVariantNumeric:"tabular-nums", fontSize: 23, fontWeight: 500, color: totalDiff >= 0 ? "#4A7C59" : "#A8443C", marginTop:3 }}>
-                {totalDiff >= 0 ? "+" : "−"}{fmtKc(Math.abs(totalDiff))}
+      </div>
+      <div className="dn-verdict">
+        Pošli tento měsíc <b>{F(T.total)}</b>
+        {T.debtAll > 0 && <> — a jednorázově <b>{F(T.debtAll)}</b> na jistý nedoplatek {year - 1} ({TAX_ACCTS.filter(a => T.debt[a] > 0).map(a => `${TAX_NAME[a]} ${F(T.debt[a])}`).join(" · ")}), jakmile budou podané opravné přehledy —</>}
+        {" "}a v dubnu {year + 1} {allOk ? "stojíš na všech třech účtech na nule, s pár stovkami k dobru." : "ti na některém účtu zůstane doplatek."}
+      </div>
+
+      <div className="dn-hero">
+        <div className="dn-orbit">
+          <svg viewBox="0 0 440 440">{TAX_ACCTS.map(ring)}</svg>
+          <div className="c"><div className="l">tento měsíc</div><div className="n maux-num">{F(T.total)}</div><div className="s">třem účtům</div></div>
+          <div className="lg"><span><i /> poslal jsi</span><span><i style={{ background: "#1C0A63", opacity: .55 }} /> jistý nedoplatek</span><span><i className="d" /> odhad</span><span>vně ČSSZ · střed VZP · uvnitř FÚ</span></div>
+        </div>
+        <div className={"dn-rows" + (hov ? " hov" : "")}>
+          {TAX_ACCTS.map(k => {
+            const monthly = (ledger || []).filter(e => e.account === k && Number(e.tax_year) === year && Number(e.amount) > 0 && e.kind === "zaloha").map(e => Number(e.amount));
+            if (k === "dan") monthly.length = 0;
+            const danMonthly = k === "dan" ? (dpfoMonths || []).filter(m => m.year === year && m.is_paid && (m.amount || 0) > 0).map(m => m.amount) : [];
+            const bars = k === "dan" ? danMonthly : monthly;
+            const mx = Math.max(T.per[k], ...bars, 1);
+            const rem = Math.max(0, T.must[k] - T.paid[k]);
+            return (
+              <div key={k} className={"dn-row" + (hov === k ? " on" : "")} style={{ "--c": TAX_COL[k] }} onMouseEnter={() => setHov(k)} onMouseLeave={() => setHov(null)}>
+                <div className="nm"><i /><div>{TAX_NAME[k]}<small>{TAX_SUB[k]}</small></div></div>
+                <div className="mid">
+                  <div><div className="v maux-num">{Fn(T.must[k])}</div><div className="k">musíš letos</div></div>
+                  <div><div className="v maux-num">{Fn(T.paid[k])}</div><div className="k">poslal jsi</div></div>
+                  <div><div className="v maux-num" style={{ color: "#1C0A63" }}>{Fn(T.sure[k])}</div><div className="k">jistý nedopl.{T.debt[k] > 0 ? ` · ${year - 1}: ${Fn(T.debt[k])}` : ""}</div></div>
+                  <div><div className="v maux-num">{Fn(rem)}</div><div className="k">zbývá · {T.leftPay[k]} {k === "dan" ? "měs." : "platby"}</div></div>
+                  <div><div className="dn-bars">{bars.map((v, i) => <b key={i} style={{ height: `${v / mx * 100}%` }} />)}{Array(Math.min(4, T.leftPay[k])).fill(0).map((_, i) => <b key={"p" + i} className="p" style={{ height: `${T.per[k] / mx * 100}%` }} />)}</div><div className="k">platby</div></div>
+                </div>
+                <div className="send">
+                  <div className="k">pošli tento měsíc</div>
+                  <div className="n maux-num">{F(T.per[k])}</div>
+                  <div className="e">duben {year + 1} · <b className={T.end[k] >= 0 ? "g" : "r"}>{T.end[k] >= 0 ? (k === "dan" ? "zbyde " : "+") + F(T.end[k]) : "−" + F(-T.end[k])}</b>
+                    {k === "dan" && T.nearest && <><br />{evLabel(T.nearest.date)} záloha {F(T.nearest.amount)} · za {daysTo(T.nearest.date)} dní · na spořáku bude {F(T.sporakAtNearest)} → {T.sporakAtNearest >= T.nearest.amount ? <b className="g">stačí</b> : <b className="r">chybí {F(T.nearest.amount - T.sporakAtNearest)}</b>}</>}
+                    {k === "dan" && T.interest > 0 && <><br />z toho úroky z úschov {F(T.interest)} × 15 % — leží ještě na Monetě u běžících úschov</>}
+                  </div>
+                </div>
               </div>
-            </div>
-          )}
-          {danUschov > 0 && (
-            <div style={{ background:"#fff", padding:"4px 16px" }}>
-              <div style={{ fontSize: 9.5, color: "var(--mut)" }}>Daň z výnosu úschov (info)</div>
-              <div style={{ fontFamily:"Inter,ui-sans-serif,system-ui,sans-serif",fontVariantNumeric:"tabular-nums", fontSize: 23, fontWeight:600, color: "var(--mut)", marginTop:3 }}>{fmtKc(danUschov)}</div>
-            </div>
-          )}
-        </div>
-        <div style={{ fontSize: 10, color: "var(--mut)", marginTop: 16, lineHeight: 1.5, maxWidth: 720, opacity:.85 }}>
-          „Zaplaceno" appka počítá živě z DPFO trackeru, uhrazených faktur (DPH) a pravidelných výdajů. Jakmile zjistíš
-          skutečnou částku z přiznání nebo přehledů ČSSZ/VZP, zapiš ji u dané kategorie níže — appka dopočítá rozdíl.
+            );
+          })}
         </div>
       </div>
 
-      {/* Kategorie — auto vs. ruční, jako vzdušné karty místo tabulky */}
-      <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
-        {records.map(rec => <TaxRow key={rec.id} rec={rec} auto={AUTO[rec.category]} onSave={onSaveTax} />)}
-        {records.length === 0 && (
-          <div style={{ background: "#fff", border: "1px solid var(--line)", borderRadius: 14, padding: "28px 22px", textAlign: "center", color: "var(--mut)", fontSize: 12.5 }}>
-            Evidence pro rok {year} se právě zakládá — za chvíli se objeví čtyři kategorie k vyplnění.
+      <section style={{ marginTop: 44 }}>
+        <div className="dn-hd"><span className="t">Co tě čeká do uzávěrky</span><span className="s">{monthNom[T.curM]} {year} → duben {year + 1}</span></div>
+        <div className="dn-tl">
+          <div className="line" />
+          {events.map((e, i) => {
+            const x = 4 + i * (92 / Math.max(1, events.length - 1));
+            return (
+              <Fragment key={i}>
+                {e.a == null && <div className="now" style={{ left: `${x}%` }} />}
+                <div className="ev" style={{ left: `${x}%` }}>
+                  <i style={{ background: e.a ? TAX_COL[e.a] : "#1C0A63" }} />
+                  <b style={{ fontSize: e.big ? 13 : 12 }}>{e.a == null ? "dnes" : e.d.endsWith("-04-01") ? "duben" : evLabel(e.d)}</b>
+                  <span>{e.t}</span>
+                </div>
+              </Fragment>
+            );
+          })}
+        </div>
+      </section>
+
+      <section className="dn-moves">
+        <div className="dn-glass" style={MAUX_GLASS}>
+          <div className="t">Mimořádná platba</div>
+          <div className="d">Když pošleš víc než měsíční částku — třeba část zisku místo XTB. Zapíše se do logu a všechno nahoře se přepočítá. Odškrtávání běžných plateb zůstává na Přehledu.</div>
+          <div className="dn-f">
+            <label>Účet</label>
+            <div className="dn-seg">{TAX_ACCTS.map(k => <button key={k} onClick={() => setForm(f => ({ ...f, account: k }))} style={form.account === k ? { background: TAX_COL[k], color: "#fff", borderColor: "transparent", fontWeight: 600 } : {}}>{k === "dan" ? "FÚ · spořák" : TAX_NAME[k]}</button>)}</div>
+            <label>Částka</label><input className="n" value={form.amount} onChange={e => setForm(f => ({ ...f, amount: e.target.value }))} placeholder="0" />
+            <label>Datum</label><input type="date" value={form.date} onChange={e => setForm(f => ({ ...f, date: e.target.value }))} />
+            <label>Započítat do</label>
+            <div className="dn-seg">{[year, year - 1].map(y => <button key={y} onClick={() => setForm(f => ({ ...f, tax_year: y }))} style={Number(form.tax_year) === y ? { background: "#1C0A63", color: "#fff", borderColor: "transparent", fontWeight: 600 } : {}}>{y === year ? `roku ${year}` : `doplatku ${y}`}</button>)}</div>
+            <label>Poznámka</label><input value={form.note} onChange={e => setForm(f => ({ ...f, note: e.target.value }))} placeholder="např. místo XTB · zisk z úschovy" />
+            <button className="dn-btn" onClick={addManual}>Zapsat a přepočítat</button>
+          </div>
+        </div>
+        <div className="dn-glass" style={MAUX_GLASS}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+            <div className="t">Log plateb</div>
+            <span onClick={() => setShowLog(s => !s)} style={{ fontSize: 12, color: "#4A44B8", cursor: "pointer", fontWeight: 600 }}>{showLog ? "sbalit" : `zobrazit (${logRows.length})`}</span>
+          </div>
+          <div className="d">Všechno, co odešlo nebo přišlo — z portálů při kalibraci, z odškrtnutí ve Výdajích na Přehledu i mimořádné platby odsud. Rok říká, kam pohyb patří.</div>
+          {showLog && (
+            <>
+              <div className="dn-chips">{[["all", "vše"], ["soc", "ČSSZ"], ["vzp", "VZP"], ["dan", "FÚ"], ["2025", `jen rok ${year - 1}`]].map(c => <button key={c[0]} className={filt === c[0] ? "on" : ""} onClick={() => setFilt(c[0])}>{c[1]}</button>)}</div>
+              {logShown.length === 0 ? (
+                <div style={{ fontSize: 12.5, color: "var(--mut)", padding: "10px 0" }}>
+                  Log je prázdný. {!dbErr && <span onClick={seedFromPortals} style={{ color: "#4A44B8", cursor: "pointer", fontWeight: 600 }}>Naplnit z portálů (kalibrace 5. 9. 2026)</span>}
+                </div>
+              ) : (
+                <table className="dn-log">
+                  <thead><tr><th>Datum</th><th>Účet</th><th>Pohyb</th><th>Zdroj</th><th>Rok</th><th style={{ textAlign: "right" }}>Částka</th><th /></tr></thead>
+                  <tbody>
+                    {logShown.map(e => (
+                      <tr key={e.id} className={newest === e.id ? "new" : ""}>
+                        <td className="maux-num" style={{ fontWeight: 500, color: "var(--mut)" }}>{evLabel(e.date)} {String(e.date).slice(0, 4)}</td>
+                        <td><span style={{ color: TAX_COL[e.account], fontWeight: 600 }}>{TAX_NAME[e.account]}</span></td>
+                        <td>{e.note || e.kind}</td>
+                        <td><span className={"dn-tag" + (/ručně|Přehled/.test(e.source || "") ? " man" : "") + (/mimoř/.test(e.source || "") ? " x" : "")}>{e.source}</span></td>
+                        <td>{Number(e.tax_year) < year ? <span className="dn-tag y25">{e.tax_year}</span> : e.tax_year}</td>
+                        <td className="n maux-num">{e.amount < 0 ? "−" : ""}{F(Math.abs(e.amount))}</td>
+                        <td style={{ width: 18, textAlign: "right" }}>{/ručně/.test(e.source || "") && <span onClick={() => removeRow(e)} style={{ color: "var(--mut)", cursor: "pointer" }}>×</span>}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: "var(--mut)", paddingTop: 10 }}>
+                <span>{logShown.length} pohybů</span>
+                <span>do roku {year} celkem <b className="maux-num" style={{ color: "var(--txt)" }}>{F(logShown.filter(e => Number(e.tax_year) === year).reduce((a, e) => a + e.amount, 0))}</b></span>
+              </div>
+            </>
+          )}
+        </div>
+      </section>
+
+      <div className="dn-foot">
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 10 }}>
+          <span><span style={{ display: "inline-block", width: 7, height: 7, borderRadius: "50%", background: "#22C98A", marginRight: 7 }} />vzorec ověřen proti výměru FÚ {year - 1} · faktury 1–{T.lastClosed + 1} <b className="maux-num">{F(T.certainInc)}</b> · odhad {T.estMonths} × <b className="maux-num">{F(T.avg)}</b> · úroky z úschov <b className="maux-num">{F(T.interest)}</b></span>
+          <span>
+            <span onClick={pushToExpenses} style={{ color: "#4A44B8", cursor: "pointer", fontWeight: 600, marginLeft: 16 }}>Propsat „pošli tento měsíc" do Výdajů</span>
+            <span onClick={() => setShowCal(s => !s)} style={{ color: "#4A44B8", cursor: "pointer", fontWeight: 600, marginLeft: 16 }}>{showCal ? "Zavřít kalibraci" : "Kalibrace"}</span>
+          </span>
+        </div>
+        <div style={{ marginTop: 8 }}>
+          <b>Jak se počítá:</b> musíš letos = jisté (faktury {year} podle DUZP, bez DPH, na korunu) + odhad (zbývající měsíce × průměr posledních {settings.est_months_avg} uzavřených). Paušál {Math.round(settings.pausal_rate * 100)} % (strop {F(settings.pausal_cap)}) · ČSSZ {(settings.rate_soc * 100).toFixed(1)} % z {Math.round(settings.base_soc * 100)} % základu · VZP {settings.rate_vzp * 100} % z {Math.round(settings.base_vzp * 100)} % · daň 15 % ze základu (advokacie + radní {F(settings.radni)} + úroky) − sleva {F(settings.sleva)} − sražené městem {F(T.srazeno6)} · nad {F(36 * settings.avg_wage)} 23 %. Pošli tento měsíc = zbývá ÷ platby do uzávěrky (pojišťovny do prosince, daň do dubna, pojistka na nejbližší zálohu FÚ), na stovky nahoru. Přepočet 1. dne po vystavení faktur.
+        </div>
+        {showCal && cal && (
+          <div style={{ ...MAUX_GLASS, borderRadius: 20, padding: "20px 24px", marginTop: 16 }}>
+            <div style={{ fontFamily: "'Fraunces',serif", fontSize: 20, color: "var(--ink)", fontWeight: 300, marginBottom: 12 }}>Kalibrace {year}</div>
+            <div className="dn-cal">
+              {[["radni", "Radní § 6 · základ"], ["srazeno6", "Sraženo městem (prázdné = 15 %)"], ["min_soc", "Min. záloha ČSSZ"], ["min_vzp", "Min. záloha VZP"], ["target_cushion", "Cíl v dubnu (+ Kč na účet)"], ["est_months_avg", "Průměr z N měsíců"], ["avg_wage", "Průměrná mzda"], ["pausal_cap", "Strop paušálu"]].map(([k, l]) => (
+                <div key={k}><label>{l}</label><input value={cal[k] ?? ""} onChange={e => setCal(c => ({ ...c, [k]: e.target.value === "" ? null : Number(e.target.value) }))} /></div>
+              ))}
+              {["soc", "vzp", "dan"].map(a => (
+                <div key={a}><label>Doplatek {year - 1} · {TAX_NAME[a]}</label><input value={cal.doplatek25?.[a] ?? 0} onChange={e => setCal(c => ({ ...c, doplatek25: { ...(c.doplatek25 || {}), [a]: Number(e.target.value) || 0 } }))} /></div>
+              ))}
+              {(cal.fu_zalohy || []).map((z, i) => (
+                <div key={i}><label>Záloha FÚ {i + 1} · datum · částka</label>
+                  <div style={{ display: "flex", gap: 6 }}>
+                    <input type="date" value={z.date} onChange={e => setCal(c => { const f = [...c.fu_zalohy]; f[i] = { ...f[i], date: e.target.value }; return { ...c, fu_zalohy: f }; })} />
+                    <input value={z.amount} onChange={e => setCal(c => { const f = [...c.fu_zalohy]; f[i] = { ...f[i], amount: Number(e.target.value) || 0 }; return { ...c, fu_zalohy: f }; })} />
+                  </div>
+                </div>
+              ))}
+              {[["dis", "DIS+ přečteno"], ["cssz", "ePortál ČSSZ přečteno"], ["vzp", "Moje VZP přečteno"]].map(([k, l]) => (
+                <div key={k}><label>{l}</label><input value={cal.sources?.[k] || ""} onChange={e => setCal(c => ({ ...c, sources: { ...(c.sources || {}), [k]: e.target.value } }))} placeholder="5. 9. 2026" /></div>
+              ))}
+            </div>
+            <div style={{ display: "flex", gap: 10, marginTop: 14, flexWrap: "wrap" }}>
+              <button className="dn-btn" onClick={saveCal}>Uložit kalibraci</button>
+              <button className="dn-btn ghost" onClick={() => setCal(c => ({ ...c, fu_zalohy: [...(c.fu_zalohy || []), { date: `${year + 1}-06-15`, amount: 55200 }] }))}>+ záloha FÚ</button>
+              <button className="dn-btn ghost" onClick={seedFromPortals}>Naplnit log z portálů (5. 9. 2026)</button>
+            </div>
           </div>
         )}
+      </div>
+
+      {/* DPH — evidence účtenek zůstává (proces s účetní, skill uctenky) */}
+      <div style={{ marginTop: 40 }}>
+        <div className="dn-hd" style={{ marginBottom: 12 }}><span className="t">Evidence účtenek · DPH</span><span className="s">pro účetní · měsíčně</span></div>
+        <DphOdpocetTile invoices={invoices} financeItems={financeItems} onSaveFinance={onSaveFinance} onNav={onNav} dashNadmernyOdpocet={dashNadmernyOdpocet} />
       </div>
     </div>
   );
@@ -20711,6 +21113,17 @@ export default function MauxCRM() {
       const fi = (financeItems || []).find(i => i.id === itemId);
       if (fi && isDpfoExpenseItem(fi)) {
         setDpfoMonths(await syncDpfoSavingPaid(dpfoMonths, y, mo, paid, Math.abs(fi.amount || 0)));
+      }
+      // Sociálka / VZP ↔ log plateb v Daních (5. 9. 2026). Pevné ID na (účet × rok × měsíc),
+      // odškrtnutí zapíše, zpětné odškrtnutí smaže — nic se nezdvojí. Chybějící tabulka
+      // (migrace ještě neproběhla) checkbox nesmí shodit, jen varuje do konzole.
+      const taxAcct = fi && taxAcctForExpenseItem(fi);
+      if (taxAcct) {
+        try {
+          const tlId = taxLedgerCheckId(taxAcct, y, mo);
+          if (paid) await upsertTaxLedger({ id: tlId, account: taxAcct, tax_year: y, date: today(), amount: Math.abs(fi.amount || 0), kind: "zaloha", source: "Přehled · odškrtnuto", note: `záloha za ${mo}/${y}` });
+          else await deleteTaxLedger(tlId);
+        } catch (err) { console.warn("tax_ledger:", err.message); }
       }
       // Výdaj se stejnojmenným úvěrem v Ostatní (Auto, Bobnice…) — zapiš/vezmi zpět
       // splátku. Pojistky proti duplicitě a proti sahání na ruční pohyby: viz
