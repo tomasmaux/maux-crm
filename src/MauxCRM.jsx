@@ -17232,7 +17232,12 @@ function computeTaxYear({ year, invoices, escrows, dpfoMonths, ledger, settings,
   // definice jako computeSporakEnvelopes — nikdy nepočítej podruhé jinak.
   const sporak = (dpfoMonths || []).filter(m => m.year === year && m.is_paid).reduce((s, m) => s + (m.amount || 0), 0);
   const fuZalohyPaid = sumL("dan", year, e => e.kind === "zaloha");
-  const paid = { soc: sumL("soc", year, e => e.kind !== "refund"), vzp: sumL("vzp", year, e => e.kind !== "refund"), dan: fuZalohyPaid + sporak };
+  // Daň z úroků z úschov (15 %) už appka drží jako obálku „Daň z úschov" na spořáku
+  // (computeSporakEnvelopes → escrowTotalTax). Tady se počítá jako uložená — jinak by
+  // se stejných 15 % chtělo podruhé z fakturace. Peníze fyzicky leží na Monetě do
+  // konce úschovy; obálka je jejich zrcadlo, ne druhý polštář.
+  const danUschovEnv = Math.round(escrowTotalTax(escrows || []));
+  const paid = { soc: sumL("soc", year, e => e.kind !== "refund"), vzp: sumL("vzp", year, e => e.kind !== "refund"), dan: fuZalohyPaid + sporak + danUschovEnv };
   const debt = {};
   TAX_ACCTS.forEach(a => { debt[a] = Math.max(0, (S.doplatek25?.[a] || 0) - sumL(a, year - 1, e => e.kind === "doplatek")); });
 
@@ -17253,7 +17258,7 @@ function computeTaxYear({ year, invoices, escrows, dpfoMonths, ledger, settings,
   const sure = {}; TAX_ACCTS.forEach(a => { sure[a] = Math.max(0, cert[a] - paid[a]) + debt[a]; });
 
   return { year, byMonth, certainInc, estMonths, avg, income, interest, zd7: zd7(income), zdc: Math.floor((zd7(income) + (S.radni || 0) + interest) / 100) * 100,
-           must, cert, paid, debt, sure, per, end, leftPay, sporak, fuZalohyPaid, nearest, sporakAtNearest, srazeno6, lastClosed, curM,
+           must, cert, paid, debt, sure, per, end, leftPay, sporak, fuZalohyPaid, danUschovEnv, nearest, sporakAtNearest, srazeno6, lastClosed, curM,
            total: per.soc + per.vzp + per.dan, debtAll: debt.soc + debt.vzp + debt.dan };
 }
 
@@ -17508,7 +17513,7 @@ function DaneModule({ year, taxRecords, financeItems, invoices, dpfoMonths, escr
                 <div className="nm"><i /><div>{TAX_NAME[k]}<small>{TAX_SUB[k]}</small></div></div>
                 <div className="mid">
                   <div><div className="v maux-num">{Fn(T.must[k])}</div><div className="k">musíš letos</div></div>
-                  <div><div className="v maux-num">{Fn(T.paid[k])}</div><div className="k">poslal jsi</div></div>
+                  <div><div className="v maux-num">{Fn(T.paid[k])}</div><div className="k">{k === "dan" ? "zálohy + spořák + obálka úroků" : "poslal jsi"}</div></div>
                   <div><div className="v maux-num" style={{ color: "#1C0A63" }}>{Fn(T.sure[k])}</div><div className="k">jistý nedopl.{T.debt[k] > 0 ? ` · ${year - 1}: ${Fn(T.debt[k])}` : ""}</div></div>
                   <div><div className="v maux-num">{Fn(rem)}</div><div className="k">zbývá · {T.leftPay[k]} {k === "dan" ? "měs." : "platby"}</div></div>
                   <div><div className="dn-bars">{bars.map((v, i) => <b key={i} style={{ height: `${v / mx * 100}%` }} />)}{Array(Math.min(4, T.leftPay[k])).fill(0).map((_, i) => <b key={"p" + i} className="p" style={{ height: `${T.per[k] / mx * 100}%` }} />)}</div><div className="k">platby</div></div>
@@ -17518,7 +17523,7 @@ function DaneModule({ year, taxRecords, financeItems, invoices, dpfoMonths, escr
                   <div className="n maux-num">{F(T.per[k])}</div>
                   <div className="e">duben {year + 1} · <b className={T.end[k] >= 0 ? "g" : "r"}>{T.end[k] >= 0 ? (k === "dan" ? "zbyde " : "+") + F(T.end[k]) : "−" + F(-T.end[k])}</b>
                     {k === "dan" && T.nearest && <><br />{evLabel(T.nearest.date)} záloha {F(T.nearest.amount)} · za {daysTo(T.nearest.date)} dní · na spořáku bude {F(T.sporakAtNearest)} → {T.sporakAtNearest >= T.nearest.amount ? <b className="g">stačí</b> : <b className="r">chybí {F(T.nearest.amount - T.sporakAtNearest)}</b>}</>}
-                    {k === "dan" && T.interest > 0 && <><br />z toho úroky z úschov {F(T.interest)} × 15 % — leží ještě na Monetě u běžících úschov</>}
+                    {k === "dan" && T.interest > 0 && <><br />z toho daň z úroků z úschov {F(Math.round(T.interest * 0.15))} ({F(T.interest)} × 15 %) — kryta obálkou „Daň z úschov" na spořáku ({F(T.danUschovEnv)}); peníze leží na Monetě do konce úschov</>}
                   </div>
                 </div>
               </div>
