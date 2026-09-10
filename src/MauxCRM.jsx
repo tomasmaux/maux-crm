@@ -1650,6 +1650,58 @@ function invoiceStatus(inv) {
   return "pripravena";
 }
 
+// ===== NA CESTE — jediny zdroj pravdy pro pas nad Prehledem (Tom 10. 9. 2026) =====
+// Bere JEN vystavene a dosud NEUHRAZENE faktury. Nevyfakturovana prace sem NEPATRI
+// (Tom: "ja nechci videt v na ceste doposud nevystavene") — ta zije v karte Pristi mesic.
+// Inkasni pruh meri celou davku, ze ktere jeste neco ceka: vezmou se mesice vystaveni,
+// v nichz lezi aspon jedna nezaplacena faktura, a z NICH se pocita uhrazeno vs. ceka.
+// Diky tomu hero cislo a pruh nikdy nepocitaji z jine mnoziny (jedno cislo, jedna metoda).
+const NC_MESICE_GEN = ["ledna","\u00fanora","b\u0159ezna","dubna","kv\u011btna","\u010dervna","\u010dervence","srpna","z\u00e1\u0159\u00ed","\u0159\u00edjna","listopadu","prosince"];
+function ncPluralFaktur(n) {
+  if (n === 1) return "faktura";
+  if (n >= 2 && n <= 4) return "faktury";
+  return "faktur";
+}
+function computeNaCeste(invoices) {
+  const list = invoices || [];
+  const sum = (arr) => arr.reduce((s, i) => s + (Number(i.subtotal) || 0), 0);
+  const nezaplacene = list.filter(i => {
+    const s = invoiceStatus(i);
+    return s === "vystavena" || s === "po_splatnosti";
+  });
+  const poSplat = nezaplacene.filter(i => invoiceStatus(i) === "po_splatnosti");
+  const ceka    = nezaplacene.filter(i => invoiceStatus(i) === "vystavena");
+  const cekaAmt    = sum(ceka);
+  const poSplatAmt = sum(poSplat);
+  const celkemAmt  = cekaAmt + poSplatAmt;
+  // Nejblizsi splatnost z faktur, ktere jeste neproseky termin
+  const dueDates = ceka.map(i => i.due_date).filter(Boolean).sort();
+  const nextDue = dueDates.length ? dueDates[0] : null;
+  let dniDoSplatnosti = null;
+  if (nextDue) {
+    const a = new Date(nextDue + "T00:00:00"), b = new Date(today() + "T00:00:00");
+    dniDoSplatnosti = Math.round((a - b) / 86400000);
+  }
+  // Davka = vsechny mesice vystaveni, ze kterych jeste neco ceka
+  const mesice = new Set(nezaplacene.map(i => (i.issue_date || "").slice(0, 7)).filter(Boolean));
+  const davka = list.filter(i => mesice.has((i.issue_date || "").slice(0, 7)));
+  const uhrazene = davka.filter(i => {
+    const s = invoiceStatus(i);
+    return s === "uhrazena" || s === "dph_odvedeno";
+  });
+  const uhrazenoAmt = sum(uhrazene);
+  const davkaAmt = uhrazenoAmt + celkemAmt;
+  return {
+    ceka, cekaAmt, poSplat, poSplatAmt, celkemAmt,
+    // Vse, co ceka, od nejvetsi castky — po splatnosti drzi prednost pri shode.
+    vse: nezaplacene.slice().sort((x, y2) => (Number(y2.subtotal) || 0) - (Number(x.subtotal) || 0)),
+    nextDue, dniDoSplatnosti,
+    uhrazene, uhrazenoAmt, davkaAmt,
+    // Pomer z nuly se nekresli — straz na jmenovateli.
+    podil: davkaAmt > 0 ? uhrazenoAmt / davkaAmt : 0,
+  };
+}
+
 function StatusBadge({ inv }) {
   const s = invoiceStatus(inv);
   const map = {
@@ -12746,6 +12798,9 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
   const [panelState, setPanelState] = useState(loadPanelState);
   const [dragOver, setDragOver] = useState(null);
   const [hoverBar, setHoverBar] = useState(null);
+  // Rozbaleni pasu "Na ceste" na jmena klientu. Hook musi byt na urovni panelu,
+  // ne v zanorenem IIFE, ktere pas vykresluje.
+  const [ncOpen, setNcOpen] = useState(false);
   const dragId = useRef(null);
 
   function handleDragStart(id) { dragId.current = id; }
@@ -13150,6 +13205,120 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
       })()}
 
 
+      {/* PAS "NA CESTE" — Tom 10. 9. 2026. Verdikt + inkasni pruh nad vsim ostatnim.
+          Kontrolka "Co je na ceste?" v Pulzu firmy michala vystavene faktury, nevyfakturovanou
+          praci a urok uschov do jednoho cisla. Tady jsou JEN penize, ktere uz nekdo dluzi.
+          Kdyz nic neceka, pas se schova a misto nej stoji tichy zeleny stav s datem,
+          kdy se zase objevi (Tom: "potom, co prijdou vsechny faktury se to skryje"). */}
+      {(() => {
+        const nc = computeNaCeste(invoices);
+        if (!nc.davkaAmt) return null;
+        if (!nc.celkemAmt) {
+          const d = new Date();
+          const dalsi = new Date(d.getFullYear(), d.getMonth() + 1, 1);
+          return (
+            <div style={{
+              borderLeft: "2px solid #4A7C59", borderRadius: 0, background: "#F5FAF6",
+              padding: "12px 18px", marginTop: 12, display: "flex", alignItems: "center",
+              justifyContent: "space-between", gap: 12, flexWrap: "wrap"
+            }}>
+              <span style={{ fontSize: 13, color: "#3D6A4B", fontWeight: 500 }}>
+                {"Nikdo ti nedlu\u017e\u00ed \u2014 v\u0161ech "}{nc.uhrazene.length}{" vystaven\u00fdch faktur je uhrazen\u00fdch."}
+              </span>
+              <span style={{ fontSize: 11.5, color: "var(--mut)" }}>
+                {"Dal\u0161\u00ed d\u00e1vku vystav\u00ed\u0161 1. "}{NC_MESICE_GEN[dalsi.getMonth()]}
+              </span>
+            </div>
+          );
+        }
+        const dueD = nc.nextDue ? new Date(nc.nextDue + "T00:00:00") : null;
+        const nadpis = dueD
+          ? "Do " + dueD.getDate() + ". " + NC_MESICE_GEN[dueD.getMonth()] + " ti p\u0159ijde"
+          : "Po splatnosti ti dlu\u017e\u00ed";
+        const cekaCount = nc.ceka.length + nc.poSplat.length;
+        return (
+          <div
+            onClick={() => setNcOpen(v => !v)}
+            title={ncOpen ? "Sbalit" : "Rozbalit na jm\u00e9na klient\u016f"}
+            style={{
+              ...MAUX_GLASS, borderLeft: "2px solid " + BP.indigo, borderRadius: "0 18px 18px 0",
+              padding: "20px 26px 22px", marginTop: 12, cursor: "pointer"
+            }}>
+          <div style={{ display: "flex", gap: 40, alignItems: "flex-end", flexWrap: "wrap" }}>
+            <div style={{ flex: "0 0 auto" }}>
+              {nc.poSplatAmt > 0 && (
+                <div style={{
+                  borderLeft: "2px solid " + BP.down, borderRadius: 0, background: "#FCF7F6",
+                  padding: "6px 12px", marginBottom: 10, fontSize: 11.5, color: BP.down
+                }}>
+                  Po splatnosti <strong className="maux-num">{fmtKc(nc.poSplatAmt)}</strong>
+                  {" \u00b7 "}{nc.poSplat.length} {ncPluralFaktur(nc.poSplat.length)}
+                </div>
+              )}
+              <div style={{ fontSize: 9.5, letterSpacing: ".16em", textTransform: "uppercase", color: "var(--mut)", fontWeight: 600 }}>
+                {nadpis}
+              </div>
+              <div className="maux-num" style={{ fontSize: 42, fontWeight: 600, color: BP.indigo, letterSpacing: "-.032em", lineHeight: 1.05, marginTop: 7 }}>
+                {fmtKc(nc.cekaAmt)}
+              </div>
+            </div>
+            <div style={{ flex: 1, minWidth: 280, paddingBottom: 8 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", gap: 12, fontSize: 9.5, letterSpacing: ".14em", textTransform: "uppercase", color: "var(--mut)", fontWeight: 600, marginBottom: 9 }}>
+                <span>Vystaveno {"\u00b7"} {fmtKc(nc.davkaAmt)}</span>
+                <span>{Math.round(nc.podil * 100)}{" % inkasov\u00e1no"}</span>
+              </div>
+              <div style={{ height: 12, borderRadius: 7, background: "rgba(74,68,184,.13)", overflow: "hidden" }}>
+                <div style={{ height: "100%", width: (Math.round(nc.podil * 1000) / 10) + "%", background: BP.indigo }} />
+              </div>
+              <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap", fontSize: 11.5, color: "var(--mut)", marginTop: 9 }}>
+                <span>
+                  <span style={{ display: "inline-block", width: 7, height: 7, borderRadius: "50%", background: BP.indigo, marginRight: 6 }} />
+                  uhrazeno <strong className="maux-num" style={{ color: "var(--txt)" }}>{fmtKc(nc.uhrazenoAmt)}</strong>
+                  {" \u00b7 "}{nc.uhrazene.length} {ncPluralFaktur(nc.uhrazene.length)}
+                </span>
+                <span>
+                  <span style={{ display: "inline-block", width: 7, height: 7, borderRadius: "50%", background: "rgba(74,68,184,.22)", marginRight: 6 }} />
+                  {"\u010dek\u00e1 "}<strong className="maux-num" style={{ color: "var(--txt)" }}>{fmtKc(nc.celkemAmt)}</strong>
+                  {" \u00b7 "}{cekaCount} {ncPluralFaktur(cekaCount)}
+                  <span style={{ color: BP.indigo, fontWeight: 600, marginLeft: 8 }}>{ncOpen ? "\u25b4" : "\u25be"}</span>
+                </span>
+              </div>
+            </div>
+            </div>
+            {ncOpen && (
+              <div style={{ marginTop: 16, paddingTop: 14, borderTop: "1px solid var(--line)" }}>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", columnGap: 30 }}>
+                  {nc.vse.map((inv) => {
+                    const jm = (inv.clients && inv.clients.name) || ((clients || []).find(c => c.id === inv.client_id) || {}).name || "\u2014";
+                    const late = invoiceStatus(inv) === "po_splatnosti";
+                    const amt = Number(inv.subtotal) || 0;
+                    const maxAmt = Number(nc.vse[0].subtotal) || 1;
+                    return (
+                      <div key={inv.id} style={{ padding: "8px 0", borderTop: "1px solid rgba(28,10,99,.05)" }}>
+                        <div style={{ display: "flex", justifyContent: "space-between", gap: 8, fontSize: 12 }}>
+                          <span style={{ color: late ? BP.down : "var(--txt)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{jm}</span>
+                          <b className="maux-num" style={{ color: late ? BP.down : "var(--ink)", flex: "0 0 auto" }}>{fmtKc(amt)}</b>
+                        </div>
+                        <div style={{ height: 3, borderRadius: 2, background: "rgba(74,68,184,.14)", marginTop: 6 }}>
+                          <div style={{ height: "100%", borderRadius: 2, width: Math.round(amt / maxAmt * 100) + "%", background: late ? BP.down : BP.indigo }} />
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+                <div style={{ textAlign: "right", marginTop: 12 }}>
+                  <span
+                    onClick={(e) => { e.stopPropagation(); onNav && onNav("fakturace"); }}
+                    style={{ fontSize: 11.5, color: BP.indigo, fontWeight: 600, cursor: "pointer" }}>
+                    {"Otev\u0159\u00edt Fakturaci \u2192"}
+                  </span>
+                </div>
+              </div>
+            )}
+          </div>
+        );
+      })()}
+
       {editLayout && (
         <div style={{background:"linear-gradient(135deg,#EEF2FF,#E0E7FF)",border:"1px solid rgba(99,102,241,.25)",borderRadius:10,padding:"12px 18px",fontSize:12,color:"#3730A3",display:"flex",alignItems:"center",gap:10}}>
           <span style={{fontSize:18}}>✨</span>
@@ -13216,7 +13385,10 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
           const tempoDelta = earned - paceTarget;
           // CO JE NA CESTĚ? — vystavené čekající + nevyfakturovaná práce + úrok úschov do konce měsíce
           const escFuture = Math.max(Math.round(escrowNetThisMonth) - Math.round(escrowNetForMonth(escrows, y, m)), 0);
-          const naCeste = onTheWayInv + unbilledAmt + escFuture;
+          // Tom 10. 9. 2026: vystavene ceka nese PAS "Na ceste" nahore. Tahle kontrolka
+          // uz drzi jen to, co pas NENESE — nevyfakturovanou praci a urok uschov.
+          // Jedno cislo, jedno misto.
+          const naCeste = unbilledAmt + escFuture;
           const dues = invoices.filter(i => ["vystavena","po_splatnosti"].includes(invoiceStatus(i))).map(i => i.due_date).filter(Boolean).sort();
           const maxDue = dues.length ? dues[dues.length - 1] : null;
           // Tichá delta — posledních 30 dní vs. předchozích 30 (stejný tok jako kalendář:
@@ -13304,14 +13476,13 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
                     <div style={{position:"absolute", top:-3, left:`${Math.min(paceTarget / Math.max(meta, 1), 1) * 100}%`, width:1.5, height:8, background:BP.indigoInk}} />
                   </div>
                 </Col>
-                <Col q="Co je na cestě?" nav={onNav ? () => onNav("fakturace") : undefined} navTitle="Přejít na Fakturaci"
+                <Col q="Co teprve vyfakturuješ?" nav={onNav ? () => onNav("vykaz") : undefined} navTitle="Přejít na Výkaz práce"
                   sub={naCeste > 0
-                  ? <>{onTheWayInv > 0 && <><Sb>{fmtKc(onTheWayInv)}</Sb> splatné{maxDue ? ` do ${fmtDate(maxDue)}` : ""}</>}{unbilledAmt > 0 && <>{onTheWayInv > 0 ? " · " : ""}<Sb>{fmtKc(unbilledAmt)}</Sb> vystavíš 1. {(m + 1) % 12 + 1}.</>}{escFuture > 0 && <> · ~<Sb>{fmtKc(escFuture)}</Sb> úrok úschov</>}<br/>vše bez DPH a přefakturací</>
+                  ? <>{unbilledAmt > 0 && <><Sb>{fmtKc(unbilledAmt)}</Sb> vystavíš 1. {(m + 1) % 12 + 1}.</>}{escFuture > 0 && <>{unbilledAmt > 0 ? " · " : ""}~<Sb>{fmtKc(escFuture)}</Sb> úrok úschov</>}<br/>vystavené faktury nese pás nahoře · bez DPH</>
                   : <>nic — všechno je vyfakturované a zaplacené</>}>
                   <Big v={num(naCeste)} unit="Kč" />
                   {naCeste > 0 ? (
                     <div style={{display:"flex", gap:2, height:2}}>
-                      {onTheWayInv > 0 && <div style={{flex:onTheWayInv, background:BP.indigo}} />}
                       {unbilledAmt > 0 && <div style={{flex:unbilledAmt, background:"#9B96D6"}} />}
                       {escFuture > 0 && <div style={{flex:escFuture, background:"#A08350"}} />}
                     </div>
@@ -14892,7 +15063,15 @@ function VykazyCalendar({ workEntries, escrows, invoices, dense = false, onOpenF
       const dow = new Date(y, m, d).getDay();
       if (dow > 0 && dow < 6) wdLeft++;
     }
-    return { goal, rem, wdLeft, prevTot, closedMax, rows, closedCount: closed.length };
+    // Kumulativni tempo — STEJNA metoda jako kontrolka "Stiham?" v Pulzu firmy:
+    // pro-rata mety po PRACOVNICH dnech uplynulych od zacatku mesice. Do 10. 9. 2026 tu
+    // stalo srovnani "dnesek vs. denni tempo" — jina otazka a casto opacny verdikt
+    // (dnes 25 324 vs. 11 451 = "nad planem", pritom kumulativne 9 489 Kc POD).
+    const wdUpTo = (up) => { let n = 0; for (let d = 1; d <= up; d++) { const dw = new Date(y, m, d).getDay(); if (dw > 0 && dw < 6) n++; } return n; };
+    const wdTotal = Math.max(wdUpTo(daysInMonth), 1);
+    const paceToDate = Math.round(goal * (wdUpTo(now.getDate()) / wdTotal));
+    const paceDelta = heroTotal - paceToDate;
+    return { goal, rem, wdLeft, prevTot, closedMax, rows, closedCount: closed.length, paceToDate, paceDelta };
   }, [dense, monthOffset, invoices, escrows, workEntries, y, m, daysInMonth, heroTotal]);
 
   return (
@@ -14982,8 +15161,8 @@ function VykazyCalendar({ workEntries, escrows, invoices, dense = false, onOpenF
                   )}
                   {hero && (
                     <>
-                      {sep}<span>Dnes <b style={{color:"var(--txt)",fontWeight:600}}>{fmtKc(todayAmt)}</b></span>
-                      {dailyTarget > 0 && (<>{sep}<span>Dnes ideálně <b style={{color:"var(--txt)",fontWeight:600}}>{fmtKc(dailyTarget)}</b> <span style={{opacity:.7}}>({hero.wdLeft} prac. dní)</span></span></>)}
+                      {sep}<span title="Meta rozpocitana na pracovni dny, ktere uz v mesici probehly">Tempo <b style={{color: hero.paceDelta >= 0 ? BP.up : "var(--txt)", fontWeight:600}}>{hero.paceDelta >= 0 ? "+" : "−"}{fmtKc(Math.abs(hero.paceDelta))}</b> <span style={{opacity:.7}}>({"k dnešku stačilo "}{fmtKc(hero.paceToDate)})</span></span>
+                      {dailyTarget > 0 && (<>{sep}<span>{"Dál ideálně "}<b style={{color:"var(--txt)",fontWeight:600}}>{fmtKc(dailyTarget)}</b>{"/den "}<span style={{opacity:.7}}>({hero.wdLeft} prac. dní)</span></span></>)}
                       {sep}<span title="Meta se počítá sama: nejlepší z 12 měsíců × 1,10, zaokr. na 5 000, min. 200 000">Meta <b style={{color:"var(--txt)",fontWeight:600}}>{fmtKc(hero.goal)}</b></span>
                       {hero.prevTot > 0 && (<>{sep}<span>Minulý měsíc <b style={{color:"var(--txt)",fontWeight:600}}>{fmtKc(hero.prevTot)}</b></span></>)}
                       {onOpenDetail && (<>{sep}<span onClick={onOpenDetail} style={{color:BP.indigo,cursor:"pointer",fontWeight:600}} title="Tento měsíc = práce zapsaná v tomto měsíci (bez DPH, po slevě) + čistý úrok z úschov">Detail →</span></>)}
