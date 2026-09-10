@@ -14930,6 +14930,10 @@ function WorkEntryList({ entries, clients, invoices, financeItems, onNew, onEdit
 function VykazyCalendar({ workEntries, escrows, invoices, dense = false, onOpenFull, onAddEntry, onOpenDetail }) {
   const [monthOffset, setMonthOffset] = useState(0);
   const [selectedDay, setSelectedDay] = useState(null);
+  // Hero blok pod velkym cislem: v klidu jen VETA + osa. Sest opernych cisel
+  // (prace, uschovy, tempo, meta, minuly mesic) zije pod odkazem. Tom 10. 9. 2026:
+  // "tohle prepracovat, nic z toho nemam takto" — sedm cisel na ctyrech radcich.
+  const [heroDet, setHeroDet] = useState(false);
   const [hoverDay, setHoverDay] = useState(null);
 
   // Indigo phosphor — barva čísel z výkazů; ESC — zlatá pro denní úrok z úschov (ať vydělávám i ve dnech bez výkazu)
@@ -15108,6 +15112,7 @@ function VykazyCalendar({ workEntries, escrows, invoices, dense = false, onOpenF
           const scale = hero ? Math.max(heroTotal, hero.goal, 1) : 1;
           const goalPct = hero ? Math.min(1, hero.goal / scale) * 100 : 0;
           const donePct = hero ? Math.min(1, heroTotal / scale) * 100 : 0;
+          const pacePct = hero && hero.paceToDate > 0 ? Math.min(1, hero.paceToDate / scale) * 100 : 0;
           const todayAmt = (dayTotals[todayStr] || 0) + (escDayTotals[todayStr] || 0);
           const dailyTarget = hero && hero.wdLeft > 0 && hero.rem > 0 ? Math.round(hero.rem / hero.wdLeft) : 0;
           const sep = <span style={{margin:"0 9px",opacity:.35}}>·</span>;
@@ -15135,19 +15140,50 @@ function VykazyCalendar({ workEntries, escrows, invoices, dense = false, onOpenF
                     Nejsilnější měsíc za posledních {hero.closedCount + 1}.
                   </div>
                 )}
+                {/* VETA — rika, CO DELAT, ne kde jsi. Nikdy neopakuje manko (veta mlci,
+                    kdyz je zprava spatna); to nese zarez na ose. */}
+                {hero && !dense && dailyTarget > 0 && (
+                  <div style={{fontFamily:"Fraunces,serif",fontSize:17,fontWeight:400,color:"var(--ink)",marginTop:record?12:16,lineHeight:1.5,maxWidth:520}}>
+                    {"Do konce " + NC_MESICE_GEN[m] + " potřebuješ "}
+                    <b className="maux-num" style={{fontWeight:600,letterSpacing:"-.02em"}}>{fmtKc(dailyTarget)}</b>
+                    {" denně, abys metu stihl."}
+                  </div>
+                )}
                 {/* Vlasová laťka — 2 px. Tlustý bar byl další křičící prvek; klid znamená, že
                     graf jen podtrhává číslo, nesoupeří s ním. Přesah nad metu = tmavší indigo —
                     meta je firemní číslo, zlatá patří majetku a úschovám (Tom 3.8. + 6.8.2026). */}
                 {hero && (
-                  <div style={{position:"relative",height:2,background:"rgba(74,68,184,.10)",margin:record?"24px 0 16px":"26px 0 16px",maxWidth:480}}>
+                  <div style={{position:"relative",height:2,background:"rgba(74,68,184,.10)",margin:dense?"18px 0 14px":"42px 0 26px",maxWidth:480}}>
                     <div style={{position:"absolute",left:0,top:0,bottom:0,width:`${Math.min(donePct,goalPct)}%`,background:PHOS,transition:"width .6s cubic-bezier(.16,1,.3,1)"}} />
                     {won && over > 0 && (
                       <div title={`Přesah nad metu ${Math.round(over).toLocaleString("cs-CZ")} Kč`} style={{position:"absolute",left:`${goalPct}%`,top:0,bottom:0,width:`${Math.max(0,donePct-goalPct)}%`,background:BP.indigoDeep,transition:"width .6s cubic-bezier(.16,1,.3,1)"}} />
                     )}
                     {!won && <div title={`Meta ${hero.goal.toLocaleString("cs-CZ")} Kč`} style={{position:"absolute",left:`${goalPct}%`,top:-3,bottom:-3,width:1.5,background:BP.indigoDeep}} />}
+                    {/* Zarez tempa — kam jsi mel dojit k dnesku. Rozdil mezi nim a koncem
+                        vyplne JE manko; necte se, vidi se. */}
+                    {!dense && pacePct > 0 && pacePct < 99.5 && (
+                      <>
+                        <div style={{position:"absolute",left:`${pacePct}%`,top:-5,bottom:-5,width:1.5,background:BP.indigoInk,opacity:.85}} />
+                        <span style={{position:"absolute",left:`${pacePct}%`,top:-22,transform:"translateX(-50%)",fontSize:9.5,fontWeight:600,color:BP.indigoInk,whiteSpace:"nowrap",letterSpacing:".01em"}}>
+                          {"k dnešku " + fmtKc(hero.paceToDate)}
+                        </span>
+                      </>
+                    )}
+                    {!dense && (
+                      <span style={{position:"absolute",right:0,top:10,fontSize:9.5,color:"var(--mut)",whiteSpace:"nowrap"}}>
+                        {"meta " + fmtKc(hero.goal)}
+                      </span>
+                    )}
                   </div>
                 )}
-                <div style={{display:"flex",alignItems:"center",flexWrap:"wrap",fontSize:dense?10:11,color:"var(--mut)",rowGap:4,marginTop:hero?0:8}}>
+                {hero && !dense && (
+                  <div style={{fontSize:11,marginTop:-8,marginBottom:heroDet?12:0}}>
+                    <span onClick={() => setHeroDet(v => !v)} style={{color:BP.indigo,cursor:"pointer",fontWeight:600}}>
+                      {heroDet ? "Skr\u00fdt podrobnosti \u25b4" : "Z \u010deho to je \u00b7 minul\u00fd m\u011bs\u00edc \u25be"}
+                    </span>
+                  </div>
+                )}
+                <div style={{display:(hero && !dense && !heroDet) ? "none" : "flex",alignItems:"center",flexWrap:"wrap",fontSize:dense?10:11,color:"var(--mut)",rowGap:4,marginTop:hero?0:8}}>
                   {monthTotal > 0 && (
                     <span style={{display:"inline-flex",alignItems:"center",gap:5}}>
                       <span style={{width:6,height:6,borderRadius:"50%",background:PHOS}} />{fmtKc(monthTotal)} práce
@@ -15161,7 +15197,7 @@ function VykazyCalendar({ workEntries, escrows, invoices, dense = false, onOpenF
                   )}
                   {hero && (
                     <>
-                      {sep}<span title="Meta rozpocitana na pracovni dny, ktere uz v mesici probehly">Tempo <b style={{color: hero.paceDelta >= 0 ? BP.up : "var(--txt)", fontWeight:600}}>{hero.paceDelta >= 0 ? "+" : "−"}{fmtKc(Math.abs(hero.paceDelta))}</b> <span style={{opacity:.7}}>({"k dnešku stačilo "}{fmtKc(hero.paceToDate)})</span></span>
+                      {sep}<span title="Meta rozpo\u010d\u00edtan\u00e1 na pracovn\u00ed dny, kter\u00e9 u\u017e v m\u011bs\u00edci prob\u011bhly">Tempo <b style={{color: hero.paceDelta >= 0 ? BP.up : "var(--txt)", fontWeight:600}}>{hero.paceDelta >= 0 ? "+" : "−"}{fmtKc(Math.abs(hero.paceDelta))}</b> <span style={{opacity:.7}}>({"k dnešku stačilo "}{fmtKc(hero.paceToDate)})</span></span>
                       {dailyTarget > 0 && (<>{sep}<span>{"Dál ideálně "}<b style={{color:"var(--txt)",fontWeight:600}}>{fmtKc(dailyTarget)}</b>{"/den "}<span style={{opacity:.7}}>({hero.wdLeft} prac. dní)</span></span></>)}
                       {sep}<span title="Meta se počítá sama: nejlepší z 12 měsíců × 1,10, zaokr. na 5 000, min. 200 000">Meta <b style={{color:"var(--txt)",fontWeight:600}}>{fmtKc(hero.goal)}</b></span>
                       {hero.prevTot > 0 && (<>{sep}<span>Minulý měsíc <b style={{color:"var(--txt)",fontWeight:600}}>{fmtKc(hero.prevTot)}</b></span></>)}
