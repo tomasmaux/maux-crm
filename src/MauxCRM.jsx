@@ -266,14 +266,19 @@ body{height:100%;background-color:#FAFAFC;background-repeat:no-repeat;background
 .brand{padding:0 4px 34px;display:flex;align-items:center;gap:13px}
 .brand .wm{font-family:'Fraunces',serif;font-size:21px;font-weight:400;color:var(--ink);letter-spacing:.05em;line-height:1}
 .brand .sub{font-size:7px;letter-spacing:.28em;text-transform:uppercase;color:var(--mut);margin-top:6px;font-weight:600;opacity:.8}
-.brand .seal{width:52px;height:52px;flex-shrink:0;display:block}
-.nav{display:flex;flex-direction:column;gap:1px}
-.ni{position:relative;display:flex;align-items:center;padding:7px 14px;border-radius:9px;cursor:pointer;font-size:13.5px;font-weight:400;color:#5E5A76;border:none;background:none;text-align:left;width:100%;transition:background .13s,color .13s;letter-spacing:-.005em}
-.ni.g1{font-size:16px;color:var(--txt);padding:9px 14px}
+.brand .seal{width:46px;height:46px;flex-shrink:0;display:block}
+.nav{display:flex;flex-direction:column;gap:2px}
+.ni{position:relative;display:flex;align-items:center;padding:8px 14px;border-radius:9px;cursor:pointer;font-size:13.5px;font-weight:400;color:#5E5A76;border:none;background:none;text-align:left;width:100%;transition:background .13s,color .13s;letter-spacing:-.005em}
+.ni.g1{font-size:15.5px;color:var(--txt);padding:9px 14px}
 .nav-gap{height:19px;flex-shrink:0}
 .ni:hover{color:var(--txt);background:#FFFFFF}
-.ni.on{color:var(--ink);background:none;font-weight:600}
-.ni.on::before{content:'';position:absolute;left:-14px;top:5px;bottom:5px;width:2px;background:var(--ink)}
+.ni.on{color:var(--ink);background:rgba(53,24,165,.06);font-weight:600}
+.ni.on::before{content:'';position:absolute;left:-14px;top:6px;bottom:6px;width:2px;background:var(--ink)}
+/* Signal v menu — jen to, co TIKA (lhuta, dluh, ticho). Zasoby patri na Prehled. */
+.ni .sig{margin-left:auto;font-size:10.5px;font-weight:500;color:var(--mut);display:flex;align-items:center;gap:5px;flex-shrink:0;padding-left:8px}
+.ni .sig i{width:5px;height:5px;border-radius:50%;display:block;flex-shrink:0}
+.sbhint{padding:9px 4px 0;font-size:10px;color:#B9B3A6;display:flex;align-items:center;gap:6px}
+.sbhint kbd{font:inherit;font-size:9px;font-weight:600;border:1px solid #D8D3C8;border-radius:4px;padding:1px 5px;color:#A8A294}
 .ni .soon{font-size:8px;color:#CCC;letter-spacing:.04em;font-weight:400;background:#F5F5F8;border-radius:4px;padding:2px 7px}
 .sbfoot{font-size:10.5px;color:var(--mut);line-height:1.7;padding:11px 4px 0;border-top:1px solid #EAE6DC;display:flex;align-items:baseline;gap:8px}
 .sbbot{margin-top:auto;flex-shrink:0;padding-top:18px}
@@ -282,12 +287,6 @@ body{height:100%;background-color:#FAFAFC;background-repeat:no-repeat;background
 .sbnote textarea::placeholder{color:#B9B3A6}
 .sbfoot button{background:none;border:none;color:var(--mut);font:inherit;font-size:10.5px;cursor:pointer;padding:0;transition:.12s}
 .sbfoot button:hover{color:var(--mut)}
-.qk{margin:0 0 22px;border-radius:12px;background:rgba(255,255,255,.85);border:1px solid rgba(28,10,99,.12);overflow:hidden;box-shadow:0 8px 20px -10px rgba(53,24,164,.55);transition:box-shadow .15s,transform .12s;flex-shrink:0}
-.qk:hover{transform:translateY(-1px)}
-.qk .qkh{display:flex;align-items:center;gap:10px;width:100%;padding:11px 14px;cursor:pointer;font:inherit;font-weight:600;font-size:14px;color:#fff;background:linear-gradient(135deg,#3518A4,#1C0A63);border:none;text-align:left;user-select:none}
-.qk .qkh:hover{background:linear-gradient(135deg,#3B1DB5,#22106F)}
-.qk .qkp{width:22px;height:22px;border-radius:7px;background:rgba(255,255,255,.16);color:#fff;display:grid;place-items:center;font-size:17px;font-weight:400;line-height:1;transition:transform .18s;flex-shrink:0}
-.qk .qkk{margin-left:auto;font-size:10px;font-weight:500;opacity:.6;border:1px solid currentColor;border-radius:4px;padding:1px 5px;letter-spacing:.04em}
 .main{flex:1;display:flex;flex-direction:column;min-width:0;background:transparent}
 .top{padding:32px 40px 0;display:flex;align-items:flex-end;justify-content:space-between;gap:16px}
 .top-l .eyebrow{font-size:9px;letter-spacing:.3em;text-transform:uppercase;color:var(--ink);font-weight:600;opacity:.5;margin-bottom:8px}
@@ -3547,19 +3546,7 @@ function ServiceDots({ list, max = 3 }) {
   );
 }
 
-/* ── Zapsat práci — tlačítko v menu (Tom 3. 9. 2026). Klik = rovnou celý formulář
-   Nový záznam; klávesa N totéž. Miniformulář v menu Tom zkusil a zamítl — chce plný formulář hned. */
-function QuickEntry({ onFull }) {
-  return (
-    <div className="qk">
-      <button type="button" className="qkh" onClick={onFull} title="Zapsat práci (N)">
-        <span className="qkp">+</span> Zapsat práci <span className="qkk">N</span>
-      </button>
-    </div>
-  );
-}
-
-function Sidebar({ mod, setMod, onLogout, privacyMode, onTogglePrivacy, onNewEntry }) {
+function Sidebar({ mod, setMod, onLogout, privacyMode, onTogglePrivacy, onNewEntry, navSignals }) {
   // — Zapsat práci: klávesa N otevře celý formulář (mimo pole formulářů) —
   // ref, aby listener nedržel zastaralou navigaci (navToNewWorkEntry čte aktuální mod/mode)
   const onNewRef = useRef(onNewEntry); onNewRef.current = onNewEntry;
@@ -3628,9 +3615,6 @@ function Sidebar({ mod, setMod, onLogout, privacyMode, onTogglePrivacy, onNewEnt
         </div>
       </div>
 
-      {/* Zapsat práci — jediný sytý prvek v menu, mezi značkou a navigací (Tom 3. 9. 2026). */}
-      {onNewEntry && <QuickEntry onFull={onNewEntry} />}
-
       {/* Skupiny dělí JEN vzduch — žádné popisky, žádné linky. */}
       <nav className="nav">
         {NAV_MODULES.map((m, i) => (
@@ -3639,6 +3623,12 @@ function Sidebar({ mod, setMod, onLogout, privacyMode, onTogglePrivacy, onNewEnt
             <button className={"ni g" + m.group + (mod === m.key ? " on" : "")} onClick={() => setMod(m.key)}>
               {m.label}
               {!m.live && <span className="soon">brzy</span>}
+              {(navSignals || {})[m.key] && (
+                <span className="sig">
+                  {(navSignals[m.key].dot) && <i style={{ background: navSignals[m.key].dot }} />}
+                  {navSignals[m.key].text}
+                </span>
+              )}
             </button>
           </Fragment>
         ))}
@@ -3672,6 +3662,12 @@ function Sidebar({ mod, setMod, onLogout, privacyMode, onTogglePrivacy, onNewEnt
               onBlur={() => setNoteFocus(false)} />
           )}
         </div>
+
+        {/* Klávesa N zustava i po zruseni tlacitka (Tom 14. 9. 2026) — bez teto
+            tiche pripominky by zkratka umrela spolu s nim. */}
+        {onNewEntry && (
+          <div className="sbhint"><kbd>N</kbd> zapsat práci</div>
+        )}
 
         <div className="sbfoot" style={{ marginTop: 16 }}>
           <span>Mgr. Tomáš Maux</span>
@@ -21075,6 +21071,39 @@ export default function MauxCRM() {
   const [escrows, setEscrows] = useState([]);
   const [transfers, setTransfers] = useState([]);   // převody nemovitostí
 
+  // ── Signály v levém menu (Tom 14. 9. 2026) ──────────────────────────
+  // V menu svítí JEN to, co tiká: lhůta (plomba úschovy), dluh (faktura po splatnosti)
+  // a ticho ve výkazu. Zásoby (nevyfakturovaná práce, obraty) sem NEPATŘÍ — ty žijí
+  // na Přehledu; jinak by se z panelu stal druhý dashboard. Když nic netiká, menu mlčí.
+  // Barvu i počet alertů bere ze sdíleného escrowAlertState — jedna metoda s dlaždicí ALERTY.
+  const navSignals = useMemo(() => {
+    const out = {};
+    const al = (escrows || []).map(escrowAlertState).filter(Boolean);
+    if (al.length) {
+      const worst = al.reduce((a, b) =>
+        (ESCROW_ALERT_RANK[a.level] <= ESCROW_ALERT_RANK[b.level] ? a : b));
+      out.uschovy = { text: String(al.length), dot: ESCROW_ALERT_COLOR[worst.level] };
+    }
+    const od = (invoices || []).filter(i => invoiceStatus(i) === "po_splatnosti").length;
+    if (od) out.fakturace = { text: od + "\u00d7 po splatnosti", dot: ESCROW_ALERT_COLOR.overdue };
+    const t0 = today();
+    const last = (workEntries || []).map(e => e.entry_date)
+      .filter(d => d && d <= t0).sort().pop();
+    if (last) {
+      // Jen PRACOVNÍ dny — jinak by po každém víkendu svítilo "3 dny bez zápisu",
+      // přestože Tom zapsal v pátek a nic nezmeškal.
+      let dn = 0;
+      const d = new Date(last + "T00:00:00"), konec = new Date(t0 + "T00:00:00");
+      while (d < konec) {
+        d.setDate(d.getDate() + 1);
+        const dow = d.getDay();
+        if (dow !== 0 && dow !== 6) dn++;
+      }
+      if (dn >= 2) out.vykaz = { text: dn + (dn < 5 ? " dny" : " dní") + " bez zápisu" };
+    }
+    return out;
+  }, [escrows, invoices, workEntries]);
+
   // ── Oslava milníku ──────────────────────────────────────────────────────────
   // Dvě různé chvíle, dvě různé váhy:
   //  • "live"   — výkaz, který PRÁVĚ překlopil průběžný měsíc přes metu. Radost patří
@@ -21845,6 +21874,7 @@ export default function MauxCRM() {
       )}
       <Sidebar mod={mod} setMod={navTo} onLogout={handleLogout}
         privacyMode={privacyMode} onTogglePrivacy={togglePrivacy}
+        navSignals={navSignals}
         onNewEntry={() => navToNewWorkEntry(null)} />
       <div className="main">
         {/* Horní pruh "Tento měsíc" ZRUŠEN (Tom, 31.7.2026). Ukazoval totéž velké číslo jako
