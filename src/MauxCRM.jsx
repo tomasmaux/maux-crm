@@ -18117,7 +18117,11 @@ const localDs = (d) =>
   `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
 
 // ── PŘEHLED — motivační dashboard Josefa ─────────────────────────────────────
-function AsistentPrehled({ logs, attendance, clients, availability, onGo }) {
+// Tom 15. 9. 2026 večer: "pepa nebude mít samostatnou kartu. Bude to na něj svítit hned po
+// otevření ten kalendář. Ne utilizaci, ne grafy. HLAVNĚ KALENDÁŘ a vykázat práci a docházka."
+// Utilizace, graf po měsících i KPI řádek zůstávají v kódu za tímhle flagem — vrátit = true.
+const ASISTENT_PREHLED_PLNY = false;
+function AsistentPrehled({ logs, attendance, clients, availability, onGo, onPickDay }) {
   const [now, setNow] = useState(new Date());
   const [period, setPeriod] = useState("this");   // this | prev | all
   useEffect(()=>{ const id=setInterval(()=>setNow(new Date()),30000); return()=>clearInterval(id); },[]);
@@ -18386,6 +18390,9 @@ function AsistentPrehled({ logs, attendance, clients, availability, onGo }) {
         </div>
       </div>
 
+      {/* ── KALENDÁŘ — Pepova hlavní obrazovka (Tom 15. 9. 2026) ── */}
+      <AsistentKalendar logs={logs} attendance={attendance} onPickDay={onPickDay} />
+
       {/* ── DNEŠEK ── */}
       <div style={{...paper,padding:"22px 26px",display:"grid",gridTemplateColumns:"156px 1px minmax(0,1fr) 1px 200px",gap:22,alignItems:"center"}}>
         <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:9}}>
@@ -18461,6 +18468,7 @@ function AsistentPrehled({ logs, attendance, clients, availability, onGo }) {
       </div>
 
       {/* ── UTILIZACE — akcentovaný panel s vysvětlením ── */}
+      {ASISTENT_PREHLED_PLNY && (
       <div style={{...paper,padding:0,overflow:"hidden",display:"flex",position:"relative"}}>
         <div style={{width:4,background:`linear-gradient(180deg, ${VIVID} 0%, ${SEC} 55%, ${SAND} 100%)`,flexShrink:0}}/>
         <div style={{flex:1,minWidth:0,padding:"24px 28px 22px"}}>
@@ -18557,6 +18565,7 @@ function AsistentPrehled({ logs, attendance, clients, availability, onGo }) {
           </div>
         </div>
       </div>
+      )}
 
       {/* ── CO JEŠTĚ CHYBÍ POPSAT ── */}
       {todoRows.length>0 && (
@@ -18599,6 +18608,7 @@ function AsistentPrehled({ logs, attendance, clients, availability, onGo }) {
       )}
 
       {/* ── UTILIZACE PO MĚSÍCÍCH ── */}
+      {ASISTENT_PREHLED_PLNY && (
       <div style={{...paper,padding:"22px 26px 18px"}}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",gap:12,flexWrap:"wrap"}}>
           <div style={lbl}>Utilizace po měsících</div>
@@ -18662,8 +18672,10 @@ function AsistentPrehled({ logs, attendance, clients, availability, onGo }) {
           </>
         )}
       </div>
+      )}
 
       {/* ── TÝDEN + KPI ── */}
+      {ASISTENT_PREHLED_PLNY && (
       <div style={{display:"grid",gridTemplateColumns:"1.35fr 1fr",gap:14}}>
         <div style={{...paper,padding:"20px 22px"}}>
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
@@ -18705,6 +18717,8 @@ function AsistentPrehled({ logs, attendance, clients, availability, onGo }) {
           ))}
         </div>
       </div>
+      )}
+
     </div>
   );
 }
@@ -20184,13 +20198,12 @@ function AsistentDochazka({ email, attendance, logs, onRefreshAttendance, onGo }
    Když s Tomem něco v Josefově pohledu upravíme, ručně zvedneme ASISTENT_BUILD
    a dopíšeme, co se změnilo. Josef to uvidí právě jednou — při nejbližším
    přihlášení. Když se nic nezmění, Josef nic neuvidí a nic se nikam nevolá.    */
-const ASISTENT_BUILD = "2026-09-15";
+const ASISTENT_BUILD = "2026-09-15b";
 // Texty pro Josefa se píšou VYKÁNÍM a zdvořile ("Zapište prosím…", "Vaše práce").
 // Tykání se do asistentského portálu nedostane — Tom si to takhle přeje.
 const ASISTENT_BUILD_NOTE = [
-  "Přibyla záložka Kalendář. Každý den ukazuje, kolik hodin jste zapsal pro klienty (indigo) a kolik na režii a provoz kanceláře (šedě). Pískově se ukáže čas, kdy jste byl podle docházky v kanceláři, ale ještě nemá zápis. Kliknutím na den otevřete zápis s tím datem.",
-  "Utilizace se nově počítá z času, který jste byl skutečně v kanceláři — ne z pevných 8 hodin. Cíl je 75 %. Zbytek je běžný provoz, který se popisovat nemusí.",
-  "V přehledu se práce dělí na tři části: pro klienty, odborná režie (úschovy, spisy, AML) a provoz kanceláře. Nic nového nezadáváte — dělí se to samo podle kategorie, kterou už vybíráte.",
+  "Přehled je teď kalendář. Každý den ukazuje, kolik hodin jste zapsal pro klienty (indigo) a kolik na režii a provoz kanceláře (šedě). Pískově se ukáže čas, kdy jste byl podle docházky v kanceláři, ale ještě nemá zápis. Kliknutím na den otevřete zápis s tím datem.",
+  "Pod kalendářem zůstává dnešek — příchod, zápis hodin, odchod — a seznam dnů, kde ještě chybí popsat práci. Grafy utilizace jsme z přehledu odstranili; hlavní je kalendář, zápis a docházka.",
   "Docházka, píchačka, plán směn ani výkaz pro účetní se nemění. Vaše odměna se počítá stejně jako dosud.",
 ];
 
@@ -20376,7 +20389,7 @@ function AsistentKalendar({ logs = [], attendance = [], onPickDay }) {
   for (let i = 0; i < cells.length; i += 7) rows.push(cells.slice(i, i + 7));
 
   return (
-    <div style={{ ...MAUX_GLASS, borderRadius: 18, border: "1px solid rgba(255,255,255,.7)", boxShadow: "0 1px 2px rgba(28,10,99,.04), 0 10px 30px -18px rgba(28,10,99,.25)", margin: "24px 0 0", overflow: "hidden" }}>
+    <div style={{ ...MAUX_GLASS, borderRadius: 18, border: "1px solid rgba(255,255,255,.7)", boxShadow: "0 1px 2px rgba(28,10,99,.04), 0 10px 30px -18px rgba(28,10,99,.25)", margin: 0, overflow: "hidden" }}>
       <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", gap: 14, padding: "24px 32px 6px", flexWrap: "wrap" }}>
         <div>
           <div style={{ fontSize: 9, letterSpacing: ".2em", textTransform: "uppercase", color: "var(--mut)", fontWeight: 700, marginBottom: 6 }}>Zapsaná práce · den po dni</div>
@@ -20477,7 +20490,6 @@ function AsistentApp({ session, onLogout, previewMode }) {
 
   const TABS = [
     { key:"prehled",  icon:"◎", label:"Přehled" },
-    { key:"kalendar", icon:"▦", label:"Kalendář" },
     { key:"vykaz",    icon:"✦", label:"Výkazy" },
     { key:"dochazka", icon:"◷", label:"Docházka" },
     { key:"klienti",  icon:"◇", label:"Klienti" },
@@ -20563,8 +20575,7 @@ function AsistentApp({ session, onLogout, previewMode }) {
           </div>
         ) : (
           <>
-            {mod==="prehled"  && <AsistentPrehled logs={logs} attendance={attendance} clients={clients} availability={availability} onGo={setMod} />}
-            {mod==="kalendar" && <AsistentKalendar logs={logs} attendance={attendance} onPickDay={(ds)=>{ setKalDate(ds); setMod("vykaz"); setTimeout(()=>window.scrollTo({top:0,behavior:"smooth"}),30); }} />}
+            {mod==="prehled"  && <AsistentPrehled logs={logs} attendance={attendance} clients={clients} availability={availability} onGo={setMod} onPickDay={(ds)=>{ setKalDate(ds); setMod("vykaz"); setTimeout(()=>window.scrollTo({top:0,behavior:"smooth"}),30); }} />}
             {mod==="vykaz"    && <AsistentVykazy email={email} clients={clients} onRefresh={refreshLogs} onClientsRefresh={refreshClients} presetDate={kalDate} onPresetUsed={()=>setKalDate(null)} />}
             {mod==="dochazka" && <AsistentDochazka email={email} attendance={attendance} logs={logs} onRefreshAttendance={refreshAtt} onGo={setMod} />}
             {mod==="klienti" && <AsistentKlienti clients={clients} logs={logs} onRefresh={refreshClients} />}
