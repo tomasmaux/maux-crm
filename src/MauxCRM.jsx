@@ -176,7 +176,6 @@ const CZ_MES_NOM = ["leden","únor","březen","duben","květen","červen","červ
 const CZ_MES_GEN = ["ledna","února","března","dubna","května","června","července","srpna","září","října","listopadu","prosince"];
 const CZ_MES_LOK = ["lednu","únoru","březnu","dubnu","květnu","červnu","červenci","srpnu","září","říjnu","listopadu","prosinci"];
 const czMes = (m, pad = "nom") => (pad === "gen" ? CZ_MES_GEN : pad === "lok" ? CZ_MES_LOK : CZ_MES_NOM)[m] || "";
-const czMesVelke = (m, pad = "nom") => { const t = czMes(m, pad); return t.charAt(0).toUpperCase() + t.slice(1); };
 const addDays = (d, n) => { const dt = new Date(d); dt.setDate(dt.getDate() + n); return localYmd(dt); };
 
 /* ─── ARES (Administrativní registr ekonomických subjektů) ─── */
@@ -1208,9 +1207,6 @@ const isBdLog = (l) => l && (l.entry_type === "bd" || !l.client_id);
 // a jsou zrušené. Hlavní metrika = KAPACITA: kolik hodin Josef odvedl a kolik
 // z nich by jinak dělal Tom. Tom nic neklikne — panel je na čtení.
 
-// Tomova hodinová sazba pro přepočet "kolik by to stálo v tvé sazbě". Jen ilustrace
-// kapacity, nikdy nevstupuje do fakturace.
-const MAUX_HOURLY_RATE = 2500;
 
 // Tři kbelíky práce. Mapa na existující bd_category — žádná migrace dat, žádná
 // nová volba pro Josefa.
@@ -1230,27 +1226,10 @@ function josefMix(logs, ym) {
   josefLogsOfMonth(logs, ym).forEach(l => { const h = Number(l.hours) || 0; r[workBucket(l)] += h; r.total += h; });
   return r;
 }
-// Čistá docházka (h) za období (prefix data: "2026-09" měsíc, "2026" rok).
-function josefNetHours(attendance, prefix) {
-  return (attendance || []).reduce((s, a) => {
-    if (!a || !a.date || (prefix && !String(a.date).startsWith(prefix))) return s;
-    if (!(a.check_in && a.check_out)) return s;
-    const h = netAttHours(a.check_in, a.check_out);
-    return s + (isFinite(h) && h > 0 ? h : 0);
-  }, 0);
-}
 // Utilizace = zapsáno / čistá docházka. Cíl 75 % (Tom 15. 9. 2026: "6 z 8").
 // Strop 100 % — zapsat víc než odpracoval je signál ke kontrole, ne bonus.
 // Jediný jmenovatel pro Tomův panel i Josefův přehled.
 const ASISTENT_UTIL_TARGET = 0.75;
-function josefUtilization(logs, attendance, ym) {
-  // Čitatel jen z dnů s UZAVŘENOU docházkou — jinak dnešek (logy ano, odchod ještě ne)
-  // nafoukne poměr a svítí "zapsal víc, než odpracoval", i když to není pravda.
-  const closed = new Set((attendance || []).filter(a => a && a.date && a.check_in && a.check_out && (!ym || String(a.date).startsWith(ym))).map(a => a.date));
-  const logged = josefLogsOfMonth(logs, ym).filter(l => closed.has(l.entry_date)).reduce((s, l) => s + (Number(l.hours) || 0), 0);
-  const net = josefNetHours(attendance, ym);
-  return { logged, net, ratio: net > 0 ? Math.min(1, logged / net) : null, over: net > 0 && logged > net };
-}
 // Nápověda pro Toma při zápisu výkazu / u faktury: co na tomhle klientovi dělal Josef.
 // Jen ke čtení — nic z toho se do výkazu nepropisuje.
 function josefForClient(logs, clientId, ym) {
@@ -10441,333 +10420,6 @@ function OstatniModule({ dpfoMonths, loanTrackers, loanTransactions, financeItem
 }
 
 /* ─── JOSEF PANEL — Dashboard widget ─── */
-function JosefPanel({ logs, attendance: attendanceProp, availability, clients = [], financeItems = [], onSaveFinance, workEntries = [] }) {
-  const now = new Date();
-  const pad = n => String(n).padStart(2, "0");
-  const ym = `${now.getFullYear()}-${pad(now.getMonth() + 1)}`;
-  const todayStr = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
-  const CZM = ["ledna","února","března","dubna","května","června","července","srpna","září","října","listopadu","prosince"];
-  const CZM_SH = ["led","úno","bře","dub","kvě","čvn","čvc","srp","zář","říj","lis","pro"];
-  const monthNameJP    = czMesVelke(now.getMonth());          // Srpen
-  const monthNameJPLok = czMes(now.getMonth(), "lok");        // v srpnu
-  const monthNameJPAcc = czMes(now.getMonth());               // za srpen
-  const fh = h => (h % 1 === 0 ? String(h) : h.toFixed(1));
-
-  const [freshAtt, setFreshAtt] = useState(null);
-  useEffect(() => { fetchAssistantAttendance("asistent@maux.cz").then(setFreshAtt).catch(() => setFreshAtt([])); }, []);
-  const attendance = freshAtt !== null ? freshAtt : (attendanceProp || []);
-
-  const INK = "#2B2478", IND = "#3518A5", INDV = "#4A44B8", MUT = "#8B87A8", SND = "#A08350", UP = "#4A7C59", HL = "rgba(53,24,165,.08)";
-
-  // Efektivně datovaná sazba — prázdný rozvrh => 170 (žádná změna čísel)
-  const rateSched = assistantRateSchedule(financeItems);
-  const rateNow = assistantRateForMonth(ym, rateSched);
-
-  // Docházka po měsících (net hodiny + počet dní)
-  const attByMonth = {};
-  (attendance || []).forEach(a => {
-    if (!a.date) return;
-    const m = a.date.slice(0, 7);
-    if (!attByMonth[m]) attByMonth[m] = { hours: 0, days: 0 };
-    if (a.check_in) attByMonth[m].days += 1;
-    if (a.check_in && a.check_out) { const h = netAttHours(a.check_in, a.check_out); if (isFinite(h) && h > 0) attByMonth[m].hours += h; }
-  });
-
-  // Náklady po měsících — ruční override, jinak docházka × sazba daného měsíce
-  const monthsSet = new Set([...Object.keys(JOSEF_WAGE_MANUAL_OVERRIDES), ...Object.keys(attByMonth), ym]);
-  const costMonths = [...monthsSet].sort().slice(-6).map(m => {
-    const manual = JOSEF_WAGE_MANUAL_OVERRIDES[m];
-    const att = attByMonth[m] || { hours: 0, days: 0 };
-    const cost = manual != null ? manual : Math.round(att.hours * assistantRateForMonth(m, rateSched));
-    return { m, cost, hours: att.hours, days: att.days, manual: manual != null, running: m === ym };
-  });
-  const maxCost = Math.max(...costMonths.map(c => c.cost), 1);
-  const prevCost = costMonths.length >= 2 ? costMonths[costMonths.length - 2].cost : null;
-  const curCostM = costMonths.find(c => c.m === ym) || { cost: 0, hours: 0, days: 0 };
-  const costDeltaPct = prevCost && prevCost > 0 ? Math.round((curCostM.cost - prevCost) / prevCost * 100) : null;
-
-  // Aktuální měsíc / docházka
-  const monthAtt = (attendance || []).filter(a => (a.date || "").startsWith(ym));
-  const daysWorked = monthAtt.filter(a => a.check_in).length;
-  const totalHours = curCostM.hours;
-  const wageToDate = Math.round(totalHours * rateNow);
-  const missingCheckout = daysWorked > 0 && totalHours === 0;
-
-  // Projekce z plánovaných směn (budoucí den = 8 h)
-  const plannedSet = new Set((availability && availability.year_month === ym ? availability.planned_dates : null) || []);
-  const attByDate = {}; monthAtt.forEach(a => { attByDate[a.date] = a; });
-  const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
-  let projHours = 0, projPlannedDays = 0;
-  for (let d = 1; d <= daysInMonth; d++) {
-    const ds = `${ym}-${pad(d)}`;
-    if (ds <= todayStr) { const a = attByDate[ds]; if (a && a.check_in && a.check_out) { const h = netAttHours(a.check_in, a.check_out); if (isFinite(h) && h > 0) projHours += h; } }
-    else if (plannedSet.has(ds)) { projHours += 8; projPlannedDays++; }
-  }
-  const projWage = Math.round(projHours * rateNow);
-  const wdTotal = (() => { const y = now.getFullYear(), mo = now.getMonth(); const last = new Date(y, mo + 1, 0).getDate(); let n = 0; for (let d = 1; d <= last; d++) { const dow = new Date(y, mo, d).getDay(); if (dow !== 0 && dow !== 6) n++; } return n; })();
-  const totalPlannedDays = daysWorked + projPlannedDays;
-  const progressDenom = totalPlannedDays > 0 ? totalPlannedDays : wdTotal;
-  const progress = progressDenom > 0 ? Math.min(1, daysWorked / progressDenom) : 0;
-
-  // Dnešek
-  const todayAtt = (attendance || []).find(a => a.date === todayStr);
-  const isIn = !!(todayAtt?.check_in && !todayAtt?.check_out);
-  const isOut = !!(todayAtt?.check_in && todayAtt?.check_out);
-  const statusLabel = isIn ? "Přítomen" : isOut ? "Odhlášen" : "Nezaznamenán";
-  const statusColor = isIn ? "#4A7C59" : isOut ? "#6B7280" : "#D97706";
-  const statusBg = isIn ? "rgba(5,150,105,.08)" : isOut ? "rgba(107,114,128,.06)" : "rgba(217,119,6,.06)";
-  const checkInStr = todayAtt?.check_in ? new Date(todayAtt.check_in).toLocaleTimeString("cs-CZ", { hour: "2-digit", minute: "2-digit" }) : null;
-  const todayHours = todayAtt?.check_in ? (todayAtt.check_out ? netAttHours(todayAtt.check_in, todayAtt.check_out) : Math.max(0, (now - new Date(todayAtt.check_in)) / 36e5)) : 0;
-
-  // Efektivita z výkazů (tento měsíc)
-  const mLogs = josefLogsOfMonth(logs, ym);
-  // ── PEPA-DATA (15. 9. 2026): kapacita, mix, utilizace, strop dohody ──
-  const mix = josefMix(logs, ym);
-  const utilM = josefUtilization(logs, attendance, ym);
-  const effCost = mix.klient > 0 ? Math.round(wageToDate / mix.klient) : null;
-  const ymShift = (k) => { const d = new Date(now.getFullYear(), now.getMonth() - k, 1); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}`; };
-  const mixMonths = [2, 1, 0].map(k => { const m = ymShift(k); return { m, ...josefMix(logs, m) }; });
-  const mixMax = Math.max(1, ...mixMonths.map(x => x.total));
-  const r1 = h => fh(Math.round(h * 10) / 10);
-
-  // Co dělá nejdýl (tento měsíc) — klient nebo BD kategorie
-  const clientName = id => (clients.find(c => c.id === id)?.name) || "Klient";
-  const taskMap = {};
-  mLogs.forEach(l => {
-    const b = isBd(l);
-    const key = b ? (l.bd_category || "BD — jiné") : clientName(l.client_id);
-    if (!taskMap[key]) taskMap[key] = { h: 0, bd: b };
-    taskMap[key].h += (Number(l.hours) || 0);
-  });
-  const topTasks = Object.entries(taskMap).map(([label, v]) => ({ label, ...v })).sort((a, b) => b.h - a.h).slice(0, 5);
-  const maxTask = topTasks.length ? Math.max(...topTasks.map(t => t.h)) : 1;
-
-  // Editor sazby
-  const _nm = new Date(now.getFullYear(), now.getMonth() + 1, 1);
-  const nextYm = `${_nm.getFullYear()}-${pad(_nm.getMonth() + 1)}`;
-  const [rateOpen, setRateOpen] = useState(false);
-  const [newRate, setNewRate] = useState(rateNow);
-  const [effMonth, setEffMonth] = useState(nextYm);
-  const [savingRate, setSavingRate] = useState(false);
-  const saveRate = async () => {
-    if (!onSaveFinance) return;
-    const val = Number(newRate) || rateNow;
-    setSavingRate(true);
-    try {
-      const item = (financeItems || []).find(i => i.id === "fi_asistent_sazba");
-      const hist = rateSched.filter(h => h.from !== effMonth).concat([{ from: effMonth, rate: val }]).sort((a, b) => a.from.localeCompare(b.from));
-      await onSaveFinance({ ...(item || {}), id: "fi_asistent_sazba", category: "config", label: "Hodinovka asistenta", amount: val, notes: JSON.stringify({ history: hist }) });
-      setRateOpen(false);
-    } catch (e) { mauxToast("Chyba: " + e.message); }
-    finally { setSavingRate(false); }
-  };
-  const fmtMonth = m => { const p = m.split("-"); return `${CZM_SH[Number(p[1]) - 1]} ${p[0].slice(2)}`; };
-
-  const lbl = (extra = {}) => ({ fontSize: 8.5, letterSpacing: ".22em", textTransform: "uppercase", color: MUT, fontWeight: 700, ...extra });
-  const hero = (size, color) => ({ fontFamily: "var(--num)", fontVariantNumeric: "tabular-nums", letterSpacing: "-.025em", fontWeight: 600, fontSize: size, color, lineHeight: 1, whiteSpace: "nowrap" });
-
-  return (
-    <div style={{ position: "relative", borderRadius: BP.r, overflow: "hidden" }}>
-      <BpCorners />
-
-      {/* Hlavička */}
-      <div style={{ padding: "18px 22px 14px", display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 10 }}>
-        <div>
-          <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 5 }}>
-            <span style={{ width: 6, height: 6, borderRadius: "50%", background: IND, boxShadow: "0 0 4px rgba(53,24,165,.5)" }} />
-            <span style={{ fontSize: 11, letterSpacing: ".22em", textTransform: "uppercase", color: IND, fontWeight: 800 }}>Josef Řehák</span>
-          </div>
-          <div style={{ fontSize: 10.5, color: MUT }}>Asistent · {monthNameJP} {now.getFullYear()}</div>
-        </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <button onClick={() => { setNewRate(rateNow); setEffMonth(nextYm); setRateOpen(o => !o); }}
-            style={{ display: "flex", alignItems: "center", gap: 6, background: "rgba(74,68,184,.07)", border: "1px solid rgba(74,68,184,.18)", borderRadius: 8, padding: "6px 10px", cursor: "pointer" }}>
-            <span style={{ fontSize: 12, fontWeight: 600, color: "#3A3494" }}>{rateNow} Kč/h</span>
-            <span style={{ fontSize: 9, color: INDV, fontWeight: 600, borderLeft: "1px solid rgba(74,68,184,.25)", paddingLeft: 6 }}>upravit</span>
-          </button>
-          <div style={{ display: "flex", alignItems: "center", gap: 5, background: statusBg, borderRadius: 8, padding: "6px 10px" }}>
-            <span style={{ width: 6, height: 6, borderRadius: "50%", background: statusColor, boxShadow: isIn ? `0 0 6px ${statusColor}` : "none" }} />
-            <span style={{ fontSize: 10, color: statusColor, fontWeight: 600 }}>{statusLabel}</span>
-          </div>
-        </div>
-      </div>
-
-      {/* Editor sazby */}
-      {rateOpen && (
-        <div style={{ margin: "0 22px 6px", padding: "12px 14px", background: "rgba(74,68,184,.04)", border: "1px solid rgba(74,68,184,.16)", borderRadius: BP.rInner, display: "flex", alignItems: "flex-end", gap: 12, flexWrap: "wrap" }}>
-          <div>
-            <div style={lbl({ marginBottom: 5 })}>Nová sazba</div>
-            <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
-              <input type="number" value={newRate} onChange={e => setNewRate(e.target.value)}
-                style={{ width: 74, padding: "6px 8px", fontSize: 14, fontWeight: 600, color: "#3A3494", border: "1px solid rgba(74,68,184,.3)", borderRadius: 7, outline: "none" }} />
-              <span style={{ fontSize: 11, color: MUT }}>Kč/h</span>
-            </div>
-          </div>
-          <div>
-            <div style={lbl({ marginBottom: 5 })}>Platí od</div>
-            <input type="month" value={effMonth} onChange={e => setEffMonth(e.target.value)}
-              style={{ padding: "6px 8px", fontSize: 12, color: INK, border: "1px solid rgba(74,68,184,.3)", borderRadius: 7, outline: "none" }} />
-          </div>
-          <div style={{ fontSize: 9.5, color: INDV, fontWeight: 600, flex: 1, minWidth: 140, paddingBottom: 6 }}>
-            {rateNow} → {Number(newRate) || rateNow} Kč/h · minulé měsíce beze změny
-          </div>
-          <div style={{ display: "flex", gap: 7, paddingBottom: 2 }}>
-            <button onClick={() => setRateOpen(false)} style={{ fontSize: 11, color: MUT, background: "none", border: "1px solid rgba(0,0,0,.1)", borderRadius: 7, padding: "6px 11px", cursor: "pointer" }}>Zrušit</button>
-            <button onClick={saveRate} disabled={savingRate} style={{ fontSize: 11, fontWeight: 600, color: "#fff", background: IND, border: "none", borderRadius: 7, padding: "6px 13px", cursor: "pointer", opacity: savingRate ? .6 : 1 }}>{savingRate ? "Ukládám…" : "Uložit sazbu"}</button>
-          </div>
-        </div>
-      )}
-
-      {/* ── PEPA-DATA (15. 9. 2026) — Josefovy výkazy jsou interní evidence, nikdy nejdou
-          do fakturace. Fronta ke schválení i návratnost z faktur zrušeny; hlavní číslo je
-          KAPACITA: kolik hodin odvedl a kolik z nich by jinak dělal Tom. ── */}
-      <div style={{ padding: "4px 22px 16px" }}>
-        {mix.total > 0 ? (
-          <>
-            <div style={{ fontFamily: "Fraunces,serif", fontSize: 17, color: INK, lineHeight: 1.35, maxWidth: 440 }}>
-              Josef ti v {monthNameJPLok} sundal z talíře {r1(mix.total)} hodin.{mix.klient > 0 ? ` ${r1(mix.klient)} z nich byla práce za tvoji sazbu.` : ""}
-            </div>
-            <div style={{ display: "flex", alignItems: "flex-end", gap: 12, marginTop: 10, flexWrap: "wrap" }}>
-              <span style={hero(44, IND)}>{r1(mix.total)}</span>
-              <span style={{ fontSize: 15, color: MUT, fontWeight: 500, paddingBottom: 5 }}>h odebrané kapacity</span>
-            </div>
-            <div style={{ display: "flex", gap: 18, flexWrap: "wrap", marginTop: 9, fontSize: 10.5, color: MUT }}>
-              <span>klientské <b className="maux-num" style={{ color: INK, fontWeight: 600 }}>{r1(mix.klient)} h</b></span>
-              <span>v tvé sazbě <b className="maux-num" style={{ color: INK, fontWeight: 600 }}>{fmtKc(mix.klient * MAUX_HOURLY_RATE)}</b></span>
-              <span>zaplatil jsi <b className="maux-num" style={{ color: INK, fontWeight: 600 }}>{missingCheckout ? "—" : fmtKc(wageToDate)}</b></span>
-            </div>
-          </>
-        ) : (
-          <div style={{ fontSize: 11, color: MUT }}>Za {monthNameJPAcc} zatím žádný výkaz.</div>
-        )}
-      </div>
-
-      {/* Řada 1 — Aktuální náklad + Docházka dnes */}
-      <div style={{ display: "flex", borderTop: `1px solid ${HL}`, borderBottom: `1px solid ${HL}` }}>
-        <div style={{ flex: 1.3, padding: "16px 22px", borderRight: `1px solid ${HL}` }}>
-          <div style={lbl({ marginBottom: 9 })}>Aktuální náklad · tento měsíc</div>
-          <div style={{ display: "flex", alignItems: "baseline", gap: 10, flexWrap: "wrap" }}>
-            <span style={hero(32, INK)}>{missingCheckout ? "—" : fmtKc(wageToDate)}</span>
-            {projWage > wageToDate && (
-              <span style={{ fontSize: 10.5, color: INDV, fontWeight: 600, background: "rgba(74,68,184,.08)", border: "1px dashed rgba(74,68,184,.35)", borderRadius: 20, padding: "3px 9px" }}>→ {fmtKc(projWage)} projekce</span>
-            )}
-          </div>
-          <div style={{ fontSize: 10.5, color: MUT, marginTop: 8 }}>{fh(Math.round(totalHours * 10) / 10)} h × {rateNow} Kč{projPlannedDays > 0 ? ` · do konce měsíce plán ${Math.round(projHours)} h` : ""}</div>
-        </div>
-        <div style={{ flex: 1, padding: "16px 22px" }}>
-          <div style={lbl({ marginBottom: 9 })}>Docházka dnes</div>
-          <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
-            <span style={hero(24, INK)}>{todayAtt?.check_in ? `${fh(Math.round(todayHours * 10) / 10)} h` : "—"}</span>
-            {checkInStr && <span style={{ fontSize: 10.5, color: MUT }}>od {checkInStr}</span>}
-          </div>
-          <div style={{ display: "flex", justifyContent: "space-between", margin: "11px 0 5px" }}>
-            <span style={{ fontSize: 9.5, color: MUT }}>Odpracováno v {monthNameJPLok}</span>
-            <span style={{ fontSize: 9.5, color: INK, fontWeight: 600 }}>{daysWorked}/{progressDenom} dní · {Math.round(progress * 100)} %</span>
-          </div>
-          <div style={{ height: 4, background: HL, borderRadius: 99, overflow: "hidden" }}>
-            <div style={{ height: "100%", width: `${progress * 100}%`, background: IND, borderRadius: 99, transition: "width .5s ease" }} />
-          </div>
-        </div>
-      </div>
-
-      {/* Řada 2 — Náklady za minulé měsíce */}
-      <div style={{ padding: "16px 22px 8px" }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
-          <span style={lbl()}>Náklady za minulé měsíce</span>
-          {costDeltaPct != null && (
-            <span style={{ fontSize: 9.5, fontWeight: 600, color: costDeltaPct <= 0 ? UP : "#A8443C" }}>{costDeltaPct <= 0 ? "▼" : "▲"} {costDeltaPct > 0 ? "+" : ""}{costDeltaPct} % vs. minulý</span>
-          )}
-        </div>
-        <div style={{ display: "flex", alignItems: "flex-end", gap: 12, height: 96 }}>
-          {costMonths.map(c => {
-            const barH = Math.max(4, Math.round(c.cost / maxCost * 82));
-            const col = c.running ? "rgba(74,68,184,.28)" : c.manual ? SND : IND;
-            const tcol = c.running ? INDV : c.manual ? SND : INK;
-            return (
-              <div key={c.m} style={{ flex: 1, textAlign: "center", minWidth: 0 }}>
-                <div style={{ fontSize: 9, color: tcol, fontWeight: c.running || c.manual ? 600 : 400, marginBottom: 5 }}>{c.cost > 0 ? fmtKc(c.cost).replace(" Kč", "") : "—"}</div>
-                <div style={{ height: barH, borderRadius: "2px 2px 0 0", background: col, border: c.running ? `1.5px dashed ${INDV}` : "none" }} />
-                <div style={{ fontSize: 8.5, color: c.running ? INDV : c.manual ? SND : MUT, marginTop: 5 }}>{fmtMonth(c.m)}{c.manual ? " ✎" : c.running ? " ●" : ""}</div>
-              </div>
-            );
-          })}
-        </div>
-        <div style={{ fontSize: 8.5, color: MUT, marginTop: 9 }}>
-          Plná = z docházky · <span style={{ color: SND }}>písek = ruční (před 6/2026)</span> · <span style={{ color: INDV }}>přerušovaná = běžící měsíc</span>
-        </div>
-      </div>
-
-      {/* Mix času — tři kbelíky (klient / odborná režie / provoz). Nahrazuje dlaždici
-          Efektivita, která vynechávala archivované výkazy a svítila nulu. */}
-      <div style={{ borderTop: `1px solid ${HL}`, marginTop: 8, padding: "16px 22px 6px" }}>
-        <div style={lbl({ marginBottom: 12 })}>Mix času · klient ≥ 50 % · provoz ≤ 10 %</div>
-        <div style={{ display: "flex", flexDirection: "column", gap: 9 }}>
-          {mixMonths.map(x => {
-            const w = x.total / mixMax * 100;
-            const segs = [["klient", "#3A3494", "Klientská práce"], ["rezie", "#6F69C0", "Odborná režie"], ["provoz", "#A29DC6", "Provoz kanceláře"]];
-            return (
-              <div key={x.m} style={{ display: "grid", gridTemplateColumns: "44px 1fr", gap: 10, alignItems: "center" }}>
-                <span style={{ fontSize: 9.5, color: MUT, fontWeight: 600, textAlign: "right" }}>{fmtMonth(x.m)}</span>
-                {x.total > 0 ? (
-                  <div style={{ display: "flex", height: 18, gap: 2, width: `${w}%`, minWidth: 120 }}>
-                    {segs.map(([k, c, name]) => { const v = x[k] / x.total * 100; return v > 0 ? (
-                      <span key={k} className="maux-num" title={`${name}: ${r1(x[k])} h`}
-                        style={{ flex: `0 0 ${v}%`, background: c, borderRadius: 3, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 8.5, fontWeight: 700, color: k === "provoz" ? INK : "#fff", minWidth: 0, overflow: "hidden" }}>
-                        {v >= 14 ? `${Math.round(v)} %` : ""}
-                      </span>) : null; })}
-                  </div>
-                ) : <span style={{ fontSize: 9.5, color: MUT }}>—</span>}
-              </div>
-            );
-          })}
-        </div>
-        <div style={{ display: "flex", gap: 14, marginTop: 10, fontSize: 9, color: MUT, flexWrap: "wrap" }}>
-          {[["#3A3494", "Klientská práce"], ["#6F69C0", "Odborná režie"], ["#A29DC6", "Provoz kanceláře"]].map(([c, n]) => (
-            <span key={n}><i style={{ display: "inline-block", width: 8, height: 8, borderRadius: 2, background: c, marginRight: 5, verticalAlign: -1 }} />{n}</span>
-          ))}
-        </div>
-      </div>
-
-      {/* Řada 3 — Utilizace + Co dělá nejdýl */}
-      <div style={{ display: "flex", borderTop: `1px solid ${HL}`, marginTop: 8 }}>
-        <div style={{ flex: 1, padding: "16px 22px", borderRight: `1px solid ${HL}` }}>
-          <div style={lbl({ marginBottom: 9 })}>Utilizace · {monthNameJP}</div>
-          <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
-            <span style={hero(28, INK)}>{utilM.ratio != null ? `${Math.round(utilM.ratio * 100)} %` : "—"}</span>
-            <span style={{ fontSize: 10, color: MUT }}>cíl {Math.round(ASISTENT_UTIL_TARGET * 100)} %</span>
-          </div>
-          <div className="maux-num" style={{ fontSize: 9.5, color: MUT, marginTop: 4 }}>
-            {utilM.ratio != null ? `zapsáno ${r1(utilM.logged)} h z ${r1(utilM.net)} h v kanceláři${utilM.over ? " · zapsal víc, než odpracoval" : ""}` : "bez uzavřené docházky"}
-          </div>
-          <div style={{ marginTop: 11, paddingTop: 10, borderTop: `1px solid ${HL}`, display: "flex", justifyContent: "space-between", gap: 8 }}>
-            <span style={{ fontSize: 10, color: MUT }}>Efekt. náklad klientské h <span className="maux-num" style={{ color: INK, fontWeight: 600 }}>{effCost != null ? `${effCost} Kč` : "—"}</span></span>
-            <span style={{ fontSize: 10, color: MUT }}>Provoz <span className="maux-num" style={{ color: INK, fontWeight: 600 }}>{r1(mix.provoz)} h</span></span>
-          </div>
-        </div>
-        <div style={{ flex: 1, padding: "16px 22px" }}>
-          <div style={lbl({ marginBottom: 12 })}>Co dělá nejdýl · {monthNameJP}</div>
-          {topTasks.length === 0 ? (
-            <div style={{ fontSize: 10.5, color: MUT, paddingTop: 4 }}>Zatím žádné výkazy za {monthNameJPAcc}.</div>
-          ) : (
-            <div style={{ display: "flex", flexDirection: "column", gap: 9 }}>
-              {topTasks.map((t, i) => (
-                <div key={i}>
-                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10, marginBottom: 3, gap: 8 }}>
-                    <span style={{ color: INK, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{t.label}{t.bd ? <span style={{ color: SND }}> · BD</span> : null}</span>
-                    <span style={{ color: MUT, fontWeight: 600, flexShrink: 0 }}>{fh(Math.round(t.h * 10) / 10)} h</span>
-                  </div>
-                  <div style={{ height: 5, background: HL, borderRadius: 99 }}>
-                    <div style={{ height: "100%", width: `${Math.max(4, t.h / maxTask * 100)}%`, background: t.bd ? SND : IND, borderRadius: 99 }} />
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-}
 
 /* ─── TRIPLE RING PANEL — Karlín 2154 ──────────────────────────────────────────────────
    Tom 30.6.2026: "brand, ale Karlín 2154" — barevné animované ringy místo ploché linky.
@@ -16393,7 +16045,9 @@ const localDs = (d) =>
 // otevření ten kalendář. Ne utilizaci, ne grafy. HLAVNĚ KALENDÁŘ a vykázat práci a docházka."
 // Utilizace, graf po měsících i KPI řádek zůstávají v kódu za tímhle flagem — vrátit = true.
 const ASISTENT_PREHLED_PLNY = false;
-function AsistentPrehled({ logs, attendance, clients, availability, onGo, onPickDay, onNovyKlient }) {
+// readOnly = Tomův list Josef (15. 9. 2026, varianta A): vidí přesně to, co Pepa, ale bez
+// akčních tlačítek — píchačka a zápis patří jen Pepovi, Tom by jinak psal docházku za něj.
+function AsistentPrehled({ logs, attendance, clients, availability, onGo, onPickDay, onNovyKlient, readOnly = false }) {
   const [now, setNow] = useState(new Date());
   const [period, setPeriod] = useState("this");   // this | prev | all
   useEffect(()=>{ const id=setInterval(()=>setNow(new Date()),30000); return()=>clearInterval(id); },[]);
@@ -16726,6 +16380,7 @@ function AsistentPrehled({ logs, attendance, clients, availability, onGo, onPick
         <div style={{height:1,background:LINE}}/>
 
         <div style={{display:"flex",flexDirection:"column",gap:8}}>
+          {!readOnly && <>
           <button onClick={()=>onGo&&onGo("vykaz")}
             style={{display:"flex",alignItems:"center",gap:9,padding:"12px 15px",borderRadius:12,border:"none",background:IND,color:"#fff",fontSize:12.5,fontWeight:600,cursor:"pointer",textAlign:"left",letterSpacing:".01em"}}>
             <span style={{fontSize:14,opacity:.8}}>＋</span> Zapsat hodiny
@@ -16738,6 +16393,7 @@ function AsistentPrehled({ logs, attendance, clients, availability, onGo, onPick
             style={{display:"flex",alignItems:"center",gap:9,padding:"12px 15px",borderRadius:12,border:"1px solid rgba(0,0,0,.13)",background:"#fff",color:"var(--txt)",fontSize:12.5,fontWeight:500,cursor:"pointer",textAlign:"left"}}>
             <span style={{fontSize:13,opacity:.55}}>◇</span> Založit klienta
           </button>
+          </>}
           <div style={{fontSize:9.5,color:MUT,lineHeight:1.65,paddingLeft:3,marginTop:2}}>
             {lastLogName ? <>Poslední zápis — <b style={{color:"var(--txt)"}}>{lastLogName}</b></> : <>Dnes zatím žádný zápis</>}
           </div>
@@ -18656,21 +18312,20 @@ function AsistentPanel({ clients, onPreview, financeItems = [], onSaveFinance, w
       <div className="top" style={{marginBottom:0,display:"flex",alignItems:"flex-start",justifyContent:"space-between",flexWrap:"wrap",gap:12}}>
         <div>
           <h1 style={{fontFamily:"Fraunces,serif",fontWeight:300,fontSize:30}}>Josef · Asistent</h1>
-          <p style={{color:"var(--mut)",fontSize:13,marginTop:4}}>Kolik tě stojí, co odvedl a kolik ti sundal z talíře. Pod přehledem je administrace — archivace výkazů, editace docházky, export pro účetní.</p>
+          <p style={{color:"var(--mut)",fontSize:13,marginTop:4}}>To, co vidí Josef. Pod tím tvoje administrace — docházka pro účetní, výkazy, editace.</p>
         </div>
         <button onClick={onPreview}
           style={{marginTop:6,padding:"12px 24px",borderRadius:12,border:"1.5px solid var(--ink)",background:"var(--ink)",color:"#fff",fontSize:13.5,fontWeight:600,cursor:"pointer",display:"flex",alignItems:"center",gap:8,whiteSpace:"nowrap"}}>
-          👁 Otevřít Josefův přehled →
+          👁 Josefova appka →
         </button>
       </div>
 
-      {/* ── PŘEHLED — přestěhováno z dashboardu 6.8.2026 (panel "josef" tam zanikl).
-             Tom: "když jako admin kliknu na Josef, vidím pro mě nesmyslné informace."
-             Odpověď je nahoře a je vidět vždycky; administrativa sjela pod ni. ── */}
-      <div style={{margin:"22px 28px 0",position:"relative",borderRadius:BP.r,border:BP.frame,background:"#fff",boxShadow:BP.shadow}}>
-        <JosefPanel logs={logs} attendance={attendance} availability={availCur}
-          clients={clients} financeItems={financeItems} onSaveFinance={onSaveFinance}
-          workEntries={workEntries} />
+      {/* ── JOSEFŮV PŘEHLED 1:1 (Tom 15. 9. 2026, varianta A): "Já ten můj pohled na Pepu vlastně
+             nepotřebuji a nechci vidět. Mně stačí v menu kliknout na Pepa a vidět předně to, co on."
+             Stejná komponenta jako u Pepy (žádná kopie), jen bez akčních tlačítek (readOnly).
+             JosefPanel s kapacitou, mixem a utilizací zrušen — "ten můj přehled mi reálně nic nepřidává". ── */}
+      <div style={{margin:"0 -6px"}}>
+        <AsistentPrehled logs={logs} attendance={attendance} clients={clients} availability={availCur} readOnly />
       </div>
 
       {/* ── Docházka pro účetní — vlastní karta, ne záložka (Tom 2.9.2026: "je to pro mne důležité").
