@@ -18351,7 +18351,7 @@ function AsistentPrehled({ logs, attendance, clients, availability, onGo, onPick
   // ── styly ──
   const paper = { background:"#fff", borderRadius:18, border:`1px solid ${LINE}`, boxShadow:"0 1px 2px rgba(20,18,60,.04), 0 8px 28px rgba(20,18,60,.05)" };
   const lbl   = { fontSize:8, letterSpacing:".26em", textTransform:"uppercase", color:MUT, fontWeight:600 };
-  const tile  = { background:"#fff", borderRadius:14, border:`1px solid ${LINE}`, padding:"13px 15px" };
+  const tile  = { background:"#fff", borderRadius:14, border:`1px solid ${LINE}`, padding:"12px 12px", minWidth:0 };
   const tlbl  = { fontSize:8, letterSpacing:".18em", textTransform:"uppercase", color:MUT, fontWeight:600 };
   const dot   = (c)=>({ display:"inline-block", width:7, height:7, borderRadius:2, background:c, marginRight:6, verticalAlign:1 });
    const hero  = (c,s)=>({ fontFamily:"var(--num)", fontVariantNumeric:"tabular-nums", fontWeight:600, fontSize:s, color:c, lineHeight:1, letterSpacing:"-.025em" });
@@ -18428,17 +18428,17 @@ function AsistentPrehled({ logs, attendance, clients, availability, onGo, onPick
           <div style={{display:"grid",gridTemplateColumns:"repeat(3,minmax(0,1fr))",gap:8}}>
             <div style={tile}>
               <div style={tlbl}>Režie a provoz</div>
-              <div style={{...hero(todayBdH>0?SANDD:"rgba(0,0,0,.2)",20),marginTop:6}}>{fmtH(todayBdH)}</div>
+              <div style={{...hero(todayBdH>0?SANDD:"rgba(0,0,0,.2)",17),marginTop:6,whiteSpace:"nowrap"}}>{fmtH(todayBdH)}</div>
               <div style={{fontSize:9,color:MUT,marginTop:4}}>nad rámec denního cíle</div>
             </div>
             <div style={tile}>
               <div style={tlbl}>Bez zápisu</div>
-              <div style={{...hero(!todayAtt?.check_in?"rgba(0,0,0,.2)":todayUnlog<=.25?OK:todayUnlog>=1.5?SANDD:IND,20),marginTop:6}}>{todayAtt?.check_in?fmtH(todayUnlog):"—"}</div>
+              <div style={{...hero(!todayAtt?.check_in?"rgba(0,0,0,.2)":todayUnlog<=.25?OK:todayUnlog>=1.5?SANDD:IND,17),marginTop:6,whiteSpace:"nowrap"}}>{todayAtt?.check_in?fmtH(todayUnlog):"—"}</div>
               <div style={{fontSize:9,color:MUT,marginTop:4}}>{todayAtt?.check_in?`zapsáno ${fmtH(todayLogged)} z ${fmtH(attNet)}`:"chybí příchod"}</div>
             </div>
             <div style={tile}>
               <div style={tlbl}>Tempo</div>
-              <div style={{...hero(todayPct>=1?OK:etaTxt==="—"?"rgba(0,0,0,.2)":IND,20),marginTop:6}}>{etaTxt}</div>
+              <div style={{...hero(todayPct>=1?OK:etaTxt==="—"?"rgba(0,0,0,.2)":IND,17),marginTop:6,whiteSpace:"nowrap"}}>{etaTxt}</div>
               <div style={{fontSize:9,color:MUT,marginTop:4}}>{todayPct>=1?"cíl splněn":"odhad splnění cíle"}</div>
             </div>
           </div>
@@ -20395,10 +20395,8 @@ function AsistentKalendar({ logs = [], attendance = [], onPickDay }) {
                     <span className="maux-num" style={{ minHeight: 17, fontSize: 15, fontWeight: 600, letterSpacing: "-.01em", lineHeight: 1, whiteSpace: "nowrap", color: v.k > 0 ? PHOS : "transparent" }}>{v.k > 0 ? `${h1(v.k)} h` : "0"}</span>
                     <span className="maux-num" style={{ minHeight: 11, fontSize: 9.5, fontWeight: 500, lineHeight: 1, whiteSpace: "nowrap", color: v.b > 0 ? GREY : (gap > 0.24 ? SAND : "transparent") }}>
                       {v.b > 0 ? `${h1(v.b)} h` : (gap > 0.24 ? `+${h1(gap)} h` : "0")}
+                      {v.b > 0 && gap > 0.24 && <span style={{ color: SAND, fontWeight: 700 }}> +{h1(gap)}</span>}
                     </span>
-                    {v.b > 0 && gap > 0.24 && (
-                      <span className="maux-num" style={{ position: "absolute", top: 5, right: 7, fontSize: 8.5, fontWeight: 700, color: SAND, lineHeight: 1 }}>+{h1(gap)}</span>
-                    )}
                     <span style={{ width: 42, height: 42, borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 15, fontWeight: isToday ? 600 : 400, lineHeight: 1,
                       background: isToday ? PHOS : "transparent", color: isToday ? "#fff" : (isFuture ? FUT : "var(--ink)") }}>{d}</span>
                   </button>
