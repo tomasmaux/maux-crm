@@ -11846,286 +11846,160 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
       })()}
       </Panel>
 
-      {/* STACKED BAR CHART — PŘÍJEM MAUX LEGAL: zelená faktury + oranžová úschovy */}
+      {/* ── PŘÍJEM MAUX LEGAL — varianta B (Tom 15. 9. 2026: "B fakt super").
+          Pravidlo hero pásu: JEDNO číslo na sloupec. Delty, trend linka, osa i popisky
+          segmentů pryč; rozpad faktury / úschovy nese hlavička (dvě YTD čísla se sparkline)
+          a hover nad sloupcem. Úschovy = mint (BP.zisk) — peníze měřené sazbou (16. 8.),
+          písek tím ztrácí jeden ze šesti významů. Náklady zůstávají jako tichá čárkovaná linka. ── */}
       <Panel id="chart">
       <Card style={{padding:"22px 24px 16px",position:"relative",border:"none",boxShadow:"none",background:"transparent"}}>
         {(() => {
           const n = barData.length;
           if (n === 0) return null;
-          const W = 900, BAR_AREA_H = 230, padL = 10, padR = 10, padT = 54, padB = 32;
+          const W = 900, BAR_AREA_H = 230, padL = 8, padR = 8, padT = 34, padB = 30;
           const totalW = W - padL - padR;
-          const barW = Math.max(Math.floor(totalW / n * 0.62), 18);
+          const barW = Math.max(Math.floor(totalW / n * 0.58), 18);
           const gap = (totalW - barW * n) / Math.max(n - 1, 1);
           const barX = (i) => padL + i * (barW + gap);
-          // Zoomovaná osa: nezačínáme od nuly, ale od ~70 % nejnižšího měsíce —
-          // díky tomu jsou rozdíly mezi měsíci (i řádu 10k) na první pohled vidět.
-          const positiveTotals = barData.map(d=>d.total).filter(v=>v>0);
-          const minTotal = positiveTotals.length ? Math.min(...positiveTotals) : 0;
-          const baseline = 0;
-          const range = Math.max(maxBarV - baseline, 1);
-          const toBarH = (v) => v <= 0 ? 0 : ((v - baseline) / range) * BAR_AREA_H;
+          const range = Math.max(maxBarV, 1);
+          const toBarH = (v) => v <= 0 ? 0 : (v / range) * BAR_AREA_H;
           const baseY = padT + BAR_AREA_H;
-          // Živý odhad příštího měsíce do YTD nepočítáme — to je projekce, ne fakturovaný fakt.
-          const ytdInv = barData.filter(d => !d.isLive && d.key.startsWith(String(year))).reduce((s,d)=>s+d.inv,0);
-          const ytdEsc = barData.filter(d => !d.isLive && d.key.startsWith(String(year))).reduce((s,d)=>s+d.escrow,0);
+          const closed = barData.filter(d => !d.isLive);
+          const yearRows = closed.filter(d => d.key.startsWith(String(year)));
+          const ytdInv = yearRows.reduce((s,d)=>s+d.inv,0);
+          const ytdEsc = yearRows.reduce((s,d)=>s+d.escrow,0);
+          const ytdTot = ytdInv + ytdEsc;
+          const podil = ytdTot > 0 ? ytdEsc / ytdTot : 0;
+          // Věta závěru: podíl úschov letos, nejvyšší měsíc a poslední uzavřený měsíc.
+          const withShare = yearRows.filter(d => d.total > 0).map(d => ({ ...d, share: d.escrow / d.total }));
+          const best = withShare.length ? withShare.reduce((a, b) => (b.share > a.share ? b : a)) : null;
+          const lastClosed = withShare.length ? withShare[withShare.length - 1] : null;
+          const bestMonth = yearRows.length ? yearRows.reduce((a, b) => (b.total > a.total ? b : a)) : null;
+          const mesLok = (key) => czMes(Number(key.split("-")[1]) - 1, "lok");
+          const veta = ytdTot > 0 ? (
+            ytdEsc > 0
+              ? <>Letos <b style={{color:"var(--ink)"}}>{fmtKc(ytdTot)}</b>. Úschovy dělají <b style={{color:"var(--ink)"}}>{Math.round(podil*100)} %</b> příjmu
+                  {best && lastClosed && best.key !== lastClosed.key ? <> — v {mesLok(best.key)} {Math.round(best.share*100)} %, v {mesLok(lastClosed.key)} {Math.round(lastClosed.share*100)} %</> : null}.
+                  {bestMonth ? <> Nejlepší měsíc {czMes(Number(bestMonth.key.split("-")[1]) - 1)}, {fmtKc(bestMonth.total)}.</> : null}</>
+              : <>Letos <b style={{color:"var(--ink)"}}>{fmtKc(ytdTot)}</b> z faktur.</>
+          ) : null;
+          // Sparkline nad YTD číslem — uzavřené měsíce, poslední bod zvýrazněný.
+          const Spark = ({ arr, color }) => {
+            const m = Math.max(...arr, 1), w = 110, h = 22;
+            if (arr.length < 2) return null;
+            const pts = arr.map((v, i) => [i / (arr.length - 1) * w, h - 2 - (v / m) * (h - 6)]);
+            const last = pts[pts.length - 1];
+            return (
+              <svg width={w} height={h} style={{ display: "block", marginLeft: "auto", overflow: "visible" }}>
+                <polyline points={pts.map(p => p.join(",")).join(" ")} fill="none" stroke={color} strokeWidth={1.6} />
+                <circle cx={last[0]} cy={last[1]} r={2.4} fill={color} />
+              </svg>
+            );
+          };
           const hov = hoverBar != null ? barData[hoverBar] : null;
-          const hovPrev = hoverBar != null && hoverBar > 0 ? barData[hoverBar-1] : null;
-          const hovDelta = hov && hovPrev ? hov.total - hovPrev.total : null;
-          const hovPct = (hov && hovPrev && hovPrev.total > 0) ? (hovDelta / hovPrev.total * 100) : null;
-          const [hovY, hovM] = hov ? hov.key.split("-").map(Number) : [null,null];
           return (
             <>
-              {/* Header */}
-              <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:12}}>
-                <div>
+              {/* Hlavička: věta závěru vlevo, rozpad YTD vpravo */}
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-end",gap:20,flexWrap:"wrap",marginBottom:8}}>
+                <div style={{minWidth:0,flex:"1 1 340px"}}>
                   <div style={{fontSize:8.5,letterSpacing:".24em",textTransform:"uppercase",color:"var(--mut)",fontWeight:700,opacity:.7}}>Příjem MAUX Legal · {year}</div>
-                  <div style={{fontSize:9,color:"var(--mut)",marginTop:3,display:"flex",gap:14,fontFamily:"'JetBrains Mono','SF Mono',Menlo,monospace"}}>
-                    <span style={{display:"flex",alignItems:"center",gap:4}}>
-                      <span style={{display:"inline-block",width:10,height:10,borderRadius:3,background:BP.indigo}}/>
-                      Fakturace {fmtKc(ytdInv)}
-                    </span>
-                    {ytdEsc > 0 && (
-                      <span style={{display:"flex",alignItems:"center",gap:4}}>
-                        <span style={{display:"inline-block",width:10,height:10,borderRadius:3,background:BP.sand}}/>
-                        Úschovy {fmtKc(ytdEsc)}
-                      </span>
-                    )}
-                  </div>
+                  <div style={{fontSize:14.5,color:"var(--txt)",marginTop:6,lineHeight:1.45,maxWidth:"70ch"}}>{veta}</div>
                 </div>
-                <div style={{textAlign:"right"}}>
-                  <div style={{fontSize:8.5,color:"var(--mut)",letterSpacing:".22em",fontWeight:700,textTransform:"uppercase",opacity:.7}}>Celkem YTD</div>
-                  <div style={{fontFamily:"Inter,ui-sans-serif,system-ui,sans-serif",fontVariantNumeric:"tabular-nums",fontSize:20,fontWeight:600,color:"var(--txt)"}}>{fmtKc(ytdInv + ytdEsc)}</div>
+                <div style={{display:"flex",gap:26,flexShrink:0}}>
+                  <div style={{textAlign:"right"}}>
+                    <div style={{fontSize:9,letterSpacing:".16em",textTransform:"uppercase",color:"var(--mut)",fontWeight:600,marginBottom:2}}>
+                      <span style={{display:"inline-block",width:8,height:8,borderRadius:2,background:BP.indigo,marginRight:6,verticalAlign:"middle"}}/>Fakturace YTD
+                    </div>
+                    <div className="maux-num" style={{fontSize:19,fontWeight:600,color:"var(--txt)",letterSpacing:"-.02em"}}>{fmtKc(ytdInv)}</div>
+                    <Spark arr={closed.map(d=>d.inv)} color={BP.indigo} />
+                  </div>
+                  <div style={{textAlign:"right"}}>
+                    <div style={{fontSize:9,letterSpacing:".16em",textTransform:"uppercase",color:"var(--mut)",fontWeight:600,marginBottom:2}}>
+                      <span style={{display:"inline-block",width:8,height:8,borderRadius:2,background:BP.zisk,marginRight:6,verticalAlign:"middle"}}/>Úschovy YTD
+                    </div>
+                    <div className="maux-num" style={{fontSize:19,fontWeight:600,color:"var(--txt)",letterSpacing:"-.02em"}}>{fmtKc(ytdEsc)}</div>
+                    <Spark arr={closed.map(d=>d.escrow)} color={BP.zisk} />
+                  </div>
                 </div>
               </div>
 
-              {/* SVG bars */}
               <svg width="100%" viewBox={`0 0 ${W} ${padT + BAR_AREA_H + padB}`} style={{overflow:"visible"}}>
-                {/* Grid lines + osové popisky (reálné hodnoty, aby zoomovaná osa nebyla zavádějící) */}
-                {[0, 0.25, 0.5, 0.75, 1].map(p => {
-                  const v = baseline + range * p;
-                  return (
-                    <g key={p}>
-                      <line
-                        x1={padL} x2={W-padR}
-                        y1={baseY - BAR_AREA_H * p} y2={baseY - BAR_AREA_H * p}
-                        stroke="rgba(53,24,165,.08)" strokeWidth={p===0?1.5:1}
-                      />
-                      <text x={padL} y={baseY - BAR_AREA_H * p - 4} fontSize={7.5} fontFamily="'JetBrains Mono','SF Mono',Menlo,monospace" fill="#b4abd9">
-                        {Math.round(v/1000)}k
-                      </text>
-                    </g>
-                  );
-                })}
-
-                {/* Náklady jako tichá referenční linka — nestresující připomínka, kde je "nula":
-                    vše nad ní je čistý zisk. Žádná velká červená čísla, jen jemný orientační pruh. */}
+                {/* Náklady — tichá referenční linka, žádná osa */}
                 {totalVydaje > 0 && (() => {
-                  const costClamped = Math.min(Math.max(totalVydaje, baseline), baseline + range);
-                  const costY = baseY - toBarH(costClamped);
+                  const costY = baseY - toBarH(Math.min(totalVydaje, range));
                   return (
                     <g style={{ pointerEvents: "none" }}>
-                      <rect x={padL} y={padT} width={W-padL-padR} height={Math.max(costY-padT,0)}
-                        fill="#4A7C59" opacity={0.04} />
-                      <line x1={padL} x2={W-padR} y1={costY} y2={costY}
-                        stroke="#9CA3AF" strokeWidth={1} strokeDasharray="2,3" opacity={0.55} />
-                      <text x={W-padR} y={costY-4} textAnchor="end" fontSize={7} fontFamily="Inter" fill="#9CA3AF">
-                        měsíční náklady ≈ {Math.round(totalVydaje/1000)}k · výš už je čistý zisk
-                      </text>
+                      <line x1={padL} x2={W-padR} y1={costY} y2={costY} stroke="#9C96B5" strokeWidth={1} strokeDasharray="2,3" opacity={0.55} />
+                      <text x={W-padR} y={costY-5} textAnchor="end" fontSize={8} fontFamily="Inter" fill="#9C96B5">náklady ≈ {Math.round(totalVydaje/1000)} tis.</text>
                     </g>
                   );
                 })()}
-
-                {/* Trend linka — spojnice vrcholů sloupců, zvýrazňuje růstovou trajektorii */}
-                {n > 1 && (() => {
-                  const trendPts = barData.map((d,i) => [barX(i)+barW/2, d.total>0 ? baseY - toBarH(d.total) - 2 : baseY]);
-                  const last = trendPts[trendPts.length-1];
-                  return (
-                    <g>
-                      <polyline
-                        points={trendPts.map(p=>p.join(",")).join(" ")}
-                        fill="none" stroke="#4A44B8" strokeWidth={1.6} strokeDasharray="4,4" opacity={0.6}
-                      />
-                      <circle cx={last[0]} cy={last[1]} r={5} fill="#4A44B8" opacity={0.18} />
-                      <circle cx={last[0]} cy={last[1]} r={2.6} fill="#3518A5" />
-                    </g>
-                  );
-                })()}
-
-                {/* Jemná pulzující animace pro "živý" sloupec příštího měsíce */}
-                <style>{`
-                  @keyframes mauxLivePulse { 0%,100% { opacity: .4; } 50% { opacity: 1; } }
-                  .maux-live-badge { animation: mauxLivePulse 1.8s ease-in-out infinite; }
-                `}</style>
+                <line x1={padL} x2={W-padR} y1={baseY} y2={baseY} stroke="rgba(28,10,99,.12)" strokeWidth={1} />
 
                 {barData.map((d, i) => {
                   const x = barX(i);
                   const invH = toBarH(d.inv);
-                  const escH = d.escrow > 0 ? Math.max(toBarH(d.inv + d.escrow) - invH, 6) : 0;
+                  const escH = d.escrow > 0 ? Math.max(toBarH(d.escrow), 4) : 0;
                   const totalH = invH + escH;
-                  const isNow = d.isCurrent;
-                  const isLive = !!d.isLive;
-                  const isHov = hoverBar === i;
-                  const prev = i > 0 ? barData[i-1] : null;
-                  const delta = prev ? d.total - prev.total : null;
+                  const isNow = d.isCurrent, isLive = !!d.isLive, isHov = hoverBar === i;
+                  const dim = hoverBar != null && !isHov ? 0.45 : 1;
+                  const fillInv = isLive ? "rgba(74,68,184,.28)" : (isNow ? BP.indigoDeep : BP.indigo);
+                  const fillEsc = isLive ? "rgba(61,220,151,.35)" : (isNow ? BP.ziskDeep : BP.zisk);
+                  const liveStroke = isLive ? { stroke: BP.indigo, strokeWidth: 1.2, strokeDasharray: "4,3" } : {};
+                  const label = d.label.replace("_", " ");
                   return (
-                    <g key={i}
-                      onMouseEnter={() => setHoverBar(i)}
-                      onMouseLeave={() => setHoverBar(h => h === i ? null : h)}
-                      style={{ cursor: "pointer" }}>
-                      {/* Neviditelný hit-box přes celý sloupec — usnadňuje hover */}
-                      <rect x={x-gap/2} y={padT-10} width={barW+gap} height={BAR_AREA_H+22} fill="transparent" />
-
-                      {/* Zelený bar — faktury (živý sloupec má fialový nádech a přerušovaný obrys — "ještě se počítá") */}
+                    <g key={i} onMouseEnter={() => setHoverBar(i)} onMouseLeave={() => setHoverBar(h => h === i ? null : h)} style={{ cursor: "pointer" }}>
+                      <rect x={x-gap/2} y={padT-24} width={barW+gap} height={BAR_AREA_H+50} fill="transparent" />
                       {d.inv > 0 && (
-                        <rect
-                          x={x} y={baseY - invH} width={barW} height={invH}
-                          rx={d.escrow > 0 ? 0 : 4} ry={d.escrow > 0 ? 0 : 4}
-                          fill={isLive ? BP.live : (isNow ? BP.indigoDeep : BP.indigo)}
-                          stroke={isLive ? BP.liveEdge : "none"}
-                          strokeWidth={isLive ? 1.2 : 0}
-                          strokeDasharray={isLive ? "4,3" : "none"}
-                          opacity={isLive ? (isHov ? 0.95 : 0.62) : (isHov ? 1 : (hoverBar != null ? 0.45 : 1))}
-                          style={{ transition: "opacity .12s" }}
-                        />
+                        <rect x={x} y={baseY - invH} width={barW} height={invH} rx={d.escrow > 0 ? 0 : 4} ry={d.escrow > 0 ? 0 : 4}
+                          fill={fillInv} opacity={dim} {...liveStroke} style={{ transition: "opacity .12s" }} />
                       )}
-                      {/* Oranžový bar — úschovy (nahoře) */}
                       {d.escrow > 0 && (
-                        <rect
-                          x={x} y={baseY - totalH} width={barW} height={escH}
-                          rx={4} ry={4}
-                          fill={isLive ? "#E4DCC9" : (isNow ? BP.sandDeep : BP.sand)}
-                          stroke={isLive ? BP.liveEdge : "none"}
-                          strokeWidth={isLive ? 1.2 : 0}
-                          strokeDasharray={isLive ? "4,3" : "none"}
-                          opacity={isLive ? (isHov ? 0.95 : 0.62) : (isHov ? 1 : (hoverBar != null ? 0.45 : 1))}
-                          style={{ transition: "opacity .12s" }}
-                        />
+                        <rect x={x} y={baseY - totalH} width={barW} height={escH} rx={4} ry={4}
+                          fill={fillEsc} opacity={dim} {...liveStroke} style={{ transition: "opacity .12s" }} />
                       )}
-                      {/* Obrys při hoveru */}
-                      {isHov && !isLive && (
-                        <rect x={x-2} y={baseY-totalH-2} width={barW+4} height={totalH+4}
-                          rx={5} fill="none" stroke="#3518A5" strokeWidth={1.4} opacity={0.5}/>
-                      )}
-                      {/* Pulzující odznak "ŽIVĚ" — sloupec roste s každým novým výkazem a denním úrokem,
-                          jako herní progress bar, který Tom může honit */}
-                      {isLive && (
-                        <g className="maux-live-badge">
-                          <circle cx={x + barW/2 - 22} cy={baseY - totalH - 40} r={2.6} fill="#7C3AED" />
-                          <text x={x + barW/2 - 16} y={baseY - totalH - 37}
-                            fontSize={6.5} fontFamily="Inter" fontWeight="700" letterSpacing=".08em"
-                            fill="#7C3AED">ŽIVĚ ROSTE</text>
-                        </g>
-                      )}
-
-                      {/* Popisek fakturace — vždy viditelný */}
-                      {d.inv > 0 && (
-                        <text
-                          x={x + barW/2} y={invH > 16 ? baseY - invH/2 + 3 : baseY - invH - 5}
-                          textAnchor="middle" fontSize={7.5}
-                          fontFamily="Inter" fontWeight="600"
-                          fill={invH > 16 ? "rgba(255,255,255,.92)" : "#16A34A"}
-                        >
-                          {Math.round(d.inv/1000)}k
-                        </text>
-                      )}
-                      {/* Popisek úschov — vždy viditelný */}
-                      {d.escrow > 0 && (
-                        <text
-                          x={x + barW/2} y={escH > 14 ? baseY - invH - escH/2 + 3 : baseY - totalH - 5}
-                          textAnchor="middle" fontSize={7.5}
-                          fontFamily="Inter" fontWeight="600"
-                          fill={escH > 14 ? "rgba(255,255,255,.92)" : "#D97706"}
-                        >
-                          +{Math.round(d.escrow/1000)}k
-                        </text>
-                      )}
-                      {/* Hodnota CELKEM nahoře */}
+                      {/* JEDNO číslo na sloupec */}
                       {d.total > 0 && (
-                        <text
-                          x={x + barW/2} y={baseY - totalH - 16}
-                          textAnchor="middle"
-                          fontSize={isNow ? 12 : 10}
-                          fontFamily="'JetBrains Mono','SF Mono',Menlo,monospace"
-                          fontWeight={isNow ? "700" : "500"}
-                          fill={isNow ? "var(--ink)" : "var(--txt)"}
-                        >
+                        <text x={x + barW/2} y={baseY - totalH - 7} textAnchor="middle" fontSize={11}
+                          fontFamily="Inter,ui-sans-serif,system-ui,sans-serif" fontWeight="600"
+                          fill={isLive ? "#8F84E6" : "var(--txt)"}>
                           {Math.round(d.total/1000)}k
                         </text>
                       )}
-                      {/* Delta vs. předchozí měsíc — malá šipka nad celkovou hodnotou.
-                          U živého sloupce je to přesně ta "honička" s minulým měsícem, kterou chce Tom vidět. */}
-                      {delta != null && d.total > 0 && (
-                        <text
-                          x={x + barW/2} y={baseY - totalH - 28}
-                          textAnchor="middle" fontSize={7}
-                          fontFamily="Inter" fontWeight="700"
-                          fill={isLive ? "#7C3AED" : (delta > 0 ? "#4A7C59" : delta < 0 ? "#A8443C" : "var(--mut)")}
-                        >
-                          {isLive
-                            ? (delta < 0 ? `ještě ${Math.round(Math.abs(delta)/1000)}k do mety` : `+${Math.round(delta/1000)}k navrch — máš to!`)
-                            : `${delta > 0 ? "▲" : delta < 0 ? "▼" : "—"} ${delta !== 0 ? `${delta>0?"+":""}${Math.round(delta/1000)}k` : ""}`}
-                        </text>
-                      )}
-                      {/* X label */}
-                      <text
-                        x={x + barW/2} y={padT + BAR_AREA_H + padB - 4}
-                        textAnchor="middle"
-                        fontSize={isNow ? 9.5 : 8.5}
-                        fontFamily="'JetBrains Mono','SF Mono',Menlo,monospace"
-                        fontWeight={isNow ? "700" : "400"}
-                        fill={isLive ? "#7C3AED" : (isNow ? "#3518A5" : "var(--mut)")}
-                      >
-                        {d.label}{isLive ? " ›" : ""}
+                      <text x={x + barW/2} y={baseY + 16} textAnchor="middle" fontSize={9} letterSpacing="1"
+                        fontFamily="Inter,ui-sans-serif,system-ui,sans-serif" fontWeight={isNow ? "600" : "400"}
+                        fill={isLive ? "#8F84E6" : (isNow ? "var(--ink)" : "var(--mut)")}>
+                        {label}{isLive ? " ›" : ""}
                       </text>
                     </g>
                   );
                 })}
 
-                {/* Tooltip při hoveru */}
+                {/* Hover — rozpad měsíce; jediné místo, kde se čísla faktur a úschov u sloupce ukážou */}
                 {hov && (() => {
                   const i = hoverBar;
-                  const tx = Math.min(Math.max(barX(i) + barW/2, 86), W - 86);
-                  const ty = padT - 14;
-                  const lines = hov.isLive ? [
-                    `${CZ_MONTHS[hovM]} ${hovY} · živý odhad`,
-                    `Z výkazů + úschov k dnešku: ${fmtKc(hov.inv)}`,
-                    ...(hov.escrow > 0 ? [`+ narostlý úrok z úschov: ${fmtKc(hov.escrow)}`] : []),
-                    `Zatím napočítáno: ${fmtKc(hov.total)}`,
-                    ...(hovDelta != null ? [hovDelta < 0
-                      ? `Do mety minulého měsíce: ${fmtKc(Math.abs(hovDelta))}`
-                      : `Minulý měsíc už trumfnuto o ${fmtKc(hovDelta)} 🎉`] : []),
-                    `Roste s každým výkazem a dnem →`,
-                  ] : [
-                    `${CZ_MONTHS[hovM]} ${hovY}`,
-                    `Fakturace: ${fmtKc(hov.inv)}`,
-                    ...(hov.escrow > 0 ? [`Úschovy: ${fmtKc(hov.escrow)}`] : []),
-                    `Celkem: ${fmtKc(hov.total)}`,
-                    ...(hovDelta != null ? [`Změna: ${hovDelta>=0?"+":""}${fmtKc(hovDelta)}${hovPct!=null ? ` (${hovDelta>=0?"+":""}${hovPct.toFixed(1)} %)` : ""}`] : []),
+                  const [hy, hm] = hov.key.split("-").map(Number);
+                  const lines = [
+                    `${czMes(hm - 1)} ${hy}${hov.isLive ? " · živě" : ""}`,
+                    `faktury ${fmtKc(hov.inv)} · úschovy ${fmtKc(hov.escrow)}`,
+                    `celkem ${fmtKc(hov.total)}`,
+                    ...(hov.isLive ? ["roste s každým výkazem a dnem úroku"] : []),
                   ];
-                  const boxH = 14 + lines.length * 13;
-                  const boxW = hov.isLive ? 198 : 158;
-                  // Index řádku, který se zvýrazní barvou (zelená/červená podle vývoje) —
-                  // u živého sloupce je to řádek "do mety / trumfnuto", u ostatních poslední řádek se "Změna".
-                  const highlightIdx = hovDelta == null ? -1 : (hov.isLive ? lines.length - 2 : lines.length - 1);
-                  const highlightGood = hov.isLive ? (hovDelta >= 0) : (hovDelta >= 0);
+                  const boxW = 236, boxH = 14 + lines.length * 13;
+                  const tx = Math.min(Math.max(barX(i) + barW/2, boxW/2 + 4), W - boxW/2 - 4);
+                  const ty = padT - 10;
                   return (
                     <g style={{ pointerEvents: "none" }}>
-                      <rect x={tx-boxW/2} y={ty-boxH} width={boxW} height={boxH} rx={8}
-                        fill="#1A1530" opacity={0.94} />
+                      <rect x={tx-boxW/2} y={ty-boxH} width={boxW} height={boxH} rx={8} fill="#1C0A63" opacity={0.94} />
                       {lines.map((ln, li) => (
-                        <text key={li} x={tx} y={ty - boxH + 16 + li*13}
-                          textAnchor="middle" fontSize={li===0?9:8.5}
-                          fontFamily={li===0?"'JetBrains Mono','SF Mono',Menlo,monospace":"Inter"}
-                          fontWeight={li===0?"600":(li===highlightIdx ? "700":"400")}
-                          fill={li===0 ? "#fff" : (li===highlightIdx ? (highlightGood?"#6EE7B7":"#FCA5A5") : "rgba(255,255,255,.78)")}>
-                          {ln}
-                        </text>
+                        <text key={li} x={tx} y={ty - boxH + 16 + li*13} textAnchor="middle" fontSize={li===0?9.5:8.5}
+                          fontFamily="Inter,ui-sans-serif,system-ui,sans-serif" fontWeight={li===0?"600":"400"}
+                          fill={li===0 ? "#fff" : "rgba(255,255,255,.82)"}>{ln}</text>
                       ))}
                     </g>
                   );
                 })()}
               </svg>
-              {/* osa od nuly — Tom: "okrádá mě to o potěšení zbytečně" */}
             </>
           );
         })()}
