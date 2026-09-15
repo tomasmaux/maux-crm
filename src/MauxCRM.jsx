@@ -18736,9 +18736,10 @@ const klientKlic = (s) => (s || "")
   .split(/\s+/).filter(Boolean).sort().join(" ");
 
 /* ── FORMULÁŘ KLIENTA V PEPOVĚ PORTÁLU ───────────────────────────────────────
-   Vědomě NEOBSAHUJE fakturováno, hodinovou sazbu ani přepínač stavu — Pepa
-   zakládá vždy aktivního klienta a k penězům se nedostane ani omylem.
-   Při editaci se Tomova čísla nesou beze změny přes ...d, formulář je nepřepíše. */
+   Stejný kompletní formulář jako Tomův ClientForm (Tom 15. 9. 2026: „musí mít
+   stejný formulář jako já kompletní"), jen BEZ fakturováno a hodinové sazby —
+   k penězům se Pepa nedostane ani omylem. Při editaci se Tomova čísla nesou
+   beze změny přes ...d, formulář je nepřepíše. */
 function AsistentKlientForm({ init, initialName, clients = [], onSave, onCancel, saving }) {
   const [d, setD] = useState(() => init ? { ...init } : {
     id: uid(), name: (initialName || "").trim(), type: "firma", ico: "", dic: "", reg: "",
@@ -18833,9 +18834,10 @@ function AsistentKlientForm({ init, initialName, clients = [], onSave, onCancel,
       </div>
 
       {isOsoba ? (
-        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:14}}>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 150px",gap:14}}>
           <div><label style={iL}>Jméno *</label><input value={d.first_name || ""} onChange={e=>set("first_name",e.target.value)} style={iS}/></div>
           <div><label style={iL}>Příjmení *</label><input value={d.last_name || ""} onChange={e=>set("last_name",e.target.value)} style={iS}/></div>
+          <div><label style={iL}>Narozen</label><input type="date" value={d.birth_date || ""} onChange={e=>set("birth_date",e.target.value)} style={iS}/></div>
         </div>
       ) : (
         <div><label style={iL}>Obchodní firma *</label><input value={d.name || ""} onChange={e=>set("name",e.target.value)} style={iS} placeholder="Přesně podle obchodního rejstříku"/></div>
@@ -18868,6 +18870,21 @@ function AsistentKlientForm({ init, initialName, clients = [], onSave, onCancel,
         <div><label style={iL}>E-maily (oddělit čárkou)</label><input value={emailStr} onChange={e=>set("emails",e.target.value)} style={iS}/></div>
         <div><label style={iL}>Odkaz na spis</label><input value={d.file_link || ""} onChange={e=>set("file_link",e.target.value)} style={iS} placeholder="https://…"/></div>
       </div>
+
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:14}}>
+        <div>
+          <label style={iL}>Stav</label>
+          <select value={d.status || "aktivní"} onChange={e=>set("status",e.target.value)} style={iS}>
+            <option value="aktivní">aktivní</option><option value="spící">spící</option><option value="ukončený">ukončený</option>
+          </select>
+        </div>
+        <div><label style={iL}>Datum poslední práce</label><input type="date" value={d.last_work_date || ""} onChange={e=>set("last_work_date",e.target.value)} style={iS}/></div>
+      </div>
+
+      <label style={{display:"flex",alignItems:"center",gap:9,fontSize:12.5,color:"var(--txt)",cursor:"pointer",userSelect:"none"}}>
+        <input type="checkbox" checked={!!d.uschovaaml} onChange={e=>set("uschovaaml",e.target.checked)} style={{width:15,height:15,margin:0,accentColor:"#4A44B8"}}/>
+        Klient s úschovou nebo AML povinností
+      </label>
 
       <div>
         <label style={iL}>Specializace</label>
@@ -20198,13 +20215,14 @@ function AsistentDochazka({ email, attendance, logs, onRefreshAttendance, onGo }
    Když s Tomem něco v Josefově pohledu upravíme, ručně zvedneme ASISTENT_BUILD
    a dopíšeme, co se změnilo. Josef to uvidí právě jednou — při nejbližším
    přihlášení. Když se nic nezmění, Josef nic neuvidí a nic se nikam nevolá.    */
-const ASISTENT_BUILD = "2026-09-15b";
+const ASISTENT_BUILD = "2026-09-15c";
 // Texty pro Josefa se píšou VYKÁNÍM a zdvořile ("Zapište prosím…", "Vaše práce").
 // Tykání se do asistentského portálu nedostane — Tom si to takhle přeje.
 const ASISTENT_BUILD_NOTE = [
   "Přehled je teď kalendář. Každý den ukazuje, kolik hodin jste zapsal pro klienty (indigo) a kolik na režii a provoz kanceláře (šedě). Pískově se ukáže čas, kdy jste byl podle docházky v kanceláři, ale ještě nemá zápis. Kliknutím na den otevřete zápis s tím datem.",
   "Pod kalendářem zůstává dnešek — příchod, zápis hodin, odchod — a seznam dnů, kde ještě chybí popsat práci. Grafy utilizace jsme z přehledu odstranili; hlavní je kalendář, zápis a docházka.",
   "Docházka, píchačka, plán směn ani výkaz pro účetní se nemění. Vaše odměna se počítá stejně jako dosud.",
+  "Formulář klienta je nově kompletní: u fyzické osoby datum narození, dále stav klienta, datum poslední práce a označení úschovy či AML povinnosti. Zakládáte tak klienta se stejnými údaji jako pan Maux.",
 ];
 
 const HARD_RELOAD_KEYS = (() => {
