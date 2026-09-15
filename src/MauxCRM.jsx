@@ -622,6 +622,33 @@ async function setExpenseCheck(itemId, year, month, paid) {
    nenarostla → firemní rezerva ukázala jako Tomovy peníze částku, která patří
    finančnímu úřadu (~8 tis. měsíčně, za rok až sto tisíc).
    Od teď se obě strany drží za ruku obousměrně (druhý směr v handleDpfoToggle). */
+/* ── LOG ÚHRAD NÁKLADŮ (Tom 15. 9. 2026: "u checkboxu úhrada nákladu chci log kliknutí —
+   datum a čas každého kliknutí, ať dohledám, kdy jsem úhradu provedl v bankovnictví").
+   expense_checklist nese jen POSLEDNÍ paid_at; historie žije v config položce
+   finance_items · fi_uhrady_log (stejný recept jako fi_asistent_sazba / fi_zapisnicek):
+   notes = JSON { "<item_id>_<rok>_<měsíc>": [{ at: ISO, paid: true|false }, …] }.
+   Bez SQL migrace, category "config" je ze všech výpočtů i výpisů vyfiltrovaná.
+   Drží se posledních 24 měsíců, starší klíče se při zápisu tiše ořežou. */
+const UHRADY_LOG_ID = "fi_uhrady_log";
+const uhradyLogKey = (itemId, y, m) => `${itemId}_${y}_${m}`;
+function uhradyLogRead(financeItems) {
+  const it = (financeItems || []).find(i => i.id === UHRADY_LOG_ID);
+  try { const p = JSON.parse(it?.notes || "{}"); return p && typeof p === "object" ? p : {}; } catch (e) { return {}; }
+}
+function uhradyLogAppend(financeItems, itemId, y, m, paid) {
+  const log = uhradyLogRead(financeItems);
+  const key = uhradyLogKey(itemId, y, m);
+  log[key] = [...(log[key] || []), { at: new Date().toISOString(), paid: !!paid }];
+  const hranice = new Date(y, m - 1 - 24, 1);
+  for (const k of Object.keys(log)) {
+    const mm = /_(\d{4})_(\d{1,2})$/.exec(k);
+    if (mm && new Date(Number(mm[1]), Number(mm[2]) - 1, 1) < hranice) delete log[k];
+  }
+  const prev = (financeItems || []).find(i => i.id === UHRADY_LOG_ID) || {};
+  return { ...prev, id: UHRADY_LOG_ID, category: "config", label: "Log úhrad nákladů", amount: 0, notes: JSON.stringify(log) };
+}
+const fmtUhradyAt = (iso) => { const d = new Date(iso); return `${d.getDate()}. ${d.getMonth()+1}. ${d.getFullYear()} ${String(d.getHours()).padStart(2,"0")}:${String(d.getMinutes()).padStart(2,"0")}`; };
+
 function isDpfoExpenseItem(item) {
   return /dpfo/i.test(item?.label || "");
 }
@@ -7427,6 +7454,10 @@ function FirmaBar({ financeItems, invoices, dpfoMonths, loanTransactions, escrow
 
   const [showDetail, setShowDetail] = useState(true);
   const [confettiShown, setConfettiShown] = useState(false);
+  // Rozbalený log kliknutí u položky (Tom 15. 9. 2026). Klik na čas u položky = rozbal / sbal.
+  const [logOpenId, setLogOpenId] = useState(null);
+  const uhradyLog = uhradyLogRead(financeItems);
+  const logEntriesOf = (id) => { const n = new Date(); return uhradyLog[uhradyLogKey(id, n.getFullYear(), n.getMonth() + 1)] || []; };
 
   // Trigger confetti once when allDone
   useEffect(() => {
@@ -7466,7 +7497,9 @@ function FirmaBar({ financeItems, invoices, dpfoMonths, loanTransactions, escrow
   // Item row component
   const Row = ({item, color, isJosef}) => {
     const p = isPaid(item.id);
+    const logRows = logOpenId === item.id ? logEntriesOf(item.id) : [];
     return (
+      <>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",fontSize:11.5,
         color:p?"var(--mut)":"var(--txt)",padding:"4px 0",gap:6,
         opacity:p?.5:1,transition:"opacity .3s"}}>
@@ -7489,7 +7522,13 @@ function FirmaBar({ financeItems, invoices, dpfoMonths, loanTransactions, escrow
           ) : <EditableLabel item={item} onSave={onSaveFinance} />}
         </span>
         <span style={{display:"flex",alignItems:"center",gap:3,flexShrink:0}}>
-          {p && paidAtOf(item.id) && <span className="maux-num" title="Kdy jsi úhradu odškrtl" style={{fontSize:8.5,color:"var(--mut)",marginRight:6,opacity:.85}}>{fmtPaidAt(paidAtOf(item.id))}</span>}
+          {(p && paidAtOf(item.id) || logEntriesOf(item.id).length > 0) && (
+            <span className="maux-num" onClick={e => { e.stopPropagation(); setLogOpenId(v => v === item.id ? null : item.id); }}
+              title={logEntriesOf(item.id).length ? "Klikni: log všech kliknutí (kdy zaškrtnuto / odškrtnuto)" : "Kdy jsi úhradu odškrtl"}
+              style={{fontSize:8.5,color:"var(--mut)",marginRight:6,opacity:.85,cursor:"pointer",borderBottom:"1px dotted rgba(107,102,133,.5)"}}>
+              {p && paidAtOf(item.id) ? fmtPaidAt(paidAtOf(item.id)) : `${logEntriesOf(item.id).length}×`}
+            </span>
+          )}
           {isJosef ? (
             <span className="maux-num" style={{color:p?"var(--mut)":"#3518A5",fontSize:11}}>
               {josefWage>0?josefWage.toLocaleString("cs-CZ")+" Kč":"— Kč"}
@@ -7502,6 +7541,15 @@ function FirmaBar({ financeItems, invoices, dpfoMonths, loanTransactions, escrow
           )}
         </span>
       </div>
+      {logRows.length > 0 && (
+        <div style={{margin:"2px 0 6px 21px",padding:"6px 10px",borderLeft:"2px solid #4A44B8",background:"rgba(74,68,184,.05)",fontSize:10,color:"var(--mut)",lineHeight:1.6}}>
+          {logRows.slice().reverse().map((e, i) => (
+            <div key={i} className="maux-num"><span style={{color:e.paid?"#4A7C59":"#A8443C",fontWeight:600}}>{e.paid ? "zaškrtnuto" : "odškrtnuto"}</span> · {fmtUhradyAt(e.at)}</div>
+          ))}
+          <div style={{fontSize:9,opacity:.75,marginTop:2}}>Čas kliknutí = kdy jsi platbu odeslal v bankovnictví. Historie se drží 24 měsíců.</div>
+        </div>
+      )}
+      </>
     );
   };
 
@@ -18770,8 +18818,11 @@ function AsistentPanel({ clients, onPreview, financeItems = [], onSaveFinance, w
                         setSavingAdminAtt(true);
                         try {
                           const d = editAdminDraft.date;
-                          const ci = editAdminDraft.check_in_t?`${d}T${editAdminDraft.check_in_t}:00`:null;
-                          const co = editAdminDraft.check_out_t?`${d}T${editAdminDraft.check_out_t}:00`:null;
+                          // Bez pásma by Postgres vzal "2026-09-15T17:30:00" jako UTC a v appce by se ukázalo 19:30
+                          // (15. 9. 2026 — ruční uzavření směny posunulo příchod 8:34 na 10:34). new Date() bez "Z"
+                          // parsuje jako LOKÁLNÍ čas, toISOString() to teprve převede na UTC správně.
+                          const ci = editAdminDraft.check_in_t?new Date(`${d}T${editAdminDraft.check_in_t}:00`).toISOString():null;
+                          const co = editAdminDraft.check_out_t?new Date(`${d}T${editAdminDraft.check_out_t}:00`).toISOString():null;
                           await upsertAssistantAttendance({id:a.id,assistant_email:email,date:d,check_in:ci,check_out:co});
                           setAttendance(await fetchAssistantAttendance(email));
                           setEditingAdminAtt(null);
@@ -19311,6 +19362,14 @@ export default function MauxCRM() {
     const y = now.getFullYear(), mo = now.getMonth() + 1;
     try {
       setExpenseChecks(await setExpenseCheck(itemId, y, mo, paid));
+      // Log kliknutí (datum + čas, obě polarity) — viz uhradyLogAppend. Neuložený log
+      // checkbox neshodí, ale Tom se to dozví, protože o ten log výslovně stojí.
+      try {
+        const logItem = uhradyLogAppend(financeItems, itemId, y, mo, paid);
+        await upsertFinanceItem(logItem);
+        setFinanceItems(prev => (prev || []).some(i => i.id === UHRADY_LOG_ID)
+          ? prev.map(i => i.id === UHRADY_LOG_ID ? logItem : i) : [...(prev || []), logItem]);
+      } catch (err) { mauxToast("Chyba: log úhrady se neuložil — " + err.message); }
       // DPFO záloha není běžný výdaj — peníze neodešly ven, přesunuly se na spořák
       // do obálky státu. Musí se proto propsat i do dpfo_months, jinak obálka
       // nenaroste a firemní rezerva ukáže jako volné peníze ty, co patří finančáku.
