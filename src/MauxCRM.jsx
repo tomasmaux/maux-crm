@@ -19122,11 +19122,6 @@ function AsistentVykazy({ email, clients, onRefresh, onClientsRefresh, presetDat
             placeholder={isBdForm ? "Např. naskenování a založení 12 spisů do archivu; vyzvednutí dokumentů na katastru…" : "Příprava podkladů, výzkum judikatury, komunikace s klientem…"}
             style={{...iS,resize:"vertical",lineHeight:1.5,
               borderColor: descOk ? "rgba(0,0,0,.1)" : "rgba(198,168,107,.55)"}}/>
-          {!descOk && (
-            <div style={{fontSize:10.5,color:"#8A6E2E",marginTop:7,lineHeight:1.6}}>
-              Bez popisu úkon neuložíte. Napište, co jste dělal a k čemu to bylo — jako byste to vysvětloval kolegovi, který u toho nebyl. Klient tento text nikdy neuvidí, pan Maux ano.
-            </div>
-          )}
         </div>
         <div style={{display:"grid",gridTemplateColumns:"1fr auto",gap:14,alignItems:"flex-end"}}>
           <div>
