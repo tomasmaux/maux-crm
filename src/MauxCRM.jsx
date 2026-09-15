@@ -99,6 +99,7 @@ function savePrivacyMode(v) {
 }
 
 // ── Zápisníček: rychlé osobní poznámky v menu, vidět napříč všemi listy appky ──
+const ZAPISNICEK_ID = "fi_zapisnicek"; // finance_items · category "config" — viz Sidebar
 function loadZapisnicek() {
   try { return localStorage.getItem("maux_zapisnicek") || ""; } catch (e) { return ""; }
 }
@@ -122,6 +123,54 @@ const uid = () => "id_" + Math.random().toString(36).slice(2, 10);
 // Datum proto skládáme z lokálních složek. (Oprava 4.8.2026.)
 const localYmd = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 const today = () => localYmd(new Date());
+
+// ── MAUX toast — jediná náhrada za alert() v celé appce (audit 15. 9. 2026) ──────────
+// Čistý DOM bez React stavu, aby šlo volat odkudkoli (i z handlerů mimo komponenty).
+// Úroveň se pozná z textu, který už v appce je: "Chyba:" / "Nepodařilo" = cihlová,
+// "Zadej…" / "Žádná…" / "Z téhle tranše…" = písková (chybí údaj), ostatní = indigo.
+// Klik zavře. Chyba visí, dokud se neklikne; ostatní zmizí samy po 6 s. Žádné emoji, žádné ikony.
+function mauxToast(msg) {
+  const text = String(msg == null ? "" : msg);
+  const lvl = /^(Chyba|Nepoda\u0159ilo)/.test(text) ? "chyba"
+    : /^(Zadej|\u017d\u00e1dn|Z t\u00e9hle|N\u00e1kupn\u00ed)/.test(text) ? "upoz" : "info";
+  let host = document.getElementById("mxToasts");
+  if (!host) { host = document.createElement("div"); host.id = "mxToasts"; host.className = "mx-toasts"; document.body.appendChild(host); }
+  const t = document.createElement("div");
+  t.className = "mx-toast " + lvl;
+  const b = document.createElement("b");
+  b.textContent = lvl === "chyba" ? "Neulo\u017eeno" : lvl === "upoz" ? "Chyb\u00ed \u00fadaj" : "Hotovo";
+  t.appendChild(b); t.appendChild(document.createTextNode(text));
+  t.onclick = () => t.remove();
+  host.appendChild(t);
+  // Chyba zůstává, dokud na ni Tom neklikne (jeho volba 15. 9. 2026); ostatní zmizí samy po 6 s.
+  if (lvl !== "chyba") setTimeout(() => t.remove(), 6000);
+}
+// ── Termíny DPFO odvozené z roku (audit 15. 9. 2026) ─────────────────────────
+// § 136 daňového řádu: 3 měsíce (1. 4.), elektronicky 4 měsíce (1. 5.), s poradcem 6 měsíců (1. 7.)
+// po konci zdaňovacího období; § 33 odst. 4: konec lhůty o víkendu / svátku se posouvá na
+// nejbližší pracovní den. Svátky: pevné + Velký pátek a Velikonoční pondělí (Gaussův výpočet).
+const czVelikonoceNedele = (y) => {
+  const a = y % 19, b = Math.floor(y / 100), c = y % 100, d = Math.floor(b / 4), e = b % 4;
+  const f = Math.floor((b + 8) / 25), g = Math.floor((b - f + 1) / 3), h = (19 * a + b - d - g + 15) % 30;
+  const i = Math.floor(c / 4), k = c % 4, l = (32 + 2 * e + 2 * i - h - k) % 7, m = Math.floor((a + 11 * h + 22 * l) / 451);
+  const mes = Math.floor((h + l - 7 * m + 114) / 31), den = ((h + l - 7 * m + 114) % 31) + 1;
+  return new Date(y, mes - 1, den);
+};
+const czJeSvatek = (d) => {
+  const md = `${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  if (["01-01","05-01","05-08","07-05","07-06","09-28","10-28","11-17","12-24","12-25","12-26"].includes(md)) return true;
+  const ne = czVelikonoceNedele(d.getFullYear());
+  const patek = new Date(ne); patek.setDate(ne.getDate() - 2);
+  const pondeli = new Date(ne); pondeli.setDate(ne.getDate() + 1);
+  return localYmd(d) === localYmd(patek) || localYmd(d) === localYmd(pondeli);
+};
+const czPracovniDenOd = (d) => { const x = new Date(d); while (x.getDay() === 0 || x.getDay() === 6 || czJeSvatek(x)) x.setDate(x.getDate() + 1); return x; };
+// Vrací tři termíny pro přiznání ZA rok `rok` (podává se v roce rok + 1).
+const dpfoTerminy = (rok) => [
+  { label: "Papírově", date: localYmd(czPracovniDenOd(new Date(rok + 1, 3, 1))) },
+  { label: "Elektronicky (bez poradce)", date: localYmd(czPracovniDenOd(new Date(rok + 1, 4, 1))) },
+  { label: "S daňovým poradcem / advokátem", date: localYmd(czPracovniDenOd(new Date(rok + 1, 6, 1))) },
+];
 /* České tvary měsíců — bez nich vznikají věty typu "za srpna" nebo "proti červenecu". */
 const CZ_MES_NOM = ["leden","únor","březen","duben","květen","červen","červenec","srpen","září","říjen","listopad","prosinec"];
 const CZ_MES_GEN = ["ledna","února","března","dubna","května","června","července","srpna","září","října","listopadu","prosince"];
@@ -449,6 +498,14 @@ body{height:100%;background-color:#FAFAFC;background-repeat:no-repeat;background
 .gamif-bar .spark-g:hover .spark-bar{filter:brightness(1.5) drop-shadow(0 0 4px rgba(253,230,138,.6))}
 .gamif-bar .spark-g .spark-label{opacity:0;transition:opacity .12s}
 .gamif-bar .spark-g:hover .spark-label{opacity:1}
+/* ── MAUX toast — náhrada systémového alert() (audit 15. 9. 2026). Pruh = závažnost, text = verdikt. */
+.mx-toasts{position:fixed;right:22px;bottom:22px;display:flex;flex-direction:column;gap:8px;z-index:200;max-width:min(420px,calc(100vw - 44px))}
+.mx-toast{background:rgba(255,255,255,.9);backdrop-filter:blur(16px);border:1px solid rgba(255,255,255,.9);border-left:2px solid #4A44B8;border-radius:0 12px 12px 0;padding:11px 16px 12px 14px;font:13px/1.45 var(--num),Inter,system-ui,sans-serif;color:var(--txt);box-shadow:0 14px 34px rgba(28,10,99,.12);cursor:pointer;animation:mxToastIn .22s ease-out;word-break:break-word}
+.mx-toast b{display:block;font-size:9.5px;letter-spacing:.16em;text-transform:uppercase;font-weight:600;margin-bottom:3px;color:#4A44B8}
+.mx-toast.chyba{border-left-color:#A8443C;background:rgba(251,243,242,.94)}.mx-toast.chyba b{color:#A8443C}
+.mx-toast.upoz{border-left-color:#C6A86B;background:rgba(250,246,236,.94)}.mx-toast.upoz b{color:#96773C}
+@keyframes mxToastIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+@media (prefers-reduced-motion: reduce){.mx-toast{animation:none}}
 `;
 
 /* ─── SUPABASE DATA LAYER ─── */
@@ -1114,21 +1171,8 @@ function computeXtbPortfolio(positions = [], closedTrades = [], tranches = [], m
   };
 }
 
-// ── SCHVALOVÁNÍ JOSEFOVÝCH VÝKAZŮ (4. 8. 2026) ──────────────────────────────
-// Tom: "musím to nějak složitě párovat na můj výkaz?" Nemusí. Párování NENÍ algoritmus:
-// vazba vzniká klikem na konkrétní Josefův záznam. Appka nic nehádá, jen si pamatuje,
-// do kterého Tomova výkazu záznam šel (assistant_work_logs.work_entry_id).
-//
-// ⚠️ Josefovy hodiny se NIKDY nepřičítají k Tomovým. Kdyby ano, "hodnota tvé hodiny"
-// by se nafoukla pokaždé, když práci předá — metrika by lhala tím příjemnějším směrem.
-const LOG_OPEN = "open", LOG_INVOICED = "invoiced", LOG_INTERNAL = "internal";
-const logStatus = (l) => l && l.billing_status ? l.billing_status : LOG_OPEN;
 const isBdLog = (l) => l && (l.entry_type === "bd" || !l.client_id);
 
-// Schvalování se rozjíždí od července 2026 (Tom 4.8.2026: nejdřív srpen, pak
-// "tak přidejme i červenec"). Starší výkazy se do fronty nedostanou vůbec — nemá
-// smysl zpětně odklikávat půl roku práce, kterou si stejně nikdo nepamatuje.
-const SCHVALOVANI_OD = "2026-07-01";
 
 // ── PEPA-DATA (15. 9. 2026) — Josefovy výkazy jsou INTERNÍ EVIDENCE. ────────────
 // Nikdy nevstupují do fakturace: Tom fakturuje sám svou sazbou nebo paušálem a
@@ -1590,17 +1634,6 @@ function computeNaCeste(invoices) {
   };
 }
 
-function StatusBadge({ inv }) {
-  const s = invoiceStatus(inv);
-  const map = {
-    uhrazena:     { cls: "b-ok",   label: "Uhrazena ✓" },
-    po_splatnosti:{ cls: "b-late", label: "Po splatnosti" },
-    vystavena:    { cls: "b-vy",   label: "Vystavena" },
-    pripravena:   { cls: "b-prep", label: "Připravena" },
-  };
-  const { cls, label } = map[s] || map.pripravena;
-  return <span className={`badge ${cls}`}>{label}</span>;
-}
 
 /* ─── INVOICE ISSUE MODAL ─── */
 /* ─── INVOICE DATE HELPERS ─── */
@@ -2264,7 +2297,7 @@ function InvoiceEditModal({ inv, clients, workEntries, onPreview, onCancel, onSa
       setSelectedIds(p => new Set([...p, entry.id]));
       setNewEntry(NEW_ENTRY_BLANK);
       setShowNewEntry(false);
-    } catch(e) { alert("Chyba: " + e.message); }
+    } catch(e) { mauxToast("Chyba: " + e.message); }
     finally { setSavingNew(false); }
   };
 
@@ -2382,7 +2415,7 @@ function InvoiceEditModal({ inv, clients, workEntries, onPreview, onCancel, onSa
       await onSaveEntry(updated);
       setLocalEntries(p => p.map(x => x.id === e.id ? updated : x));
       closeEdit(e.id);
-    } catch(err) { alert("Chyba: " + err.message); }
+    } catch(err) { mauxToast("Chyba: " + err.message); }
     finally { setSavingEntry(null); }
   };
 
@@ -2394,7 +2427,7 @@ function InvoiceEditModal({ inv, clients, workEntries, onPreview, onCancel, onSa
       setLocalEntries(p => p.filter(x => x.id !== id));
       setSelectedIds(p => { const n = new Set(p); n.delete(id); return n; });
       setConfirmDels(p => { const n = { ...p }; delete n[id]; return n; });
-    } catch(err) { alert("Chyba: " + err.message); }
+    } catch(err) { mauxToast("Chyba: " + err.message); }
     finally { setSavingEntry(null); }
   };
 
@@ -2439,8 +2472,6 @@ function InvoiceEditModal({ inv, clients, workEntries, onPreview, onCancel, onSa
   const stepStyle = { width: 28, height: 28, borderRadius: 6, border: "1px solid var(--line)", background: "#fff", cursor: "pointer", fontSize: 16, color: "var(--ink)", display:"flex", alignItems:"center", justifyContent:"center", userSelect:"none", flexShrink:0 };
 
   // ── filtered free entries ─────────────────────────────────────────
-
-
 
 
   return (
@@ -3457,6 +3488,19 @@ function Sidebar({ mod, setMod, onLogout, privacyMode, onTogglePrivacy, onNewEnt
   const [noteSavedAt, setNoteSavedAt] = useState(null);
   const [noteFocus, setNoteFocus] = useState(false);
   const noteSaveTimer = useRef(null);
+  const noteDbTimer = useRef(null);
+  // Zápisníček žije v Supabase (finance_items · fi_zapisnicek · category "config", stejný recept
+  // jako fi_asistent_sazba), aby přežil jiný Mac, telefon i promazaný prohlížeč (audit 15. 9. 2026).
+  // localStorage zůstává jen jako okamžitá cache: při startu se ukáže hned a DB ho pak přepíše.
+  useEffect(() => {
+    supabase.from("finance_items").select("notes").eq("id", ZAPISNICEK_ID).maybeSingle()
+      .then(({ data, error }) => {
+        if (error || !data) return;
+        const v = data.notes || "";
+        setNote(v); saveZapisnicek(v);
+      })
+      .catch(() => {});
+  }, []);
 
   // — Josef status: je v kanceláři? přijde zítra? —
   const [josefInOffice, setJosefInOffice] = useState(null); // null=loading, true/false
@@ -3483,6 +3527,11 @@ function Sidebar({ mod, setMod, onLogout, privacyMode, onTogglePrivacy, onNewEnt
       saveZapisnicek(v);
       setNoteSavedAt(new Date());
     }, 500);
+    if (noteDbTimer.current) clearTimeout(noteDbTimer.current);
+    noteDbTimer.current = setTimeout(() => {
+      upsertFinanceItem({ id: ZAPISNICEK_ID, category: "config", label: "Zápisníček", amount: 0, notes: v })
+        .catch(e => mauxToast("Chyba: zápisníček se neuložil do databáze — " + e.message));
+    }, 1200);
   };
   const toggleNote = () => {
     setNoteOpen(o => { const n = !o; saveZapisnicekOpen(n); return n; });
@@ -3878,350 +3927,17 @@ function LoanDashTile({ tracker, transactions, onAddTransaction, onToggleTransac
 }
 
 /* ─── DONUT CHART (simple) ─── */
-function DonutChart({ items, size = 160 }) {
-  const total = items.reduce((s, i) => s + Math.abs(i.amount || 0), 0);
-  if (total === 0) return null;
-  const colors = ["#3518A5", "#A08350", "#4A7C59", "#7C3AED", "#A8443C", "#0EA5E9"];
-  let angle = -Math.PI / 2;
-  const cx = size / 2, cy = size / 2, r = size * 0.38, ri = size * 0.22;
-  const segments = items.map((item, i) => {
-    const pct = Math.abs(item.amount) / total;
-    const sweep = pct * 2 * Math.PI;
-    const x1 = cx + r * Math.cos(angle), y1 = cy + r * Math.sin(angle);
-    angle += sweep;
-    const x2 = cx + r * Math.cos(angle), y2 = cy + r * Math.sin(angle);
-    const xi1 = cx + ri * Math.cos(angle - sweep), yi1 = cy + ri * Math.sin(angle - sweep);
-    const xi2 = cx + ri * Math.cos(angle), yi2 = cy + ri * Math.sin(angle);
-    const large = sweep > Math.PI ? 1 : 0;
-    return { path: `M ${x1} ${y1} A ${r} ${r} 0 ${large} 1 ${x2} ${y2} L ${xi2} ${yi2} A ${ri} ${ri} 0 ${large} 0 ${xi1} ${yi1} Z`, color: colors[i % colors.length], pct, item };
-  });
-  return (
-    <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
-      {segments.map((s, i) => <path key={i} d={s.path} fill={s.color} opacity={.9} />)}
-      <text x={cx} y={cy - 6} textAnchor="middle" fontSize={9} fill="var(--mut)" fontFamily="Inter,sans-serif">celkem</text>
-      <text x={cx} y={cx + 8} textAnchor="middle" fontSize={11} fill="var(--txt)" fontFamily="var(--num)" fontWeight="500">{Math.round(total / 1000)}k</text>
-    </svg>
-  );
-}
 
 /* ─── DOUBLE RING CHART — interactive, branded ─── */
-function DoubleRingChart({ outerItems, innerItems, size = 300 }) {
-  const cx = size/2, cy = size/2;
-  const OR = size*0.46, ORi = size*0.32; // outer ring (osobni majetek)
-  const IR = size*0.29, IRi = size*0.17; // inner ring (sporaci ucet)
-  
-  const arc = (outerR, innerR, startA, endA) => {
-    const x1=cx+outerR*Math.cos(startA), y1=cy+outerR*Math.sin(startA);
-    const x2=cx+outerR*Math.cos(endA),   y2=cy+outerR*Math.sin(endA);
-    const xi1=cx+innerR*Math.cos(endA),  yi1=cy+innerR*Math.sin(endA);
-    const xi2=cx+innerR*Math.cos(startA),yi2=cy+innerR*Math.sin(startA);
-    const lg=(endA-startA)>Math.PI?1:0;
-    return `M ${x1} ${y1} A ${outerR} ${outerR} 0 ${lg} 1 ${x2} ${y2} L ${xi1} ${yi1} A ${innerR} ${innerR} 0 ${lg} 0 ${xi2} ${yi2} Z`;
-  };
-  
-  const makeSegs = (items, outerR, innerR) => {
-    const total = items.reduce((s,i)=>s+Math.abs(i.amount||0), 0);
-    let a = -Math.PI/2;
-    return items.map(item => {
-      const sw = (Math.abs(item.amount||0)/total)*2*Math.PI;
-      const path = arc(outerR, innerR, a, a+sw);
-      a += sw;
-      return {...item, path};
-    });
-  };
-  
-  const oSegs = makeSegs(outerItems, OR, ORi);
-  const iSegs = makeSegs(innerItems, IR, IRi);
-  const oTotal = outerItems.reduce((s,i)=>s+Math.abs(i.amount||0),0);
-  const iTotal = innerItems.reduce((s,i)=>s+Math.abs(i.amount||0),0);
-  
-  return (
-    <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} style={{display:"block"}}>
-      <circle cx={cx} cy={cy} r={ORi-2} fill="var(--bg)" opacity={.4}/>
-      {oSegs.map((s,i)=><path key={i} d={s.path} fill={s.color} opacity={.92}/>)}
-      <circle cx={cx} cy={cy} r={IR-2} fill="var(--bg)" opacity={.5}/>
-      {iSegs.map((s,i)=><path key={i} d={s.path} fill={s.color} opacity={.88}/>)}
-      <circle cx={cx} cy={cy} r={IRi-1} fill="white"/>
-      <text x={cx} y={cy-14} textAnchor="middle" fontSize={8} fill="var(--mut)" fontFamily="Inter,sans-serif" letterSpacing="1">SPOŘÁK</text>
-      <text x={cx} y={cy} textAnchor="middle" fontSize={11} fill="#3518A5" fontFamily="var(--num)" fontWeight="500">{Math.round(iTotal/1000)}k</text>
-      <text x={cx} y={cy+14} textAnchor="middle" fontSize={8} fill="var(--mut)" fontFamily="Inter,sans-serif" letterSpacing="1">MAJETEK</text>
-      <text x={cx} y={cy+26} textAnchor="middle" fontSize={11} fill="#4A7C59" fontFamily="var(--num)" fontWeight="500">{Math.round(oTotal/1000)}k</text>
-    </svg>
-  );
-}
 
 /* ─── AUTO BADGE ─── */
-function AutoBadge() {
-  return <span style={{fontSize:7.5,background:"#3518A5",color:"#fff",padding:"2px 6px",borderRadius:4,fontWeight:700,letterSpacing:".08em",fontFamily:"Inter,sans-serif",flexShrink:0,display:"inline-flex",alignItems:"center",gap:3}}><span style={{opacity:.7}}>⚡</span>auto</span>;
-}
 
 /* ─── INTERACTIVE WEALTH DONUT ─── */
-function WealthDonut({ outerItems, innerItems, outerLabel, innerLabel, outerTotal, innerTotal }) {
-  const [hovered, setHovered] = useState(null);
-  const W = 760, H = 560, cx = W/2, cy = H/2;
-  const OR = 215, ORi = 155;   // outer = osobni majetek
-  const IR = 147, IRi = 96;    // inner = sporaci ucet
-
-  const arc = (outerR, innerR, startA, endA) => {
-    if (Math.abs(endA - startA) < 0.001) return "";
-    const x1=cx+outerR*Math.cos(startA), y1=cy+outerR*Math.sin(startA);
-    const x2=cx+outerR*Math.cos(endA),   y2=cy+outerR*Math.sin(endA);
-    const xi1=cx+innerR*Math.cos(endA),  yi1=cy+innerR*Math.sin(endA);
-    const xi2=cx+innerR*Math.cos(startA),yi2=cy+innerR*Math.sin(startA);
-    const lg=(endA-startA)>Math.PI?1:0;
-    return `M ${x1} ${y1} A ${outerR} ${outerR} 0 ${lg} 1 ${x2} ${y2} L ${xi1} ${yi1} A ${innerR} ${innerR} 0 ${lg} 0 ${xi2} ${yi2} Z`;
-  };
-
-  const makeSegs = (items, outerR, innerR, ring) => {
-    const total = items.reduce((s,i)=>s+Math.abs(i.amount||0),0);
-    let a = -Math.PI/2;
-    return items.filter(i=>Math.abs(i.amount||0)>0).map(item => {
-      const sw = (Math.abs(item.amount||0)/total)*2*Math.PI;
-      const midA = a + sw/2;
-      const seg = {...item, path: arc(outerR, innerR, a, a+sw), midA, ring, sw};
-      a += sw;
-      return seg;
-    });
-  };
-
-  const oSegs = makeSegs(outerItems, OR, ORi, "outer");
-  const iSegs = makeSegs(innerItems, IR, IRi, "inner");
-  const fmtN = n => maskNum(new Intl.NumberFormat("cs-CZ").format(Math.round(n)));
-
-  // Label line endpoint outside the ring
-  const labelAnchor = (seg, ringR, offset=28) => {
-    const r = ringR + offset;
-    return { x: cx + r*Math.cos(seg.midA), y: cy + r*Math.sin(seg.midA) };
-  };
-  const labelEnd = (seg, ringR, offset=52) => {
-    const r = ringR + offset;
-    const raw = { x: cx + r*Math.cos(seg.midA), y: cy + r*Math.sin(seg.midA) };
-    // Push further left/right for readability
-    const side = Math.cos(seg.midA) > 0 ? 1 : -1;
-    return { x: raw.x + side*20, y: raw.y, side };
-  };
-
-  const isHov = (s) => hovered && hovered.label === s.label && hovered.ring === s.ring;
-
-  return (
-    <div style={{width:"100%", background:"#fff", borderRadius:16, border:"1px solid var(--line)", padding:"12px 4px 12px", display:"flex", flexDirection:"column", alignItems:"center"}}>
-      <div style={{fontSize:9,letterSpacing:".3em",textTransform:"uppercase",color:"var(--mut)",fontWeight:600,marginBottom:12,alignSelf:"flex-start",paddingLeft:16}}>
-        Majetek & Spořák · najeď pro detail
-      </div>
-      <svg width="100%" viewBox={`0 0 ${W} ${H}`} style={{overflow:"visible"}}>
-        <defs>
-          <filter id="segGlow" x="-20%" y="-20%" width="140%" height="140%">
-            <feGaussianBlur stdDeviation="4" result="blur"/>
-            <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
-          </filter>
-        </defs>
-
-        {/* Outer ring — OSOBNÍ MAJETEK */}
-        <circle cx={cx} cy={cy} r={ORi-2} fill="var(--bg)" opacity={.6}/>
-        {oSegs.map((s,i)=>(
-          <path key={i} d={s.path} fill={s.color}
-            opacity={hovered && !isHov(s) ? 0.45 : 0.95}
-            style={{cursor:"pointer",transition:"opacity .15s",filter:isHov(s)?"url(#segGlow)":"none",strokeWidth:isHov(s)?1.5:0,stroke:"#fff"}}
-            onMouseEnter={()=>setHovered({ring:"outer",label:s.label,amount:s.amount,color:s.color,pct:Math.round(s.sw/(2*Math.PI)*100)})}
-            onMouseLeave={()=>setHovered(null)}
-          />
-        ))}
-
-        {/* Inner ring — SPOŘÍCÍ ÚČET */}
-        <circle cx={cx} cy={cy} r={IR-2} fill="var(--bg)" opacity={.6}/>
-        {iSegs.map((s,i)=>(
-          <path key={i} d={s.path} fill={s.color}
-            opacity={hovered && !isHov(s) ? 0.45 : 0.90}
-            style={{cursor:"pointer",transition:"opacity .15s",filter:isHov(s)?"url(#segGlow)":"none",strokeWidth:isHov(s)?1.5:0,stroke:"#fff"}}
-            onMouseEnter={()=>setHovered({ring:"inner",label:s.label,amount:s.amount,color:s.color,pct:Math.round(s.sw/(2*Math.PI)*100)})}
-            onMouseLeave={()=>setHovered(null)}
-          />
-        ))}
-
-        {/* Center hole & text */}
-        <circle cx={cx} cy={cy} r={IRi-1} fill="white"/>
-        {hovered ? (
-          <g>
-            <text x={cx} y={cy-18} textAnchor="middle" fontSize={8} fill={hovered.color} fontFamily="Inter,sans-serif" fontWeight="700" letterSpacing="1">{hovered.ring==="outer"?"MAJETEK":"SPOŘÁK"}</text>
-            <text x={cx} y={cy-4} textAnchor="middle" fontSize={9} fill={hovered.color} fontFamily="Inter,sans-serif" fontWeight="500">{hovered.label}</text>
-            <text x={cx} y={cy+12} textAnchor="middle" fontSize={14} fill={hovered.color} fontFamily="var(--num)" fontWeight="600">{fmtN(hovered.amount)}</text>
-            <text x={cx} y={cy+26} textAnchor="middle" fontSize={9} fill={hovered.color} fontFamily="Inter" opacity={.7}>{hovered.pct} %</text>
-          </g>
-        ) : (
-          <g>
-            <text x={cx} y={cy-20} textAnchor="middle" fontSize={7.5} fill="var(--mut)" fontFamily="Inter" letterSpacing="1.5">SPOŘÁK</text>
-            <text x={cx} y={cy-6} textAnchor="middle" fontSize={13} fill="#3518A5" fontFamily="var(--num)" fontWeight="500">{fmtN(innerTotal)} Kč</text>
-            <text x={cx} y={cy+8} textAnchor="middle" fontSize={7.5} fill="var(--mut)" fontFamily="Inter" letterSpacing="1.5">MAJETEK</text>
-            <text x={cx} y={cy+22} textAnchor="middle" fontSize={13} fill="#4A7C59" fontFamily="var(--num)" fontWeight="500">{fmtN(outerTotal)} Kč</text>
-          </g>
-        )}
-
-        {/* Label lines + text for outer ring (big segments only) */}
-        {oSegs.filter(s=>s.sw>0.08).map((s,i)=>{
-          const a1 = labelAnchor(s, OR, 8);
-          const a2 = labelEnd(s, OR, 48);
-          const right = a2.side > 0;
-          return (
-            <g key={i} style={{pointerEvents:"none",opacity:hovered&&!isHov(s)?0.3:1,transition:"opacity .15s"}}>
-              <line x1={a1.x} y1={a1.y} x2={a2.x} y2={a2.y} stroke={s.color} strokeWidth={1.2} opacity={.7}/>
-              <text x={a2.x+(right?5:-5)} y={a2.y-5} textAnchor={right?"start":"end"} fontSize={11} fill={s.color} fontFamily="Fraunces,Georgia,serif" fontWeight="400">{s.label}</text>
-              <text x={a2.x+(right?5:-5)} y={a2.y+8} textAnchor={right?"start":"end"} fontSize={10.5} fill={s.color} fontFamily="var(--num)" fontWeight="500">{fmtN(s.amount)} Kč</text>
-            </g>
-          );
-        })}
-
-        {/* Label lines + text for inner ring (big segments only) */}
-        {iSegs.filter(s=>s.sw>0.10).map((s,i)=>{
-          const a1 = { x: cx+(IR-4)*Math.cos(s.midA), y: cy+(IR-4)*Math.sin(s.midA) };
-          const a2 = { x: cx+(IRi-14)*Math.cos(s.midA), y: cy+(IRi-14)*Math.sin(s.midA) };
-          return (
-            <g key={i} style={{pointerEvents:"none",opacity:hovered&&!isHov(s)?0.3:1,transition:"opacity .15s"}}>
-              <text x={a2.x} y={a2.y} textAnchor="middle" fontSize={8} fill="#fff" fontFamily="Inter,sans-serif" fontWeight="700" opacity={.9}>{s.label?.split(" ")[0]}</text>
-            </g>
-          );
-        })}
-
-        {/* Ring labels */}
-        <text x={cx-OR-8} y={cy} textAnchor="end" fontSize={8} fill="var(--mut)" fontFamily="Inter" letterSpacing="1" opacity={.6}>MAJETEK</text>
-        <text x={cx+OR+8} y={cy} textAnchor="start" fontSize={8} fill="var(--mut)" fontFamily="Inter" letterSpacing="1" opacity={.6}>SPOŘÁK</text>
-      </svg>
-
-      {/* Compact legend */}
-      <div style={{display:"flex",gap:4,flexWrap:"wrap",justifyContent:"center",maxWidth:520,marginTop:4,padding:"0 16px"}}>
-        {[...oSegs.map(s=>({...s,ring:"outer"})),...iSegs.map(s=>({...s,ring:"inner"}))].map((s,i)=>(
-          <div key={i}
-            style={{display:"flex",alignItems:"center",gap:5,padding:"3px 10px",borderRadius:20,border:`1px solid ${isHov(s)?s.color:"transparent"}`,background:isHov(s)?s.color+"15":"var(--bg)",cursor:"pointer",transition:".12s"}}
-            onMouseEnter={()=>setHovered({ring:s.ring,label:s.label,amount:s.amount,color:s.color,pct:Math.round(s.sw/(2*Math.PI)*100)})}
-            onMouseLeave={()=>setHovered(null)}>
-            <div style={{width:8,height:8,borderRadius:2,background:s.color,flexShrink:0}}/>
-            <span style={{fontSize:12,color:isHov(s)?s.color:"var(--txt)",fontWeight:isHov(s)?600:500,whiteSpace:"nowrap",letterSpacing:".01em"}}>{s.label}</span>
-            <span style={{fontSize:11,color:isHov(s)?s.color:"var(--mut)",fontFamily:"Inter,ui-sans-serif,system-ui,sans-serif",fontVariantNumeric:"tabular-nums",fontWeight:600}}>{fmtN(s.amount)}</span>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
 
 
 /* ─── INLINE EDITABLE ROW ─── */
-function EditRow({ item, onSave, onDelete, valuePrefix = "", valueSuffix = " Kč", isCalculated = false, calculatedValue = null }) {
-  const [editing, setEditing] = useState(false);
-  const [val, setVal] = useState(Math.abs(item?.amount || 0));
-  const displayVal = isCalculated ? calculatedValue : Math.abs(item?.amount || 0);
-
-  return (
-    <div style={{ display: "flex", alignItems: "center", padding: "8px 0", borderBottom: "1px solid var(--line)", gap: 8, cursor: isCalculated ? "default" : "pointer" }}
-      onClick={() => !isCalculated && !editing && setEditing(true)}>
-      <div style={{ flex: 1, fontSize: 12.5, color: "var(--txt)" }}>{item?.label}</div>
-      {editing ? (
-        <>
-          <input type="number" value={val} onChange={e => setVal(e.target.value)} autoFocus
-            style={{ width: 100, font: "inherit", fontSize: 12.5, padding: "3px 7px", border: "1px solid var(--ink)", borderRadius: 6, outline: "none", textAlign: "right" }}
-            onKeyDown={e => { if(e.key==="Enter") { onSave({...item, amount: Number(val)}); setEditing(false); } if(e.key==="Escape") setEditing(false); }} />
-          <button onClick={e => { e.stopPropagation(); onSave({...item, amount: Number(val)}); setEditing(false); }} style={{ background: "var(--ink)", color: "#fff", border: "none", borderRadius: 5, padding: "3px 8px", fontSize: 11, cursor: "pointer" }}>✓</button>
-        </>
-      ) : (
-        <div style={{ fontSize: 13, fontFamily:"Inter,ui-sans-serif,system-ui,sans-serif",fontVariantNumeric:"tabular-nums", fontWeight:600, color: isCalculated ? "var(--mut)" : "var(--gold)", whiteSpace: "nowrap" }}>
-          {isCalculated ? <span style={{ fontSize: 11, color: "#4A7C59" }}>auto</span> : ""} {valuePrefix}{maskNum(new Intl.NumberFormat("cs-CZ").format(Math.round(displayVal)))}{valueSuffix}
-        </div>
-      )}
-      {!isCalculated && !editing && <span style={{ fontSize: 9, color: "var(--mut)", opacity: .4 }}>✎</span>}
-    </div>
-  );
-}
 
 /* ─── FINANCE ITEM EDITOR ─── */
-function FinanceSection({ title, items, category, onSave, onDelete, accent, autoItems }) {
-  const isIncome = category === "prijem";
-  const [editing, setEditing] = useState(null);
-  const [editVal, setEditVal] = useState({ label: "", amount: "" });
-  const [adding, setAdding] = useState(false);
-  const [newItem, setNewItem] = useState({ label: "", amount: "" });
-
-  const manualTotal = items.filter(i => i.notes !== "TBD").reduce((s, i) => s + Math.abs(i.amount || 0), 0);
-  const autoTotal = (autoItems||[]).reduce((s,i) => s+i.amount, 0);
-  const total = manualTotal + autoTotal;
-  const amtColor = isIncome ? "#4A7C59" : "#A8443C";
-  const signStr = isIncome ? "+" : "−";
-
-  const startEdit = (item) => { setEditing(item.id); setEditVal({ label: item.label, amount: Math.abs(item.amount) }); };
-  const saveEdit = async (item) => {
-    const sign = isIncome ? 1 : -1;
-    await onSave({ ...item, label: editVal.label, amount: sign * Math.abs(Number(editVal.amount) || 0) });
-    setEditing(null);
-  };
-  const addNew = async () => {
-    if (!newItem.label || !newItem.amount) return;
-    const sign = isIncome ? 1 : -1;
-    await onSave({ id: "fi_" + Math.random().toString(36).slice(2,8), category, label: newItem.label, amount: sign * Math.abs(Number(newItem.amount)), sort_order: items.length + 1 });
-    setNewItem({ label: "", amount: "" }); setAdding(false);
-  };
-
-  return (
-    <div style={{ background: "#fff", border: "1px solid var(--line)", borderRadius: 14, overflow: "hidden" }}>
-      <div style={{ padding: "16px 20px 12px", borderBottom: "1px solid var(--line)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-        <div>
-          <div style={{ fontSize: 9, letterSpacing: ".3em", textTransform: "uppercase", color: accent || "var(--mut)", fontWeight: 600 }}>{title}</div>
-          <div style={{ fontFamily:"Inter,ui-sans-serif,system-ui,sans-serif",fontVariantNumeric:"tabular-nums", fontSize: 22, fontWeight:600, color: "var(--txt)", marginTop: 2 }}>
-            {isIncome ? "+" : ""}{fmtKc(total)}
-            <span style={{ fontSize: 11, color: "var(--mut)", fontFamily: "Inter, sans-serif", marginLeft: 6, fontWeight: 400 }}>/ měsíc</span>
-          </div>
-        </div>
-        <button onClick={() => setAdding(true)} style={{ background: "none", border: "1px solid var(--line2)", borderRadius: 7, padding: "5px 12px", fontSize: 12, color: "var(--ink)", cursor: "pointer", fontFamily: "inherit" }}>+ Přidat</button>
-      </div>
-      <div>
-        {(autoItems||[]).map((item, i) => (
-          <div key={i} style={{ display: "flex", alignItems: "center", padding: "7px 14px", borderBottom: "1px solid var(--line)", gap: 10 }}>
-            <div style={{ flex: 1, fontSize: 12.5, color: "var(--txt)" }}>{item.label}</div>
-            <span style={{ fontSize: 7, background: "#EEF2FF", color: "#3730A3", padding: "1px 4px", borderRadius: 3, fontWeight: 700 }}>auto</span>
-            <div style={{ fontSize: 13, fontFamily: "var(--mono)", color: amtColor }}>+{maskNum(item.amount.toLocaleString("cs-CZ"))} Kč</div>
-          </div>
-        ))}
-        {items.map(item => item.notes === "TBD" ? (
-          <div key={item.id} style={{ display: "flex", alignItems: "center", padding: "7px 14px", borderBottom: "1px solid var(--line)", gap: 10 }}>
-            <div style={{ flex: 1, fontSize: 12.5, color: "var(--mut)", fontStyle: "italic" }}>{item.label}</div>
-            <span style={{ fontSize: 10, color: "var(--mut)", background: "#F5F5F5", padding: "2px 8px", borderRadius: 4 }}>k doplnění</span>
-          </div>
-        ) : (
-          <div key={item.id} style={{ display: "flex", alignItems: "center", padding: "10px 20px", borderBottom: "1px solid var(--line)", gap: 12, cursor: "pointer" }}
-            onClick={() => startEdit(item)}>
-            {editing === item.id ? (
-              <>
-                <input value={editVal.label} onChange={e => setEditVal(p => ({ ...p, label: e.target.value }))}
-                  style={{ flex: 1, font: "inherit", fontSize: 13, padding: "5px 8px", border: "1px solid var(--ink)", borderRadius: 6, outline: "none" }}
-                  onClick={e => e.stopPropagation()} autoFocus />
-                <input type="number" value={editVal.amount} onChange={e => setEditVal(p => ({ ...p, amount: e.target.value }))}
-                  style={{ width: 90, font: "inherit", fontSize: 13, padding: "5px 8px", border: "1px solid var(--ink)", borderRadius: 6, outline: "none", textAlign: "right" }}
-                  onClick={e => e.stopPropagation()} />
-                <span style={{ fontSize: 11, color: "var(--mut)" }}>Kč</span>
-                <button onClick={e => { e.stopPropagation(); saveEdit(item); }} style={{ background: "var(--ink)", color: "#fff", border: "none", borderRadius: 6, padding: "5px 10px", fontSize: 11, cursor: "pointer" }}>✓</button>
-                <button onClick={e => { e.stopPropagation(); onDelete(item.id); }} style={{ background: "none", border: "none", color: "#A8443C", fontSize: 14, cursor: "pointer", padding: "0 4px" }}>✕</button>
-              </>
-            ) : (
-              <>
-                <div style={{ flex: 1, fontSize: 13, color: "var(--txt)" }}>{item.label}</div>
-                <div style={{ fontSize: 13, fontFamily: "var(--mono)", color: amtColor }}>{signStr}{maskNum(Math.abs(item.amount).toLocaleString("cs-CZ"))} Kč</div>
-                <div style={{ fontSize: 10, color: "var(--mut)", opacity: .5 }}>✎</div>
-              </>
-            )}
-          </div>
-        ))}
-        {adding && (
-          <div style={{ display: "flex", alignItems: "center", padding: "10px 20px", gap: 10, background: "#F7F5FF" }}>
-            <input placeholder="Název..." value={newItem.label} onChange={e => setNewItem(p => ({ ...p, label: e.target.value }))}
-              style={{ flex: 1, font: "inherit", fontSize: 13, padding: "5px 8px", border: "1px solid var(--line2)", borderRadius: 6, outline: "none" }} autoFocus />
-            <input type="number" placeholder="0" value={newItem.amount} onChange={e => setNewItem(p => ({ ...p, amount: e.target.value }))}
-              style={{ width: 80, font: "inherit", fontSize: 13, padding: "5px 8px", border: "1px solid var(--line2)", borderRadius: 6, outline: "none", textAlign: "right" }} />
-            <span style={{ fontSize: 11, color: "var(--mut)" }}>Kč</span>
-            <button onClick={addNew} style={{ background: "var(--ink)", color: "#fff", border: "none", borderRadius: 6, padding: "5px 10px", fontSize: 11, cursor: "pointer" }}>Přidat</button>
-            <button onClick={() => setAdding(false)} style={{ background: "none", border: "none", color: "var(--mut)", fontSize: 13, cursor: "pointer" }}>✕</button>
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
 
 /* ─── DPFO TRACKER — dvě sekce: měsíční spoření + platby FÚ (redesign 3.7.2026) ─── */
 function DpfoTracker({ months, onToggle, onAdd, onDelete, year }) {
@@ -4381,153 +4097,6 @@ function DpfoTracker({ months, onToggle, onAdd, onDelete, year }) {
 }
 
 /* ─── LOAN TRACKER ─── */
-function LoanTrackerCard({ tracker, transactions, onUpdateTracker, onAddTransaction, onToggleTransaction, onDeleteTransaction }) {
-  const [showLog, setShowLog] = useState(false);
-  const [addForm, setAddForm] = useState(false);
-  const [newTx, setNewTx] = useState({ date: today(), amount: -(tracker?.monthly_payment || 0), description: "Splátka", is_done: false });
-  const [editAmount, setEditAmount] = useState(false);
-
-  const isInvestment = tracker?.type === "investment";
-
-  // Calculate running balance with cumulative sum
-  const txWithBalance = useMemo(() => {
-    let bal = 0;
-    return [...transactions].sort((a,b) => a.transaction_date.localeCompare(b.transaction_date)).map(tx => {
-      bal += tx.amount;
-      return { ...tx, balance: bal };
-    });
-  }, [transactions]);
-
-  const currentBalance = txWithBalance[txWithBalance.length - 1]?.balance || 0;
-  const totalPaid = transactions.filter(t => t.amount < 0 && t.is_done).reduce((s,t) => s + Math.abs(t.amount), 0);
-  const original = tracker?.original_amount || 0;
-  const remaining = isInvestment ? currentBalance : (original - totalPaid);
-  const monthlyPmt = tracker?.monthly_payment || 0;
-  const monthsLeft = monthlyPmt > 0 && remaining > 0 ? Math.ceil(remaining / monthlyPmt) : 0;
-  const finalDate = monthsLeft > 0 ? new Date(Date.now() + monthsLeft * 30 * 24 * 3600 * 1000).toLocaleDateString("cs-CZ", { month: "long", year: "numeric" }) : "—";
-
-  const colorAccent = isInvestment ? "#4A7C59" : "#A8443C";
-
-  return (
-    <div style={{ background: "#fff", border: `1px solid ${isInvestment ? "#BBF7D0" : "var(--line)"}`, borderRadius: 14, overflow: "hidden" }}>
-      <div style={{ padding: "16px 20px", borderBottom: "1px solid var(--line)" }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 8 }}>
-          <div>
-            <div style={{ fontSize: 9, letterSpacing: ".28em", textTransform: "uppercase", fontWeight: 600, color: colorAccent, marginBottom: 4 }}>
-              {isInvestment ? "Investiční úvěr" : "Osobní dluh"} · {tracker?.name}
-            </div>
-            {isInvestment ? (
-              <div style={{ fontFamily:"Inter,ui-sans-serif,system-ui,sans-serif",fontVariantNumeric:"tabular-nums", fontSize: 18, fontWeight:600, color: "#4A7C59" }}>
-                {fmtKc(Math.max(currentBalance, 0))} <span style={{ fontSize: 11, color: "var(--mut)", fontFamily: "Inter" }}>zbývá v kase</span>
-              </div>
-            ) : (
-              <div>
-                {editAmount ? (
-                  <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-                    <input type="number" defaultValue={original} autoFocus
-                      style={{ width: 120, font: "inherit", fontSize: 15, padding: "4px 8px", border: "1px solid var(--ink)", borderRadius: 6, outline: "none" }}
-                      onKeyDown={e => { if(e.key==="Enter") { onUpdateTracker({...tracker, original_amount: Number(e.target.value)}); setEditAmount(false); } }}
-                    />
-                    <span style={{ fontSize: 11, color: "var(--mut)" }}>Kč původní dluh</span>
-                  </div>
-                ) : (
-                  <div style={{ fontFamily:"Inter,ui-sans-serif,system-ui,sans-serif",fontVariantNumeric:"tabular-nums", fontSize: 18, fontWeight:600, color: "#A8443C", cursor: "pointer" }}
-                    onClick={() => setEditAmount(true)}>
-                    {original === 0 ? <span style={{ fontSize: 13, color: "var(--mut)" }}>Klikni — zadej původní částku</span> : fmtKc(remaining)}
-                    {original > 0 && <span style={{ fontSize: 11, color: "var(--mut)", fontFamily: "Inter", marginLeft: 6 }}>zbývá · původně {fmtKc(original)}</span>}
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-          <div style={{ textAlign: "right", fontSize: 11, color: "var(--mut)", lineHeight: 1.7 }}>
-            {isInvestment ? (
-              <>Načerpáno: <strong>{fmtKc(transactions.filter(t=>t.amount>0).reduce((s,t)=>s+t.amount,0))}</strong><br/>
-              Zaplaceno: <strong>{fmtKc(totalPaid)}</strong><br/>
-              <span style={{ color: "#4A7C59" }}>Projekt: ~1M profit 🎯</span></>
-            ) : (
-              <>Splaceno: <strong>{fmtKc(totalPaid)}</strong><br/>
-              {monthsLeft > 0 && <><strong>{monthsLeft}</strong> splátek · {finalDate}</>}</>
-            )}
-          </div>
-        </div>
-        {!isInvestment && original > 0 && (
-          <div style={{ height: 4, background: "#FEE2E2", borderRadius: 2, marginTop: 8 }}>
-            <div style={{ height: "100%", width: `${Math.min((totalPaid/original)*100,100)}%`, background: "#4A7C59", borderRadius: 2, transition: ".3s" }} />
-          </div>
-        )}
-      </div>
-
-      {/* Actions */}
-      <div style={{ padding: "10px 16px", background: "#FAFAF9", borderBottom: "1px solid var(--line)", display: "flex", gap: 8, alignItems: "center" }}>
-        <button className="btn pri" style={{ fontSize: 11, padding: "5px 12px" }} onClick={() => { setNewTx({ date: today(), amount: -monthlyPmt, description: "Splátka", is_done: false }); setAddForm(true); }}>
-          + Přidat pohyb
-        </button>
-        <button className="btn gho" style={{ fontSize: 11 }} onClick={() => setShowLog(p => !p)}>
-          {showLog ? "Skrýt log" : `Log pohybů (${transactions.length})`}
-        </button>
-      </div>
-
-      {/* Add form */}
-      {addForm && (
-        <div style={{ padding: "12px 16px", background: "#F7F5FF", borderBottom: "1px solid var(--line)", display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-          <input type="date" value={newTx.date} onChange={e => setNewTx(p => ({...p, date: e.target.value}))}
-            style={{ font: "inherit", fontSize: 12.5, padding: "5px 8px", border: "1px solid var(--line2)", borderRadius: 7, outline: "none" }} />
-          <input type="number" value={newTx.amount} onChange={e => setNewTx(p => ({...p, amount: Number(e.target.value)}))}
-            style={{ width: 110, font: "inherit", fontSize: 12.5, padding: "5px 8px", border: "1px solid var(--line2)", borderRadius: 7, outline: "none" }}
-            placeholder="−13 000" />
-          <input value={newTx.description} onChange={e => setNewTx(p => ({...p, description: e.target.value}))}
-            style={{ flex: 1, minWidth: 120, font: "inherit", fontSize: 12.5, padding: "5px 8px", border: "1px solid var(--line2)", borderRadius: 7, outline: "none" }}
-            placeholder="Popis..." />
-          <label style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 12, color: "var(--mut)", cursor: "pointer" }}>
-            <input type="checkbox" checked={newTx.is_done} onChange={e => setNewTx(p => ({...p, is_done: e.target.checked}))} />Provedeno
-          </label>
-          <button className="btn pri" style={{ fontSize: 11, padding: "5px 12px" }}
-            onClick={() => { onAddTransaction({ id: uid(), loan_id: tracker.id, transaction_date: newTx.date, amount: newTx.amount, description: newTx.description, is_done: newTx.is_done }); setAddForm(false); }}>
-            Uložit
-          </button>
-          <button className="btn gho" style={{ fontSize: 11 }} onClick={() => setAddForm(false)}>✕</button>
-        </div>
-      )}
-
-      {/* Transaction log */}
-      {showLog && (
-        <div style={{ maxHeight: 320, overflowY: "auto" }}>
-          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
-            <thead><tr style={{ background: "#F5F3FF", borderBottom: "1px solid var(--line)" }}>
-              <th style={{ padding: "8px 12px", textAlign: "left", fontSize: 9, letterSpacing: ".1em", textTransform: "uppercase", color: "var(--mut)", fontWeight: 500 }}>Datum</th>
-              <th style={{ padding: "8px 12px", textAlign: "left", fontSize: 9, letterSpacing: ".1em", textTransform: "uppercase", color: "var(--mut)", fontWeight: 500 }}>Popis</th>
-              <th style={{ padding: "8px 12px", textAlign: "right", fontSize: 9, letterSpacing: ".1em", textTransform: "uppercase", color: "var(--mut)", fontWeight: 500 }}>Částka</th>
-              <th style={{ padding: "8px 12px", textAlign: "right", fontSize: 9, letterSpacing: ".1em", textTransform: "uppercase", color: "var(--mut)", fontWeight: 500 }}>Zůstatek</th>
-              <th style={{ padding: "8px 12px", textAlign: "center", fontSize: 9, letterSpacing: ".1em", textTransform: "uppercase", color: "var(--mut)", fontWeight: 500 }}>✓</th>
-              <th style={{ padding: "8px 4px" }}></th>
-            </tr></thead>
-            <tbody>
-              {txWithBalance.map(tx => (
-                <tr key={tx.id} style={{ borderBottom: "1px solid var(--line)", opacity: tx.is_done ? 1 : .7 }}>
-                  <td style={{ padding: "9px 12px", color: "var(--mut)", whiteSpace: "nowrap" }}>{fmtDate(tx.transaction_date)}</td>
-                  <td style={{ padding: "9px 12px", color: "var(--txt)" }}>{tx.description}</td>
-                  <td style={{ padding: "9px 12px", textAlign: "right", fontFamily:"Inter,ui-sans-serif,system-ui,sans-serif",fontVariantNumeric:"tabular-nums", fontWeight:600, color: tx.amount < 0 ? "#A8443C" : "#4A7C59" }}>
-                    {tx.amount > 0 ? "+" : ""}{fmtKc(tx.amount)}
-                  </td>
-                  <td style={{ padding: "9px 12px", textAlign: "right", fontFamily:"Inter,ui-sans-serif,system-ui,sans-serif",fontVariantNumeric:"tabular-nums", fontWeight:600, color: "var(--txt)" }}>{fmtKc(tx.balance)}</td>
-                  <td style={{ padding: "9px 12px", textAlign: "center" }}>
-                    <span style={{ cursor: "pointer", fontSize: 14 }} onClick={() => onToggleTransaction({...tx, is_done: !tx.is_done})}>
-                      {tx.is_done ? "✅" : "⬜"}
-                    </span>
-                  </td>
-                  <td style={{ padding: "9px 4px", textAlign: "center" }}>
-                    <button onClick={() => onDeleteTransaction(tx.id)} style={{ background: "none", border: "none", color: "#DDD", cursor: "pointer", fontSize: 12 }}>✕</button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-    </div>
-  );
-}
 
 
 /* ─── ÚSCHOVY (Escrow) MODULE ─── */
@@ -4769,24 +4338,6 @@ function _dailyNetIsAuto(escrows, date) {
   });
 }
 
-// — Zachováme starší helpers pro EscrowCard legacy tabulku a EscrowInsights —
-function _trancheEnd(tranche, escrow) {
-  if (tranche.is_paid && tranche.paid_date) return new Date(tranche.paid_date);
-  if (escrow.status === 'ukonceno' || escrow.status === 'ukončeno') {
-    if (escrow.date_paid) return new Date(escrow.date_paid);
-  }
-  if (escrow.date_plomba_end && escrow.status === 'čeká_na_plombu') {
-    return new Date(escrow.date_plomba_end);
-  }
-  return new Date(9999, 0, 1);
-}
-function _escrowFrom(e) {
-  const d = new Date(e.date_received); d.setDate(d.getDate() + 1); return d;
-}
-function _escrowTranches(e) {
-  const opr = (e.escrow_tranches || []).filter(t => t.party_type === 'oprávněný');
-  return opr.length > 0 ? opr : (e.escrow_tranches || []).filter(t => t.party_type === 'složitel');
-}
 // — Měsíční KPI funkce (používají nový balance-interval engine) ──────────────
 
 // Čistý úrok k 1. příštího měsíce — zahrne:
@@ -7291,180 +6842,8 @@ function EscrowList({ escrows, onNew, onEdit, onDelete, onMarkPaid, onPayment, o
 
 /* ─── MINI SPOŘÁK BAR (kompakt pro dashboard) ─── */
 /* ─── LIQUID TANK (interaktivní "dolévající se" vizualizace k cíli — V.03) ─── */
-function LiquidTank({ pct, color, value, goal, onSetGoal, size = 46 }) {
-  const p = Math.max(0, Math.min(pct, 1));
-  const W = Math.round(size * 0.62);
-  const H = size;
-  const [editGoal, setEditGoal] = useState(false);
-  const [goalInput, setGoalInput] = useState(goal);
-  const full = p >= 1;
-
-  const commitGoal = () => { if (onSetGoal) onSetGoal(Math.max(0, Math.round(goalInput||0))); setEditGoal(false); };
-  const openEdit = (e) => { if (!onSetGoal) return; e.stopPropagation(); setGoalInput(goal); setEditGoal(true); };
-
-  return (
-    <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:4}}>
-      <style>{`
-        @keyframes mauxLiquidShimmer { 0% { transform: translateX(-60%); opacity:0; } 18% { opacity:.85; } 50% { transform: translateX(55%); opacity:.85; } 75% { opacity:0; } 100% { transform: translateX(55%); opacity:0; } }
-        @keyframes mauxLiquidGlow { 0%,100% { box-shadow: 0 0 0 0 rgba(139,92,246,0); } 50% { box-shadow: 0 0 10px 1px rgba(139,92,246,.45); } }
-        .maux-liquid-shimmer { animation: mauxLiquidShimmer 3.4s ease-in-out infinite; }
-        .maux-liquid-full { animation: mauxLiquidGlow 2.2s ease-in-out infinite; }
-      `}</style>
-      <div
-        title={`${Math.round(p*100)} % cíle · ${fmtKc(value)} z ${fmtKc(goal)} Kč${onSetGoal ? " · klikni pro úpravu cíle" : ""}`}
-        className={full ? "maux-liquid-full" : ""}
-        style={{position:"relative",width:W,height:H,borderRadius:8,border:`1.5px solid ${color}`,overflow:"hidden",background:"#F8FAFC",cursor:onSetGoal?"pointer":"default",flexShrink:0}}
-        onClick={openEdit}
-      >
-        {/* hladina kapaliny — stoupá k cíli */}
-        <div style={{position:"absolute",left:0,right:0,bottom:0,height:`${p*100}%`,background:`linear-gradient(180deg, ${color}BB 0%, ${color} 88%)`,transition:"height 1.1s cubic-bezier(.4,0,.2,1)",overflow:"hidden"}}>
-          {/* jemná lesklá vlna probublávající přes hladinu */}
-          <div className="maux-liquid-shimmer" style={{position:"absolute",top:1,left:"-40%",width:"170%",height:5,borderRadius:3,background:"linear-gradient(90deg, transparent, rgba(255,255,255,.6), transparent)"}} />
-        </div>
-        {/* % popisek */}
-        <div style={{position:"absolute",inset:0,display:"flex",alignItems:"center",justifyContent:"center"}}>
-          <span style={{fontSize:10,fontWeight:800,color: p > 0.5 ? "#fff" : color, textShadow: p > 0.5 ? "0 1px 3px rgba(0,0,0,.3)" : "none"}}>
-            {full ? "🎉" : `${Math.round(p*100)}%`}
-          </span>
-        </div>
-      </div>
-      {editGoal ? (
-        <div style={{display:"flex",alignItems:"center",gap:3}} onClick={e=>e.stopPropagation()}>
-          <input type="number" value={goalInput} autoFocus onChange={e=>setGoalInput(Number(e.target.value))}
-            onKeyDown={e=>{ if(e.key==="Enter") commitGoal(); if(e.key==="Escape") setEditGoal(false); }}
-            style={{width:70,fontSize:10,padding:"2px 5px",border:`1.5px solid ${color}`,borderRadius:5,outline:"none"}} />
-          <button onClick={commitGoal} style={{background:color,color:"#fff",border:"none",borderRadius:5,padding:"2px 6px",fontSize:10,cursor:"pointer",fontWeight:700}}>✓</button>
-        </div>
-      ) : (
-        <span onClick={openEdit} style={{fontSize:8.5,color:"var(--mut)",cursor:onSetGoal?"pointer":"default"}}>
-          cíl {fmtKc(goal)}{onSetGoal ? " ✎" : ""}
-        </span>
-      )}
-    </div>
-  );
-}
 
 /* ─── MAJETEK BAR (osobní majetek — dedikovaný řádek) ─── */
-function MajetekBar({ financeItems, onSaveFinance, invoices, dpfoMonths, loanTransactions, escrows }) {
-  const akcieItem    = (financeItems||[]).find(i => i.id === "fi_ma_01");
-  const stavebkoItem = (financeItems||[]).find(i => i.id === "fi_ma_02");
-  const extraItems   = (financeItems||[]).filter(i => i.category === "majetek" && !["fi_ma_01","fi_ma_02","fi_ma_03"].includes(i.id));
-  const akcie    = akcieItem?.amount    || 0;
-  const stavebko = stavebkoItem?.amount || 0;
-
-  // Firemní rezerva = vše co zbyde na spořáku po odečtení obálek (= volné) — sdílený výpočet (computeFirmaRezerva)
-  const { firmaRez: firmaRezM, planKap: reserveGoal, planKapItem: reserveGoalItem } =
-    computeFirmaRezerva(financeItems, invoices, dpfoMonths, loanTransactions, escrows);
-  const firmaKap = Math.max(firmaRezM, 0);
-  const setReserveGoal = (val) => onSaveFinance({ ...(reserveGoalItem||{category:"plan",label:"Cíl — kapitál"}), id: "fi_plan_kapital", amount: val });
-
-  const total = akcie + stavebko + firmaKap + extraItems.reduce((s,i) => s+(i.amount||0), 0);
-
-  const [editId,    setEditId]    = useState(null);   // which item is being edited
-  const [editVal,   setEditVal]   = useState(0);
-  const [adding,    setAdding]    = useState(false);
-  const [newLabel,  setNewLabel]  = useState("");
-  const [newAmount, setNewAmount] = useState(0);
-
-  const saveEdit = (item) => { onSaveFinance({...item, amount: editVal}); setEditId(null); };
-  const saveNew  = () => {
-    if (!newLabel.trim()) return;
-    onSaveFinance({ id: `fi_ma_${Date.now()}`, category: "majetek", label: newLabel.trim(), amount: newAmount });
-    setNewLabel(""); setNewAmount(0); setAdding(false);
-  };
-
-  // Decentní, nerušivá paleta — jemné/zemité tóny místo syté (graf = poměrné rozložení podle barev položek)
-  const COLORS = ["#7FA8C9","#D08F9B","#9094C9","#7FB69E","#C9A468","#A48FD6"];
-  const allAssets = [
-    akcieItem    && { item: akcieItem,    label: "Akcie / ETF",      amount: akcie,    color: "#6FA98A", editable: true  },
-    stavebkoItem && { item: stavebkoItem, label: "Stavební spoření", amount: stavebko, color: "#C9A468", editable: true  },
-    firmaKap > 0  && { item: null,         label: "Firemní rezerva",  amount: firmaKap, color: "#A48FD6", editable: false, liquid: true, goal: reserveGoal, autoNote: "= spořák − obálky · fyzicky leží na spořicím účtu (volné)" },
-    ...extraItems.map((it,idx) => ({ item: it, label: it.label, amount: it.amount||0, color: COLORS[(3+idx)%COLORS.length], editable: true })),
-  ].filter(Boolean).filter(a => a.amount > 0 || a.editable);
-
-  const barW = a => total > 0 ? (a.amount / total) * 100 : 0;
-  const btnStyle = {background:"#A08350",color:"#fff",border:"none",borderRadius:16,padding:"5px 12px",fontSize:11,cursor:"pointer",fontWeight:700,whiteSpace:"nowrap"};
-
-  return (
-    <div style={{background:"#fff",border:"2px solid #A08350",borderRadius:14,padding:"28px 36px",display:"flex",alignItems:"stretch",gap:24,flexWrap:"wrap"}}>
-      {/* === CELKOVÝ MAJETEK === */}
-      <div style={{minWidth:220,display:"flex",flexDirection:"column",justifyContent:"center"}}>
-        <div style={{fontSize:11,letterSpacing:".22em",textTransform:"uppercase",color:"#A08350",fontWeight:700,marginBottom:10}}>OSOBNÍ MAJETEK</div>
-        <div style={{fontFamily:"Inter,ui-sans-serif,system-ui,sans-serif",fontVariantNumeric:"tabular-nums",fontSize:44,fontWeight:600,color:"#A08350",lineHeight:1,marginBottom:6}}>{fmtKc(total)}</div>
-        <div style={{fontSize:12,color:"var(--mut)"}}>{allAssets.length} složky · celkem</div>
-      </div>
-
-      {/* STACKED BAR + POLOŽKY */}
-      <div style={{display:"flex",flexDirection:"column",justifyContent:"center",flexGrow:1,minWidth:200}}>
-        <div style={{display:"flex",gap:7,marginBottom:18}}>
-          {allAssets.map((a,i) => (
-            <div key={i} style={{flexGrow:Math.max(a.amount,1),flexBasis:0,height:38,borderRadius:11,background:a.color}} title={`${a.label}: ${fmtKc(a.amount)}`} />
-          ))}
-        </div>
-        <div style={{display:"flex",gap:24,flexWrap:"wrap",alignItems:"flex-start"}}>
-          {allAssets.map((a,i) => (
-            <div key={i} style={{display:"flex",alignItems:"flex-start",gap:8}}>
-              {a.liquid ? (
-                <LiquidTank pct={a.goal > 0 ? a.amount / a.goal : 0} color={a.color} value={a.amount} goal={a.goal} onSetGoal={setReserveGoal} size={48} />
-              ) : (
-                <div style={{width:11,height:11,borderRadius:3,background:a.color,flexShrink:0,marginTop:3}} />
-              )}
-              <div>
-                <div style={{fontSize:11,color:"var(--mut)",marginBottom:2}}>
-                  {a.label}
-                  {!a.editable && <span style={{fontSize:9,background:"#EEF2FF",color:"#3730A3",padding:"1px 4px",borderRadius:3,fontWeight:700,marginLeft:5}}>auto</span>}
-                  {a.autoNote && <span style={{fontSize:9,color:"var(--mut)",marginLeft:4,opacity:.7}}>{a.autoNote}</span>}
-                  {a.liquid && (
-                    <span style={{fontSize:9,marginLeft:5,fontWeight:700,color: a.amount >= a.goal ? "#4A7C59" : "#8B5CF6"}}>
-                      {a.amount >= a.goal ? "🎉 cíl splněn" : `· ${Math.round((a.amount/Math.max(a.goal,1))*100)} % k cíli`}
-                    </span>
-                  )}
-                </div>
-                {editId === a.item?.id ? (
-                  <div style={{display:"flex",alignItems:"center",gap:5}}>
-                    <input type="number" value={editVal} autoFocus onChange={e => setEditVal(Number(e.target.value))}
-                      onKeyDown={e => { if(e.key==="Enter") saveEdit(a.item); if(e.key==="Escape") setEditId(null); }}
-                      style={{width:110,fontSize:16,padding:"3px 7px",border:`2px solid ${a.color}`,borderRadius:6,fontFamily:"var(--num)",fontVariantNumeric:"tabular-nums",fontWeight:600,outline:"none"}} />
-                    <button onClick={() => saveEdit(a.item)} style={{...btnStyle,background:a.color}}>✓</button>
-                    <button onClick={() => setEditId(null)} style={{background:"none",border:"1px solid var(--line)",borderRadius:12,padding:"4px 8px",fontSize:11,cursor:"pointer",color:"var(--mut)"}}>✕</button>
-                  </div>
-                ) : (
-                  <div style={{display:"flex",alignItems:"baseline",gap:8}}>
-                    <div style={{fontSize:22,fontFamily:"Inter,ui-sans-serif,system-ui,sans-serif",fontVariantNumeric:"tabular-nums",fontWeight:600,color:a.color,lineHeight:1.2}}>{fmtKc(a.amount)}</div>
-                    {a.editable && (
-                      <button onClick={() => { setEditVal(a.amount); setEditId(a.item?.id); }}
-                        style={{background:"none",border:"none",cursor:"pointer",fontSize:12,color:a.color,padding:0,opacity:.7}}>✎</button>
-                    )}
-                  </div>
-                )}
-                <div style={{fontSize:10,color:"var(--mut)"}}>{Math.round(barW(a))} % portfolia</div>
-              </div>
-            </div>
-          ))}
-
-          {/* + PŘIDAT DALŠÍ */}
-          {!adding ? (
-            <div style={{display:"flex",alignItems:"center"}}>
-              <button onClick={() => setAdding(true)} style={{...btnStyle,background:"#A08350",fontSize:12,padding:"7px 16px",borderRadius:20}}>
-                + Přidat složku
-              </button>
-            </div>
-          ) : (
-            <div style={{display:"flex",alignItems:"center",gap:6,flexWrap:"wrap"}}>
-              <input placeholder="Název (např. Krypto)" value={newLabel} onChange={e => setNewLabel(e.target.value)}
-                style={{width:150,fontSize:13,padding:"5px 10px",border:"2px solid #A08350",borderRadius:7,outline:"none"}} />
-              <input type="number" placeholder="Částka" value={newAmount||""} onChange={e => setNewAmount(Number(e.target.value))}
-                onKeyDown={e => { if(e.key==="Enter") saveNew(); if(e.key==="Escape") setAdding(false); }}
-                style={{width:110,fontSize:13,padding:"5px 10px",border:"2px solid #A08350",borderRadius:7,outline:"none"}} />
-              <button onClick={saveNew} style={btnStyle}>✓ Uložit</button>
-              <button onClick={() => setAdding(false)} style={{background:"none",border:"1px solid var(--line)",borderRadius:12,padding:"5px 10px",fontSize:12,cursor:"pointer",color:"var(--mut)"}}>✕</button>
-            </div>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-}
 
 /* ─── ŽIVÝ VÝDĚLEK Z ÚSCHOV — náhrada za RUNWAY (dnes / včera / předevčírem / 7 dní) ─── */
 function EscrowLiveTile({ escrows, onNav, onOpenEscrow }) {
@@ -7640,125 +7019,10 @@ function EscrowLiveTile({ escrows, onNav, onOpenEscrow }) {
 }
 
 /* ─── DONUT ARC HELPER ─── */
-function _donutArcPath(cx, cy, ro, ri, a1, a2) {
-  const pt = (r, deg) => { const rad = (deg - 90) * Math.PI / 180; return [cx + r * Math.cos(rad), cy + r * Math.sin(rad)]; };
-  const [x1,y1]=pt(ro,a1),[x2,y2]=pt(ro,a2),[x3,y3]=pt(ri,a2),[x4,y4]=pt(ri,a1);
-  const lg = (a2 - a1) > 180 ? 1 : 0;
-  return `M${x1} ${y1} A${ro} ${ro} 0 ${lg} 1 ${x2} ${y2} L${x3} ${y3} A${ri} ${ri} 0 ${lg} 0 ${x4} ${y4}Z`;
-}
 
 /* ─── INTERACTIVE RING — velký zářící prstenec s hoverem, propojený s legendou ─── */
-function InteractiveRing({ segments, size = 190, thickness = 20, glowColor, centerTop, centerMain, centerSub, legendOnly = false }) {
-  const [hover, setHover] = useState(null);
-  const visible = segments.filter(s => s.value > 0);
-  const total = visible.reduce((s, d) => s + (d.value || 0), 0) || 1;
-  const r = (size - thickness) / 2;
-  const circumference = 2 * Math.PI * r;
-  const gap = visible.length > 1 ? Math.max(thickness * 0.16, 3) : 0;
-  let offsetAcc = 0;
-  const arcs = visible.map((s, i) => {
-    const frac = s.value / total;
-    const len = Math.max(frac * circumference - gap, 0.0001);
-    const dashoffset = -offsetAcc;
-    offsetAcc += frac * circumference;
-    return { ...s, len, dashoffset, frac, idx: i };
-  });
-  const active = hover != null ? arcs[hover] : null;
-
-  return (
-    <div style={{ display: "flex", alignItems: "center", gap: 32 }}>
-      <div style={{ position: "relative", width: size, height: size, flexShrink: 0 }}>
-        <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} style={{ transform: "rotate(-90deg)", overflow: "visible" }}>
-          <circle cx={size/2} cy={size/2} r={r} fill="none" stroke="rgba(0,0,0,0.04)" strokeWidth={thickness} />
-          {arcs.map((a, i) => (
-            <circle key={i} cx={size/2} cy={size/2} r={r} fill="none"
-              stroke={a.color} strokeWidth={hover === i ? thickness + 6 : thickness} strokeLinecap="butt"
-              strokeDasharray={`${a.len} ${circumference}`} strokeDashoffset={a.dashoffset}
-              onMouseEnter={() => setHover(i)} onMouseLeave={() => setHover(null)}
-              style={{
-                cursor: "pointer",
-                opacity: hover == null || hover === i ? 1 : 0.28,
-                transition: "stroke-width .25s ease, opacity .25s ease, stroke-dasharray 1.1s cubic-bezier(.34,1.05,.64,1), stroke-dashoffset 1.1s cubic-bezier(.34,1.05,.64,1)",
-              }} />
-          ))}
-        </svg>
-        <div style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", textAlign: "center", padding: "0 8px", pointerEvents: "none", overflow: "visible" }}>
-          {active ? (
-            <>
-              <div style={{ fontSize: 8.5, letterSpacing: ".2em", color: "var(--mut)", fontWeight: 700, textTransform: "uppercase", opacity: 0.7, marginBottom: 7, maxWidth: size - 50, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{active.label}</div>
-              <div style={{ fontFamily:"Inter,ui-sans-serif,system-ui,sans-serif",fontVariantNumeric:"tabular-nums", fontSize: Math.min(size > 160 ? 26 : 19, size * 0.135, String(fmtKc(active.value)||"").length > 10 ? (size > 160 ? 20 : 15) : (size > 160 ? 26 : 19)), fontWeight:600, color: "var(--txt)", lineHeight: 1, whiteSpace: "nowrap" }}>{fmtKc(active.value)}</div>
-              <div style={{ fontSize: 10.5, color: "var(--mut)", opacity: 0.75, marginTop: 7 }}>{Math.round(active.frac * 100)} %</div>
-            </>
-          ) : (
-            <>
-              {centerTop && <div style={{ fontSize: 8.5, letterSpacing: ".2em", color: "var(--mut)", fontWeight: 700, textTransform: "uppercase", opacity: 0.7, marginBottom: 7 }}>{centerTop}</div>}
-              <div style={{ fontFamily: "var(--num)", fontVariantNumeric: "tabular-nums", letterSpacing: "-.025em", fontSize: Math.min(size > 160 ? 29 : 21, size * 0.14, String(centerMain||"").length > 10 ? (size > 160 ? 22 : 16) : (size > 160 ? 29 : 21)), fontWeight: 600, color: "var(--txt)", lineHeight: 1, whiteSpace: "nowrap" }}>{centerMain}</div>
-              {centerSub && <div style={{ fontSize: 10.5, color: "var(--mut)", opacity: 0.8, marginTop: 7 }}>{centerSub}</div>}
-            </>
-          )}
-        </div>
-      </div>
-      {!legendOnly && (
-        <div style={{ display: "flex", flexDirection: "column", gap: 6, flex: 1, minWidth: 0, justifyContent: "center" }}>
-          {arcs.map((s, i) => (
-            <div key={i} onMouseEnter={() => setHover(i)} onMouseLeave={() => setHover(null)}
-              style={{
-                display: "flex", alignItems: "center", gap: 12, padding: "8px 12px", borderRadius: 11, cursor: "pointer",
-                background: hover === i ? "rgba(0,0,0,.028)" : "transparent",
-                transform: hover === i ? "translateX(4px)" : "none",
-                transition: "background .2s ease, transform .2s ease",
-              }}>
-              <span style={{ width: 12, height: 12, borderRadius: "50%", background: s.color, flexShrink: 0, boxShadow: hover === i ? `0 0 12px ${s.color}` : `0 0 6px ${s.color}99`, transition: "box-shadow .2s ease" }} />
-              <span style={{ flex: 1, fontSize: 14, color: "var(--ink)", fontWeight: hover === i ? 700 : 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.label}</span>
-              <span style={{ fontSize: 14, fontWeight: 700, color: "var(--ink)", whiteSpace: "nowrap" }}>{fmtKc(s.value)}</span>
-              <span style={{ fontSize: 12, color: "var(--mut)", width: 40, textAlign: "right", flexShrink: 0 }}>{Math.round(s.frac * 100)}%</span>
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
 
 /* ─── FIN DONUT CHART (interaktivní, explode on hover — pro TriGrafyPanel) ─── */
-function FinDonutChart({ segments, centerDefault, centerColor, size = 170 }) {
-  const [hov, setHov] = useState(null);
-  if (!segments || segments.length === 0) return null;
-  const cx = size/2, cy = size/2, ro = size/2 - 9, ri = Math.round(ro * 0.61);
-  const GAP = segments.length > 1 ? 2.5 : 0;
-  const total = segments.reduce((s, d) => s + (d.value || 0), 0);
-  if (total <= 0) return null;
-  let angle = 0;
-  const segs = segments.map(seg => {
-    const sweep = (seg.value / total) * 360 - GAP;
-    const s = { ...seg, a1: angle, a2: angle + Math.max(sweep, 0.01), mid: angle + sweep / 2 };
-    angle += sweep + GAP;
-    return s;
-  });
-  const hSeg = hov !== null ? segs[hov] : null;
-  const cVal = hSeg ? fmtKc(hSeg.value) : (centerDefault || fmtKc(total));
-  const cCol = hSeg ? hSeg.color : (centerColor || "var(--ink)");
-  const cLbl = hSeg ? hSeg.label : "";
-  const cPct = hSeg ? (hSeg.value / total * 100).toFixed(1) + " %" : "";
-  return (
-    <svg viewBox={`0 0 ${size} ${size}`} style={{ width: "100%", display: "block" }}>
-      <circle cx={cx} cy={cy} r={(ro + ri) / 2} style={{ fill: "none", stroke: "var(--line)", strokeWidth: ro - ri }} />
-      {segs.map((s, i) => {
-        const isH = hov === i, anyH = hov !== null;
-        const rad = (s.mid - 90) * Math.PI / 180;
-        const tx = isH ? Math.cos(rad) * 10 : 0, ty = isH ? Math.sin(rad) * 10 : 0;
-        return (
-          <path key={i} d={_donutArcPath(cx, cy, ro, ri, s.a1, s.a2)}
-            style={{ fill: s.color, transform: `translate(${tx}px,${ty}px)`, opacity: anyH ? (isH ? 1 : 0.15) : 1, cursor: "pointer", transition: "transform .22s cubic-bezier(.34,1.4,.64,1), opacity .15s" }}
-            onMouseEnter={() => setHov(i)} onMouseLeave={() => setHov(null)} />
-        );
-      })}
-      <text x={cx} y={cy + (cLbl ? -7 : 5)} textAnchor="middle" fontSize={13} fontWeight="600" fontFamily="inherit" style={{ fill: cCol }}>{cVal}</text>
-      {cLbl && <text x={cx} y={cy + 10} textAnchor="middle" fontSize={8.5} fontFamily="inherit" style={{ fill: "var(--mut)" }}>{cLbl}</text>}
-      {cPct && <text x={cx} y={cy + (cLbl ? 22 : 20)} textAnchor="middle" fontSize={9.5} fontWeight="500" fontFamily="inherit" style={{ fill: cCol }}>{cPct}</text>}
-    </svg>
-  );
-}
 
 /* ─── SPOŘICÍ ÚČET — samostatná čtvercová dlaždice (vedle Příjmy/Výdaje na Přehledu) ─── */
 /* ─── TRI GRAFY PANEL — Majetek + Rezerva jako interaktivní donut grafy (Spořák je teď samostatná dlaždice na Přehledu) ─── */
@@ -9019,149 +8283,6 @@ function PohledavkyPanel({ financeItems, onSaveFinance, onDeleteFinance }) {
   );
 }
 
-// Návštěvnost webu maux.cz — živé GA4 (Google Analytics Data API) přes serverless
-// proxy /api/ga4 (service account, klíče jen na Vercelu — viz api/ga4.js).
-function WebsiteTrafficPanel() {
-  const [data, setData] = useState(null);
-  const [err, setErr] = useState(null);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    let alive = true;
-    setLoading(true);
-    fetch("/api/ga4")
-      .then(r => r.json().then(j => ({ ok: r.ok, j })))
-      .then(({ ok, j }) => {
-        if (!alive) return;
-        if (!ok || j.error) { setErr(j.error || "Neznámá chyba"); setData(null); }
-        else { setData(j); setErr(null); }
-      })
-      .catch(e => { if (alive) setErr(e.message); })
-      .finally(() => { if (alive) setLoading(false); });
-    return () => { alive = false; };
-  }, []);
-
-  const fmtN = (n) => Math.round(n || 0).toLocaleString("cs-CZ");
-  const label = { fontSize: 7, letterSpacing: ".28em", textTransform: "uppercase", color: "var(--mut)", fontWeight: 700 };
-
-  if (loading) {
-    return (
-      <div style={{ background: "#fff", borderRadius: BP.rInner, padding: "26px 30px", boxShadow: "0 0 0 1px rgba(0,0,0,.06)", color: "var(--mut)", fontSize: 12 }}>
-        Načítám návštěvnost webu…
-      </div>
-    );
-  }
-  if (err) {
-    return (
-      <div style={{ background: "#fff", borderRadius: BP.rInner, padding: "22px 28px", boxShadow: "0 0 0 1px rgba(0,0,0,.06)" }}>
-        <div style={{ ...label, marginBottom: 8 }}>Návštěvnost webu — maux.cz</div>
-        <div style={{ fontSize: 12.5, color: "#A8443C", lineHeight: 1.5 }}>{err}</div>
-      </div>
-    );
-  }
-
-  const s = data?.summary || {};
-  const today = s.today || { activeUsers: 0, sessions: 0, pageViews: 0 };
-  const last7 = s.last7 || { activeUsers: 0, sessions: 0, pageViews: 0 };
-  const last30 = s.last30 || { activeUsers: 0, sessions: 0, pageViews: 0 };
-  const trend = data?.trend || [];
-  const topPages = data?.topPages || [];
-
-  // jednoduchá sparkline (bez externí knihovny — inline SVG, stejný princip jako jiné grafy v appce)
-  const W = 100, H = 34;
-  const maxPv = Math.max(1, ...trend.map(t => t.pageViews));
-  const pts = trend.map((t, i) => {
-    const x = trend.length > 1 ? (i / (trend.length - 1)) * W : 0;
-    const y = H - (t.pageViews / maxPv) * H;
-    return `${x.toFixed(1)},${y.toFixed(1)}`;
-  }).join(" ");
-
-  return (
-    <div style={{ background: "#fff", borderRadius: BP.rInner, overflow: "hidden", boxShadow: "0 0 0 1px rgba(0,0,0,.06)" }}>
-      <div style={{ padding: "18px 26px 14px", display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
-        <div style={{ ...label }}>Návštěvnost webu — maux.cz</div>
-        <div style={{ fontSize: 8, color: "var(--mut)", opacity: .6 }}>Google Analytics 4</div>
-      </div>
-
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", borderTop: "1px solid rgba(0,0,0,.06)", borderBottom: "1px solid rgba(0,0,0,.06)" }}>
-        {[
-          ["Dnes", today],
-          ["Posledních 7 dní", last7],
-          ["Posledních 30 dní", last30],
-        ].map(([title, v], i) => (
-          <div key={title} style={{ padding: "16px 20px", borderRight: i < 2 ? "1px solid rgba(0,0,0,.06)" : "none" }}>
-            <div style={{ fontSize: 8, letterSpacing: ".12em", textTransform: "uppercase", color: "var(--mut)", fontWeight: 700, marginBottom: 8 }}>{title}</div>
-            <div className="maux-num" style={{ fontSize: 22, fontWeight: 600, color: "var(--ink)", lineHeight: 1 }}>{fmtN(v.activeUsers)}</div>
-            <div style={{ fontSize: 8.5, color: "var(--mut)", marginTop: 3 }}>aktivních uživatelů</div>
-            <div style={{ fontSize: 9, color: "var(--mut)", marginTop: 8, opacity: .75 }}>{fmtN(v.sessions)} relací · {fmtN(v.pageViews)} zobrazení</div>
-          </div>
-        ))}
-      </div>
-
-      <div style={{ display: "flex", gap: 0 }}>
-        <div style={{ flex: 1, padding: "16px 26px 18px", borderRight: "1px solid rgba(0,0,0,.06)" }}>
-          <div style={{ fontSize: 8, letterSpacing: ".12em", textTransform: "uppercase", color: "var(--mut)", fontWeight: 700, marginBottom: 10 }}>Trend zobrazení stránek — 30 dní</div>
-          {trend.length > 1 ? (
-            <svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", height: 60, display: "block" }} preserveAspectRatio="none">
-              <polyline points={pts} fill="none" stroke="#0EA5E9" strokeWidth="1.6" vectorEffect="non-scaling-stroke" />
-            </svg>
-          ) : (
-            <div style={{ fontSize: 11, color: "var(--mut)" }}>Nedostatek dat pro graf.</div>
-          )}
-        </div>
-        <div style={{ flex: 1, padding: "16px 26px 18px" }}>
-          <div style={{ fontSize: 8, letterSpacing: ".12em", textTransform: "uppercase", color: "var(--mut)", fontWeight: 700, marginBottom: 10 }}>Nejnavštěvovanější stránky</div>
-          {topPages.length === 0 ? (
-            <div style={{ fontSize: 11, color: "var(--mut)" }}>Žádná data.</div>
-          ) : topPages.slice(0, 5).map(p => (
-            <div key={p.path} style={{ display: "flex", justifyContent: "space-between", gap: 10, fontSize: 11, padding: "4px 0", borderTop: "1px solid rgba(0,0,0,.04)" }}>
-              <span style={{ color: "var(--ink)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.path}</span>
-              <span style={{ color: "var(--mut)", flexShrink: 0 }}>{fmtN(p.pageViews)}</span>
-            </div>
-          ))}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// Investiční evidence (Akcie) — ruční ledger vkladů/výběrů hotovosti do/z XTB.
-// Pozn.: živé napojení na XTB xAPI bylo odstraněno — XTB v roce 2025 zrušilo retailový
-// přístup k API (ws.xtb.com vyřazeno 14.3.2025, náhradní ws.xapi.pro slouží jen klientům
-// X Open Hub, ne běžným XTB účtům). Modul proto vede jen ruční evidenci tranší.
-function XtbPanel({ xtbTranches = [], onNav }) {
-  const label = { fontSize: 8, letterSpacing: ".22em", textTransform: "uppercase", color: "var(--mut)", fontWeight: 700 };
-  const fmtMoney = (v, cur) => v == null ? "—" : maskNum(`${Number(v).toLocaleString("cs-CZ", { maximumFractionDigits: 2 })} ${cur || ""}`.trim());
-
-  const hasTranches = xtbTranches.length > 0;
-  const netDeposited = xtbTranches.reduce((s, t) => s + (t.type === "výběr" ? -(t.amount || 0) : (t.amount || 0)), 0);
-  const currency = xtbTranches[0]?.currency || "CZK";
-
-  return (
-    <div style={{ background: "#fff", borderRadius: BP.rInner, overflow: "hidden", boxShadow: "0 0 0 1px rgba(0,0,0,.06)" }}>
-      <div style={{ padding: "18px 26px 14px", display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-          <span className="maux-dot" style={{ width: 6, height: 6, background: "#4F46E5", boxShadow: "0 0 4px rgba(79,70,229,.55)" }} />
-          <div style={{ ...label }}>Investice — Akcie</div>
-        </div>
-        {onNav && (
-          <span style={{ fontSize: 10, color: "#4F46E5", fontWeight: 600, cursor: "pointer" }} onClick={() => onNav("akcie")}>Detail →</span>
-        )}
-      </div>
-
-      <div style={{ padding: "16px 20px", borderTop: "1px solid rgba(0,0,0,.06)" }}>
-        <div style={{ fontSize: 8, letterSpacing: ".12em", textTransform: "uppercase", color: "var(--mut)", fontWeight: 700, marginBottom: 8 }}>Čistě vloženo</div>
-        <div className="maux-num maux-glow" style={{ fontSize: 22, fontWeight: 600, color: "#4F46E5", lineHeight: 1 }}>{hasTranches ? fmtMoney(netDeposited, currency) : "—"}</div>
-      </div>
-
-      {!hasTranches && (
-        <div style={{ padding: "0 26px 16px", fontSize: 10, color: "var(--mut)" }}>
-          Doplň tranše na stránce Akcie — XTB live napojení bylo zrušeno (zdroj), eviduje se ručně.
-        </div>
-      )}
-    </div>
-  );
-}
 
 /* ─── AKCIE — ruční evidence tranší vkladů/výběrů do/z XTB ───
    Pozn.: živé napojení na XTB xAPI bylo odstraněno — XTB v roce 2025 zrušilo retailový
@@ -10015,9 +9136,9 @@ function AkcieModule({ xtbTranches = [], onTrancheSave, onTrancheDelete, xtbTitl
   const ulozPozici = async () => {
     const sym = posDraft.symbol.trim().toUpperCase();
     const ks = cislo(posDraft.volume), cena = cislo(posDraft.price);
-    if (!sym) { alert("Zadej ticker, například MSFT.US"); return; }
-    if (!ks || ks <= 0) { alert("Zadej počet kusů."); return; }
-    if (!cena || cena <= 0) { alert("Zadej cenu za kus."); return; }
+    if (!sym) { mauxToast("Zadej ticker, například MSFT.US"); return; }
+    if (!ks || ks <= 0) { mauxToast("Zadej počet kusů."); return; }
+    if (!cena || cena <= 0) { mauxToast("Zadej cenu za kus."); return; }
     // Pravidlo 5: když na nákup není hotovost, muselo přijít nové. Teprve nový vklad
     // zvedá vložený kapitál — bez téhle otázky by se výnos tiše nafoukl.
     const kurzOdhad = posDraft.currency === "CZK" ? 1 : kurzXtb((market && market.kurzy && market.kurzy[posDraft.currency]) || null, "nakup");
@@ -10053,7 +9174,7 @@ function AkcieModule({ xtbTranches = [], onTrancheSave, onTrancheDelete, xtbTitl
       setPosDraft({ symbol: "", instrument_name: "", trade_date: today(), volume: "", price: "", currency: "USD" });
       setTickOver(null);
       setPosForm(false);
-    } catch (e) { alert("Chyba: " + e.message); }
+    } catch (e) { mauxToast("Chyba: " + e.message); }
     setPosSaving(false);
   };
   // ── PRODEJ Z TRANŠE ────────────────────────────────────────────────────────
@@ -10083,11 +9204,11 @@ function AkcieModule({ xtbTranches = [], onTrancheSave, onTrancheDelete, xtbTitl
   const ulozProdej = async () => {
     const l = prodejLot; if (!l) return;
     const ks = cislo(prodejDraft.ks), cena = cislo(prodejDraft.cena);
-    if (!ks || ks <= 0) { alert("Zadej počet kusů."); return; }
-    if (ks > l.ks + 1e-9) { alert(`Z téhle tranše zbývá jen ${l.ks} ks.`); return; }
-    if (!cena || cena <= 0) { alert("Zadej prodejní cenu za kus."); return; }
+    if (!ks || ks <= 0) { mauxToast("Zadej počet kusů."); return; }
+    if (ks > l.ks + 1e-9) { mauxToast(`Z téhle tranše zbývá jen ${l.ks} ks.`); return; }
+    if (!cena || cena <= 0) { mauxToast("Zadej prodejní cenu za kus."); return; }
     const pos = xtbPositions.find(p => p.id === l.id);
-    if (!pos) { alert("Nákupní tranše se nenašla."); return; }
+    if (!pos) { mauxToast("Nákupní tranše se nenašla."); return; }
     setProdejSaving(true);
     try {
       // Prodej = XTB směňuje zpátky do korun pod svým kurzem, tedy ČNB − 0,5 %.
@@ -10105,7 +9226,7 @@ function AkcieModule({ xtbTranches = [], onTrancheSave, onTrancheDelete, xtbTitl
       });
       await onPositionSave({ ...pos, closed_volume: (Number(pos.closed_volume) || 0) + ks });
       setProdejLot(null);
-    } catch (e) { alert("Chyba: " + e.message); }
+    } catch (e) { mauxToast("Chyba: " + e.message); }
     setProdejSaving(false);
   };
 
@@ -10124,25 +9245,25 @@ function AkcieModule({ xtbTranches = [], onTrancheSave, onTrancheDelete, xtbTitl
     const pos = xtbPositions.find(p => p.id === l.id); if (!pos) return;
     const ks = cislo(editDraft.ks), cena = cislo(editDraft.cena);
     const zavreno = Number(pos.closed_volume) || 0;
-    if (!ks || ks <= 0) { alert("Zadej počet kusů."); return; }
-    if (ks < zavreno - 1e-9) { alert(`Z téhle tranše je už ${zavreno} ks prodáno — pod tohle číslo jít nejde. Nejdřív zruš prodej.`); return; }
-    if (!cena || cena <= 0) { alert("Zadej cenu za kus."); return; }
+    if (!ks || ks <= 0) { mauxToast("Zadej počet kusů."); return; }
+    if (ks < zavreno - 1e-9) { mauxToast(`Z téhle tranše je už ${zavreno} ks prodáno — pod tohle číslo jít nejde. Nejdřív zruš prodej.`); return; }
+    if (!cena || cena <= 0) { mauxToast("Zadej cenu za kus."); return; }
     setEditSaving(true);
     try {
       // fx_rate schválně na null — datum se mohlo změnit a kurz se musí zamrazit znovu.
       await onPositionSave({ ...pos, trade_date: editDraft.datum, volume: ks, price: cena, currency: editDraft.mena, fx_rate: null });
       setEditLot(null);
-    } catch (e) { alert("Chyba: " + e.message); }
+    } catch (e) { mauxToast("Chyba: " + e.message); }
     setEditSaving(false);
   };
   const smazLot = async (l) => {
     const pos = xtbPositions.find(p => p.id === l.id); if (!pos) return;
     if ((Number(pos.closed_volume) || 0) > 0) {
-      alert("Z téhle tranše je něco prodáno. Nejdřív zruš ten prodej, pak jde smazat.");
+      mauxToast("Z téhle tranše je něco prodáno. Nejdřív zruš ten prodej, pak jde smazat.");
       return;
     }
     if (!confirm(`Smazat nákup ${l.symbol} z ${l.datum}? Hotovost se o tuhle částku zvedne zpátky.`)) return;
-    try { await onPositionDelete(l.id); } catch (e) { alert("Chyba: " + e.message); }
+    try { await onPositionDelete(l.id); } catch (e) { mauxToast("Chyba: " + e.message); }
   };
   // Zrušení prodeje — vrátí kusy zpátky do tranše. Bez tohohle by šel překlep opravit
   // jen v databázi a Tom by na to sám nedosáhl.
@@ -10152,7 +9273,7 @@ function AkcieModule({ xtbTranches = [], onTrancheSave, onTrancheDelete, xtbTitl
       const pos = ct.lot_id ? xtbPositions.find(p => p.id === ct.lot_id) : null;
       if (pos) await onPositionSave({ ...pos, closed_volume: Math.max(0, (Number(pos.closed_volume) || 0) - (Number(ct.volume) || 0)) });
       await onClosedTradeDelete(ct.id);
-    } catch (e) { alert("Chyba: " + e.message); }
+    } catch (e) { mauxToast("Chyba: " + e.message); }
   };
 
   const [addForm, setAddForm] = useState(false);
@@ -10178,7 +9299,7 @@ function AkcieModule({ xtbTranches = [], onTrancheSave, onTrancheDelete, xtbTitl
 
   const saveTranche = async () => {
     const amt = Number(String(newTranche.amount).replace(/\s/g, "").replace(",", "."));
-    if (!amt || amt <= 0) { alert("Zadej částku."); return; }
+    if (!amt || amt <= 0) { mauxToast("Zadej částku."); return; }
     setSavingTranche(true);
     try {
       await onTrancheSave({
@@ -10187,7 +9308,7 @@ function AkcieModule({ xtbTranches = [], onTrancheSave, onTrancheDelete, xtbTitl
       });
       setNewTranche({ date: today(), type: "vklad", amount: "", symbol: "", note: "" });
       setAddForm(false);
-    } catch (e) { alert("Chyba: " + e.message); }
+    } catch (e) { mauxToast("Chyba: " + e.message); }
     setSavingTranche(false);
   };
 
@@ -10198,13 +9319,13 @@ function AkcieModule({ xtbTranches = [], onTrancheSave, onTrancheDelete, xtbTitl
 
   const saveTitle = async () => {
     const symbol = newTitle.symbol.trim().toUpperCase();
-    if (!symbol) { alert("Zadej ticker."); return; }
+    if (!symbol) { mauxToast("Zadej ticker."); return; }
     setSavingTitle(true);
     try {
       await onTitleSave({ id: uid(), symbol, status: newTitle.status, note: newTitle.note || "" });
       setNewTitle({ symbol: "", status: "drzim", note: "" });
       setAddTitleForm(false);
-    } catch (e) { alert("Chyba: " + e.message); }
+    } catch (e) { mauxToast("Chyba: " + e.message); }
     setSavingTitle(false);
   };
 
@@ -10303,18 +9424,18 @@ function AkcieModule({ xtbTranches = [], onTrancheSave, onTrancheDelete, xtbTitl
     };
   }, [sortedClosedTrades, sortedTranches]);
 
-  // Termíny DPFO za rok 2025 (podává se v roce 2026) — pevně dané GFŘ, nemění se appkou.
-  const DPFO_DEADLINES = [
-    { label: "Papírově", date: "2026-04-01" },
-    { label: "Elektronicky (bez poradce)", date: "2026-05-04" },
-    { label: "S daňovým poradcem / advokátem", date: "2026-07-01" },
-  ];
+  // Termíny DPFO odvozené z běžícího roku (audit 15. 9. 2026 — dřív natvrdo "2026-04-01" atd.,
+  // takže od 2. 7. 2026 dlaždice mlčela a v lednu 2027 by neukázala nic). Když všechny
+  // termíny za loňský rok prošly, přepne se na letošní zdaňovací období (termíny v příštím roce).
   const nowMs = Date.now();
-  const dpfoStatus = DPFO_DEADLINES.map(d => {
+  const dpfoStatusFor = (rok) => dpfoTerminy(rok).map(d => {
     const dueMs = new Date(d.date + "T23:59:59").getTime();
     const daysLeft = Math.ceil((dueMs - nowMs) / 86400000);
     return { ...d, daysLeft, passed: daysLeft < 0 };
   });
+  let dpfoRok = new Date().getFullYear() - 1;
+  let dpfoStatus = dpfoStatusFor(dpfoRok);
+  if (dpfoStatus.every(d => d.passed)) { dpfoRok += 1; dpfoStatus = dpfoStatusFor(dpfoRok); }
   const nextDeadline = dpfoStatus.find(d => !d.passed);
 
   const label = { fontSize: 9, letterSpacing: ".14em", textTransform: "uppercase", color: "var(--mut)", fontWeight: 700 };
@@ -10803,7 +9924,7 @@ function AkcieModule({ xtbTranches = [], onTrancheSave, onTrancheDelete, xtbTitl
               display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, flexWrap: "wrap",
             }}>
               <div style={{ fontSize: 12, fontWeight: 600, color: nextDeadline.daysLeft <= 14 ? "#A8443C" : "var(--ink)" }}>
-                Termín DPFO za rok 2025 — {nextDeadline.label}: {fmtDate(nextDeadline.date)}
+                Termín DPFO za rok {dpfoRok} — {nextDeadline.label}: {fmtDate(nextDeadline.date)}
               </div>
               <div style={{ fontSize: 11.5, fontWeight: 700, color: nextDeadline.daysLeft <= 14 ? "#A8443C" : "var(--mut)" }}>
                 {nextDeadline.daysLeft === 0 ? "dnes!" : `zbývá ${nextDeadline.daysLeft} ${nextDeadline.daysLeft === 1 ? "den" : "dní"}`}
@@ -11389,7 +10510,7 @@ function JosefPanel({ logs, attendance: attendanceProp, availability, clients = 
       const hist = rateSched.filter(h => h.from !== effMonth).concat([{ from: effMonth, rate: val }]).sort((a, b) => a.from.localeCompare(b.from));
       await onSaveFinance({ ...(item || {}), id: "fi_asistent_sazba", category: "config", label: "Hodinovka asistenta", amount: val, notes: JSON.stringify({ history: hist }) });
       setRateOpen(false);
-    } catch (e) { alert("Chyba: " + e.message); }
+    } catch (e) { mauxToast("Chyba: " + e.message); }
     finally { setSavingRate(false); }
   };
   const fmtMonth = m => { const p = m.split("-"); return `${CZM_SH[Number(p[1]) - 1]} ${p[0].slice(2)}`; };
@@ -11604,151 +10725,6 @@ function JosefPanel({ logs, attendance: attendanceProp, availability, clients = 
    Tom 30.6.2026: "brand, ale Karlín 2154" — barevné animované ringy místo ploché linky.
    Spořicí účet + Firemní rezerva + Osobní majetek v jedné kompaktní sekci Bilance.
    Zásada: evidence/client_id se nemění, jen vizuální vrstva.                          */
-function TripleRingPanel({ sporSegs, sporBal, sporEarmarked, firmaRez, planKap,
-                           majSegs, totalMaj, onSetGoal }) {
-  const [mounted, setMounted]   = useState(false);
-  const [expanded, setExpanded] = useState(null); // "spor" | "rez" | "maj"
-  useEffect(() => { const t = setTimeout(() => setMounted(true), 80); return () => clearTimeout(t); }, []);
-
-  // ── Mini segmented ring renderer ──
-  const MiniRing = ({ segs, accent, size = 72 }) => {
-    const R = (size - 10) / 2, C = 2 * Math.PI * R, cx = size / 2, cy = size / 2;
-    const total = segs.reduce((s, x) => s + (x.value || 0), 0) || 1;
-    const GAP   = C * 0.012; // visual gap between segments (% of circumference)
-    let acc     = 0;
-    const arcs  = segs.filter(x => (x.value || 0) > 0).map(seg => {
-      const len = Math.max((seg.value / total) * C - GAP, 0);
-      const startDeg = (acc / C) * 360 - 90;
-      acc += (seg.value / total) * C;
-      return { ...seg, len, startDeg };
-    });
-    return (
-      <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} style={{ overflow: "visible", display: "block" }}>
-        <defs>
-          <filter id={`trg-glow-${accent.replace("#","")}`} x="-40%" y="-40%" width="180%" height="180%">
-            <feGaussianBlur stdDeviation="2.5" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
-          </filter>
-        </defs>
-        {/* track */}
-        <circle cx={cx} cy={cy} r={R} fill="none" stroke={`${accent}18`} strokeWidth={5} />
-        {/* segments */}
-        {arcs.map((arc, i) => (
-          <circle key={i} cx={cx} cy={cy} r={R} fill="none"
-            stroke={arc.color || accent}
-            strokeWidth={5}
-            strokeLinecap={arcs.length === 1 ? "round" : "butt"}
-            strokeDasharray={`${mounted ? arc.len : 0} ${C}`}
-            style={{
-              transform: `rotate(${arc.startDeg}deg)`,
-              transformOrigin: `${cx}px ${cy}px`,
-              transition: `stroke-dasharray 1.3s cubic-bezier(.4,0,.2,1) ${i * 0.1}s`,
-              filter: `url(#trg-glow-${accent.replace("#","")})`,
-            }}
-          />
-        ))}
-      </svg>
-    );
-  };
-
-  const RING_SIZE = 70;
-  const rezPct = planKap > 0 ? Math.min(firmaRez / planKap, 1) : 0;
-  // Rezerva: 2 segmenty — naplněno (zelená) + do cíle (průhledná)
-  const rezSegs = [
-    { value: Math.max(firmaRez, 0), color: "#1D9E75" },
-    { value: Math.max(planKap - firmaRez, 0), color: "rgba(29,158,117,.1)" },
-  ];
-
-  const ringBlock = (key, ring, label, mainVal, sub, accentCol) => (
-    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 5, flex: 1, cursor: "pointer", minWidth: 0 }}
-      onClick={() => setExpanded(e => e === key ? null : key)}>
-      <div style={{ position: "relative" }}>
-        {ring}
-        {/* center dot — small accent indicator */}
-        <div style={{
-          position: "absolute", top: "50%", left: "50%", transform: "translate(-50%,-50%)",
-          width: 7, height: 7, borderRadius: "50%", background: accentCol,
-          boxShadow: `0 0 8px ${accentCol}`,
-          opacity: mounted ? 1 : 0, transition: "opacity 1s ease 0.6s",
-        }} />
-      </div>
-      <div style={{ fontSize: 7, letterSpacing: ".18em", textTransform: "uppercase", color: "var(--mut)", fontWeight: 800, textAlign: "center", lineHeight: 1.2 }}>{label}</div>
-      <div style={{ fontFamily: "Fraunces,serif", fontSize: 14, fontWeight: 300, color: "var(--ink)", textAlign: "center", lineHeight: 1 }}>{mainVal}</div>
-      {sub && <div style={{ fontSize: 8.5, color: accentCol, textAlign: "center", opacity: 0.85 }}>{sub}</div>}
-      <div style={{ fontSize: 8, color: "var(--mut)", opacity: 0.6 }}>{expanded === key ? "▲" : "▾"}</div>
-    </div>
-  );
-
-  return (
-    <div style={{ borderTop: "1px solid rgba(53,24,165,.14)", paddingTop: 14 }}>
-      {/* 3 rings */}
-      <div style={{ display: "flex", gap: 6, alignItems: "flex-start" }}>
-        {ringBlock("spor",
-          <MiniRing segs={sporSegs} accent="#3518A5" size={RING_SIZE} />,
-          "Spořicí účet", fmtKc(sporBal),
-          `${fmtKc(sporEarmarked)} obálky`,
-          "#3518A5"
-        )}
-        <div style={{ width: 1, background: "rgba(53,24,165,.1)", alignSelf: "stretch", marginTop: 4, marginBottom: 4 }} />
-        {ringBlock("rez",
-          <MiniRing segs={rezSegs} accent="#1D9E75" size={RING_SIZE} />,
-          "Firemní rezerva", fmtKc(firmaRez),
-          `${Math.round(rezPct * 100)} % z ${fmtKc(planKap)}`,
-          "#1D9E75"
-        )}
-        <div style={{ width: 1, background: "rgba(53,24,165,.1)", alignSelf: "stretch", marginTop: 4, marginBottom: 4 }} />
-        {ringBlock("maj",
-          <MiniRing segs={majSegs} accent="#6358D4" size={RING_SIZE} />,
-          "Osobní majetek", fmtKc(totalMaj),
-          null,
-          "#6358D4"
-        )}
-      </div>
-
-      {/* Expanded detail */}
-      {expanded === "spor" && (
-        <div style={{ marginTop: 10, padding: "10px 6px 2px", borderTop: "1px solid rgba(53,24,165,.08)", display: "flex", flexDirection: "column", gap: 5 }}>
-          {sporSegs.map((s, i) => (
-            <div key={i} style={{ display: "flex", alignItems: "center", gap: 7 }}>
-              <span style={{ width: 7, height: 7, borderRadius: "50%", background: s.color, flexShrink: 0, boxShadow: `0 0 5px ${s.color}88` }} />
-              <span style={{ flex: 1, fontSize: 10, color: "var(--mut)", letterSpacing: ".01em", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.label}</span>
-              <span className="maux-num" style={{ fontSize: 11, fontWeight: 500, color: "var(--ink)", flexShrink: 0 }}>{fmtKc(s.value)}</span>
-              <span style={{ fontSize: 9, color: "var(--mut)", width: 26, textAlign: "right", flexShrink: 0 }}>{Math.round((s.value / (sporBal || 1)) * 100)}%</span>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {expanded === "rez" && (
-        <div style={{ marginTop: 10, padding: "10px 6px 2px", borderTop: "1px solid rgba(29,158,117,.12)", display: "flex", flexDirection: "column", gap: 6 }}>
-          <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10.5, color: "var(--ink)" }}>
-            <span style={{ color: "#1D9E75", fontWeight: 600 }}>Naplněno</span>
-            <span className="maux-num" style={{ fontWeight: 600 }}>{fmtKc(firmaRez)}</span>
-          </div>
-          <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10.5, color: "var(--mut)" }}>
-            <span>Zbývá do cíle</span>
-            <span className="maux-num">{fmtKc(Math.max(planKap - firmaRez, 0))}</span>
-          </div>
-          <div style={{ height: 4, borderRadius: 99, background: "rgba(29,158,117,.12)", overflow: "hidden", marginTop: 2 }}>
-            <div style={{ height: "100%", width: `${rezPct * 100}%`, background: "#1D9E75", borderRadius: 99, transition: "width 1.2s ease" }} />
-          </div>
-        </div>
-      )}
-
-      {expanded === "maj" && (
-        <div style={{ marginTop: 10, padding: "10px 6px 2px", borderTop: "1px solid rgba(99,88,212,.12)", display: "flex", flexDirection: "column", gap: 5 }}>
-          {majSegs.map((s, i) => (
-            <div key={i} style={{ display: "flex", alignItems: "center", gap: 7 }}>
-              <span style={{ width: 7, height: 7, borderRadius: "50%", background: s.color, flexShrink: 0, boxShadow: `0 0 5px ${s.color}88` }} />
-              <span style={{ flex: 1, fontSize: 10, color: "var(--mut)", letterSpacing: ".01em", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.label}</span>
-              <span className="maux-num" style={{ fontSize: 11, fontWeight: 500, color: "var(--ink)", flexShrink: 0 }}>{fmtKc(s.value)}</span>
-              <span style={{ fontSize: 9, color: "var(--mut)", width: 26, textAlign: "right", flexShrink: 0 }}>{Math.round((s.value / (totalMaj || 1)) * 100)}%</span>
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
 
 
 /* ─── PANEL CONTEXT — defined at file level so Panel is a stable component reference ─── */
@@ -11828,16 +10804,6 @@ const bpHeroText = (size = 30, color = "var(--txt)", extra = {}) => ({
   fontFamily: "Fraunces,serif", fontSize: size, fontWeight: 300,
   color, lineHeight: 1, whiteSpace: "nowrap", ...extra,
 });
-// Malý delta čip ▲/▼ — jen tam, kde změna něco znamená
-function BpDelta({ value, suffix = "", size = 9.5 }) {
-  if (value == null || value === 0) return null;
-  const up = value > 0;
-  return (
-    <span style={{ fontSize: size, fontWeight: 700, color: up ? BP.up : BP.down, whiteSpace: "nowrap" }}>
-      {up ? "▲" : "▼"} {up ? "+" : "−"}{fmtKc(Math.abs(value)).replace(" Kč", "")}{suffix}
-    </span>
-  );
-}
 
 // "Tichý papír" (Tom, 26.7.2026: "chci, aby mě uklidňovalo na to koukat"): panely už nemají
 // každý svou barvu. Jeden neutrální vlasový rám + měkký stín; barva zůstává jen uvnitř obsahu
@@ -11902,167 +10868,6 @@ function Panel({ id, children }) {
   );
 }
 
-// ── TROFEJNÍ SÍŇ — VYPNUTO 30.7.2026 na žádost Toma ───────────────────────────
-// Logika i komponenta zůstávají v souboru, ale NIC je nerenderuje. Zapnutí zpět =
-// vrátit <TrophyWall trophies={trophies} /> do rozbaleného panelu na Přehledu
-// a k němu výpočet computeTrophies({...}) nad returnem téhož IIFE.
-// ── TROFEJNÍ SÍŇ ────────────────────────────────────────────────────────────────
-// Tom 30.7.2026: "jako na PSKu sbírat odznáčky - achievementy".
-// Pravidla, která si sám nastavil (a která hlídám, ať sbírka nezlevní):
-//  • stupňovité trofeje (bronz/stříbro/zlato na jedné ose) místo jednorázových —
-//    dvanáct konečných odznáčků odemkneš do jara a zbude mrtvý list;
-//  • aspoň třetina za ŘEMESLO a DISCIPLÍNU, ne za obrat — gamifikace samotných peněz
-//    tlačí praxi k objemu na úkor kvality;
-//  • všechno se počítá z dat, která už v appce jsou. Žádná nová tabulka, žádný zápis.
-const TROPHY_TIERS = ["#B08A5E", "#9AA0B5", "#C6A86B"]; // bronz · stříbro · zlato
-
-function trophyStep(value, steps) {
-  let level = 0;
-  for (let i = 0; i < steps.length; i++) if (value >= steps[i]) level = i + 1;
-  const done = level >= steps.length;
-  const next = done ? steps[steps.length - 1] : steps[level];
-  const floor = level === 0 ? 0 : steps[level - 1];
-  const progress = done ? 1 : Math.max(0, Math.min(1, (value - floor) / (next - floor)));
-  return { level, done, next, progress, value };
-}
-
-function computeTrophies({ ladder, invoices, workEntries, clients, firmaRez, reserveGoal }) {
-  const rows = (ladder && ladder.allRows) || [];
-  const best = rows.reduce((m, r) => Math.max(m, r.totalM), 0);
-  const recordCount = rows.filter(r => r.record).length;
-  const year12 = rows.slice(-12).reduce((s, r) => s + r.totalM, 0);
-  const escTotal = rows.reduce((s, r) => s + (r.escAmt || 0), 0);
-  // Nejdelší série měsíců po sobě nad metou — zatím nedosažitelné, a to je záměr:
-  // sbírka potřebuje strop, ne jen podlahu (Tom 30.7.2026).
-  let streak = 0, bestStreak = 0;
-  rows.forEach(r => { if (r.over) { streak++; bestStreak = Math.max(bestStreak, streak); } else streak = 0; });
-  const entries = workEntries || [];
-  const flatCount = entries.filter(e => e.billing_type === "flat_rate").length;
-  const overdueCount = (invoices || []).filter(i => invoiceStatus(i) === "po_splatnosti").length;
-  const billedClients = new Set((invoices || []).map(i => i.client_id).filter(Boolean)).size;
-  const issued = (invoices || []).filter(i => invoiceStatus(i) !== "pripravena");
-  const settled = issued.filter(i => ["uhrazena", "dph_odvedeno"].includes(invoiceStatus(i))).length;
-  const collectRate = issued.length ? settled / issued.length : 0;
-  const perMonth = {};
-  entries.forEach(e => { const k = (e.entry_date || "").slice(0, 7); if (k) perMonth[k] = (perMonth[k] || 0) + 1; });
-  const busiestMonth = Object.values(perMonth).reduce((m, v) => Math.max(m, v), 0);
-  const thisYm = new Date().toISOString().slice(0, 7);
-  const staleUnbilled = entries.filter(e => !e.invoice_id && (e.entry_date || "") < thisYm + "-01").length;
-  const withReal = entries.filter(e => (e.real_hours || 0) > 0).length;
-  const realShare = entries.length ? withReal / entries.length : 0;
-
-  const T = [];
-  const kc = v => fmtKc(Math.round(v));
-  const add = (id, icon, name, kind, steps, value, doneFn, remainFn) => {
-    const st = trophyStep(value, steps);
-    T.push({
-      id, icon, name, kind,
-      done: st.level > 0, complete: st.done, level: st.level,
-      progress: st.done ? 1 : st.progress,
-      value, next: st.next,
-      desc: st.done ? doneFn(steps[steps.length - 1]) : (st.level > 0 ? doneFn(steps[st.level - 1]) : remainFn(st.next, value)),
-      remain: st.done ? null : remainFn(st.next, value),
-    });
-  };
-
-  // — VÝKON —
-  add("mesic", "📈", "Nejlepší měsíc", "vykon", [100000, 250000, 400000], best,
-      v => `překonáno ${kc(v)}`, (n, v) => `do ${kc(n)} chybí ${kc(n - v)}`);
-  add("rekord", "🏆", "Rekordman", "vykon", [3, 12, 30], recordCount,
-      v => `${v}× osobní rekord`, (n, v) => `ještě ${n - v} rekordů do ${n}`);
-  add("rok", "🌍", "Rok práce", "vykon", [1000000, 2000000, 4000000], year12,
-      v => `za 12 měsíců přes ${kc(v)}`, (n, v) => `do ${kc(n)} chybí ${kc(n - v)}`);
-  add("serie", "🔥", "Série", "vykon", [2, 4, 8], bestStreak,
-      v => `${v} měsíců v řadě nad metou`, (n, v) => `${n} měsíců v řadě nad metou (máš ${v})`);
-  add("uschovy", "🔐", "Správce cizích peněz", "vykon", [100000, 300000, 750000], escTotal,
-      v => `přes ${kc(v)} na úrocích`, (n, v) => `do ${kc(n)} chybí ${kc(n - v)}`);
-
-  // — DISCIPLÍNA —
-  T.push({ id: "bezdluzniku", icon: "⚖️", name: "Bez dlužníků", kind: "disciplina",
-    done: overdueCount === 0, complete: overdueCount === 0, level: overdueCount === 0 ? 3 : 0,
-    progress: overdueCount === 0 ? 1 : 0,
-    desc: overdueCount === 0 ? "žádná faktura po splatnosti" : `${overdueCount}× po splatnosti`,
-    remain: overdueCount === 0 ? null : `srovnat ${overdueCount} faktur` });
-  T.push({ id: "cistystul", icon: "🧾", name: "Čistý stůl", kind: "disciplina",
-    done: staleUnbilled === 0, complete: staleUnbilled === 0, level: staleUnbilled === 0 ? 3 : 0,
-    progress: staleUnbilled === 0 ? 1 : Math.max(0, 1 - staleUnbilled / 20),
-    desc: staleUnbilled === 0 ? "nic nevisí z minulých měsíců" : `${staleUnbilled} výkazů z minulých měsíců`,
-    remain: staleUnbilled === 0 ? null : `vyfakturovat ${staleUnbilled} výkazů` });
-  add("vybrano", "💳", "Vybráno", "disciplina", [0.8, 0.9, 0.98], collectRate,
-      v => `${Math.round(v * 100)} % faktur uhrazeno`, (n, v) => `${Math.round(n * 100)} % uhrazených (máš ${Math.round(v * 100)} %)`);
-  add("rezerva", "🏛️", "Firemní rezerva", "disciplina", [50000, reserveGoal || 220000, POLSTAR_CAP], Math.max(0, firmaRez || 0),
-      v => `přes ${kc(v)} v rezervě`, (n, v) => `do ${kc(n)} chybí ${kc(n - v)}`);
-
-  // — ŘEMESLO —
-  add("vykazy", "🗂️", "Kronikář", "remeslo", [100, 300, 750], entries.length,
-      v => `přes ${v} zapsaných výkazů`, (n, v) => `ještě ${n - v} výkazů do ${n}`);
-  add("realhod", "⏱️", "Poctivé hodiny", "remeslo", [0.3, 0.6, 0.95], realShare,
-      v => `${Math.round(v * 100)} % výkazů s reálným časem`, (n, v) => `${Math.round(n * 100)} % výkazů s reálným časem (máš ${Math.round(v * 100)} %)`);
-  add("pilny", "📅", "Pilný měsíc", "remeslo", [15, 25, 40], busiestMonth,
-      v => `${v} výkazů v jednom měsíci`, (n, v) => `${n} výkazů za měsíc (nejlíp ${v})`);
-  add("pausal", "📐", "Paušálista", "remeslo", [5, 20, 50], flatCount,
-      v => `${v} paušálních výkazů`, (n, v) => `ještě ${n - v} paušálů do ${n}`);
-  add("klienti", "🤝", "Klientela", "remeslo", [10, 40, 100], billedClients,
-      v => `${v} fakturovaných klientů`, (n, v) => `ještě ${n - v} klientů do ${n}`);
-
-  return T;
-}
-
-function TrophyWall({ trophies }) {
-  const done = trophies.filter(t => t.done).length;
-  const KIND = { vykon: "Výkon", disciplina: "Disciplína", remeslo: "Řemeslo" };
-  return (
-    <div style={{ marginTop: 10, ...MAUX_GLASS, borderRadius: BP.rInner, padding: "22px 24px", maxWidth: 640 }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", marginBottom: 4 }}>
-        <div>
-          <div style={bpLabel()}>Trofejní síň</div>
-          <div style={{ ...bpHero(28), marginTop: 5 }}>{done} <span style={{ fontSize: 16, color: "var(--mut)" }}>z {trophies.length}</span></div>
-        </div>
-      </div>
-      <div style={{ fontSize: 9, color: "var(--mut)", marginBottom: 16 }}>
-        stupně bronz · stříbro · zlato — počítají se ze zápisů, které už v appce máš
-      </div>
-      {["vykon", "disciplina", "remeslo"].map(kind => (
-        <div key={kind} style={{ marginTop: 14 }}>
-          <div style={{ fontSize: 8.5, letterSpacing: ".2em", textTransform: "uppercase", color: "var(--mut)", fontWeight: 700, marginBottom: 10 }}>{KIND[kind]}</div>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 14 }}>
-            {trophies.filter(t => t.kind === kind).map(t => {
-              const R = 30, C = 2 * Math.PI * R;
-              const col = t.done ? TROPHY_TIERS[Math.min(t.level, 3) - 1] : "#8F86C4";
-              const dash = t.done && t.complete ? C : C * (t.progress || 0);
-              return (
-                <div key={t.id} style={{ textAlign: "center" }}>
-                  <div style={{ width: 70, height: 70, margin: "0 auto 7px", position: "relative" }}>
-                    <svg viewBox="0 0 70 70" style={{ width: 70, height: 70, transform: "rotate(-90deg)" }}>
-                      <circle cx="35" cy="35" r={R} fill="none" stroke="rgba(28,10,99,.07)" strokeWidth="2.5" />
-                      <circle cx="35" cy="35" r={R} fill="none" stroke={col} strokeWidth="2.5" strokeLinecap="round"
-                        strokeDasharray={`${dash} ${C}`} />
-                    </svg>
-                    <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center",
-                      fontSize: 22, filter: t.done ? "none" : "grayscale(1)", opacity: t.done ? 1 : .28 }}>{t.icon}</div>
-                    {!t.done && (
-                      <div style={{ position: "absolute", bottom: 0, right: 2, fontSize: 8, fontWeight: 800, color: "#8F86C4" }}>
-                        {Math.round((t.progress || 0) * 100)}%
-                      </div>
-                    )}
-                    {t.done && !t.complete && (
-                      <div style={{ position: "absolute", bottom: 0, right: 2, fontSize: 8, fontWeight: 800, color: col }}>
-                        {["I", "II", "III"][t.level - 1]}
-                      </div>
-                    )}
-                  </div>
-                  <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: ".05em", textTransform: "uppercase", lineHeight: 1.3,
-                    color: t.done ? "var(--ink)" : "var(--mut)" }}>{t.name}</div>
-                  <div style={{ fontSize: 8, color: "var(--mut)", marginTop: 2, lineHeight: 1.3 }}>{t.desc}</div>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      ))}
-    </div>
-  );
-}
 
 // ── PEČEŤ ZA OSOBNÍ REKORD ──────────────────────────────────────────────────────
 // Vědomě TIŠŠÍ než oslava mety: rekord přichází ~8× do roka, meta jednou. Kdyby obojí
@@ -12662,7 +11467,10 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
                 {nadpis}
               </div>
               <div className="maux-num" style={{ fontSize: 42, fontWeight: 600, color: BP.indigo, letterSpacing: "-.032em", lineHeight: 1.05, marginTop: 7 }}>
-                {fmtKc(nc.cekaAmt)}
+                {/* Když nic nečeká na splatnost a všechno je po splatnosti, nadpis říká
+                    "Po splatnosti ti dluží" — hero pak musí nést dlužnou částku, ne 0 Kč
+                    (audit 15. 9. 2026: ukazovalo 0 Kč místo 51 750 Kč). */}
+                {fmtKc(dueD ? nc.cekaAmt : nc.celkemAmt)}
               </div>
             </div>
             <div style={{ flex: 1, minWidth: 280, paddingBottom: 8 }}>
@@ -15479,108 +14287,7 @@ function InvoiceForm({ init, clients, invoices, onSave, onCancel, saving }) {
    Pravý blok (skutečné vyúčtování + poznámka k optimalizaci) doplňuje Tom ručně po
    podání přiznání/přehledů — appka sama dopočítá přeplatek/nedoplatek. Základ pro
    budoucí přesný výpočet a optimalizaci záloh, beze ztráty jediného procesu nebo dat. */
-// ─── SRO OPTIMIZATION — "závažné daňové upozornění": kdy už se vyplatí s.r.o. ──
-// Sazby a hranice pro rok 2026 (zdroj: Finanční správa ČR — Daňové novinky pro rok 2026,
-// portal.gov.cz — sazba daně z příjmů právnických osob):
-//   • OSVČ / fyzická osoba: 15 % do základu daně 1 762 812 Kč ročně (= 36× průměrná mzda),
-//     nad tuto hranici 23 % z přesahu (tzv. "vyšší sazba")
-//   • s.r.o.: daň z příjmu právnických osob 21 % ze zisku
-//   • výplata zisku společníkovi (podíl na zisku): dalších 15 % srážkové daně z dividendy
-// Toto je ORIENTAČNÍ porovnání efektivních sazeb na hrubý obrat z fakturace (ne přesný
-// základ daně — ten závisí na skutečných/paušálních výdajích). Slouží jako "budík", kdy
-// dává smysl probrat přechod na s.r.o. s daňovým poradcem — appka nenahrazuje poradenství.
-const SRO_TH_23   = 1762812;   // hranice pro 23% sazbu DPFO v roce 2026 (36× průměrná mzda)
-const SRO_RATE_LO = 0.15;      // DPFO — základní sazba
-const SRO_RATE_HI = 0.23;      // DPFO — zvýšená sazba nad hranicí
-const SRO_RATE_CO = 0.21;      // s.r.o. — daň z příjmu právnických osob
-const SRO_RATE_DIV= 0.15;      // srážková daň z vyplacených podílů na zisku
 
-function SroOptimizationPanel({ year, invoices }) {
-  const now = new Date();
-  const isCurrentYear = year === now.getFullYear();
-  const monthsElapsed = isCurrentYear ? Math.max(now.getMonth() + 1, 1) : 12;
-
-  const ytdSubtotal = invoices.filter(i => (i.issue_date||"").startsWith(String(year)))
-                              .reduce((s,i) => s + (i.subtotal||0), 0);
-  const projectedAnnual = isCurrentYear ? Math.round(ytdSubtotal / monthsElapsed * 12) : ytdSubtotal;
-
-  const overTh   = Math.max(projectedAnnual - SRO_TH_23, 0);
-  const triggered = overTh > 0;
-
-  // Efektivní DPFO (OSVČ) na celý odhadovaný základ
-  const taxOsvc        = Math.round(Math.min(projectedAnnual, SRO_TH_23) * SRO_RATE_LO + overTh * SRO_RATE_HI);
-  const effOsvcPct     = projectedAnnual > 0 ? (taxOsvc / projectedAnnual) * 100 : 0;
-  // s.r.o. — zisk ponechaný ve firmě (jen 21 %), vs. zisk vyplacený jako podíl (21 % + 15 % z dividendy)
-  const taxSroRetained    = Math.round(projectedAnnual * SRO_RATE_CO);
-  const taxSroDistributed = Math.round(projectedAnnual * SRO_RATE_CO + projectedAnnual * (1 - SRO_RATE_CO) * SRO_RATE_DIV);
-  const effSroDistPct     = projectedAnnual > 0 ? (taxSroDistributed / projectedAnnual) * 100 : 0;
-
-  const saving = taxOsvc - taxSroRetained; // možná úspora, pokud zisk zůstane ve firmě
-
-  if (projectedAnnual <= 0) return null;
-
-  return (
-    <div style={{
-      background: triggered ? "#FFFBEB" : "#fff",
-      border: `1.5px solid ${triggered ? "#F59E0B" : "var(--line)"}`,
-      borderRadius: 14, padding: "20px 22px"
-    }}>
-      <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:10}}>
-        {triggered && <span style={{fontSize:16}}>⚠️</span>}
-        <div style={{fontSize:9,letterSpacing:".24em",textTransform:"uppercase",fontWeight:700,color:triggered?"#92400E":"var(--mut)"}}>
-          {triggered ? "Závažné daňové upozornění — zvaž s.r.o." : "Optimalizace — OSVČ vs. s.r.o."}
-        </div>
-      </div>
-
-      <div style={{fontSize:12.5,color:"var(--txt)",lineHeight:1.6,marginBottom:14,maxWidth:760}}>
-        {triggered ? (
-          <>Při odhadovaném ročním obratu <strong>{fmtKc(projectedAnnual)}</strong> (extrapolace z fakturace {monthsElapsed}/12 měsíců {year})
-          přesahuješ hranici <strong>{fmtKc(SRO_TH_23)}</strong>, od které se na OSVČ uplatňuje <strong>zvýšená sazba 23 %</strong> místo 15 %.
-          Z přesahu <strong>{fmtKc(overTh)}</strong> tak navíc odvádíš o {fmtKc(Math.round(overTh*(SRO_RATE_HI-SRO_RATE_LO)))} víc, než kdyby platila jen 15% sazba.
-          Společnost s ručením omezeným naproti tomu platí jednotných <strong>21 %</strong> z celého zisku — při tomto objemu se vyplatí nechat si od daňového poradce
-          spočítat přesný přechod na s.r.o.</>
-        ) : (
-          <>Při odhadovaném ročním obratu <strong>{fmtKc(projectedAnnual)}</strong> (extrapolace z fakturace {monthsElapsed}/12 měsíců {year}) zatím nepřesahuješ hranici
-          pro zvýšenou sazbu 23 % (<strong>{fmtKc(SRO_TH_23)}</strong>). OSVČ s paušálem 15 % zůstává sazbou výhodná — appka tě upozorní, jakmile se přiblížíš.</>
-        )}
-      </div>
-
-      <div style={{display:"flex",gap:28,flexWrap:"wrap",marginBottom:12}}>
-        <div>
-          <div style={{fontSize:10,color:"var(--mut)"}}>OSVČ — DPFO (15 % / 23 %)</div>
-          <div style={{fontFamily:"Inter,ui-sans-serif,system-ui,sans-serif",fontVariantNumeric:"tabular-nums",fontSize:22,fontWeight:600,color:triggered?"#A8443C":"var(--txt)"}}>{fmtKc(taxOsvc)}</div>
-          <div style={{fontSize:9.5,color:"var(--mut)"}}>efektivně {effOsvcPct.toFixed(1)} % z obratu</div>
-        </div>
-        <div>
-          <div style={{fontSize:10,color:"var(--mut)"}}>s.r.o. — zisk zůstává ve firmě (21 %)</div>
-          <div style={{fontFamily:"Inter,ui-sans-serif,system-ui,sans-serif",fontVariantNumeric:"tabular-nums",fontSize:22,fontWeight:600,color:"#4A7C59"}}>{fmtKc(taxSroRetained)}</div>
-          <div style={{fontSize:9.5,color:"var(--mut)"}}>efektivně 21,0 % z obratu</div>
-        </div>
-        <div>
-          <div style={{fontSize:10,color:"var(--mut)"}}>s.r.o. — zisk vyplacen (21 % + 15 % z podílu)</div>
-          <div style={{fontFamily:"Inter,ui-sans-serif,system-ui,sans-serif",fontVariantNumeric:"tabular-nums",fontSize:22,fontWeight:600,color:"var(--txt)"}}>{fmtKc(taxSroDistributed)}</div>
-          <div style={{fontSize:9.5,color:"var(--mut)"}}>efektivně {effSroDistPct.toFixed(1)} % z obratu</div>
-        </div>
-        {triggered && (
-          <div>
-            <div style={{fontSize:10,color:"var(--mut)"}}>Možná úspora (zisk ve firmě vs. OSVČ)</div>
-            <div style={{fontFamily:"Inter,ui-sans-serif,system-ui,sans-serif",fontVariantNumeric:"tabular-nums",fontSize:22,fontWeight:500,color:saving>0?"#4A7C59":"#A8443C"}}>
-              {saving>0?"až +":""}{fmtKc(Math.abs(saving))}
-            </div>
-            <div style={{fontSize:9.5,color:"var(--mut)"}}>ročně, orientačně</div>
-          </div>
-        )}
-      </div>
-
-      <div style={{fontSize:9.5,color:"var(--mut)",lineHeight:1.6,maxWidth:760,borderTop:"1px solid rgba(0,0,0,.06)",paddingTop:10}}>
-        ℹ️ Orientační porovnání efektivních sazeb na <strong>hrubý obrat z fakturace</strong> — skutečný základ daně závisí na reálných/paušálních výdajích,
-        sociálním a zdravotním pojištění a způsobu výplaty zisku (mzda vs. podíl). Sazby a hranice odpovídají roku {year} dle Finanční správy ČR
-        (DPFO 15 % / 23 % nad {fmtKc(SRO_TH_23)}, daň z příjmu právnických osob 21 %, srážková daň z podílů na zisku 15 %).
-        Nejde o daňové poradenství — pro přesný přepočet a rozhodnutí o přechodu na s.r.o. je třeba probrat konkrétní čísla s daňovým poradcem.
-      </div>
-    </div>
-  );
-}
 
 /* ─── DPH — MĚSÍČNÍ ODPOČET (na žádost): kolik na konci měsíce zaplatím Čechmanové po odečtení účtenek ───
    Princip: DPH z vystavených faktur (tento měsíc) − DPH z účtenek, které posílám jako odpočet = reálně
@@ -16102,6 +14809,8 @@ function DphOdpocetTile({ invoices, financeItems, onSaveFinance, onNav, dashNadm
   // ale výsledek je splatný až příští měsíc. Štítky níže to teď odrážejí, ať se to nepřekrývá s částkou,
   // která už ti od Čechmanové přišla k úhradě (ta je vždय za měsíc předchozí).
   const dueMonthName = CZM[(now.getMonth() + 1) % 12];
+  // Nominativ pro popisky dlaždic ("DPH z faktur · srpen"), genitiv jen po předložce ("z uzavřeného měsíce srpna").
+  const prevMonthNom = czMes((now.getMonth() + 11) % 12);
   const prevMonthName = CZM[(now.getMonth() + 11) % 12];
 
   // Skutečná částka, kterou Čechmanová pošle k úhradě do 25. TOHOTO měsíce — netýká se aktuálního,
@@ -16123,12 +14832,12 @@ function DphOdpocetTile({ invoices, financeItems, onSaveFinance, onNav, dashNadm
   };
 
   const kpis = [
-    { label: `DPH z faktur · ${prevMonthName}`, value: fmtKc(dphFakturyPrev), color: "var(--txt)", hint: "určuje, kolik dostaneš 25. " + CZM[now.getMonth()] },
-    { label: `Odpočet z účtenek · ${prevMonthName}`, value: "−" + fmtKc(odpocetPrev), color: "#3518A5", hint: "uplatněný k tomuto vyúčtování" },
+    { label: `DPH z faktur · ${prevMonthNom}`, value: fmtKc(dphFakturyPrev), color: "var(--txt)", hint: "určuje, kolik dostaneš 25. " + CZM[now.getMonth()] },
+    { label: `Odpočet z účtenek · ${prevMonthNom}`, value: "−" + fmtKc(odpocetPrev), color: "#3518A5", hint: "uplatněný k tomuto vyúčtování" },
     { label: "K úhradě Čechmanové do 25. " + CZM[now.getMonth()], value: kUhradePrev>0 ? fmtKc(kUhradePrev) : "✓ kryto", color: kUhradePrev>0 ? "#A8443C" : "#4A7C59", hint: `vyúčtování za ${czMes((now.getMonth() + 11) % 12)}`, big: true },
     { label: `Odhad za ${czMes(now.getMonth())} (do 25. ${dueMonthName})`, value: kUhrade>0 ? fmtKc(kUhrade) : "✓ kryto", color: kUhrade>0 ? "#B45309" : "#4A7C59", hint: "orientační — měsíc se ještě tvoří" },
   ];
-  if (prevodPrev > 0) kpis.push({ label: `Přesah odpočtu · ${prevMonthName}`, value: fmtKc(prevodPrev), color: "#7C3AED", hint: "nadměrný odpočet — převádí se dál" });
+  if (prevodPrev > 0) kpis.push({ label: `Přesah odpočtu · ${prevMonthNom}`, value: fmtKc(prevodPrev), color: "#7C3AED", hint: "nadměrný odpočet — převádí se dál" });
 
   return (
     <div style={{ background:"#fff", borderRadius:14, overflow:"hidden", border:"1px solid var(--line)", borderTop:"1px solid rgba(0,0,0,.05)", boxShadow:"0 1px 3px rgba(53,24,165,.06)" }}>
@@ -16137,7 +14846,7 @@ function DphOdpocetTile({ invoices, financeItems, onSaveFinance, onNav, dashNadm
         <div style={{ display:"flex", alignItems:"center", gap:7 }}>
           <span className="maux-dot" style={{ width:6, height:6, background:"#3518A5", boxShadow:"0 0 4px rgba(53,24,165,.5)" }} />
           <span style={{ fontSize:10, letterSpacing:".22em", textTransform:"uppercase", color:"#3518A5", fontWeight:800 }}>
-            DPH odpočet · vyúčtování {prevMonthName}
+            DPH odpočet · vyúčtování {prevMonthNom}
           </span>
         </div>
         {paidPrev ? (
@@ -16173,8 +14882,8 @@ function DphOdpocetTile({ invoices, financeItems, onSaveFinance, onNav, dashNadm
       {/* Konektor na Dashboard — Tom chtěl vidět, jak se tohle promítá do Bilance příštího měsíce */}
       <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", gap:12, flexWrap:"wrap", margin:"14px 22px 0", padding:"11px 14px", background:"#F5F3FF", border:"1px solid #DDD6FE", borderRadius:10 }}>
         <div style={{ fontSize:10.5, color:"#3518A5", lineHeight:1.5 }}>
-          ↳ Z odpočtu za {CZM[now.getMonth()]} se do <b>Dashboardu → Bilance příštího měsíce</b> právě promítá{" "}
-          <b className="maux-num">{fmtKc(dashNadmernyOdpocet)}</b> (řádek „Odpočet DPH za {CZM[now.getMonth()]}").
+          ↳ Z odpočtu za {czMes(now.getMonth())} se do <b>Dashboardu → Bilance příštího měsíce</b> právě promítá{" "}
+          <b className="maux-num">{fmtKc(dashNadmernyOdpocet)}</b> (řádek „Odpočet DPH za {czMes(now.getMonth())}").
         </div>
         {onNav && (
           <button onClick={() => onNav("dashboard")}
@@ -16962,20 +15671,20 @@ function DaneModule({ year, taxRecords, financeItems, invoices, dpfoMonths, escr
         kind: Number(form.tax_year) < year ? "doplatek" : "zaloha", source: "ručně · mimořádná", note: form.note || "mimořádná platba" });
       setNewest(id); setForm(f => ({ ...f, amount: "", note: "" })); setShowLog(true);
       await reload();
-    } catch (e) { alert("Nepodařilo se zapsat: " + e.message); }
+    } catch (e) { mauxToast("Nepodařilo se zapsat: " + e.message); }
   };
   const removeRow = async (e) => {
     if (e.ro || !/ručně/.test(e.source || "")) return;
     if (!confirm("Smazat tuhle mimořádnou platbu z logu?")) return;
-    try { await deleteTaxLedger(e.id); await reload(); } catch (err) { alert("Chyba: " + err.message); }
+    try { await deleteTaxLedger(e.id); await reload(); } catch (err) { mauxToast("Chyba: " + err.message); }
   };
   const seedFromPortals = async () => {
     try { for (const r of TAX_SEED_2026) await upsertTaxLedger(r); await reload(); }
-    catch (e) { alert("Nepodařilo se naplnit log: " + e.message); }
+    catch (e) { mauxToast("Nepodařilo se naplnit log: " + e.message); }
   };
   const saveCal = async () => {
     try { await saveTaxSettings(year, cal); setSettings(cal); setShowCal(false); }
-    catch (e) { alert("Nepodařilo se uložit kalibraci: " + e.message); }
+    catch (e) { mauxToast("Nepodařilo se uložit kalibraci: " + e.message); }
   };
   // Propíše „pošli tento měsíc" do částek položek Sociálka / VZP / DPFO ve Výdajích.
   const pushToExpenses = async () => {
@@ -16988,7 +15697,7 @@ function DaneModule({ year, taxRecords, financeItems, invoices, dpfoMonths, escr
       const v = T.per[acct]; const signed = (it.amount || 0) < 0 ? -v : v;
       if (Math.round(it.amount || 0) !== Math.round(signed)) { await onSaveFinance({ ...it, amount: signed }); n++; }
     }
-    alert(n ? `Propsáno do Výdajů: ${n} položky. Od teď v nich uvidíš částky z listu Daně.` : "Výdaje už sedí — nebylo co měnit.");
+    mauxToast(n ? `Propsáno do Výdajů: ${n} položky. Od teď v nich uvidíš částky z listu Daně.` : "Výdaje už sedí — nebylo co měnit.");
   };
 
   if (!settings || !T) return <div style={{ padding: 40, color: "var(--mut)", fontSize: 13 }}>Načítám daně…</div>;
@@ -17306,85 +16015,6 @@ function DaneModule({ year, taxRecords, financeItems, invoices, dpfoMonths, escr
   );
 }
 
-function TaxRow({ rec, auto, onSave }) {
-  const [settlement, setSettlement] = useState(rec.actual_settlement ?? "");
-  const [note, setNote] = useState(rec.note || "");
-  const [editingSettlement, setEditingSettlement] = useState(false);
-  const [editingNote, setEditingNote] = useState(false);
-
-  const hasSettlement = rec.actual_settlement != null && rec.actual_settlement !== "";
-  const diff = hasSettlement ? (auto.paid - Number(rec.actual_settlement)) : null;
-
-  const commitSettlement = () => { onSave({ ...rec, actual_settlement: settlement === "" ? null : Number(settlement) }); setEditingSettlement(false); };
-  const commitNote = () => { onSave({ ...rec, note }); setEditingNote(false); };
-
-  return (
-    <div style={{ background: "#fff", border: "1px solid var(--line)", borderRadius: 12, padding: "14px 18px" }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12, flexWrap: "wrap" }}>
-        <div>
-          <div style={{ fontSize: 13, color: "var(--txt)", fontWeight: 600 }}>{rec.label}</div>
-          <div style={{ fontSize: 9.5, color: "var(--mut)", marginTop: 2, opacity:.85 }}>{auto.basis}</div>
-        </div>
-        {diff != null && (
-          <span className="maux-num" style={{
-            fontSize: 11.5, fontWeight: 700, padding: "3px 10px", borderRadius: 20,
-            color: diff >= 0 ? "#4A7C59" : "#A8443C",
-            background: diff >= 0 ? "#ECFDF5" : "#FEF2F2",
-            border: `1px solid ${diff >= 0 ? "#A7F3D0" : "#FECACA"}`,
-            whiteSpace: "nowrap",
-          }}>
-            {diff >= 0 ? "+" : "−"}{fmtKc(Math.abs(diff))} {diff >= 0 ? "přeplatek" : "nedoplatek"}
-          </span>
-        )}
-      </div>
-
-      <div style={{ display: "flex", gap: 24, flexWrap: "wrap", marginTop: 12, paddingTop: 12, borderTop: "1px solid var(--line)" }}>
-        <div>
-          <div style={{ fontSize: 9, letterSpacing:".06em", textTransform:"uppercase", color: "var(--mut)" }}>Zaplaceno (auto)</div>
-          <div className="maux-num" style={{ fontSize: 14, color: "var(--txt)", fontWeight:600, marginTop:2 }}>{fmtKc(auto.paid)}</div>
-        </div>
-        <div>
-          <div style={{ fontSize: 9, letterSpacing:".06em", textTransform:"uppercase", color: "var(--mut)" }}>Skutečné vyúčtování</div>
-          {editingSettlement ? (
-            <span style={{ display: "inline-flex", alignItems: "center", gap: 4, marginTop:2 }}>
-              <input type="number" autoFocus value={settlement}
-                onChange={e => setSettlement(e.target.value)}
-                onKeyDown={e => { if (e.key === "Enter") commitSettlement(); if (e.key === "Escape") setEditingSettlement(false); }}
-                style={{ width: 88, fontSize: 12, fontFamily: "var(--mono)", padding: "3px 6px", border: "1px solid var(--ink)", borderRadius: 5, outline: "none" }} />
-              <button onClick={commitSettlement} style={{ fontSize: 12, border: "none", background: "none", cursor: "pointer", color: "var(--ink)" }}>✓</button>
-            </span>
-          ) : (
-            <div onClick={() => { setSettlement(rec.actual_settlement ?? ""); setEditingSettlement(true); }}
-              title="Klikni a zadej skutečné vyúčtování po podání přiznání / přehledu"
-              className="maux-num"
-              style={{ fontSize: 14, fontWeight:600, cursor: "pointer", borderBottom: "1px dotted var(--mut)", color: hasSettlement ? "var(--txt)" : "var(--mut)", marginTop:2, display:"inline-block" }}>
-              {hasSettlement ? fmtKc(Number(rec.actual_settlement)) : "klikni a zadej…"}
-            </div>
-          )}
-        </div>
-        <div style={{ flex: 1, minWidth: 180 }}>
-          <div style={{ fontSize: 9, letterSpacing:".06em", textTransform:"uppercase", color: "var(--mut)" }}>Poznámka k optimalizaci záloh</div>
-          {editingNote ? (
-            <span style={{ display: "inline-flex", alignItems: "center", gap: 4, width: "100%", marginTop:2 }}>
-              <input type="text" autoFocus value={note}
-                onChange={e => setNote(e.target.value)}
-                onKeyDown={e => { if (e.key === "Enter") commitNote(); if (e.key === "Escape") setEditingNote(false); }}
-                placeholder="např. snížit zálohu od ledna o…"
-                style={{ flex: 1, fontSize: 12, padding: "3px 6px", border: "1px solid var(--ink)", borderRadius: 5, outline: "none" }} />
-              <button onClick={commitNote} style={{ fontSize: 12, border: "none", background: "none", cursor: "pointer", color: "var(--ink)" }}>✓</button>
-            </span>
-          ) : (
-            <div onClick={() => { setNote(rec.note || ""); setEditingNote(true); }}
-              title="Klikni a napiš poznámku k optimalizaci záloh na příští rok"
-              style={{ fontSize: 12, cursor: "pointer", color: rec.note ? "var(--txt)" : "var(--mut)", borderBottom: "1px dotted var(--mut)", marginTop:4, display:"inline-block" }}>
-              {rec.note || "klikni a přidej poznámku…"}
-            </div>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-}
 
 /* ─── KLIENTI ─── */
 function ClientList({ clients, invoices, query, setQuery, filter, setFilter, onOpen, onNew, onRepairClients }) {
@@ -17705,7 +16335,6 @@ const netAttHours = (ci, co) => {
   const dur = (new Date(co) - new Date(ci)) / 36e5;
   return Math.max(0, dur >= LUNCH_THRESHOLD_H ? dur - LUNCH_BREAK_H : dur);
 };
-const UNDO_WINDOW_MS   = 10 * 60 * 1000; // 10 minut
 
 // Lokální formát data bez UTC problémů (reuse today() pattern)
 const localDs = (d) =>
@@ -18588,7 +17217,7 @@ function AsistentVykazy({ email, clients, onRefresh, onClientsRefresh, presetDat
       setLogs(updated); onRefresh?.();
       setForm({ id: uid(), client_id: "", entry_date: today(), description: "", hours: "", notes: "", entry_type: "client", bd_category: "" });
       setClientQ("");
-    } catch(e) { alert("Chyba: " + e.message); }
+    } catch(e) { mauxToast("Chyba: " + e.message); }
     finally { setSaving(false); }
   };
 
@@ -18607,7 +17236,7 @@ function AsistentVykazy({ email, clients, onRefresh, onClientsRefresh, presetDat
       await upsertAssistantWorkLog({ ...log, description: editDesc.text.trim() });
       setLogs(await fetchAssistantWorkLogs(email)); onRefresh?.();
       setEditDesc(null);
-    } catch(e) { alert("Chyba: " + e.message); }
+    } catch(e) { mauxToast("Chyba: " + e.message); }
     finally { setSavingDesc(false); }
   };
 
@@ -18629,7 +17258,7 @@ function AsistentVykazy({ email, clients, onRefresh, onClientsRefresh, presetDat
       await onClientsRefresh?.();
       set("client_id", c.id); setClientQ(c.name);
       setNovyKlient(null);
-    } catch(e) { alert("Chyba: " + e.message); }
+    } catch(e) { mauxToast("Chyba: " + e.message); }
     finally { setSavingKlient(false); }
   };
 
@@ -18843,7 +17472,7 @@ const dochazkaStats = (rows) => {
 // CSV pro účetní za jeden měsíc (nebo vše), se součtovým řádkem. Název souboru = vybraný měsíc, ne dnešek.
 function downloadDochazkaCsv(attendance, ym) {
   const rows = dochazkaClosedRows(attendance, ym);
-  if (rows.length === 0) { alert(`Žádná uzavřená směna za ${ym ? dochazkaLabel(ym) : "celé období"}.`); return; }
+  if (rows.length === 0) { mauxToast(`Žádná uzavřená směna za ${ym ? dochazkaLabel(ym) : "celé období"}.`); return; }
   const fmtTs = ts => ts ? new Date(ts).toLocaleTimeString("cs-CZ", { hour: "2-digit", minute: "2-digit" }) : "";
   const out = [["Datum","Příchod","Odchod","Hrubé hodiny","Čisté hodiny","Pauza","Odměna (Kč)"]];
   let sGross = 0, sNet = 0, sLunch = 0;
@@ -18873,7 +17502,7 @@ function exportDochazkaHtml(attendance, ym, email) {
     const rows = attendance
       .filter(a => (a.date || "").startsWith(ym) && a.check_in && a.check_out)
       .sort((a,b) => a.date.localeCompare(b.date));
-    if (rows.length === 0) { alert(`Žádné záznamy docházky za ${monthNames[em-1]} ${ey}.`); return; }
+    if (rows.length === 0) { mauxToast(`Žádné záznamy docházky za ${monthNames[em-1]} ${ey}.`); return; }
 
     const toT = (ts) => new Date(ts).toLocaleTimeString("cs-CZ", { hour: "2-digit", minute: "2-digit" });
     const fmtHm = (h) => fmtHodMin(h, " h ", " min");
@@ -19043,7 +17672,7 @@ function AsistentDochazka({ email, attendance, logs, onRefreshAttendance, onGo }
         await upsertAssistantAttendance({ id:todayRec?.id||uid(), assistant_email:email, date:todayStr, check_in:new Date().toISOString(), check_out:todayRec?.check_out||null });
       }
       await onRefreshAttendance?.();
-    } catch(e){alert("Chyba: "+e.message);} finally{setSaving(false);}
+    } catch(e){mauxToast("Chyba: "+e.message);} finally{setSaving(false);}
   };
   // ── BRÁNA PŘED ODCHODEM ──────────────────────────────────────────────────
   // Žádný tvrdý zámek. Appka Josefovi nezabrání odejít z kanceláře, jen zapsat
@@ -19076,7 +17705,7 @@ function AsistentDochazka({ email, attendance, logs, onRefreshAttendance, onGo }
         await upsertAssistantAttendance({ id:todayRec?.id||uid(), assistant_email:email, date:todayStr, check_in:ci, check_out:new Date().toISOString() });
       }
       await onRefreshAttendance?.();
-    } catch(e){alert("Chyba: "+e.message);} finally{setSaving(false);}
+    } catch(e){mauxToast("Chyba: "+e.message);} finally{setSaving(false);}
   };
 
   const liveDur = todayRec?.check_in
@@ -19095,7 +17724,7 @@ function AsistentDochazka({ email, attendance, logs, onRefreshAttendance, onGo }
     try {
       const rec = { id: avail?.id||uid(), assistant_email:email, year_month:ym, planned_dates:newDates };
       await upsertAssistantAvailability(rec); setAvail(rec);
-    } catch(e){alert("Chyba: "+e.message);} finally{setSavingAvail(false);}
+    } catch(e){mauxToast("Chyba: "+e.message);} finally{setSavingAvail(false);}
   };
   const toggleDay = (dateStr) => {
     const isPast = dateStr < todayStr, isSel = plannedDates.includes(dateStr);
@@ -19130,7 +17759,7 @@ function AsistentDochazka({ email, attendance, logs, onRefreshAttendance, onGo }
     };
     setSavingAtt(true);
     try { await upsertAssistantAttendance(rec); await onRefreshAttendance?.(); setEditingAtt(null); }
-    catch(e) { alert("Chyba: "+e.message); } finally { setSavingAtt(false); }
+    catch(e) { mauxToast("Chyba: "+e.message); } finally { setSavingAtt(false); }
   };
   const monthNames = ["leden","únor","březen","duben","květen","červen","červenec","srpen","září","říjen","listopad","prosinec"];
   const monthNamesGen = ["ledna","února","března","dubna","května","června","července","srpna","září","října","listopadu","prosince"];
@@ -19454,7 +18083,7 @@ function AsistentDochazka({ email, attendance, logs, onRefreshAttendance, onGo }
               const deleteAtt = async () => {
                 if(!window.confirm(`Smazat záznam docházky ${fmtDate(a.date)}?`)) return;
                 try { await deleteAssistantAttendance(a.id); await onRefreshAttendance?.(); }
-                catch(e){alert("Chyba: "+e.message);}
+                catch(e){mauxToast("Chyba: "+e.message);}
               };
               return (
                 <div key={a.id}>
@@ -19797,7 +18426,7 @@ function AsistentApp({ session, onLogout, previewMode }) {
   const ulozNovehoKlienta = async (c) => {
     setSavingKlient(true);
     try { await upsertClient(c); await refreshClients(); setNovyKlient(false); }
-    catch (e) { alert("Chyba: " + e.message); }
+    catch (e) { mauxToast("Chyba: " + e.message); }
     finally { setSavingKlient(false); }
   };
   const refreshLogs = () => fetchAssistantWorkLogs(email).then(setLogs).catch(console.error);
@@ -19967,7 +18596,12 @@ function AsistentPanel({ clients, onPreview, financeItems = [], onSaveFinance, w
   const admDefYm  = admMonths.includes(admPrevYm) ? admPrevYm : (admMonths.find(m => m !== curMonth) || admMonths[0]);
   const admSel    = admYm === null ? admDefYm : admYm;
   const admSt     = dochazkaStats(dochazkaClosedRows(attendance, admSel));
-  const admOpen   = attendance.filter(a => (a.date||"").startsWith(admSel) && a.check_in && !a.check_out).length;
+  // Zapomenutý odchod se hlídá napříč měsíci, ne jen ve vybraném (audit 15. 9. 2026: směna
+  // od 8:34 běžela ve 22:30 dál a karta mlčela, protože roletka stála na minulém měsíci).
+  // Zapomenutá = starší den bez odchodu, nebo dnešní s příchodem před 10+ hodinami.
+  const admOpenRows = attendance.filter(a => a.check_in && !a.check_out && (
+    (a.date||"") < today() || (Date.now() - new Date(a.check_in).getTime()) / 36e5 >= 10));
+  const admOpen   = admOpenRows.length;
 
   return (
     <div className="body">
@@ -20028,7 +18662,7 @@ function AsistentPanel({ clients, onPreview, financeItems = [], onSaveFinance, w
           {(admSel===curMonth && admSt.days>0 || admOpen>0) && (
             <div style={{flexBasis:"100%",fontSize:11,color:"var(--mut)",marginTop:-6}}>
               {admSel===curMonth && admSt.days>0 ? "Měsíc ještě běží — výkaz bude neúplný. " : ""}
-              {admOpen>0 ? `${admOpen} ${admOpen===1?"záznam má":"záznamy mají"} jen příchod bez odchodu — do výkazu nejde, doplň odchod v Docházka · editace.` : ""}
+              {admOpen>0 ? `${admOpen} ${admOpen===1?"směna má":"směny mají"} jen příchod bez odchodu (${admOpenRows.map(r => fmtDate(r.date)).join(", ")}) — do výkazu nejde, doplň odchod v Docházka · editace.` : ""}
             </div>
           )}
         </div>
@@ -20141,14 +18775,14 @@ function AsistentPanel({ clients, onPreview, financeItems = [], onSaveFinance, w
                           await upsertAssistantAttendance({id:a.id,assistant_email:email,date:d,check_in:ci,check_out:co});
                           setAttendance(await fetchAssistantAttendance(email));
                           setEditingAdminAtt(null);
-                        } catch(e){alert("Chyba: "+e.message);} finally{setSavingAdminAtt(false);}
+                        } catch(e){mauxToast("Chyba: "+e.message);} finally{setSavingAdminAtt(false);}
                       };
                       const deleteRow = async () => {
                         if(!window.confirm(`Smazat záznam docházky ${fmtDate(a.date)}?`)) return;
                         try {
                           await deleteAssistantAttendance(a.id);
                           setAttendance(await fetchAssistantAttendance(email));
-                        } catch(e){alert("Chyba: "+e.message);}
+                        } catch(e){mauxToast("Chyba: "+e.message);}
                       };
                       return (
                         <Fragment key={a.id}>
@@ -20583,7 +19217,7 @@ export default function MauxCRM() {
 
   const saveFinanceItem = async (item) => {
     try { await upsertFinanceItem(item); setFinanceItems(await fetchFinanceItems()); }
-    catch(e) { alert("Chyba: " + e.message); }
+    catch(e) { mauxToast("Chyba: " + e.message); }
   };
   /* ── VÝDAJE ↔ DANĚ (5. 9. 2026, Tom: „výdaje na Přehledu nejsou spárované") ──────
      Položky Sociálka / VZP / DPFO ve Výdajích dostávají částku „pošli tento měsíc"
@@ -20634,11 +19268,11 @@ export default function MauxCRM() {
       // Negative amount = FÚ payment (always paid), positive = savings entry
       const fn = amount < 0 ? addDpfoPayment : addDpfoZaloha;
       setDpfoMonths(await fn(year, month, amount));
-    } catch(e) { alert("Chyba: " + e.message); }
+    } catch(e) { mauxToast("Chyba: " + e.message); }
   };
   const handleDpfoDelete = async (id, year) => {
     try { setDpfoMonths(await deleteDpfoZaloha(id, year)); }
-    catch(e) { alert("Chyba: " + e.message); }
+    catch(e) { mauxToast("Chyba: " + e.message); }
   };
   // Označení tranše jako vyplacené — promítne se do úroků v celé appce (interest engine čte paid_date)
   // ⚠️ Datum bere z globálního today() (lokální kalendář). Dřív tu byl toISOString().slice(0,10),
@@ -20647,7 +19281,7 @@ export default function MauxCRM() {
     try {
       await upsertEscrowTranche({ ...tranche, escrow_id: escrowId, is_paid: true, paid_date: today() });
       setEscrows(await fetchEscrows());
-    } catch(e) { alert("Chyba: " + e.message); }
+    } catch(e) { mauxToast("Chyba: " + e.message); }
   };
   // Inline zápis data podání návrhu na vklad z karty úschovy. Na tomhle datu stojí celá
   // projekce úroků (plomba = návrh + 20 dní), proto musí jít doplnit jedním klikem.
@@ -20661,16 +19295,16 @@ export default function MauxCRM() {
       await upsertEscrow({ ...escrow, date_navrh_podan: ymd,
         date_plomba_end: autoPlomba ? addDays(ymd, 20) : escrow.date_plomba_end });
       setEscrows(await fetchEscrows());
-    } catch(e) { alert("Chyba: " + e.message); }
+    } catch(e) { mauxToast("Chyba: " + e.message); }
   };
   // Refresh po výplatě z PaymentWizard (Wizard sám dělá upserty, my jen refreshneme)
   const handleEscrowPaymentRefresh = async () => {
     try { setEscrows(await fetchEscrows()); }
-    catch(e) { alert("Chyba při načítání úschov: " + e.message); }
+    catch(e) { mauxToast("Chyba při načítání úschov: " + e.message); }
   };
   const saveTaxRecord = async (rec) => {
     try { await upsertTaxRecord(rec); setTaxRecords(await fetchTaxRecords(rec.year)); }
-    catch(e) { alert("Chyba: " + e.message); }
+    catch(e) { mauxToast("Chyba: " + e.message); }
   };
   const toggleExpenseCheck = async (itemId, paid) => {
     const now = new Date();
@@ -20722,7 +19356,7 @@ export default function MauxCRM() {
         }
       }
     }
-    catch(e) { alert("Chyba: " + e.message); }
+    catch(e) { mauxToast("Chyba: " + e.message); }
   };
   const handleLoanTxAdd = async (tx) => {
     await upsertLoanTransaction(tx);
@@ -20791,7 +19425,7 @@ export default function MauxCRM() {
 
   const deleteFinanceItem = async (id) => {
     try { await deleteFinanceItemDb(id); setFinanceItems(p => p.filter(i => i.id !== id)); }
-    catch(e) { alert("Chyba: " + e.message); }
+    catch(e) { mauxToast("Chyba: " + e.message); }
   };
 
   const saveWorkEntry = async (e) => {
@@ -20801,13 +19435,13 @@ export default function MauxCRM() {
       const updated = await fetchWorkEntries();
       setWorkEntries(updated);
       setMode("list"); setSel(null); setPrefillDate(null);
-    } catch (err) { alert("Chyba: " + err.message); } finally { setSaving(false); }
+    } catch (err) { mauxToast("Chyba: " + err.message); } finally { setSaving(false); }
   };
   const doDeleteWorkEntry = async (id) => {
     try {
       await deleteWorkEntryDb(id);
       setWorkEntries(p => p.filter(e => e.id !== id));
-    } catch (err) { alert("Chyba: " + err.message); }
+    } catch (err) { mauxToast("Chyba: " + err.message); }
   };
 
   const openIssueModal = (clientId, entries, existingInvoice = null) => {
@@ -20829,7 +19463,7 @@ export default function MauxCRM() {
       const updated = await fetchWorkEntries();
       setWorkEntries(updated);
       setDiscountModal(null);
-    } catch (err) { alert("Chyba: " + err.message); } finally { setSaving(false); }
+    } catch (err) { mauxToast("Chyba: " + err.message); } finally { setSaving(false); }
   };
 
   // "Vystavit na jiný subjekt" — Tom 30.6.2026: stejný princip jako "Změny" výše, samostatný
@@ -20904,7 +19538,7 @@ export default function MauxCRM() {
       ]);
       const [updInvs, updWE] = await Promise.all([fetchInvoices(), fetchWorkEntries()]);
       setInvoices(updInvs); setWorkEntries(updWE);
-    } catch (e) { alert("Chyba: " + e.message); } finally { setSaving(false); setEditInvModal(null); }
+    } catch (e) { mauxToast("Chyba: " + e.message); } finally { setSaving(false); setEditInvModal(null); }
   };
 
   const generateInvoiceFromEntries = async (clientId, entries) => {
@@ -20934,7 +19568,7 @@ export default function MauxCRM() {
       // setSel → navTo → setMode("detail") se v jednom renderu srazila (navTo nuluje sel),
       // výsledek byl mode "detail" bez vybrané faktury = prázdná stránka Fakturace.
       navTo("fakturace");
-    } catch (err) { alert("Chyba: " + err.message); } finally { setSaving(false); }
+    } catch (err) { mauxToast("Chyba: " + err.message); } finally { setSaving(false); }
   };
 
   // Sirotci (viz orphanWorkEntries): zruší vazbu na fakturu, výkazy spadnou do K vystavení.
@@ -20946,7 +19580,7 @@ export default function MauxCRM() {
       await Promise.all(entries.map(e => upsertWorkEntry({ ...e, invoice_id: null })));
       const updWE = await fetchWorkEntries();
       setWorkEntries(updWE);
-    } catch (err) { alert("Chyba: " + err.message); } finally { setSaving(false); }
+    } catch (err) { mauxToast("Chyba: " + err.message); } finally { setSaving(false); }
   };
 
   const revertInvoiceToDraft = async (inv) => {
@@ -20957,7 +19591,7 @@ export default function MauxCRM() {
       await upsertInvoice({ ...cleanInv, status: 'pripravena' });
       const updInvs = await fetchInvoices();
       setInvoices(updInvs);
-    } catch (err) { alert("Chyba: " + err.message); } finally { setSaving(false); }
+    } catch (err) { mauxToast("Chyba: " + err.message); } finally { setSaving(false); }
   };
 
   const issueExistingInvoice = (inv) => {
@@ -20970,11 +19604,11 @@ export default function MauxCRM() {
   const saveClient = async (c) => {
     setSaving(true);
     try { await upsertClient(c); const updated = await fetchClients(); setClients(updated); setSel(c.id); setMode("detail"); }
-    catch (e) { alert("Chyba: " + e.message); } finally { setSaving(false); }
+    catch (e) { mauxToast("Chyba: " + e.message); } finally { setSaving(false); }
   };
   const doDeleteClient = async (id) => {
     try { await deleteClientDb(id); setClients(p => p.filter(c => c.id !== id)); setConfirmDel(null); setMode("list"); setSel(null); }
-    catch (e) { alert("Chyba: " + e.message); }
+    catch (e) { mauxToast("Chyba: " + e.message); }
   };
   // Faktury vystavené na klienty, kteří chybí v evidenci — automaticky je založíme
   // z údajů na faktuře (jméno z poznámky) a fakturu propojíme na nový záznam.
@@ -20998,17 +19632,17 @@ export default function MauxCRM() {
       }
       const [updatedClients, updatedInvoices] = await Promise.all([fetchClients(), fetchInvoices()]);
       setClients(updatedClients); setInvoices(updatedInvoices);
-    } catch (e) { alert("Chyba: " + e.message); }
+    } catch (e) { mauxToast("Chyba: " + e.message); }
     finally { setSaving(false); }
   };
   const saveInvoice = async (inv) => {
     setSaving(true);
     try { await upsertInvoice(inv); const updated = await fetchInvoices(); setInvoices(updated); setSel(inv.id); setMode("detail"); }
-    catch (e) { alert("Chyba: " + e.message); } finally { setSaving(false); }
+    catch (e) { mauxToast("Chyba: " + e.message); } finally { setSaving(false); }
   };
   const doDeleteInvoice = async (id) => {
     try { await deleteInvoiceDb(id); setInvoices(p => p.filter(i => i.id !== id)); setConfirmDel(null); setMode("list"); setSel(null); }
-    catch (e) { alert("Chyba: " + e.message); }
+    catch (e) { mauxToast("Chyba: " + e.message); }
   };
   const toggleInvoiceStatus = async (inv) => {
     let newStatus;
@@ -21025,7 +19659,7 @@ export default function MauxCRM() {
     const updated = { ...cleanInv, status: newStatus };
     setInvoices(p => p.map(i => i.id === inv.id ? { ...i, status: newStatus } : i));
     try { await upsertInvoice(updated); }
-    catch (e) { setInvoices(p => p.map(i => i.id === inv.id ? cleanInv : i)); alert("Chyba: " + e.message); }
+    catch (e) { setInvoices(p => p.map(i => i.id === inv.id ? cleanInv : i)); mauxToast("Chyba: " + e.message); }
   };
   const openClientFromInvoice = (clientId) => {
     setSel(clientId); navTo("klienti"); setMode("detail");
@@ -21042,7 +19676,7 @@ export default function MauxCRM() {
   };
   const doDeleteEscrow = async (id) => {
     try { await deleteEscrowDb(id); setEscrows(p => p.filter(e => e.id !== id)); }
-    catch(e) { alert("Chyba: " + e.message); }
+    catch(e) { mauxToast("Chyba: " + e.message); }
   };
 
   const selClient = clients.find(c => c.id === sel);
