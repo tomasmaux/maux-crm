@@ -13383,6 +13383,7 @@ function InvoiceList({ invoices, clients, workEntries, escrows, onOpen, onOpenCl
   );
 
   const [expandedDraft, setExpandedDraft] = useState(null);
+  const [menuDraft, setMenuDraft] = useState(null); // "···" u draftu — Změny / jiný subjekt (15. 9. 2026, varianta A)
   const [expandedDraftInv, setExpandedDraftInv] = useState(null);
   const orphans = useMemo(() => orphanWorkEntries(workEntries, invoices), [workEntries, invoices]);
   const orphanSum = orphans.reduce((s, e) => s + (Number(e.amount) || 0), 0);
@@ -13572,79 +13573,81 @@ function InvoiceList({ invoices, clients, workEntries, escrows, onOpen, onOpenCl
         </div>
       )}
 
-      {/* ── PŘIPRAVENO K VYSTAVENÍ ── */}
-      {drafts.length > 0 && (
+      {/* ── PŘIPRAVENO K VYSTAVENÍ — varianta A (Tom 15. 9. 2026: "líbí se mi ta horní část,
+          ale na Vystavené mi nesahej"). Jedna sklo karta, řádek na klienta, Náhled + Vystavit,
+          Změny a jiný subjekt pod "···", součet dole. Klik na jméno rozbalí výkazy jako dřív.
+          Sekce Vystavené faktury níž je záměrně BEZE ZMĚNY — barevné pilulky jsou Tomova volba. ── */}
+      {drafts.length > 0 && (() => {
+        const _n = new Date(); const _d1 = new Date(_n.getFullYear(), _n.getMonth() + 1, 1);
+        const sumBase = drafts.reduce((a, d) => a + (d.workAmt || 0), 0);
+        const sumTotal = drafts.reduce((a, d) => a + (d.total || 0), 0);
+        const rowGrid = { display: "grid", gridTemplateColumns: "minmax(0,2.2fr) minmax(0,1.5fr) 130px auto", alignItems: "center", gap: 14, padding: "12px 16px 12px 18px" };
+        return (
         <div style={{ marginBottom: 36 }}>
-          <div className="sec-hd" style={{ marginBottom: 14 }}>
-            <span style={{ color: "var(--ink)", fontWeight: 600 }}>
-              K vystavení · {drafts.length} {drafts.length === 1 ? "klient" : "klientů"}
-            </span>
-            <span style={{ fontSize: 12, color: "var(--mut)", fontWeight: 400, textTransform: "none", letterSpacing: 0 }}>
-              Agregováno z výkazu práce — zkontroluj a vystav
-            </span>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 12, flexWrap: "wrap", marginBottom: 10 }}>
+            <div style={{ fontFamily: "Fraunces,serif", fontWeight: 300, fontSize: 22, color: "var(--ink)" }}>
+              K vystavení 1. {czMes(_d1.getMonth(), "gen")}
+            </div>
+            <div style={{ fontSize: 11.5, color: "var(--mut)" }}>
+              agregováno z výkazu práce · <b style={{ color: "var(--txt)", fontWeight: 600 }}>{drafts.length} {drafts.length === 1 ? "klient" : drafts.length < 5 ? "klienti" : "klientů"}</b>
+            </div>
           </div>
-          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-            {drafts.map((d, draftIdx) => (
-              <div key={d.clientId} style={{ background: "#fff", border: "1px solid var(--line)", borderRadius: 12, overflow: "hidden" }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 16, padding: "14px 18px", cursor: "pointer" }}
-                  onClick={() => setExpandedDraft(expandedDraft === d.clientId ? null : d.clientId)}>
-                  <div style={{ flex: 1 }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                      <span style={{ fontWeight: 600, fontSize: 14, color: "var(--txt)" }}>{d.client?.name || "—"}</span>
-                      {/* Tom 30.6.2026: predikované číslo faktury — nepřerušená navazující řada už u
-                          draftů, podle chronologického pořadí v listu. Pouze zobrazení (viz
-                          previewInvoiceNumber); skutečné číslo se zafixuje až při vystavení. */}
-                      <span title="Předpokládané číslo faktury — zafixuje se až při vystavení" style={{
-                        fontSize: 10.5, fontWeight: 500, color: "var(--mut)", background: "#F3F0FF",
-                        border: "1px solid var(--line)", borderRadius: 6, padding: "1px 7px", flexShrink: 0,
-                      }}>{previewInvoiceNumber(invoices, draftIdx)}</span>
+          <div style={{ ...MAUX_GLASS, borderRadius: 18, overflow: "visible" }}>
+            {drafts.map((d, draftIdx) => {
+              const alt = altSubjects?.[d.clientId];
+              const hasDisc = d.entries.some(e => Number(e.discount_amount) > 0);
+              const open = expandedDraft === d.clientId;
+              return (
+              <div key={d.clientId} style={{ borderTop: draftIdx === 0 ? "none" : "1px solid var(--line)", position: "relative" }}>
+                <div style={rowGrid}>
+                  <div style={{ minWidth: 0, cursor: "pointer" }} onClick={() => setExpandedDraft(open ? null : d.clientId)} title={open ? "Sbalit výkazy" : "Rozbalit výkazy"}>
+                    <div style={{ fontWeight: 600, fontSize: 13.5, color: "var(--ink)", display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
+                      <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{d.client?.name || "—"}</span>
+                      <span style={{ fontSize: 10, color: "var(--mut)", opacity: .7, flexShrink: 0 }}>{open ? "▴" : "▾"}</span>
                     </div>
-                    <div style={{ fontSize: 11.5, color: "var(--mut)", marginTop: 2 }}>
-                      {d.entries.length} záznamů · {d.hours.toFixed(1)} h fakturovaných
+                    <div style={{ fontSize: 10.5, color: "var(--mut)", marginTop: 2 }}>
+                      <span className="maux-num" style={{ fontWeight: 500 }} title="Předpokládané číslo faktury — zafixuje se až při vystavení">{previewInvoiceNumber(invoices, draftIdx)}</span>
+                      {" · "}{d.entries.length} {d.entries.length === 1 ? "záznam" : d.entries.length < 5 ? "záznamy" : "záznamů"} · {d.hours.toFixed(1)} h
                       {d.notary > 0 && ` · notář ${fmtKc(d.notary)}`}
-                      {d.admin > 0 && ` · sp.pop. ${fmtKc(d.admin)}`}
+                      {d.admin > 0 && ` · sp. poplatek ${fmtKc(d.admin)}`}
                       {d.sig > 0 && ` · prohlášení ${fmtKc(d.sig)}`}
                     </div>
+                    {alt && <div style={{ fontSize: 10.5, color: "var(--ink)", marginTop: 2 }}>→ odběratel na faktuře: <b>{alt.name}</b></div>}
                   </div>
-                  <div style={{ textAlign: "right", marginRight: 16 }}>
-                    <div style={{ fontFamily:"Inter,ui-sans-serif,system-ui,sans-serif",fontVariantNumeric:"tabular-nums", fontSize: 18, fontWeight:600, color: "var(--gold)" }}>{fmtKc(d.total)}</div>
-                    <div style={{ fontSize: 11, color: "var(--mut)" }}>základ {fmtKc(d.workAmt)} + DPH {fmtKc(d.vat)}{(d.admin+d.sig)>0 ? ` + přef. ${fmtKc(d.admin+d.sig)}` : ""}</div>
-                    {d.discount > 0 && (
-                      <div style={{ fontSize: 10.5, color: "#A8527A", marginTop: 1 }}>sleva uplatněna −{fmtKc(d.discount)}</div>
-                    )}
+                  <div style={{ fontSize: 11.5, color: "var(--mut)" }}>
+                    základ {fmtKc(d.workAmt)} + DPH {fmtKc(d.vat)}{(d.admin + d.sig) > 0 ? ` + přef. ${fmtKc(d.admin + d.sig)}` : ""}
+                    {d.discount > 0 && <div style={{ fontSize: 10.5, color: "#A8527A", marginTop: 1 }}>sleva −{fmtKc(d.discount)}</div>}
                   </div>
-                  <button className="btn" style={{ fontSize: 12, flexShrink: 0 }}
-                    onClick={e => { e.stopPropagation(); onOpenDiscountModal && onOpenDiscountModal(d.clientId, d.entries); }}>
-                    Změny{d.entries.some(e => Number(e.discount_amount) > 0) ? " •" : ""}
-                  </button>
-                  {/* Tom 30.6.2026: musí být vidět přímo na panelu draftu, ne až skryté v dialogu
-                      vystavení — evidence/klient se tímto nemění, jen "Odběratel" na faktuře. */}
-                  <button className="btn" style={{
-                    fontSize: 12, flexShrink: 0,
-                    background: altSubjects?.[d.clientId] ? "#F0EEFF" : "#fff",
-                    borderColor: altSubjects?.[d.clientId] ? "var(--ink)" : "var(--line)",
-                  }}
-                    onClick={e => { e.stopPropagation(); onOpenAltSubjectModal && onOpenAltSubjectModal(d.clientId, d.entries); }}>
-                    {altSubjects?.[d.clientId] ? `Jiný subjekt: ${altSubjects[d.clientId].name} •` : "Vystavit na jiný subjekt"}
-                  </button>
-                  <button className="btn" style={{ fontSize: 12, flexShrink: 0 }}
-                    onClick={e => { e.stopPropagation(); onPreviewInvoice && onPreviewInvoice(d.clientId, d.entries); }}>
-                    Náhled
-                  </button>
-                  <button className="btn pri" style={{ fontSize: 12, flexShrink: 0 }}
-                    onClick={e => { e.stopPropagation(); onGenerateInvoice(d.clientId, d.entries); }}>
-                    Vystavit fakturu →
-                  </button>
-                  <span style={{ fontSize: 11, color: "var(--mut)", cursor: "pointer" }}>{expandedDraft === d.clientId ? "▲" : "▼"}</span>
+                  <div className="maux-num" style={{ textAlign: "right", fontSize: 14.5, fontWeight: 600, color: "var(--txt)" }}>{fmtKc(d.total)}</div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 6, justifyContent: "flex-end" }}>
+                    <button className="btn" style={{ fontSize: 12 }} onClick={() => onPreviewInvoice && onPreviewInvoice(d.clientId, d.entries)}>Náhled</button>
+                    <button className="btn pri" style={{ fontSize: 12 }} onClick={() => onGenerateInvoice(d.clientId, d.entries)}>Vystavit →</button>
+                    <button title="Změny · jiný subjekt" onClick={() => setMenuDraft(menuDraft === d.clientId ? null : d.clientId)}
+                      style={{ background: "none", border: "1px solid transparent", borderRadius: 8, padding: "6px 8px", cursor: "pointer", color: (hasDisc || alt) ? "var(--ink)" : "var(--mut)", fontSize: 14, letterSpacing: ".08em", lineHeight: 1 }}>
+                      ···{(hasDisc || alt) ? <span style={{ display: "inline-block", width: 5, height: 5, borderRadius: "50%", background: "var(--ink)", marginLeft: 4, verticalAlign: "top" }} /> : null}
+                    </button>
+                  </div>
                 </div>
-                {expandedDraft === d.clientId && (
-                  <div style={{ borderTop: "1px solid var(--line)", background: "#FAFAFA" }}>
+                {menuDraft === d.clientId && (
+                  <div style={{ position: "absolute", right: 16, top: 48, zIndex: 20, ...MAUX_GLASS_MODAL, borderRadius: 12, padding: 6, minWidth: 220, boxShadow: "0 14px 34px rgba(28,10,99,.14)" }}>
+                    <button className="btn" style={{ display: "block", width: "100%", textAlign: "left", fontSize: 12, border: "none", background: "transparent" }}
+                      onClick={() => { setMenuDraft(null); onOpenDiscountModal && onOpenDiscountModal(d.clientId, d.entries); }}>
+                      Změny{hasDisc ? " · sleva uplatněna" : ""}
+                    </button>
+                    <button className="btn" style={{ display: "block", width: "100%", textAlign: "left", fontSize: 12, border: "none", background: "transparent" }}
+                      onClick={() => { setMenuDraft(null); onOpenAltSubjectModal && onOpenAltSubjectModal(d.clientId, d.entries); }}>
+                      {alt ? `Jiný subjekt: ${alt.name}` : "Vystavit na jiný subjekt"}
+                    </button>
+                  </div>
+                )}
+                {open && (
+                  <div style={{ borderTop: "1px solid var(--line)", background: "var(--bg)" }}>
                     <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5 }}>
-                      <thead><tr style={{ background: "#F3F0FF" }}>
-                        <th style={{ padding: "8px 18px", textAlign: "left", fontWeight: 500, color: "var(--mut)", fontSize: 10, letterSpacing: ".1em", textTransform: "uppercase" }}>Datum</th>
-                        <th style={{ padding: "8px 18px", textAlign: "left", fontWeight: 500, color: "var(--mut)", fontSize: 10, letterSpacing: ".1em", textTransform: "uppercase" }}>Popis</th>
-                        <th style={{ padding: "8px 18px", textAlign: "right", fontWeight: 500, color: "var(--mut)", fontSize: 10, letterSpacing: ".1em", textTransform: "uppercase" }}>Hodiny</th>
-                        <th style={{ padding: "8px 18px", textAlign: "right", fontWeight: 500, color: "var(--mut)", fontSize: 10, letterSpacing: ".1em", textTransform: "uppercase" }}>Bez DPH</th>
+                      <thead><tr>
+                        <th style={{ padding: "8px 18px", textAlign: "left", fontWeight: 600, color: "var(--mut)", fontSize: 9.5, letterSpacing: ".14em", textTransform: "uppercase" }}>Datum</th>
+                        <th style={{ padding: "8px 18px", textAlign: "left", fontWeight: 600, color: "var(--mut)", fontSize: 9.5, letterSpacing: ".14em", textTransform: "uppercase" }}>Popis</th>
+                        <th style={{ padding: "8px 18px", textAlign: "right", fontWeight: 600, color: "var(--mut)", fontSize: 9.5, letterSpacing: ".14em", textTransform: "uppercase" }}>Hodiny</th>
+                        <th style={{ padding: "8px 18px", textAlign: "right", fontWeight: 600, color: "var(--mut)", fontSize: 9.5, letterSpacing: ".14em", textTransform: "uppercase" }}>Bez DPH</th>
                       </tr></thead>
                       <tbody>
                         {d.entries.sort((a,b)=>(a.entry_date||"").localeCompare(b.entry_date||"")).map(e => (
@@ -13661,7 +13664,7 @@ function InvoiceList({ invoices, clients, workEntries, escrows, onOpen, onOpenCl
                               )}
                             </td>
                             <td style={{ padding: "10px 18px", textAlign: "right", color: "var(--mut)" }}>{e.hours > 0 ? `${e.hours} h` : "—"}</td>
-                            <td style={{ padding: "10px 18px", textAlign: "right", fontFamily:"Inter,ui-sans-serif,system-ui,sans-serif",fontVariantNumeric:"tabular-nums", fontWeight:600 }}>
+                            <td className="maux-num" style={{ padding: "10px 18px", textAlign: "right", fontWeight: 600 }}>
                               {fmtKc(Math.max((e.amount||0)-(Number(e.discount_amount)||0),0)+(e.admin_fee||0)+(Number(e.sig_count)||0)*SIGNATURE_DECL_FEE)}
                             </td>
                           </tr>
@@ -13671,10 +13674,16 @@ function InvoiceList({ invoices, clients, workEntries, escrows, onOpen, onOpenCl
                   </div>
                 )}
               </div>
-            ))}
+              );
+            })}
+            <div style={{ borderTop: "1px solid var(--line)", background: "var(--bg)", borderRadius: "0 0 18px 18px", padding: "11px 18px", display: "flex", justifyContent: "space-between", fontSize: 12, color: "var(--mut)" }}>
+              <span>Celkem k vystavení</span>
+              <span><b className="maux-num" style={{ color: "var(--ink)", fontSize: 13 }}>{fmtKc(sumBase)}</b> základ · <span className="maux-num">{fmtKc(sumTotal)}</span> s DPH</span>
+            </div>
           </div>
         </div>
-      )}
+        );
+      })()}
 
       {/* ── STATISTIKY + KALENDÁŘ VÝKAZŮ ──
           Tom 30.6.2026: tohle všechno už vidí na Dashboardu (Pulz firmy / Finance command
