@@ -11925,12 +11925,15 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
 
               <svg width="100%" viewBox={`0 0 ${W} ${padT + BAR_AREA_H + padB}`} style={{overflow:"visible"}}>
                 {/* Náklady — tichá referenční linka, žádná osa */}
-                {totalVydaje > 0 && (() => {
-                  const costY = baseY - toBarH(Math.min(totalVydaje, range));
+                {/* totalVydaje je v Dashboardu ZÁPORNÉ (výdaje se sčítají se znaménkem) — proto
+                    stará podmínka `> 0` linku nikdy nevykreslila. Bereme absolutní hodnotu. */}
+                {Math.abs(totalVydaje) > 0 && (() => {
+                  const naklady = Math.abs(totalVydaje);
+                  const costY = baseY - toBarH(Math.min(naklady, range));
                   return (
                     <g style={{ pointerEvents: "none" }}>
                       <line x1={padL} x2={W-padR} y1={costY} y2={costY} stroke="#9C96B5" strokeWidth={1} strokeDasharray="2,3" opacity={0.55} />
-                      <text x={W-padR} y={costY-5} textAnchor="end" fontSize={8} fontFamily="Inter" fill="#9C96B5">náklady ≈ {Math.round(totalVydaje/1000)} tis.</text>
+                      <text x={W-padR} y={costY-5} textAnchor="end" fontSize={8} fontFamily="Inter" fill="#9C96B5">náklady ≈ {Math.round(naklady/1000)} tis.</text>
                     </g>
                   );
                 })()}
