@@ -18390,11 +18390,12 @@ function AsistentPrehled({ logs, attendance, clients, availability, onGo, onPick
         </div>
       </div>
 
-      {/* ── KALENDÁŘ — Pepova hlavní obrazovka (Tom 15. 9. 2026) ── */}
+      {/* ── KALENDÁŘ + DNEŠEK vedle sebe (Tom 15. 9. 2026: „tyhle dva panely dej vedle sebe") ── */}
+      <div style={{display:"grid",gridTemplateColumns:"minmax(0,1fr) 372px",gap:14,alignItems:"start"}}>
       <AsistentKalendar logs={logs} attendance={attendance} onPickDay={onPickDay} />
 
       {/* ── DNEŠEK ── */}
-      <div style={{...paper,padding:"22px 26px",display:"grid",gridTemplateColumns:"156px 1px minmax(0,1fr) 1px 200px",gap:22,alignItems:"center"}}>
+      <div style={{...paper,padding:"22px 26px",display:"flex",flexDirection:"column",gap:18}}>
         <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:9}}>
           <div style={{position:"relative",width:154,height:154}}>
             <svg viewBox="0 0 140 140" style={{width:154,height:154,transform:"rotate(-90deg)"}}>
@@ -18420,11 +18421,11 @@ function AsistentPrehled({ logs, attendance, clients, availability, onGo, onPick
             <b style={{color:todayDayF>=1?OK:"var(--txt)"}}>{fmtH(todayLogged)}</b> / {attNet>0?fmtH(attNet):"—"} v kanceláři
           </div>
         </div>
-        <div style={{background:LINE}}/>
+        <div style={{height:1,background:LINE}}/>
 
         <div style={{minWidth:0}}>
           <div style={{...lbl,marginBottom:13}}>Dnešek</div>
-          <div style={{display:"grid",gridTemplateColumns:"repeat(3,minmax(0,1fr))",gap:10}}>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(3,minmax(0,1fr))",gap:8}}>
             <div style={tile}>
               <div style={tlbl}>Režie a provoz</div>
               <div style={{...hero(todayBdH>0?SANDD:"rgba(0,0,0,.2)",20),marginTop:6}}>{fmtH(todayBdH)}</div>
@@ -18450,7 +18451,7 @@ function AsistentPrehled({ logs, attendance, clients, availability, onGo, onPick
             <span style={{whiteSpace:"nowrap"}}>{attNet<=0?<span>zatím bez příchodu</span>:todayDayF>=1?<b style={{color:OK}}>Den je popsaný</b>:<>do {Math.round(ASISTENT_UTIL_TARGET*100)} % ještě <b style={{color:"var(--txt)"}}>{fmtH(todayToGoal)}</b></>}</span>
           </div>
         </div>
-        <div style={{background:LINE}}/>
+        <div style={{height:1,background:LINE}}/>
 
         <div style={{display:"flex",flexDirection:"column",gap:8}}>
           <button onClick={()=>onGo&&onGo("vykaz")}
@@ -18465,6 +18466,7 @@ function AsistentPrehled({ logs, attendance, clients, availability, onGo, onPick
             {lastLogName ? <>Poslední zápis — <b style={{color:"var(--txt)"}}>{lastLogName}</b></> : <>Dnes zatím žádný zápis</>}
           </div>
         </div>
+      </div>
       </div>
 
       {/* ── UTILIZACE — akcentovaný panel s vysvětlením ── */}
