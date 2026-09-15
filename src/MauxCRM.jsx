@@ -19398,18 +19398,8 @@ function AsistentVykazy({ email, clients, onRefresh, onClientsRefresh, presetDat
                     )}
                     <span style={{fontSize:10,color:"var(--mut)"}}>·</span>
                     <span style={{fontSize:10.5,color:"var(--mut)"}}>{fmtDate(l.entry_date)}</span>
-                    {bd&&<span style={{fontSize:9,color:"#6366F1",fontWeight:600}}>0 Kč</span>}
+                    {bd&&<span style={{fontSize:9,color:"#8B87A8",fontWeight:600,letterSpacing:".04em"}}>{workBucket(l)==="provoz"?"provoz":"režie"}</span>}
                     {l.status==="archived"&&<span style={{fontSize:8.5,background:"#F0FDF4",color:"#065F46",borderRadius:4,padding:"1px 6px",fontWeight:700}}>archivováno</span>}
-                    {/* Razítko schválení — bez jediné částky. Pepa má vidět, že jeho práce
-                        došla ke klientovi, ne za kolik. */}
-                    {logStatus(l)===LOG_INVOICED&&(
-                      <span title="Mgr. Maux tenhle výkaz schválil a práce šla klientovi na fakturu."
-                        style={{fontSize:8.5,background:"rgba(43,36,120,.07)",color:"#2B2478",borderRadius:4,padding:"1px 6px",fontWeight:700,letterSpacing:".03em"}}>ve fakturaci</span>
-                    )}
-                    {String(l.feedback||"").trim()&&(
-                      <span title="Mgr. Maux k tomuhle výkazu něco připsal — najdete to v listu Zpětná vazba."
-                        style={{fontSize:8.5,background:"rgba(160,131,80,.1)",color:"#6B5424",borderRadius:4,padding:"1px 6px",fontWeight:700,letterSpacing:".03em"}}>poznámka</span>
-                    )}
                   </div>
                   {editDesc?.id===l.id ? (
                     <div>
@@ -20215,7 +20205,7 @@ function AsistentDochazka({ email, attendance, logs, onRefreshAttendance, onGo }
    Když s Tomem něco v Josefově pohledu upravíme, ručně zvedneme ASISTENT_BUILD
    a dopíšeme, co se změnilo. Josef to uvidí právě jednou — při nejbližším
    přihlášení. Když se nic nezmění, Josef nic neuvidí a nic se nikam nevolá.    */
-const ASISTENT_BUILD = "2026-09-15c";
+const ASISTENT_BUILD = "2026-09-15d";
 // Texty pro Josefa se píšou VYKÁNÍM a zdvořile ("Zapište prosím…", "Vaše práce").
 // Tykání se do asistentského portálu nedostane — Tom si to takhle přeje.
 const ASISTENT_BUILD_NOTE = [
@@ -20223,6 +20213,7 @@ const ASISTENT_BUILD_NOTE = [
   "Pod kalendářem zůstává dnešek — příchod, zápis hodin, odchod — a seznam dnů, kde ještě chybí popsat práci. Grafy utilizace jsme z přehledu odstranili; hlavní je kalendář, zápis a docházka.",
   "Docházka, píchačka, plán směn ani výkaz pro účetní se nemění. Vaše odměna se počítá stejně jako dosud.",
   "Formulář klienta je nově kompletní: u fyzické osoby datum narození, dále stav klienta, datum poslední práce a označení úschovy či AML povinnosti. Zakládáte tak klienta se stejnými údaji jako pan Maux.",
+  "Karta Zpětná vazba byla odstraněna jako nadbytečná. Případné poznámky k výkazům Vám pan Maux sdělí přímo.",
 ];
 
 const HARD_RELOAD_KEYS = (() => {
@@ -20299,59 +20290,6 @@ function UpdateNotice() {
           </button>
         </div>
       </div>
-    </div>
-  );
-}
-
-/* ─── ZPĚTNÁ VAZBA — Pepův pohled (4. 8. 2026) ───────────────────────────────
-   Varianta B: žádné štítky, žádné počty, nic, z čeho jde udělat skóre.
-   Naplní se jen tam, kde Tom něco napsal. Ticho znamená "bylo to v pořádku" —
-   a je to tady napsané výslovně, aby si Pepa z prázdné lišty nic nedomýšlel.
-   ⚠️ Částky sem NIKDY nepatří. Ani cena pro klienta, ani jeho vlastní náklad. */
-function AsistentZpetnaVazba({ logs = [], clients = [] }) {
-  const jmeno = (id) => (clients.find(c => c.id === id) || {}).name || "Klient";
-  const sVazbou = (logs || [])
-    .filter(l => l && String(l.feedback || "").trim())
-    .sort((a,b) => String(b.feedback_at || b.entry_date || "").localeCompare(String(a.feedback_at || a.entry_date || "")));
-  const veFakturaci = (logs || []).filter(l => logStatus(l) === LOG_INVOICED).length;
-
-  // Označit přečtené. Žádné notifikace, žádné hlídání — jen tichý příznak.
-  useEffect(() => {
-    const nove = (logs || []).filter(l => String(l.feedback || "").trim() && l.feedback_seen === false);
-    if (!nove.length) return;
-    Promise.all(nove.map(l => upsertAssistantWorkLog({ ...l, feedback_seen: true }))).catch(() => {});
-  }, [logs]);
-
-  return (
-    <div style={{padding:"28px 0 0"}}>
-      <div style={{fontFamily:"Fraunces,serif",fontSize:26,color:"var(--ink)",marginBottom:6}}>Zpětná vazba</div>
-      <div style={{fontSize:13,color:"var(--mut)",lineHeight:1.65,maxWidth:600,marginBottom:24}}>
-        {sVazbou.length === 0
-          ? "Zatím tu nic není, a to je dobrá zpráva. Tom sem píše jen tam, kde má co dodat — když je ticho, výkaz prošel tak, jak jste ho napsal."
-          : `${sVazbou.length === 1 ? "Jedna poznámka" : sVazbou.length < 5 ? `${sVazbou.length} poznámky` : `${sVazbou.length} poznámek`}. U ostatních výkazů bylo všechno v pořádku.`}
-      </div>
-
-      {veFakturaci > 0 && (
-        <div style={{fontSize:12,color:"var(--mut)",background:"rgba(43,36,120,.04)",borderRadius:10,padding:"12px 15px",marginBottom:20,lineHeight:1.6}}>
-          <span style={{color:"var(--ink)",fontWeight:600}}>{veFakturaci}</span> {veFakturaci === 1 ? "váš výkaz šel" : "vašich výkazů šlo"} do fakturace klientovi.
-          Vaše práce se dostala až na fakturu — pod jménem Mgr. Mauxe, jak to u advokáta musí být.
-        </div>
-      )}
-
-      {sVazbou.map(l => (
-        <div key={l.id} style={{padding:"14px 0",borderTop:"1px solid rgba(0,0,0,.07)"}}>
-          <div style={{display:"flex",gap:10,alignItems:"baseline",flexWrap:"wrap"}}>
-            <span style={{fontSize:13,color:"var(--ink)",fontWeight:500}}>
-              {isBdLog(l) ? (l.bd_category || "Vlastní rozvoj") : jmeno(l.client_id)}
-            </span>
-            <span style={{fontSize:12,color:"var(--mut)",flex:1,minWidth:0,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
-              {l.description}
-            </span>
-            <span style={{fontSize:11,color:"var(--mut)"}}>{fmtDate(l.entry_date)}</span>
-          </div>
-          <div style={{fontSize:13,color:"var(--txt)",lineHeight:1.65,marginTop:7}}>{l.feedback}</div>
-        </div>
-      ))}
     </div>
   );
 }
@@ -20512,7 +20450,6 @@ function AsistentApp({ session, onLogout, previewMode }) {
     { key:"dochazka", icon:"◷", label:"Docházka" },
     { key:"klienti",  icon:"◇", label:"Klienti" },
     { key:"prevody",  icon:"⇄", label:"Převody" },
-    { key:"vazba",    icon:"✎", label:"Zpětná vazba" },
   ];
 
   // Pepa zakládá a upravuje převody stejně jako Tom, jen bez kupních cen (bezCen).
@@ -20598,7 +20535,6 @@ function AsistentApp({ session, onLogout, previewMode }) {
             {mod==="dochazka" && <AsistentDochazka email={email} attendance={attendance} logs={logs} onRefreshAttendance={refreshAtt} onGo={setMod} />}
             {mod==="klienti" && <AsistentKlienti clients={clients} logs={logs} onRefresh={refreshClients} />}
             {mod==="prevody" && <PrevodyModule transfers={transfers} escrows={escrows} onSave={savePrevod} bezCen />}
-            {mod==="vazba"   && <AsistentZpetnaVazba logs={logs} clients={clients} />}
           </>
         )}
       </main>
