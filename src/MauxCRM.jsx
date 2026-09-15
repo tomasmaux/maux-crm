@@ -1313,15 +1313,6 @@ function josefUtilization(logs, attendance, ym) {
   const net = josefNetHours(attendance, ym);
   return { logged, net, ratio: net > 0 ? Math.min(1, logged / net) : null, over: net > 0 && logged > net };
 }
-// Roční strop dohody o provedení práce (§ 138 ZP): 300 h. Hodiny před zavedením
-// docházky (03–05/2026, po 25 h) v DB nejsou — drží je konstanta.
-const JOSEF_DPP_CAP_H = 300;
-const JOSEF_HOURS_PRE_LOG = { "2026": 75 };
-function dppStatus(attendance, year) {
-  const y = String(year);
-  const hours = josefNetHours(attendance, y) + (JOSEF_HOURS_PRE_LOG[y] || 0);
-  return { hours, cap: JOSEF_DPP_CAP_H, ratio: hours / JOSEF_DPP_CAP_H, over: Math.max(0, hours - JOSEF_DPP_CAP_H) };
-}
 // Nápověda pro Toma při zápisu výkazu / u faktury: co na tomhle klientovi dělal Josef.
 // Jen ke čtení — nic z toho se do výkazu nepropisuje.
 function josefForClient(logs, clientId, ym) {
@@ -11770,7 +11761,6 @@ function JosefPanel({ logs, attendance: attendanceProp, availability, clients = 
   const mix = josefMix(logs, ym);
   const utilM = josefUtilization(logs, attendance, ym);
   const effCost = mix.klient > 0 ? Math.round(wageToDate / mix.klient) : null;
-  const dpp = dppStatus(attendance, now.getFullYear());
   const ymShift = (k) => { const d = new Date(now.getFullYear(), now.getMonth() - k, 1); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}`; };
   const mixMonths = [2, 1, 0].map(k => { const m = ymShift(k); return { m, ...josefMix(logs, m) }; });
   const mixMax = Math.max(1, ...mixMonths.map(x => x.total));
@@ -11887,16 +11877,6 @@ function JosefPanel({ logs, attendance: attendanceProp, availability, clients = 
           <div style={{ fontSize: 11, color: MUT }}>Za {monthNameJPAcc} zatím žádný výkaz.</div>
         )}
       </div>
-
-      {/* Strop dohody o provedení práce — 300 h/rok (§ 138 ZP). Vlasový pruh = stav, bez emoji. */}
-      {dpp.ratio >= 0.9 && (
-        <div style={{ margin: "0 22px 14px", padding: "10px 14px", borderLeft: `2px solid ${dpp.over > 0 ? "#A8443C" : "#C6A86B"}`, background: dpp.over > 0 ? "rgba(168,68,60,.055)" : "rgba(198,168,107,.08)" }}>
-          <div style={{ fontSize: 12.5, fontWeight: 600, color: INK }}>{dpp.over > 0 ? "Roční limit dohody je vyčerpaný" : "Roční limit dohody se blíží"}</div>
-          <div className="maux-num" style={{ fontSize: 10.5, color: MUT, marginTop: 2 }}>
-            {r1(dpp.hours)} h z {dpp.cap} h{dpp.over > 0 ? ` · přesah ${r1(dpp.over)} h · od dalšího měsíce nutná změna režimu` : ` · zbývá ${r1(dpp.cap - dpp.hours)} h`}
-          </div>
-        </div>
-      )}
 
       {/* Řada 1 — Aktuální náklad + Docházka dnes */}
       <div style={{ display: "flex", borderTop: `1px solid ${HL}`, borderBottom: `1px solid ${HL}` }}>
@@ -14064,7 +14044,7 @@ const CZ_MONTHS = ["Leden","Únor","Březen","Duben","Květen","Červen","Červe
 const monthKey = (d) => d ? d.slice(0, 7) : "";
 const monthLabel = (k) => { const [y,m] = k.split("-"); return `${CZ_MONTHS[parseInt(m)-1]} ${y}`; };
 
-function WorkEntryForm({ init, prefillDate, clients, onSave, onCancel, saving }) {
+function WorkEntryForm({ init, prefillDate, clients, onSave, onCancel, saving, assistantLogs = [] }) {
   const [d, setD] = useState(() => init || {
     id: uid(), client_id: "", entry_date: prefillDate || today(),
     description: "", hours: "", rate: 2000,
@@ -14155,6 +14135,31 @@ function WorkEntryForm({ init, prefillDate, clients, onSave, onCancel, saving })
           <input type="date" value={d.entry_date} onChange={e => set("entry_date", e.target.value)} />
         </div>
       </div>
+      {/* PEPA-DATA (15. 9. 2026): co na tomhle klientovi dělal Josef v měsíci výkazu. Jen ke
+          čtení — nic se nepropisuje, o rozsahu i sazbě rozhoduješ sám. Josefovy hodiny
+          nikdy nejdou do fakturace; tohle je nápověda pro tvůj obhajitelný rozsah. */}
+      {d.client_id && (() => {
+        const ymF = String(d.entry_date || "").slice(0, 7);
+        const jf = josefForClient(assistantLogs, d.client_id, ymF);
+        if (!jf.items.length) return null;
+        const h1 = (h) => (Math.round(h * 10) / 10).toFixed(1).replace(/\.0$/, "");
+        const lok = czMes(Number(ymF.slice(5, 7)) - 1, "lok");
+        return (
+          <div style={{ borderLeft: "2px solid #4A44B8", background: "rgba(74,68,184,.045)", padding: "9px 13px", marginTop: -4, marginBottom: 14 }}>
+            <div className="maux-num" style={{ fontSize: 11.5, fontWeight: 600, color: "var(--ink)" }}>Josef pro tohoto klienta v {lok}: {h1(jf.hours)} h</div>
+            <div style={{ fontSize: 10.5, color: "var(--mut)", marginTop: 4, lineHeight: 1.6 }}>
+              {jf.items.slice(0, 6).map(l => (
+                <div key={l.id} style={{ display: "flex", gap: 8 }}>
+                  <span className="maux-num" style={{ flexShrink: 0, minWidth: 34 }}>{String(l.entry_date).slice(8).replace(/^0/, "")}. {String(l.entry_date).slice(5, 7).replace(/^0/, "")}.</span>
+                  <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{l.description || "—"}</span>
+                  <span className="maux-num" style={{ flexShrink: 0 }}>{h1(Number(l.hours) || 0)} h</span>
+                </div>
+              ))}
+              {jf.items.length > 6 && <div style={{ opacity: .7 }}>a další {jf.items.length - 6}</div>}
+            </div>
+          </div>
+        );
+      })()}
       <div className="frow">
         <label>Popis úkonu *</label>
         <textarea value={d.description} onChange={e => set("description", e.target.value)}
@@ -18260,26 +18265,36 @@ function AsistentPrehled({ logs, attendance, clients, availability, onGo }) {
   // Jmenovatel = jen dny, kdy byl Josef reálně v práci (docházka NEBO výkaz).
   // Volno, víkendy ani dny bez docházky se do toho nepromítají.
   // Starší měsíce než minulý se čtou z grafu "Utilizace po měsících".
+  // PEPA-DATA (15. 9. 2026): jmenovatel = ČISTÁ UZAVŘENÁ DOCHÁZKA, ne dny × 8 h. Stejný
+  // vzorec jako josefUtilization v Tomově panelu — jedno číslo, jedna metoda. Do čitatele
+  // jdou jen výkazy ze dnů s uzavřenou směnou (dnešek s otevřenou směnou by poměr nafoukl).
+  // Rozpad na tři kbelíky (workBucket): pro klienty / odborná režie / provoz kanceláře.
   const utilOf = (from, to) => {
-    const ls = activeLogs.filter(l=>l.entry_date && l.entry_date>=from && l.entry_date<=to);
+    const lsAll = activeLogs.filter(l=>l.entry_date && l.entry_date>=from && l.entry_date<=to);
     const as = attendance.filter(a=>a.check_in && a.date>=from && a.date<=to);
-    const bill = billableHoursOf(ls), bd = bdHoursOf(ls), logged = bill+bd;
-    const days = new Set(as.map(a=>a.date).concat(ls.map(l=>l.entry_date))).size;
-    const goal = days*ASISTENT_DAY_CAPTURE_H;
+    const closed = new Set(as.filter(a=>a.check_out).map(a=>a.date));
+    const ls = lsAll.filter(l=>closed.has(l.entry_date));
+    const mix = { klient:0, rezie:0, provoz:0 };
+    ls.forEach(l=>{ mix[workBucket(l)] += (Number(l.hours)||0); });
+    const bill = mix.klient, bd = mix.rezie+mix.provoz, logged = bill+bd;
+    const days = new Set(as.map(a=>a.date).concat(lsAll.map(l=>l.entry_date))).size;
     const office = as.reduce((acc,a)=>acc+(a.check_out?netAttHours(a.check_in,a.check_out):0),0);
-    const billF = goal>0 ? Math.min(1, bill/goal) : 0;
-    const bdF   = goal>0 ? Math.min(Math.max(0,1-billF), bd/goal) : 0;
-    return { bill, bd, logged, days, goal, office, billF, bdF, f:billF+bdF,
-             pct: goal>0 ? Math.round((billF+bdF)*100) : null,
-             avg: days>0 ? logged/days : 0,
-             unlogged: Math.max(0, office-logged) };
+    const goal = office;
+    const kF = goal>0 ? Math.min(1, mix.klient/goal) : 0;
+    const rF = goal>0 ? Math.min(Math.max(0,1-kF), mix.rezie/goal) : 0;
+    const pF = goal>0 ? Math.min(Math.max(0,1-kF-rF), mix.provoz/goal) : 0;
+    const billF = kF, bdF = rF+pF;
+    const loggedAll = billableHoursOf(lsAll)+bdHoursOf(lsAll);
+    return { bill, bd, logged, days, goal, office, billF, bdF, kF, rF, pF, mix, f:kF+rF+pF,
+             pct: goal>0 ? Math.round(Math.min(1, logged/goal)*100) : null,
+             avg: days>0 ? loggedAll/days : 0,
+             unlogged: Math.max(0, office-loggedAll) };
   };
   const utBefKey = monthBefore(pKey);
   const ut     = utilOf(pKey+"-01", pKey+"-31");
   const utPrev = utilOf(utBefKey+"-01", utBefKey+"-31");
   const utDelta  = (ut.pct!=null && utPrev.pct!=null && utPrev.days>=3) ? ut.pct-utPrev.pct : null;
   const utBefName= czMes(Number(utBefKey.slice(5,7))-1, "lok");   // dativ = lokál: proti červenci
-  const utGapDay = Math.max(0, ASISTENT_DAY_CAPTURE_H-ut.avg);
 
   // ── MĚSÍČNÍ ŘADA · efektivita ──
   const byMonth = {};
@@ -18300,13 +18315,15 @@ function AsistentPrehled({ logs, attendance, clients, availability, onGo }) {
   const monthRows = allKeys.map(k=>{
     const ls = activeLogs.filter(l=>(l.entry_date||"").startsWith(k));
     const as = attendance.filter(a=>a.check_in && a.date.startsWith(k));
-    const bill = billableHoursOf(ls), bd = bdHoursOf(ls), logged = bill+bd;
+    const closed = new Set(as.filter(a=>a.check_out).map(a=>a.date));
+    const lsC = ls.filter(l=>closed.has(l.entry_date));
+    const bill = billableHoursOf(lsC), bd = bdHoursOf(lsC), logged = bill+bd;
     const days = new Set(as.map(a=>a.date).concat(ls.map(l=>l.entry_date))).size;
-    const goal = days*ASISTENT_DAY_CAPTURE_H;
     const office = as.reduce((acc,a)=>acc+(a.check_out?netAttHours(a.check_in,a.check_out):0),0);
+    const goal = office;   // PEPA-DATA: jmenovatel = uzavřená docházka
     const [yy,mm] = k.split("-").map(Number);
     return { key:k, bill, bd, logged, days, goal, office,
-      pct: goal>0 ? Math.round(logged/goal*100) : null,
+      pct: goal>0 ? Math.round(Math.min(1, logged/goal)*100) : null,
       billF: goal>0 ? bill/goal : 0,
       bdF:   goal>0 ? bd/goal   : 0,
       label: MONTHS_CS[mm-1], year:yy, running:k===mKey };
@@ -18332,7 +18349,7 @@ function AsistentPrehled({ logs, attendance, clients, availability, onGo }) {
   const tile  = { background:"#fff", borderRadius:14, border:`1px solid ${LINE}`, padding:"13px 15px" };
   const tlbl  = { fontSize:8, letterSpacing:".18em", textTransform:"uppercase", color:MUT, fontWeight:600 };
   const dot   = (c)=>({ display:"inline-block", width:7, height:7, borderRadius:2, background:c, marginRight:6, verticalAlign:1 });
-  const hero  = (c,s)=>({ fontFamily:"Fraunces,serif", fontWeight:300, fontSize:s, color:c, lineHeight:1, letterSpacing:"-.02em" });
+   const hero  = (c,s)=>({ fontFamily:"var(--num)", fontVariantNumeric:"tabular-nums", fontWeight:600, fontSize:s, color:c, lineHeight:1, letterSpacing:"-.025em" });
 
   // prstenec dneška — vnitřní: klientský cíl 3,5 h · vnější vlas: pokrytí 8h dne
   const RC = 2*Math.PI*50;
@@ -18478,38 +18495,41 @@ function AsistentPrehled({ logs, attendance, clients, availability, onGo }) {
             <div style={{position:"relative",width:148,height:148}}>
               <svg viewBox="0 0 42 42" style={{width:148,height:148,transform:"rotate(-90deg)"}}>
                 <circle cx="21" cy="21" r="15.9" fill="none" stroke="rgba(0,0,0,.06)" strokeWidth="5"/>
-                {ut.bdF>0.004 && <circle cx="21" cy="21" r="15.9" fill="none" stroke={SANDL} strokeWidth="5" strokeLinecap="round"
-                  strokeDasharray={`${ut.bdF*UC} ${UC}`} strokeDashoffset={-ut.billF*UC}/>}
-                {ut.billF>0.004 && <circle cx="21" cy="21" r="15.9" fill="none" stroke={ut.f>=1?OK:VIVID} strokeWidth="5" strokeLinecap="round"
-                  strokeDasharray={`${ut.billF*UC} ${UC}`} style={{transition:"stroke-dasharray .7s ease"}}/>}
+                {ut.pF>0.004 && <circle cx="21" cy="21" r="15.9" fill="none" stroke="#A29DC6" strokeWidth="5" strokeLinecap="round"
+                  strokeDasharray={`${ut.pF*UC} ${UC}`} strokeDashoffset={-(ut.kF+ut.rF)*UC}/>}
+                {ut.rF>0.004 && <circle cx="21" cy="21" r="15.9" fill="none" stroke="#6F69C0" strokeWidth="5" strokeLinecap="round"
+                  strokeDasharray={`${ut.rF*UC} ${UC}`} strokeDashoffset={-ut.kF*UC}/>}
+                {ut.kF>0.004 && <circle cx="21" cy="21" r="15.9" fill="none" stroke={ut.f>=ASISTENT_UTIL_TARGET?OK:VIVID} strokeWidth="5" strokeLinecap="round"
+                  strokeDasharray={`${ut.kF*UC} ${UC}`} style={{transition:"stroke-dasharray .7s ease"}}/>}
               </svg>
               <div style={{position:"absolute",inset:0,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center"}}>
-                <div style={hero(ut.pct==null?"rgba(0,0,0,.2)":ut.f>=1?OK:IND,32)}>{ut.pct==null?"—":`${ut.pct} %`}</div>
-                <div style={{fontSize:9,color:MUT,marginTop:4}}>{ut.pct==null?"chybí docházka":`Ø ${fmtH(ut.avg)} / den`}</div>
+                <div style={hero(ut.pct==null?"rgba(0,0,0,.2)":ut.f>=ASISTENT_UTIL_TARGET?OK:IND,32)}>{ut.pct==null?"—":`${ut.pct} %`}</div>
+                <div style={{fontSize:9,color:MUT,marginTop:4}}>{ut.pct==null?"chybí docházka":`cíl ${Math.round(ASISTENT_UTIL_TARGET*100)} % · Ø ${fmtH(ut.avg)} / den`}</div>
               </div>
             </div>
 
             {/* rozpad */}
             <div style={{minWidth:0}}>
-              <div style={{display:"flex",height:11,borderRadius:6,overflow:"hidden",background:"rgba(0,0,0,.055)",marginBottom:9}}>
-                <div style={{width:`${ut.billF*100}%`,background:VIVID,transition:"width .6s"}}/>
-                <div style={{width:`${ut.bdF*100}%`,background:SANDL,transition:"width .6s"}}/>
+              <div style={{display:"flex",height:11,borderRadius:6,overflow:"hidden",background:"rgba(0,0,0,.055)",marginBottom:9,gap:2}}>
+                <div style={{width:`${ut.kF*100}%`,background:"#3A3494",transition:"width .6s"}}/>
+                <div style={{width:`${ut.rF*100}%`,background:"#6F69C0",transition:"width .6s"}}/>
+                <div style={{width:`${ut.pF*100}%`,background:"#A29DC6",transition:"width .6s"}}/>
               </div>
               <div style={{display:"grid",gridTemplateColumns:"repeat(3,minmax(0,1fr))",gap:10,marginTop:16}}>
                 <div>
-                  <div style={{fontSize:10,color:MUT,marginBottom:5}}><span style={dot(VIVID)}/>Klientská práce</div>
-                  <div style={hero(IND,19)}>{fmtH(ut.bill)}</div>
-                  <div style={{fontSize:9,color:MUT,marginTop:4}}>{ut.goal>0?`${Math.round(ut.billF*100)} % dne`:"—"}</div>
+                  <div style={{fontSize:10,color:MUT,marginBottom:5}}><span style={dot("#3A3494")}/>Pro klienty</div>
+                  <div style={hero(IND,19)}>{fmtH(ut.mix.klient)}</div>
+                  <div style={{fontSize:9,color:MUT,marginTop:4}}>{ut.goal>0?`${Math.round(ut.kF*100)} % času v kanceláři`:"—"}</div>
                 </div>
                 <div>
-                  <div style={{fontSize:10,color:MUT,marginBottom:5}}><span style={dot(SANDL)}/>Development</div>
-                  <div style={hero(SANDD,19)}>{fmtH(ut.bd)}</div>
-                  <div style={{fontSize:9,color:MUT,marginTop:4}}>{ut.goal>0?`${Math.round(ut.bdF*100)} % dne`:"—"}</div>
+                  <div style={{fontSize:10,color:MUT,marginBottom:5}}><span style={dot("#6F69C0")}/>Odborná režie</div>
+                  <div style={hero("#6F69C0",19)}>{fmtH(ut.mix.rezie)}</div>
+                  <div style={{fontSize:9,color:MUT,marginTop:4}}>{ut.goal>0?`${Math.round(ut.rF*100)} %`:"—"} · úschovy, spisy, AML</div>
                 </div>
                 <div>
-                  <div style={{fontSize:10,color:MUT,marginBottom:5}}><span style={dot("rgba(0,0,0,.16)")}/>Zbývá zapsat</div>
-                  <div style={hero(ut.f>=1?OK:"rgba(0,0,0,.45)",19)}>{fmtH(Math.max(0,ut.goal-ut.logged))}</div>
-                  <div style={{fontSize:9,color:MUT,marginTop:4}}>{ut.f>=1?"nic — den je celý":`${fmtH(utGapDay)} denně`}</div>
+                  <div style={{fontSize:10,color:MUT,marginBottom:5}}><span style={dot("#A29DC6")}/>Provoz kanceláře</div>
+                  <div style={hero("#7B76A8",19)}>{fmtH(ut.mix.provoz)}</div>
+                  <div style={{fontSize:9,color:MUT,marginTop:4}}>{ut.goal>0?`${Math.round(ut.pF*100)} %`:"—"} · kancelář, pochůzky</div>
                 </div>
               </div>
               {ut.unlogged>0.5 && (
@@ -18524,13 +18544,13 @@ function AsistentPrehled({ logs, attendance, clients, availability, onGo }) {
             <div style={{background:"#F5F4FE",border:"1px solid rgba(74,68,184,.13)",borderRadius:14,padding:"16px 17px"}}>
               <div style={{fontSize:8,letterSpacing:".2em",textTransform:"uppercase",color:VIVID,fontWeight:700,marginBottom:9}}>Co je utilizace</div>
               <p style={{margin:0,fontSize:11,color:"var(--txt)",lineHeight:1.75}}>
-                Kolik z pracovního dne je <b>popsané ve výkazu</b> — klientská práce i development dohromady.
+                Kolik z času, který jste byl v kanceláři, je <b>popsané ve výkazu</b> — práce pro klienty, odborná režie i provoz dohromady.
               </p>
               <p style={{margin:"10px 0 0",fontSize:10.5,color:MUT,lineHeight:1.75}}>
                 V advokacii je to nejsledovanější číslo vůbec: co není ve výkazu, to kancelář neumí vyfakturovat ani doložit klientovi. Není to kontrola — je to způsob, jak je celá Vaše práce vidět.
               </p>
               <p style={{margin:"10px 0 0",fontSize:10.5,color:MUT,lineHeight:1.75}}>
-                <b style={{color:"var(--txt)"}}>Cíl {ASISTENT_DAY_CAPTURE_H} h denně.</b> Zapisujte prosím průběžně, ne až večer — zpětně se vždycky něco ztratí.
+                <b style={{color:"var(--txt)"}}>Cíl {Math.round(ASISTENT_UTIL_TARGET*100)} %.</b> Zbytek je běžný provoz, který se popisovat nemusí. Zapisujte prosím průběžně, ne až večer — zpětně se vždycky něco ztratí.
               </p>
             </div>
           </div>
@@ -18582,9 +18602,9 @@ function AsistentPrehled({ logs, attendance, clients, availability, onGo }) {
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",gap:12,flexWrap:"wrap"}}>
           <div style={lbl}>Utilizace po měsících</div>
           <div style={{display:"flex",gap:16,fontSize:10,color:MUT}}>
-            <span><span style={dot(VIVID)}/>Klientská práce</span>
-            <span><span style={dot(SANDL)}/>Development</span>
-            <span style={{opacity:.8}}>Cíl {ASISTENT_DAY_CAPTURE_H} h na den v práci</span>
+            <span><span style={dot(VIVID)}/>Pro klienty</span>
+            <span><span style={dot(SANDL)}/>Režie a provoz</span>
+            <span style={{opacity:.8}}>Z času v kanceláři · cíl {Math.round(ASISTENT_UTIL_TARGET*100)} %</span>
           </div>
         </div>
 
@@ -19118,11 +19138,13 @@ function AsistentKlienti({ clients = [], logs = [], onRefresh }) {
   );
 }
 
-function AsistentVykazy({ email, clients, onRefresh, onClientsRefresh }) {
+function AsistentVykazy({ email, clients, onRefresh, onClientsRefresh, presetDate = null, onPresetUsed }) {
   const [logs, setLogs] = useState([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState({ id: uid(), client_id: "", entry_date: today(), description: "", hours: "", notes: "", entry_type: "client", bd_category: "" });
+  // Den vybraný v Kalendáři → předvyplní datum a spotřebuje se (další zápis už zas dnešek).
+  useEffect(() => { if (presetDate) { setForm(f => ({ ...f, entry_date: presetDate })); onPresetUsed && onPresetUsed(); } }, [presetDate]);
   const [clientQ, setClientQ] = useState("");
   const [clientOpen, setClientOpen] = useState(false);
   // Klient, kterého Pepa zakládá rovnou z našeptávače — ať kvůli tomu neopouští
@@ -20161,14 +20183,14 @@ function AsistentDochazka({ email, attendance, logs, onRefreshAttendance, onGo }
    Když s Tomem něco v Josefově pohledu upravíme, ručně zvedneme ASISTENT_BUILD
    a dopíšeme, co se změnilo. Josef to uvidí právě jednou — při nejbližším
    přihlášení. Když se nic nezmění, Josef nic neuvidí a nic se nikam nevolá.    */
-const ASISTENT_BUILD = "2026-09-03";
+const ASISTENT_BUILD = "2026-09-15";
 // Texty pro Josefa se píšou VYKÁNÍM a zdvořile ("Zapište prosím…", "Vaše práce").
 // Tykání se do asistentského portálu nedostane — Tom si to takhle přeje.
 const ASISTENT_BUILD_NOTE = [
-  "Vpravo nahoře máte nové tlačítko + Zapsat práci. Kdekoli v portálu jste, jedním kliknutím se dostanete rovnou k zápisu nové práce.",
-  "Přibyla záložka Klienti. Najdete v ní kontakt, IČO, sídlo i odkaz na spis — nahoře máte klienty, na kterých jste poslední měsíc pracoval, kohokoli dalšího si vyhledáte.",
-  "Klienta si teď můžete sám založit i upravit mu kontaktní údaje. U firmy stačí vyplnit IČO a zmáčknout ARES — název, DIČ i sídlo se doplní samy.",
-  "Založit klienta jde i přímo ve Výkazech: napište jméno do pole Klient a v nabídce se objeví + Založit klienta.",
+  "Přibyla záložka Kalendář. Každý den ukazuje, kolik hodin jste zapsal pro klienty (indigo) a kolik na režii a provoz kanceláře (šedě). Pískově se ukáže čas, kdy jste byl podle docházky v kanceláři, ale ještě nemá zápis. Kliknutím na den otevřete zápis s tím datem.",
+  "Utilizace se nově počítá z času, který jste byl skutečně v kanceláři — ne z pevných 8 hodin. Cíl je 75 %. Zbytek je běžný provoz, který se popisovat nemusí.",
+  "V přehledu se práce dělí na tři části: pro klienty, odborná režie (úschovy, spisy, AML) a provoz kanceláře. Nic nového nezadáváte — dělí se to samo podle kategorie, kterou už vybíráte.",
+  "Docházka, píchačka, plán směn ani výkaz pro účetní se nemění. Vaše odměna se počítá stejně jako dosud.",
 ];
 
 const HARD_RELOAD_KEYS = (() => {
@@ -20302,8 +20324,128 @@ function AsistentZpetnaVazba({ logs = [], clients = [] }) {
   );
 }
 
+/* ── PEPŮV KALENDÁŘ (15. 9. 2026) ─────────────────────────────────────────────
+   Stejný vizuální recept jako Tomův VykazyCalendar (mřížka Po–Ne, dvě čísla na dni,
+   dnešek jako plné indigo kolečko), ale VLASTNÍ malá komponenta. Záměrně NE sdílený
+   kód: VykazyCalendar nese metu, úschovy, faktury a sparkline — větvení "mode" by
+   znamenalo desítky podmínek a každá z nich je díra, kterou by Pepa uviděl tržby.
+   Tahle komponenta dostává jen logy a docházku. Koruny neumí z principu.
+   Na dni: INDIGO = hodiny pro klienty · ŠEDĚ = režie a provoz · PÍSKOVĚ = chybí popsat
+   (uzavřená docházka mínus výkaz). Klik na den = zápis s tím datem. Žádné shrnutí,
+   žádná meta, žádný verdikt — přesně jako Tomův kalendář při listování do minulosti. */
+function AsistentKalendar({ logs = [], attendance = [], onPickDay }) {
+  const [monthOffset, setMonthOffset] = useState(0);
+  const [hov, setHov] = useState(null);
+  const base = new Date();
+  const viewDate = new Date(base.getFullYear(), base.getMonth() - monthOffset, 1);
+  const y = viewDate.getFullYear(), m = viewDate.getMonth();
+  const ym = `${y}-${String(m + 1).padStart(2, "0")}`;
+  const todayStr = localDs(new Date());
+  const MONTHS = ["leden","únor","březen","duben","květen","červen","červenec","srpen","září","říjen","listopad","prosinec"];
+  const PHOS = "#3A3494", GREY = "#8B87A8", SAND = "#A08350", FUT = "#A9A5C4";
+  const h1 = (h) => (Math.round(h * 10) / 10).toFixed(1);
+
+  const days = useMemo(() => {
+    const map = {};
+    josefLogsOfMonth(logs, ym).forEach(l => {
+      const ds = l.entry_date; if (!ds) return;
+      if (!map[ds]) map[ds] = { k: 0, b: 0, net: null };
+      const h = Number(l.hours) || 0;
+      if (workBucket(l) === "klient") map[ds].k += h; else map[ds].b += h;
+    });
+    (attendance || []).forEach(a => {
+      if (!a || !a.date || !String(a.date).startsWith(ym) || !(a.check_in && a.check_out)) return;
+      const h = netAttHours(a.check_in, a.check_out);
+      if (!isFinite(h) || h <= 0) return;
+      if (!map[a.date]) map[a.date] = { k: 0, b: 0, net: null };
+      map[a.date].net = h;
+    });
+    return map;
+  }, [logs, attendance, ym]);
+  const sumK = Object.values(days).reduce((s, d) => s + d.k, 0);
+  const sumB = Object.values(days).reduce((s, d) => s + d.b, 0);
+
+  const daysInMonth = new Date(y, m + 1, 0).getDate();
+  const leadPad = (new Date(y, m, 1).getDay() + 6) % 7;
+  const cells = [];
+  for (let i = 0; i < leadPad; i++) cells.push(null);
+  for (let d = 1; d <= daysInMonth; d++) cells.push(d);
+  while (cells.length % 7 !== 0) cells.push(null);
+  const rows = [];
+  for (let i = 0; i < cells.length; i += 7) rows.push(cells.slice(i, i + 7));
+
+  return (
+    <div style={{ ...MAUX_GLASS, borderRadius: 18, border: "1px solid rgba(255,255,255,.7)", boxShadow: "0 1px 2px rgba(28,10,99,.04), 0 10px 30px -18px rgba(28,10,99,.25)", margin: "24px 0 0", overflow: "hidden" }}>
+      <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", gap: 14, padding: "24px 32px 6px", flexWrap: "wrap" }}>
+        <div>
+          <div style={{ fontSize: 9, letterSpacing: ".2em", textTransform: "uppercase", color: "var(--mut)", fontWeight: 700, marginBottom: 6 }}>Zapsaná práce · den po dni</div>
+          <div style={{ display: "flex", alignItems: "baseline", gap: 12 }}>
+            <span style={{ fontFamily: "Fraunces,serif", fontSize: 26, color: "var(--ink)", lineHeight: 1 }}>{MONTHS[m]} {y}</span>
+            <span style={{ display: "flex", gap: 2 }}>
+              <button onClick={() => setMonthOffset(o => o + 1)} title="Předchozí měsíc" style={{ border: "none", background: "none", cursor: "pointer", fontSize: 15, color: "var(--mut)", padding: "0 5px" }}>‹</button>
+              <button onClick={() => setMonthOffset(o => Math.max(0, o - 1))} title="Další měsíc" disabled={monthOffset === 0} style={{ border: "none", background: "none", cursor: monthOffset === 0 ? "default" : "pointer", fontSize: 15, color: "var(--mut)", padding: "0 5px", opacity: monthOffset === 0 ? .3 : 1 }}>›</button>
+            </span>
+          </div>
+        </div>
+        <div className="maux-num" style={{ fontSize: 11.5, color: "var(--mut)", paddingBottom: 4 }}>
+          <span style={{ color: PHOS, fontWeight: 600 }}>{h1(sumK)} h</span> pro klienty · <span style={{ fontWeight: 600 }}>{h1(sumB)} h</span> režie a provoz
+        </div>
+      </div>
+
+      <div style={{ padding: "16px 32px 30px" }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(7,1fr)", gap: 8, marginBottom: 12 }}>
+          {["Po","Út","St","Čt","Pá","So","Ne"].map(n => (
+            <div key={n} style={{ textAlign: "center", fontSize: 11, color: "var(--mut)", fontWeight: 700, letterSpacing: ".03em" }}>{n}</div>
+          ))}
+        </div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          {rows.map((row, ri) => (
+            <div key={ri} style={{ display: "grid", gridTemplateColumns: "repeat(7,1fr)", gap: 8 }}>
+              {row.map((d, ci) => {
+                if (!d) return <div key={ci} />;
+                const ds = `${ym}-${String(d).padStart(2, "0")}`;
+                const v = days[ds] || { k: 0, b: 0, net: null };
+                const logged = v.k + v.b;
+                const gap = v.net != null ? Math.max(0, v.net - logged) : 0;
+                const isToday = ds === todayStr, isFuture = ds > todayStr, isHov = hov === ds;
+                const bits = [];
+                if (v.k > 0) bits.push(`${h1(v.k)} h pro klienty`);
+                if (v.b > 0) bits.push(`${h1(v.b)} h režie a provoz`);
+                if (gap > 0.24) bits.push(`${h1(gap)} h v kanceláři bez zápisu`);
+                const title = `${fmtDate(ds)}${bits.length ? " — " + bits.join(" · ") : (isFuture ? "" : " — zapsat práci")}`;
+                return (
+                  <button key={ds} onClick={() => !isFuture && onPickDay && onPickDay(ds)}
+                    onMouseEnter={() => setHov(ds)} onMouseLeave={() => setHov(p => p === ds ? null : p)} title={title}
+                    style={{ border: "none", borderRadius: 12, position: "relative", padding: "6px 0", minHeight: 78,
+                      background: logged > 0 ? "rgba(74,68,184,.065)" : (gap > 0.24 ? "rgba(160,131,80,.06)" : (isHov && !isFuture ? "rgba(74,68,184,.04)" : "none")),
+                      display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 3,
+                      cursor: isFuture ? "default" : "pointer", transition: "background .15s" }}>
+                    <span className="maux-num" style={{ minHeight: 17, fontSize: 15, fontWeight: 600, letterSpacing: "-.01em", lineHeight: 1, whiteSpace: "nowrap", color: v.k > 0 ? PHOS : "transparent" }}>{v.k > 0 ? `${h1(v.k)} h` : "0"}</span>
+                    <span className="maux-num" style={{ minHeight: 11, fontSize: 9.5, fontWeight: 500, lineHeight: 1, whiteSpace: "nowrap", color: v.b > 0 ? GREY : (gap > 0.24 ? SAND : "transparent") }}>
+                      {v.b > 0 ? `${h1(v.b)} h` : (gap > 0.24 ? `+${h1(gap)} h` : "0")}
+                    </span>
+                    {v.b > 0 && gap > 0.24 && (
+                      <span className="maux-num" style={{ position: "absolute", top: 5, right: 7, fontSize: 8.5, fontWeight: 700, color: SAND, lineHeight: 1 }}>+{h1(gap)}</span>
+                    )}
+                    <span style={{ width: 42, height: 42, borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 15, fontWeight: isToday ? 600 : 400, lineHeight: 1,
+                      background: isToday ? PHOS : "transparent", color: isToday ? "#fff" : (isFuture ? FUT : "var(--ink)") }}>{d}</span>
+                  </button>
+                );
+              })}
+            </div>
+          ))}
+        </div>
+        <div style={{ fontSize: 9, letterSpacing: ".14em", textTransform: "uppercase", color: "var(--mut)", fontWeight: 600, marginTop: 14, opacity: .8 }}>
+          Indigo = pro klienty · šedě = režie a provoz · pískově = v kanceláři bez zápisu · klik na den = zapsat
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function AsistentApp({ session, onLogout, previewMode }) {
   const [mod, setMod] = useState("prehled");
+  const [kalDate, setKalDate] = useState(null);   // den vybraný v Kalendáři → předvyplní zápis
   const [clients, setClients] = useState([]);
   const [logs, setLogs] = useState([]);
   const [attendance, setAttendance] = useState([]);
@@ -20334,6 +20476,7 @@ function AsistentApp({ session, onLogout, previewMode }) {
 
   const TABS = [
     { key:"prehled",  icon:"◎", label:"Přehled" },
+    { key:"kalendar", icon:"▦", label:"Kalendář" },
     { key:"vykaz",    icon:"✦", label:"Výkazy" },
     { key:"dochazka", icon:"◷", label:"Docházka" },
     { key:"klienti",  icon:"◇", label:"Klienti" },
@@ -20420,7 +20563,8 @@ function AsistentApp({ session, onLogout, previewMode }) {
         ) : (
           <>
             {mod==="prehled"  && <AsistentPrehled logs={logs} attendance={attendance} clients={clients} availability={availability} onGo={setMod} />}
-            {mod==="vykaz"    && <AsistentVykazy email={email} clients={clients} onRefresh={refreshLogs} onClientsRefresh={refreshClients} />}
+            {mod==="kalendar" && <AsistentKalendar logs={logs} attendance={attendance} onPickDay={(ds)=>{ setKalDate(ds); setMod("vykaz"); setTimeout(()=>window.scrollTo({top:0,behavior:"smooth"}),30); }} />}
+            {mod==="vykaz"    && <AsistentVykazy email={email} clients={clients} onRefresh={refreshLogs} onClientsRefresh={refreshClients} presetDate={kalDate} onPresetUsed={()=>setKalDate(null)} />}
             {mod==="dochazka" && <AsistentDochazka email={email} attendance={attendance} logs={logs} onRefreshAttendance={refreshAtt} onGo={setMod} />}
             {mod==="klienti" && <AsistentKlienti clients={clients} logs={logs} onRefresh={refreshClients} />}
             {mod==="prevody" && <PrevodyModule transfers={transfers} escrows={escrows} onSave={savePrevod} bezCen />}
@@ -21772,10 +21916,10 @@ export default function MauxCRM() {
               loading={dataLoading} />
           )}
           {mod === "vykaz" && mode === "new" && (
-            <WorkEntryForm clients={clients} onSave={saveWorkEntry} onCancel={() => { setMode("list"); setPrefillDate(null); }} saving={saving} prefillDate={prefillDate} />
+            <WorkEntryForm clients={clients} onSave={saveWorkEntry} onCancel={() => { setMode("list"); setPrefillDate(null); }} saving={saving} prefillDate={prefillDate} assistantLogs={assistantLogs} />
           )}
           {mod === "vykaz" && mode === "edit" && selWorkEntry && (
-            <WorkEntryForm init={selWorkEntry} clients={clients} onSave={saveWorkEntry} onCancel={() => setMode("list")} saving={saving} />
+            <WorkEntryForm init={selWorkEntry} clients={clients} onSave={saveWorkEntry} onCancel={() => setMode("list")} saving={saving} assistantLogs={assistantLogs} />
           )}
 
           {/* FAKTURACE */}
