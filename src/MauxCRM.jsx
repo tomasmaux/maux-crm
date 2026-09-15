@@ -18418,7 +18418,7 @@ function AsistentPrehled({ logs, attendance, clients, availability, onGo }) {
           <div style={{...lbl,marginBottom:13}}>Dnešek</div>
           <div style={{display:"grid",gridTemplateColumns:"repeat(3,minmax(0,1fr))",gap:10}}>
             <div style={tile}>
-              <div style={tlbl}>Development</div>
+              <div style={tlbl}>Režie a provoz</div>
               <div style={{...hero(todayBdH>0?SANDD:"rgba(0,0,0,.2)",20),marginTop:6}}>{fmtH(todayBdH)}</div>
               <div style={{fontSize:9,color:MUT,marginTop:4}}>nad rámec denního cíle</div>
             </div>
@@ -18484,7 +18484,7 @@ function AsistentPrehled({ logs, attendance, clients, availability, onGo }) {
               </div>
             </div>
             <div style={{fontSize:10,color:MUT}}>
-              Cíl <b style={{color:"var(--txt)"}}>{ASISTENT_DAY_CAPTURE_H} h zapsaných denně</b>
+              Cíl <b style={{color:"var(--txt)"}}>{Math.round(ASISTENT_UTIL_TARGET*100)} % času v kanceláři</b>
               {ut.days>0 && <> · {ut.days} {dnyWord(ut.days)} v práci</>}
               {utDelta!=null && <> · <b style={{color:utDelta>=0?OK:SANDD}}>{utDelta>=0?"+":"−"}{Math.abs(utDelta)} b. proti {utBefName}</b></>}
             </div>
