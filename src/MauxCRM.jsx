@@ -1306,7 +1306,10 @@ function josefNetHours(attendance, prefix) {
 // Jediný jmenovatel pro Tomův panel i Josefův přehled.
 const ASISTENT_UTIL_TARGET = 0.75;
 function josefUtilization(logs, attendance, ym) {
-  const logged = josefMix(logs, ym).total;
+  // Čitatel jen z dnů s UZAVŘENOU docházkou — jinak dnešek (logy ano, odchod ještě ne)
+  // nafoukne poměr a svítí "zapsal víc, než odpracoval", i když to není pravda.
+  const closed = new Set((attendance || []).filter(a => a && a.date && a.check_in && a.check_out && (!ym || String(a.date).startsWith(ym))).map(a => a.date));
+  const logged = josefLogsOfMonth(logs, ym).filter(l => closed.has(l.entry_date)).reduce((s, l) => s + (Number(l.hours) || 0), 0);
   const net = josefNetHours(attendance, ym);
   return { logged, net, ratio: net > 0 ? Math.min(1, logged / net) : null, over: net > 0 && logged > net };
 }
@@ -11868,7 +11871,7 @@ function JosefPanel({ logs, attendance: attendanceProp, availability, clients = 
         {mix.total > 0 ? (
           <>
             <div style={{ fontFamily: "Fraunces,serif", fontSize: 17, color: INK, lineHeight: 1.35, maxWidth: 440 }}>
-              Josef ti {monthNameJPLok} sundal z talíře {r1(mix.total)} hodin.{mix.klient > 0 ? ` ${r1(mix.klient)} z nich byla práce za tvoji sazbu.` : ""}
+              Josef ti v {monthNameJPLok} sundal z talíře {r1(mix.total)} hodin.{mix.klient > 0 ? ` ${r1(mix.klient)} z nich byla práce za tvoji sazbu.` : ""}
             </div>
             <div style={{ display: "flex", alignItems: "flex-end", gap: 12, marginTop: 10, flexWrap: "wrap" }}>
               <span style={hero(44, IND)}>{r1(mix.total)}</span>
@@ -20509,7 +20512,7 @@ function AsistentPanel({ clients, onPreview, financeItems = [], onSaveFinance, w
       <div className="top" style={{marginBottom:0,display:"flex",alignItems:"flex-start",justifyContent:"space-between",flexWrap:"wrap",gap:12}}>
         <div>
           <h1 style={{fontFamily:"Fraunces,serif",fontWeight:300,fontSize:30}}>Josef · Asistent</h1>
-          <p style={{color:"var(--mut)",fontSize:13,marginTop:4}}>Kolik tě stojí, co odvedl a co čeká na schválení. Pod přehledem je administrace — archivace výkazů, editace docházky, export pro účetní.</p>
+          <p style={{color:"var(--mut)",fontSize:13,marginTop:4}}>Kolik tě stojí, co odvedl a kolik ti sundal z talíře. Pod přehledem je administrace — archivace výkazů, editace docházky, export pro účetní.</p>
         </div>
         <button onClick={onPreview}
           style={{marginTop:6,padding:"12px 24px",borderRadius:12,border:"1.5px solid var(--ink)",background:"var(--ink)",color:"#fff",fontSize:13.5,fontWeight:600,cursor:"pointer",display:"flex",alignItems:"center",gap:8,whiteSpace:"nowrap"}}>
