@@ -11677,7 +11677,7 @@ function OstatniModule({ dpfoMonths, loanTrackers, loanTransactions, financeItem
 }
 
 /* ─── JOSEF PANEL — Dashboard widget ─── */
-function JosefPanel({ logs, attendance: attendanceProp, availability, clients = [], financeItems = [], onSaveFinance, workEntries = [], onApprove }) {
+function JosefPanel({ logs, attendance: attendanceProp, availability, clients = [], financeItems = [], onSaveFinance, workEntries = [] }) {
   const now = new Date();
   const pad = n => String(n).padStart(2, "0");
   const ym = `${now.getFullYear()}-${pad(now.getMonth() + 1)}`;
@@ -12597,7 +12597,7 @@ function MilestoneCelebration({ row, nextGoal, variant = "closed", onClose }) {
     </div>
   );
 }
-function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, loanTrackers, loanTransactions, escrows, expenseChecks, onToggleExpenseCheck, onNav, onAddWorkEntry, onSaveFinance, onDeleteFinance, onDpfoToggle, onLoanTxAdd, onLoanTxToggle, onLoanTxDelete, onLoanUpdate, assistantLogs=[], assistantAttendance=[], assistantAvailability=null, xtbTranches=[], xtbSnapshots=[], xtbPositions=[], xtbClosedTrades=[], xtbCashOps=[], xtbMarket=null, wealthSnapshots=[], onApproveAssistantLogs }) {
+function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, loanTrackers, loanTransactions, escrows, expenseChecks, onToggleExpenseCheck, onNav, onAddWorkEntry, onSaveFinance, onDeleteFinance, onDpfoToggle, onLoanTxAdd, onLoanTxToggle, onLoanTxDelete, onLoanUpdate, assistantLogs=[], assistantAttendance=[], assistantAvailability=null, xtbTranches=[], xtbSnapshots=[], xtbPositions=[], xtbClosedTrades=[], xtbCashOps=[], xtbMarket=null, wealthSnapshots=[] }) {
   const [escrowAlertDismissed, setEscrowAlertDismissed] = useState(false);
   const prevMonthStr = (() => { const d = new Date(); d.setDate(1); d.setMonth(d.getMonth()-1); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`; })();
   const dochazkaKey = `maux_dochazka_odeslana_${prevMonthStr}`;
@@ -18080,7 +18080,6 @@ const ASISTENT_DAILY_H = 3.5;
 
 // ── Optimální rozsah dne, který má být popsaný ve výkazu (klient + development) ─
 // Neplete se s ASISTENT_DAILY_H: to je cíl KLIENTSKÉ práce. Tohle je pokrytí dne.
-const ASISTENT_DAY_CAPTURE_H = 8;
 
 // ── Odkdy Josef reálně vykazuje v appce ──────────────────────────────────────
 // První výkaz 2. 6. 2026. Graf měsíců začíná tímhle měsícem — dřívější (prázdná
@@ -18163,7 +18162,9 @@ function AsistentPrehled({ logs, attendance, clients, availability, onGo }) {
         : (()=>{ const d=(now-new Date(todayAtt.check_in))/36e5; return Math.max(0, d>=LUNCH_THRESHOLD_H ? d-LUNCH_BREAK_H : d); })())
     : 0;
   const todayLogged = todayH+todayBdH;
-  const todayDayF   = Math.min(1, todayLogged/ASISTENT_DAY_CAPTURE_H);          // pokrytí 8h dne
+  // PEPA-DATA (15. 9. 2026): pokrytí dne = zapsáno / dosud v kanceláři, 1 = splněn cíl 75 %.
+  const todayDayF   = attNet>0 ? Math.min(1, (todayLogged/attNet)/ASISTENT_UTIL_TARGET) : 0;
+  const todayToGoal = Math.max(0, attNet*ASISTENT_UTIL_TARGET - todayLogged);
   const todayUnlog  = Math.max(0, attNet-todayLogged);                          // čas v kanceláři bez zápisu
 
   // Odhad času splnění denního cíle při současném tempu
@@ -18409,7 +18410,7 @@ function AsistentPrehled({ logs, attendance, clients, availability, onGo }) {
           </div>
           <div style={{fontSize:9,color:MUT,textAlign:"center",lineHeight:1.5}}>
             <span style={{letterSpacing:".16em",textTransform:"uppercase",fontWeight:600,fontSize:8}}>Den</span>{" "}
-            <b style={{color:todayDayF>=1?OK:"var(--txt)"}}>{fmtH(todayLogged)}</b> / {ASISTENT_DAY_CAPTURE_H} h
+            <b style={{color:todayDayF>=1?OK:"var(--txt)"}}>{fmtH(todayLogged)}</b> / {attNet>0?fmtH(attNet):"—"} v kanceláři
           </div>
         </div>
         <div style={{background:LINE}}/>
@@ -18439,7 +18440,7 @@ function AsistentPrehled({ logs, attendance, clients, availability, onGo }) {
           </div>
           <div style={{display:"flex",justifyContent:"space-between",gap:12,fontSize:10,color:MUT}}>
             <span>{todayPct>=1?"Denní cíl splněn.":todayH>0?<>Ještě <b style={{color:"var(--txt)"}}>{fmtH(zbyva)}</b> do cíle</>:"Zapište prosím první hodiny dne."}{streak>0&&<> · série <b style={{color:"var(--txt)"}}>{streak} {dnyWord(streak)}</b></>} · {todayLogs.length} {todayLogs.length===1?"zápis":todayLogs.length<5?"zápisy":"zápisů"}</span>
-            <span style={{whiteSpace:"nowrap"}}>{todayDayF>=1?<b style={{color:OK}}>Den plně zachycen</b>:<>do {ASISTENT_DAY_CAPTURE_H} h dne ještě <b style={{color:"var(--txt)"}}>{fmtH(ASISTENT_DAY_CAPTURE_H-todayLogged)}</b></>}</span>
+            <span style={{whiteSpace:"nowrap"}}>{attNet<=0?<span>zatím bez příchodu</span>:todayDayF>=1?<b style={{color:OK}}>Den je popsaný</b>:<>do {Math.round(ASISTENT_UTIL_TARGET*100)} % ještě <b style={{color:"var(--txt)"}}>{fmtH(todayToGoal)}</b></>}</span>
           </div>
         </div>
         <div style={{background:LINE}}/>
@@ -20577,7 +20578,7 @@ function AsistentApp({ session, onLogout, previewMode }) {
 }
 
 /* ── Tomův přehled asistenta ─────────────────────────────────────────────── */
-function AsistentPanel({ clients, onPreview, financeItems = [], onSaveFinance, workEntries = [], onApprove }) {
+function AsistentPanel({ clients, onPreview, financeItems = [], onSaveFinance, workEntries = [] }) {
   const email = "asistent@maux.cz";
   const [logs, setLogs] = useState([]);
   const [attendance, setAttendance] = useState([]);
@@ -20618,13 +20619,6 @@ function AsistentPanel({ clients, onPreview, financeItems = [], onSaveFinance, w
     setLogs(await fetchAssistantWorkLogs(email));
   };
 
-  // Schválení fronty píše do DB přes App (aby se srovnaly i výkazy a Přehled), ale AsistentPanel
-  // si drží vlastní kopii logů — bez tohohle refetche by fronta po schválení zůstala stát na místě.
-  const approveFromPanel = async (payload) => {
-    if (onApprove) await onApprove(payload);
-    setLogs(await fetchAssistantWorkLogs(email));
-  };
-
   const clientName = (id) => clients.find(c=>c.id===id)?.name || "—";
   const fmtTime    = (ts) => ts ? new Date(ts).toLocaleTimeString("cs-CZ",{hour:"2-digit",minute:"2-digit"}) : "—";
   const fmtH       = fmtHodMin; // sdílené — viz fmtHodMin (oprava zaokrouhlení 60 min)
@@ -20635,7 +20629,7 @@ function AsistentPanel({ clients, onPreview, financeItems = [], onSaveFinance, w
 
   const now = new Date();
   const mKey = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,"0")}`;
-  const mLogs = logs.filter(l=>(l.entry_date||"").startsWith(mKey)&&l.status!=="archived");
+  const mLogs = josefLogsOfMonth(logs, mKey);   // archivace = posláno účetní, hodiny zůstávají v měření
   const mH    = billableHoursOf(mLogs);
   const mBdH  = bdHoursOf(mLogs);
   const mDays = new Set(mLogs.map(l=>l.entry_date)).size;
@@ -20670,7 +20664,7 @@ function AsistentPanel({ clients, onPreview, financeItems = [], onSaveFinance, w
       <div style={{margin:"22px 28px 0",position:"relative",borderRadius:BP.r,border:BP.frame,background:"#fff",boxShadow:BP.shadow}}>
         <JosefPanel logs={logs} attendance={attendance} availability={availCur}
           clients={clients} financeItems={financeItems} onSaveFinance={onSaveFinance}
-          workEntries={workEntries} onApprove={approveFromPanel} />
+          workEntries={workEntries} />
       </div>
 
       {/* ── Docházka pro účetní — vlastní karta, ne záložka (Tom 2.9.2026: "je to pro mne důležité").
@@ -20729,22 +20723,31 @@ function AsistentPanel({ clients, onPreview, financeItems = [], onSaveFinance, w
 
       <div style={{padding:"18px 28px"}}>
         {/* Výkazy */}
-        {tab==="logs" && (
-          logs.length===0 ? <div style={{color:"var(--mut)",fontSize:13}}>Josef zatím nemá žádné záznamy.</div> : (
+        {tab==="logs" && (() => {
+          // PEPA-DATA (15. 9. 2026): seznam řídí stejná roletka měsíce jako karta Docházka pro
+          // účetní (admSel) — dřív tu leželo 150 řádků až do června. Josefovy výkazy jsou interní
+          // evidence: žádné "Billable", žádné koruny.
+          const admLogs = logs.filter(l=>(l.entry_date||"").startsWith(admSel));
+          const admMix = josefMix(admLogs, "");
+          return admLogs.length===0 ? <div style={{color:"var(--mut)",fontSize:13}}>Za {dochazkaLabel(admSel).replace(" (probíhá)","").toLowerCase()} Josef nemá žádné záznamy — měsíc přepneš v roletce u karty Docházka pro účetní.</div> : (
             <>
-              <div style={{display:"flex",gap:10,marginBottom:12,fontSize:11.5}}>
-                <div style={{padding:"6px 12px",borderRadius:8,background:"#F0FDF4",color:"#065F46",fontWeight:600}}>
-                  Billable: {fmtH(billableHoursOf(logs.filter(l=>l.status!=="archived")))}
+              <div style={{display:"flex",gap:10,marginBottom:12,fontSize:11.5,flexWrap:"wrap",alignItems:"center"}}>
+                <div className="maux-num" style={{padding:"6px 12px",borderRadius:8,background:"rgba(58,52,148,.09)",color:"#3A3494",fontWeight:600}}>
+                  Pro klienty {fmtH(admMix.klient)}
                 </div>
-                <div style={{padding:"6px 12px",borderRadius:8,background:"#EEF2FF",color:"#4338CA",fontWeight:600}}>
-                  BD: {fmtH(bdHoursOf(logs.filter(l=>l.status!=="archived")))} <span style={{opacity:.7,fontWeight:400}}>(0 Kč)</span>
+                <div className="maux-num" style={{padding:"6px 12px",borderRadius:8,background:"rgba(111,105,192,.12)",color:"#4A44B8",fontWeight:600}}>
+                  Odborná režie {fmtH(admMix.rezie)}
                 </div>
+                <div className="maux-num" style={{padding:"6px 12px",borderRadius:8,background:"rgba(162,157,198,.16)",color:"#5B5680",fontWeight:600}}>
+                  Provoz {fmtH(admMix.provoz)}
+                </div>
+                <span style={{fontSize:10.5,color:"var(--mut)"}}>· {dochazkaLabel(admSel).replace(" (probíhá)","")} · {admLogs.length} záznamů</span>
               </div>
               <div style={{border:"1px solid var(--line)",borderRadius:12,overflow:"hidden"}}>
-                {logs.map((l,i)=>{
+                {admLogs.map((l,i)=>{
                   const bd = isBd(l);
                   return (
-                  <div key={l.id} style={{display:"flex",alignItems:"flex-start",gap:14,padding:"12px 16px",borderBottom:i<logs.length-1?"1px solid var(--line)":"none",background:l.status==="archived"?"#F9FFF9":bd?"#FBFAFF":"#fff",opacity:l.status==="archived"?.75:1}}>
+                  <div key={l.id} style={{display:"flex",alignItems:"flex-start",gap:14,padding:"12px 16px",borderBottom:i<admLogs.length-1?"1px solid var(--line)":"none",background:l.status==="archived"?"#F9FFF9":bd?"#FBFAFF":"#fff",opacity:l.status==="archived"?.75:1}}>
                     <div style={{flex:1}}>
                       <div style={{display:"flex",gap:8,alignItems:"center",marginBottom:3}}>
                         {bd ? (
@@ -20753,7 +20756,6 @@ function AsistentPanel({ clients, onPreview, financeItems = [], onSaveFinance, w
                           <span style={{fontSize:12,fontWeight:600,color:"var(--ink)"}}>{clientName(l.client_id)}</span>
                         )}
                         <span style={{fontSize:10.5,color:"var(--mut)"}}>· {fmtDate(l.entry_date)}</span>
-                        {bd&&<span style={{fontSize:9,color:"#6366F1",fontWeight:600}}>0 Kč</span>}
                         {l.status==="archived"&&<span style={{fontSize:9,background:"#F0FDF4",color:"#065F46",border:"1px solid #BBF7D0",borderRadius:4,padding:"1px 6px",fontWeight:600}}>archivováno</span>}
                       </div>
                       <div style={{fontSize:12.5,color:"var(--txt)",lineHeight:1.5}}>{l.description}</div>
@@ -20768,8 +20770,8 @@ function AsistentPanel({ clients, onPreview, financeItems = [], onSaveFinance, w
                 );})}
               </div>
             </>
-          )
-        )}
+          );
+        })()}
 
         {/* Docházka — admin správa */}
         {tab==="dochazka" && (
@@ -21492,43 +21494,6 @@ export default function MauxCRM() {
       setMode("list"); setSel(null); setPrefillDate(null);
     } catch (err) { alert("Chyba: " + err.message); } finally { setSaving(false); }
   };
-  // ── SCHVÁLENÍ JOSEFOVÝCH ZÁZNAMŮ ──────────────────────────────────────────
-  // Jedna operace, tři možné konce:
-  //   mode "new"      → vznikne Tvůj výkaz, Josefovy záznamy se na něj navážou
-  //   mode "existing" → záznamy se navážou na výkaz, který už existuje
-  //   mode "internal" → nefakturovatelné; vazba žádná, jen se to uklidí z fronty
-  // Zpětná vazba je nepovinná. Prázdné pole = nic se Pepovi nepošle (ticho = v pořádku).
-  const approveAssistantLogs = async ({ logIds = [], mode = "new", entry = null, existingEntryId = null, feedback = "" }) => {
-    if (!logIds.length) return;
-    setSaving(true);
-    try {
-      let entryId = null;
-      if (mode === "new" && entry) {
-        await upsertWorkEntry(entry);
-        entryId = entry.id;
-      } else if (mode === "existing") {
-        entryId = existingEntryId || null;
-      }
-      const kdy = new Date().toISOString();
-      const fb = String(feedback || "").trim();
-      await Promise.all(logIds.map(id => {
-        const l = assistantLogs.find(x => x.id === id);
-        if (!l) return Promise.resolve();
-        const rec = { ...l,
-          work_entry_id: mode === "internal" ? null : entryId,
-          approved_at: kdy,
-          billing_status: mode === "internal" ? LOG_INTERNAL : LOG_INVOICED,
-        };
-        if (fb) { rec.feedback = fb; rec.feedback_at = kdy; rec.feedback_seen = false; }
-        return upsertAssistantWorkLog(rec);
-      }));
-      if (mode !== "internal") setWorkEntries(await fetchWorkEntries());
-      setAssistantLogs(await fetchAssistantWorkLogs("asistent@maux.cz"));
-    } catch (err) {
-      alert("Schválení se nepovedlo: " + err.message + "\n\nJestli to píše něco o sloupci, chybí migrace SCHVALOVANI_migrace.sql v Supabase.");
-    } finally { setSaving(false); }
-  };
-
   const doDeleteWorkEntry = async (id) => {
     try {
       await deleteWorkEntryDb(id);
@@ -21901,8 +21866,7 @@ export default function MauxCRM() {
               xtbClosedTrades={xtbClosedTrades}
               xtbCashOps={xtbCashOps}
               xtbMarket={xtbMarket}
-              wealthSnapshots={wealthSnapshots}
-              onApproveAssistantLogs={approveAssistantLogs} />
+              wealthSnapshots={wealthSnapshots} />
           )}
 
           {/* VÝKAZ PRÁCE */}
@@ -22082,7 +22046,7 @@ export default function MauxCRM() {
           {mod === "asistent" && !asistentPreview && (
             <AsistentPanel clients={clients} onPreview={() => setAsistentPreview(true)}
               financeItems={financeItems} onSaveFinance={saveFinanceItem}
-              workEntries={workEntries} onApprove={approveAssistantLogs} />
+              workEntries={workEntries} />
           )}
         </div>
       </div>
