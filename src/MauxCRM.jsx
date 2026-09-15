@@ -18121,7 +18121,7 @@ const localDs = (d) =>
 // otevření ten kalendář. Ne utilizaci, ne grafy. HLAVNĚ KALENDÁŘ a vykázat práci a docházka."
 // Utilizace, graf po měsících i KPI řádek zůstávají v kódu za tímhle flagem — vrátit = true.
 const ASISTENT_PREHLED_PLNY = false;
-function AsistentPrehled({ logs, attendance, clients, availability, onGo, onPickDay }) {
+function AsistentPrehled({ logs, attendance, clients, availability, onGo, onPickDay, onNovyKlient }) {
   const [now, setNow] = useState(new Date());
   const [period, setPeriod] = useState("this");   // this | prev | all
   useEffect(()=>{ const id=setInterval(()=>setNow(new Date()),30000); return()=>clearInterval(id); },[]);
@@ -18461,6 +18461,10 @@ function AsistentPrehled({ logs, attendance, clients, availability, onGo, onPick
           <button onClick={()=>onGo&&onGo("dochazka")}
             style={{display:"flex",alignItems:"center",gap:9,padding:"12px 15px",borderRadius:12,border:"1px solid rgba(0,0,0,.13)",background:"#fff",color:"var(--txt)",fontSize:12.5,fontWeight:500,cursor:"pointer",textAlign:"left"}}>
             <span style={{fontSize:13,opacity:.55}}>◷</span> {attOpen?"Zapsat odchod":todayAtt?.check_out?"Docházka":"Zapsat příchod"}
+          </button>
+          <button onClick={()=>onNovyKlient&&onNovyKlient()}
+            style={{display:"flex",alignItems:"center",gap:9,padding:"12px 15px",borderRadius:12,border:"1px solid rgba(0,0,0,.13)",background:"#fff",color:"var(--txt)",fontSize:12.5,fontWeight:500,cursor:"pointer",textAlign:"left"}}>
+            <span style={{fontSize:13,opacity:.55}}>◇</span> Založit klienta
           </button>
           <div style={{fontSize:9.5,color:MUT,lineHeight:1.65,paddingLeft:3,marginTop:2}}>
             {lastLogName ? <>Poslední zápis — <b style={{color:"var(--txt)"}}>{lastLogName}</b></> : <>Dnes zatím žádný zápis</>}
@@ -18933,245 +18937,6 @@ function AsistentKlientForm({ init, initialName, clients = [], onSave, onCancel,
   );
 }
 
-/* ── KLIENTI V PEPOVĚ PORTÁLU — VĚDOMĚ NE ADRESÁŘ (Tom 5. 8. 2026) ───────────
-   Tom: "vidí tak nějak všechno mi přijde. možná mu ty klienty dám jen
-   k vyhledání a nebudeme mu je ukazovat?"
-
-   Výpis celé klientely je pryč. Ve výchozím stavu Pepa vidí JEN klienty
-   z vlastních výkazů za posledních 30 dní — tedy nic, co by už neznal —
-   a kohokoli dalšího si musí dohledat. Rozdíl je v chování, ne v přístupu:
-   napsat dvě písmena a vysypat seznam pořád jde, skutečnou hráz umí
-   postavit jen databáze. Adresář zve k listování, hledání zve k dohledání.
-
-   NEVRACEJ SEM plný seznam klientů ani chipy stavu — bylo to jednou nasazené
-   a Tom to zamítl, jakmile to viděl naostro. */
-function AsistentKlienti({ clients = [], logs = [], onRefresh }) {
-  const [q, setQ] = useState("");
-  const [mode, setMode] = useState("list");
-  const [selId, setSelId] = useState(null);
-  const [saving, setSaving] = useState(false);
-
-  const stavOf = (c) => c.status || "aktivní";
-  const sel = clients.find(c => c.id === selId) || null;
-  const dotaz = q.trim();
-  const hleda = dotaz.length >= 2;
-
-  // Klienti z Pepových VLASTNÍCH výkazů za 30 dní, od nejčerstvějšího.
-  // BD záznamy nemají client_id, takže sem přirozeně nespadnou.
-  const nedavni = useMemo(() => {
-    const hranice = addDays(today(), -30);
-    const posledni = {};
-    (logs || []).forEach(l => {
-      if (!l.client_id || !l.entry_date || l.entry_date < hranice) return;
-      if (!posledni[l.client_id] || l.entry_date > posledni[l.client_id]) posledni[l.client_id] = l.entry_date;
-    });
-    return Object.keys(posledni)
-      .map(id => ({ c: clients.find(x => x.id === id), kdy: posledni[id] }))
-      .filter(x => x.c)
-      .sort((x, y) => y.kdy.localeCompare(x.kdy))
-      .slice(0, 8);
-  }, [logs, clients]);
-
-  // Hledá se napříč celou evidencí včetně spících — stejně jako už dnes
-  // ve Výkazech. Filtr stavu tu vědomě není, byl by to jen jiný adresář.
-  const nalezeni = useMemo(() => {
-    if (!hleda) return [];
-    const s = dotaz.toLowerCase();
-    return clients
-      .filter(c => (c.name || "").toLowerCase().includes(s)
-        || (c.contact || "").toLowerCase().includes(s)
-        || (c.ico || "").includes(s)
-        || (c.emails || []).join(" ").toLowerCase().includes(s))
-      .sort((a, b) => (a.name || "").localeCompare(b.name || "", "cs"))
-      .slice(0, 25);
-  }, [clients, dotaz, hleda]);
-
-  // "dnes / včera / před 5 dny" čte líp než datum, když jde o čerstvost.
-  const predKolika = (ymd) => {
-    const dnu = Math.round((new Date(today()) - new Date(ymd)) / 864e5);
-    if (dnu <= 0) return "dnes";
-    if (dnu === 1) return "včera";
-    if (dnu < 5) return `před ${dnu} dny`;
-    return fmtDate(ymd);
-  };
-
-  const ulozit = async (c) => {
-    setSaving(true);
-    try {
-      await upsertClient(c);
-      await onRefresh?.();
-      setSelId(c.id); setMode("detail");
-    } catch (e) { alert("Chyba: " + e.message); }
-    finally { setSaving(false); }
-  };
-
-  const karta = { background:"#fff",borderRadius:20,padding:"24px 28px",boxShadow:"0 0 0 1px rgba(53,24,165,.08), 0 8px 32px rgba(53,24,165,.07)" };
-  const radek = (l, v) => v ? (
-    <div key={l} style={{marginBottom:13}}>
-      <div style={{fontSize:9,letterSpacing:".12em",textTransform:"uppercase",fontWeight:600,color:"var(--mut)",marginBottom:4}}>{l}</div>
-      <div style={{fontSize:13,color:"var(--txt)",lineHeight:1.55,whiteSpace:"pre-line"}}>{v}</div>
-    </div>
-  ) : null;
-
-  if (mode === "new" || mode === "edit") {
-    return (
-      <div style={{padding:"32px 32px"}}>
-        <div style={karta}>
-          <AsistentKlientForm
-            init={mode === "edit" ? sel : null}
-            clients={clients}
-            saving={saving}
-            onCancel={() => setMode(mode === "edit" ? "detail" : "list")}
-            onSave={ulozit}
-          />
-        </div>
-      </div>
-    );
-  }
-
-  if (mode === "detail" && sel) {
-    const st = stavOf(sel);
-    return (
-      <div style={{padding:"32px 32px",display:"flex",flexDirection:"column",gap:20}}>
-        <button onClick={() => { setMode("list"); setSelId(null); }}
-          style={{alignSelf:"flex-start",padding:"7px 14px",border:"1px solid rgba(0,0,0,.1)",borderRadius:9,background:"#fff",
-            cursor:"pointer",fontSize:11.5,color:"var(--mut)",fontWeight:500}}>
-          ← Zpět na seznam
-        </button>
-        <div style={karta}>
-          <div style={{display:"flex",alignItems:"flex-start",justifyContent:"space-between",gap:16,marginBottom:20}}>
-            <div>
-              <h2 style={{fontFamily:"Fraunces,serif",fontWeight:300,fontSize:27,color:"var(--txt)",margin:0,lineHeight:1.15}}>{sel.name}</h2>
-              <div style={{display:"flex",gap:6,marginTop:9,flexWrap:"wrap"}}>
-                <span style={{fontSize:10,padding:"3px 10px",borderRadius:20,background:"rgba(28,10,99,.06)",color:"var(--mut)"}}>{sel.type}</span>
-                {st !== "aktivní" && <span style={{fontSize:10,padding:"3px 10px",borderRadius:20,background:"#FDF7EC",color:"#7A5A1A"}}>{st}</span>}
-                {sel.uschovaaml && <span style={{fontSize:10,padding:"3px 10px",borderRadius:20,background:"#F2F1FD",color:"#4A44B8"}}>Úschova / AML</span>}
-              </div>
-            </div>
-            <button onClick={() => setMode("edit")}
-              style={{padding:"9px 18px",borderRadius:11,border:"1px solid rgba(0,0,0,.13)",background:"#fff",color:"var(--txt)",
-                fontSize:12,fontWeight:600,cursor:"pointer",whiteSpace:"nowrap"}}>
-              Upravit
-            </button>
-          </div>
-          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"0 28px"}}>
-            {radek("Kontaktní osoba", sel.contact)}
-            {radek("Telefon", sel.phone)}
-            {radek("E-maily", (sel.emails || []).join("\n"))}
-            {radek("IČO", sel.ico)}
-            {radek("DIČ", sel.dic)}
-            {radek(sel.type === "osoba" ? "Bydliště" : "Sídlo", sel.reg)}
-            {radek("Narozen", sel.birth_date ? fmtDate(sel.birth_date) : "")}
-            {radek("Poslední práce", sel.last_work_date ? fmtDate(sel.last_work_date) : "")}
-          </div>
-          {(sel.services || []).length > 0 && (
-            <div style={{marginTop:4}}>
-              <div style={{fontSize:9,letterSpacing:".12em",textTransform:"uppercase",fontWeight:600,color:"var(--mut)",marginBottom:7}}>Specializace</div>
-              <div style={{display:"flex",flexWrap:"wrap",gap:6}}>
-                {(sel.services || []).map(s => (
-                  <span key={s} style={{fontSize:11.5,padding:"5px 11px",borderRadius:20,border:"1px solid rgba(0,0,0,.09)",color:"var(--txt)",display:"flex",alignItems:"center",gap:6}}>
-                    <i style={{width:7,height:7,borderRadius:"50%",background:SERVICE_COLORS[s] || "#aaa",display:"inline-block"}} />{s}
-                  </span>
-                ))}
-              </div>
-            </div>
-          )}
-          {sel.file_link && (
-            <div style={{marginTop:18}}>
-              <a href={sel.file_link} target="_blank" rel="noopener noreferrer"
-                style={{fontSize:12.5,color:"#4A44B8",fontWeight:600,textDecoration:"none"}}>Otevřít spis →</a>
-            </div>
-          )}
-          {sel.notes && (
-            <div style={{marginTop:18,paddingTop:16,borderTop:"1px solid rgba(0,0,0,.06)"}}>
-              <div style={{fontSize:9,letterSpacing:".12em",textTransform:"uppercase",fontWeight:600,color:"var(--mut)",marginBottom:6}}>Poznámky</div>
-              <div style={{fontSize:12.5,color:"var(--txt)",lineHeight:1.7,whiteSpace:"pre-line"}}>{sel.notes}</div>
-            </div>
-          )}
-        </div>
-      </div>
-    );
-  }
-
-  const radekKlienta = (c, i, popis) => {
-    const st = stavOf(c);
-    return (
-      <div key={c.id} onClick={()=>{ setSelId(c.id); setMode("detail"); }}
-        style={{display:"flex",alignItems:"center",gap:12,padding:"12px 4px",cursor:"pointer",
-          borderTop: i ? "1px solid rgba(0,0,0,.055)" : "none"}}>
-        <div style={{flex:"1 1 auto",minWidth:0}}>
-          <div style={{fontSize:13,color:"var(--txt)",fontWeight:500,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
-            {c.name}
-            <span style={{fontSize:9.5,marginLeft:8,padding:"2px 8px",borderRadius:20,background:"rgba(28,10,99,.055)",color:"var(--mut)",fontWeight:400}}>{c.type}</span>
-            {st !== "aktivní" && <span style={{fontSize:9.5,marginLeft:4,padding:"2px 8px",borderRadius:20,background:"#FDF7EC",color:"#7A5A1A",fontWeight:400}}>{st}</span>}
-          </div>
-          <div style={{fontSize:10.5,color:"var(--mut)",marginTop:2}}>
-            {c.contact || (c.ico ? <span>IČO <span className="maux-num">{c.ico}</span></span> : "—")}
-          </div>
-        </div>
-        {popis && <div style={{fontSize:11.5,color:"var(--mut)",whiteSpace:"nowrap"}}>{popis}</div>}
-        <div style={{flex:"0 0 auto"}}><ServiceDots list={c.services || []} max={2} /></div>
-      </div>
-    );
-  };
-
-  const zalozitBtn = (
-    <button onClick={()=>{ setSelId(null); setMode("new"); }}
-      style={{padding:"10px 20px",borderRadius:11,border:"none",background:"var(--ink)",color:"#fff",fontSize:12.5,fontWeight:600,cursor:"pointer",whiteSpace:"nowrap"}}>
-      + Nový klient
-    </button>
-  );
-
-  return (
-    <div style={{padding:"32px 32px",display:"flex",flexDirection:"column",gap:20}}>
-      <div>
-        <div style={{fontSize:9,letterSpacing:".22em",textTransform:"uppercase",color:"var(--mut)",marginBottom:6}}>EVIDENCE</div>
-        <h2 style={{fontFamily:"Fraunces,serif",fontWeight:300,fontSize:30,color:"var(--txt)",margin:0,lineHeight:1}}>Klienti</h2>
-      </div>
-
-      <div style={karta}>
-        <div style={{display:"flex",gap:8,marginBottom:hleda||nedavni.length?18:0}}>
-          <input value={q} onChange={e=>setQ(e.target.value)} placeholder="Hledat klienta, IČO, kontakt, e-mail…"
-            style={{flex:1,padding:"10px 12px",border:"1px solid rgba(0,0,0,.1)",borderRadius:10,fontSize:13,outline:"none",fontFamily:"inherit",background:"#fff"}}/>
-          {zalozitBtn}
-        </div>
-
-        {hleda ? (
-          nalezeni.length ? (
-            <div>
-              <div style={{fontSize:9,letterSpacing:".16em",textTransform:"uppercase",color:"var(--mut)",marginBottom:6}}>
-                Nalezeno <span className="maux-num">{nalezeni.length}</span>
-              </div>
-              {nalezeni.map((c,i)=>radekKlienta(c,i,null))}
-            </div>
-          ) : (
-            <div style={{textAlign:"center",padding:"30px 0 24px",color:"var(--mut)",fontSize:12.5,lineHeight:1.7}}>
-              Nikdo takový v evidenci není.
-              <div style={{marginTop:12}}>
-                <button onClick={()=>{ setSelId(null); setMode("new"); }}
-                  style={{padding:"9px 18px",borderRadius:11,border:"1px solid rgba(74,68,184,.35)",background:"#F2F1FD",color:"#4A44B8",fontSize:12,fontWeight:600,cursor:"pointer"}}>
-                  Založit klienta {dotaz}
-                </button>
-              </div>
-            </div>
-          )
-        ) : nedavni.length ? (
-          <div>
-            <div style={{fontSize:9,letterSpacing:".16em",textTransform:"uppercase",color:"var(--mut)",marginBottom:6}}>
-              Nedávno jste na nich pracoval
-            </div>
-            {nedavni.map((x,i)=>radekKlienta(x.c,i,predKolika(x.kdy)))}
-          </div>
-        ) : (
-          <div style={{textAlign:"center",padding:"34px 0 30px",color:"var(--mut)",fontSize:12.5,lineHeight:1.7}}>
-            Napište jméno, IČO nebo kontaktní osobu.
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
 function AsistentVykazy({ email, clients, onRefresh, onClientsRefresh, presetDate = null, onPresetUsed }) {
   const [logs, setLogs] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -19359,7 +19124,7 @@ function AsistentVykazy({ email, clients, onRefresh, onClientsRefresh, presetDat
               borderColor: descOk ? "rgba(0,0,0,.1)" : "rgba(198,168,107,.55)"}}/>
           {!descOk && (
             <div style={{fontSize:10.5,color:"#8A6E2E",marginTop:7,lineHeight:1.6}}>
-              Bez popisu úkon neuložíte — napište prosím, co jste dělal. Tento text uvidí klient.
+              Bez popisu úkon neuložíte. Napište, co jste dělal a k čemu to bylo — jako byste to vysvětloval kolegovi, který u toho nebyl. Klient tento text nikdy neuvidí, pan Maux ano.
             </div>
           )}
         </div>
@@ -20207,14 +19972,14 @@ function AsistentDochazka({ email, attendance, logs, onRefreshAttendance, onGo }
    Když s Tomem něco v Josefově pohledu upravíme, ručně zvedneme ASISTENT_BUILD
    a dopíšeme, co se změnilo. Josef to uvidí právě jednou — při nejbližším
    přihlášení. Když se nic nezmění, Josef nic neuvidí a nic se nikam nevolá.    */
-const ASISTENT_BUILD = "2026-09-15d";
+const ASISTENT_BUILD = "2026-09-15e";
 // Texty pro Josefa se píšou VYKÁNÍM a zdvořile ("Zapište prosím…", "Vaše práce").
 // Tykání se do asistentského portálu nedostane — Tom si to takhle přeje.
 const ASISTENT_BUILD_NOTE = [
   "Přehled je teď kalendář. Každý den ukazuje, kolik hodin jste zapsal pro klienty (indigo) a kolik na režii a provoz kanceláře (šedě). Pískově se ukáže čas, kdy jste byl podle docházky v kanceláři, ale ještě nemá zápis. Kliknutím na den otevřete zápis s tím datem.",
   "Pod kalendářem zůstává dnešek — příchod, zápis hodin, odchod — a seznam dnů, kde ještě chybí popsat práci. Grafy utilizace jsme z přehledu odstranili; hlavní je kalendář, zápis a docházka.",
   "Docházka, píchačka, plán směn ani výkaz pro účetní se nemění. Vaše odměna se počítá stejně jako dosud.",
-  "Formulář klienta je nově kompletní: u fyzické osoby datum narození, dále stav klienta, datum poslední práce a označení úschovy či AML povinnosti. Zakládáte tak klienta se stejnými údaji jako pan Maux.",
+  "Karta Klienti zmizela. Klienta najdete při zápisu výkazu — stačí začít psát jméno nebo IČO. Nového klienta založíte tlačítkem Založit klienta vpravo na Přehledu nebo přímo ve výkazu; formulář je kompletní jako u pana Mauxe (u fyzické osoby i datum narození, stav, poslední práce, úschova či AML).",
   "Karta Zpětná vazba byla odstraněna jako nadbytečná. Případné poznámky k výkazům Vám pan Maux sdělí přímo.",
 ];
 
@@ -20416,6 +20181,8 @@ function AsistentKalendar({ logs = [], attendance = [], onPickDay }) {
 function AsistentApp({ session, onLogout, previewMode }) {
   const [mod, setMod] = useState("prehled");
   const [kalDate, setKalDate] = useState(null);   // den vybraný v Kalendáři → předvyplní zápis
+  const [novyKlient, setNovyKlient] = useState(false);   // modál „Založit klienta" z Přehledu (Tom 15. 9. 2026: karta Klienti zrušena)
+  const [savingKlient, setSavingKlient] = useState(false);
   const [clients, setClients] = useState([]);
   const [logs, setLogs] = useState([]);
   const [attendance, setAttendance] = useState([]);
@@ -20441,6 +20208,12 @@ function AsistentApp({ session, onLogout, previewMode }) {
   }, [email]);
 
   const refreshClients = () => fetchClients().then(setClients).catch(console.error);
+  const ulozNovehoKlienta = async (c) => {
+    setSavingKlient(true);
+    try { await upsertClient(c); await refreshClients(); setNovyKlient(false); }
+    catch (e) { alert("Chyba: " + e.message); }
+    finally { setSavingKlient(false); }
+  };
   const refreshLogs = () => fetchAssistantWorkLogs(email).then(setLogs).catch(console.error);
   const refreshAtt  = () => fetchAssistantAttendance(email).then(setAttendance).catch(console.error);
 
@@ -20448,7 +20221,6 @@ function AsistentApp({ session, onLogout, previewMode }) {
     { key:"prehled",  icon:"◎", label:"Přehled" },
     { key:"vykaz",    icon:"✦", label:"Výkazy" },
     { key:"dochazka", icon:"◷", label:"Docházka" },
-    { key:"klienti",  icon:"◇", label:"Klienti" },
     { key:"prevody",  icon:"⇄", label:"Převody" },
   ];
 
@@ -20462,6 +20234,15 @@ function AsistentApp({ session, onLogout, previewMode }) {
     <div className="mx" style={{minHeight:"100vh",background:"var(--bg)",display:"flex",flexDirection:"column"}}>
       <style>{CSS}</style>
       <UpdateNotice />
+      {novyKlient && (
+        <div onClick={()=>setNovyKlient(false)}
+          style={{position:"fixed",inset:0,zIndex:80,background:"rgba(28,10,99,.28)",backdropFilter:"blur(3px)",display:"flex",alignItems:"flex-start",justifyContent:"center",padding:"48px 16px",overflowY:"auto"}}>
+          <div onClick={e=>e.stopPropagation()}
+            style={{width:"100%",maxWidth:640,background:"#fff",borderRadius:20,padding:"26px 30px 28px",boxShadow:"0 24px 64px rgba(28,10,99,.22)"}}>
+            <AsistentKlientForm clients={clients} saving={savingKlient} onCancel={()=>setNovyKlient(false)} onSave={ulozNovehoKlienta} />
+          </div>
+        </div>
+      )}
 
       {/* ── Top navigation bar ── */}
       <header style={{
@@ -20530,10 +20311,9 @@ function AsistentApp({ session, onLogout, previewMode }) {
           </div>
         ) : (
           <>
-            {mod==="prehled"  && <AsistentPrehled logs={logs} attendance={attendance} clients={clients} availability={availability} onGo={setMod} onPickDay={(ds)=>{ setKalDate(ds); setMod("vykaz"); setTimeout(()=>window.scrollTo({top:0,behavior:"smooth"}),30); }} />}
+            {mod==="prehled"  && <AsistentPrehled logs={logs} attendance={attendance} clients={clients} availability={availability} onGo={setMod} onNovyKlient={()=>setNovyKlient(true)} onPickDay={(ds)=>{ setKalDate(ds); setMod("vykaz"); setTimeout(()=>window.scrollTo({top:0,behavior:"smooth"}),30); }} />}
             {mod==="vykaz"    && <AsistentVykazy email={email} clients={clients} onRefresh={refreshLogs} onClientsRefresh={refreshClients} presetDate={kalDate} onPresetUsed={()=>setKalDate(null)} />}
             {mod==="dochazka" && <AsistentDochazka email={email} attendance={attendance} logs={logs} onRefreshAttendance={refreshAtt} onGo={setMod} />}
-            {mod==="klienti" && <AsistentKlienti clients={clients} logs={logs} onRefresh={refreshClients} />}
             {mod==="prevody" && <PrevodyModule transfers={transfers} escrows={escrows} onSave={savePrevod} bezCen />}
           </>
         )}
