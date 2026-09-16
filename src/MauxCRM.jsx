@@ -993,18 +993,18 @@ function exportDenikHtml(udalosti, ym) {
   w.document.write(html); w.document.close();
 }
 // Jeden řádek události — sdílený Deníkem, Historií na kartě i pruhem Dnes.
-function DenikRadek({ e, onOpen, onRevert, cas = "time", compact = false }) {
+function DenikRadek({ e, onOpen, onRevert, cas = "time", compact = false, dot = true }) {
   const t = new Date(e.at);
   const casTxt = cas === "time" ? _dCas(e.at) : `${t.getDate()}. ${t.getMonth() + 1}. · ${_dCas(e.at)}`;
   const cizi = e.who === "SQL";   // změna mimo appku (SQL editor, skript) — cihlově, ať je vidět hned
   const vratit = onRevert && e.op !== "INSERT";
   return (
     <div onClick={() => e.link && onOpen && onOpen(e.link)}
-      style={{ display: "grid", gridTemplateColumns: (cas === "time" ? "52px" : "112px") + " 10px 1fr auto" + (vratit ? " auto" : ""), gap: "0 12px", alignItems: "center",
+      style={{ display: "grid", gridTemplateColumns: (cas === "time" ? "52px" : "112px") + (dot ? " 10px" : "") + " 1fr auto" + (vratit ? " auto" : ""), gap: "0 12px", alignItems: "center",
         padding: compact ? "6px 0" : "9px 0", borderBottom: "1px solid var(--line)", cursor: e.link && onOpen ? "pointer" : "default",
         ...(cizi ? { background: "rgba(168,68,60,.045)", borderLeft: "2px solid #A8443C", paddingLeft: 10 } : {}) }}>
       <span className="maux-num" style={{ fontSize: 12, fontWeight: 500, color: "var(--mut)" }}>{casTxt}</span>
-      <i style={{ width: 6, height: 6, borderRadius: "50%", display: "block", background: DENIK_BARVA[e.kind] || "#C3BCAB" }} />
+      {dot && <i style={{ width: 6, height: 6, borderRadius: "50%", display: "block", background: DENIK_BARVA[e.kind] || "#C3BCAB" }} />}
       <span style={{ fontSize: 13, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: compact ? "nowrap" : "normal" }}>
         {(e.parts || []).map((p, i) => typeof p === "string" ? <Fragment key={i}>{p}</Fragment> : <b key={i} style={{ fontWeight: 500, color: "var(--ink, #1C0A63)" }}>{p.b}</b>)}
         {e.who && <span style={{ fontSize: 10, color: cizi ? "#A8443C" : "var(--mut)", marginLeft: 8, letterSpacing: ".06em" }}>{cizi ? "MIMO APPKU" : e.who}</span>}
@@ -8527,9 +8527,10 @@ function BackupReminderBanner({ onDone }) {
 // nad záložkami administrace.
 // v14 (6.8.2026) — Tom: "zůstává jen měsíční náklad luxus a hotovo". List Claude AI
 // i dlaždice na Přehledu zrušeny; předplatné je řádek v Luxus v Měsíčních výdajích.
-const PANEL_LAYOUT_VERSION = 14;
+const PANEL_LAYOUT_VERSION = 15;   // 16. 9. 2026: přibyl panel "denik" (posledních 30 událostí)
 const DEFAULT_PANELS = [
   "finance","firma","pulz",
+  "denik",
   "chart","ziskovost"
 ];
 function loadPanelState() {
@@ -11084,7 +11085,7 @@ const bpHeroText = (size = 30, color = "var(--txt)", extra = {}) => ({
 const PANEL_ACCENTS = {
   finance: "#4F46E5", uschovy: "#4F46E5", trigrafy: "#4F46E5", firma: "#4F46E5",
   josef: "#4F46E5", pulz: "#4F46E5", chart: "#4F46E5", meta: "#4F46E5",
-  navstevnost: "#4F46E5", xtb: "#4F46E5", ziskovost: "#4F46E5",
+  navstevnost: "#4F46E5", xtb: "#4F46E5", ziskovost: "#4F46E5", denik: "#4F46E5",
 };
 function Panel({ id, children }) {
   const { panelState, dragOver, editLayout, handleDragStart, handleDragOver, handleDrop, setDragOver, toggleHide } = useContext(PanelCtx);
@@ -11270,7 +11271,7 @@ function MilestoneCelebration({ row, nextGoal, variant = "closed", onClose }) {
     </div>
   );
 }
-function Dashboard({ auditLog, denikCtx, onOpenDenik, invoices, workEntries, clients, financeItems, dpfoMonths, loanTrackers, loanTransactions, escrows, expenseChecks, onToggleExpenseCheck, onNav, onAddWorkEntry, onSaveFinance, onDeleteFinance, onDpfoToggle, onLoanTxAdd, onLoanTxToggle, onLoanTxDelete, onLoanUpdate, assistantLogs=[], assistantAttendance=[], assistantAvailability=null, xtbTranches=[], xtbSnapshots=[], xtbPositions=[], xtbClosedTrades=[], xtbCashOps=[], xtbMarket=null, wealthSnapshots=[] }) {
+function Dashboard({ auditLog, denikCtx, onOpenDenik, onOpenDenikVec, invoices, workEntries, clients, financeItems, dpfoMonths, loanTrackers, loanTransactions, escrows, expenseChecks, onToggleExpenseCheck, onNav, onAddWorkEntry, onSaveFinance, onDeleteFinance, onDpfoToggle, onLoanTxAdd, onLoanTxToggle, onLoanTxDelete, onLoanUpdate, assistantLogs=[], assistantAttendance=[], assistantAvailability=null, xtbTranches=[], xtbSnapshots=[], xtbPositions=[], xtbClosedTrades=[], xtbCashOps=[], xtbMarket=null, wealthSnapshots=[] }) {
   const [escrowAlertDismissed, setEscrowAlertDismissed] = useState(false);
   const prevMonthStr = (() => { const d = new Date(); d.setDate(1); d.setMonth(d.getMonth()-1); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`; })();
   const dochazkaKey = `maux_dochazka_odeslana_${prevMonthStr}`;
@@ -11587,8 +11588,6 @@ function Dashboard({ auditLog, denikCtx, onOpenDenik, invoices, workEntries, cli
       {/* Backup Reminder */}
       <BackupReminderBanner />
 
-      {/* Deník · Dnes — jeden řádek s tím, co Tom dnes odklikal (16. 9. 2026). Klik → Deník. */}
-      <DnesPruh auditLog={auditLog} ctx={denikCtx} onOpenDenik={onOpenDenik} />
 
       {/* Escrow Alerts */}
       {/* Banner četl jen "plomba do 3 dnů" — nikdy neřekl, že plomba UŽ SKONČILA a peníze
@@ -11989,6 +11988,43 @@ function Dashboard({ auditLog, denikCtx, onOpenDenik, invoices, workEntries, cli
                 </Col>
               </div>
             </div>
+          );
+        })()}
+      </Card>
+      </Panel>
+
+      {/* DENÍK — posledních 30 událostí (Tom 16. 9. 2026: „chci vidět posledních 30, zbytek na
+          full stránce" + „vzdušnost, čistotu"). Jedna věta, den po dni, bez teček a legend;
+          řádek = proklik na věc, patička = celý Deník. Pruh „Dnes" tím zanikl. */}
+      <Panel id="denik">
+      <Card style={{padding:"30px 38px 28px"}}>
+        {(() => {
+          const ud = denikUdalosti(auditLog, denikCtx);
+          const veta = denikVeta(ud) || denikTydenVeta(ud);
+          const posl = ud.slice(0, 30);
+          const dnyMap = new Map();
+          posl.forEach(e => { const d = denikDen(e.at); if (!dnyMap.has(d)) dnyMap.set(d, []); dnyMap.get(d).push(e); });
+          return (
+            <>
+              <div style={{ fontSize: 9.5, letterSpacing: ".18em", textTransform: "uppercase", color: "var(--mut)", fontWeight: 600 }}>Deník</div>
+              {veta
+                ? <div style={{ fontFamily: "'Fraunces',serif", fontWeight: 300, fontSize: 22, lineHeight: 1.3, color: "var(--ink, #1C0A63)", margin: "16px 0 0", maxWidth: "36ch" }}>{veta}</div>
+                : <div style={{ fontSize: 13, color: "var(--mut)", margin: "16px 0 0" }}>{ud.length ? "Tento týden zatím žádná událost." : "Deník běží od 16. 9. 2026 — první událost se objeví po prvním kliknutí."}</div>}
+              {posl.length > 0 && (
+                <div style={{ marginTop: 28 }}>
+                  {[...dnyMap.entries()].map(([d, list]) => (
+                    <div key={d}>
+                      <div style={{ fontSize: 9, letterSpacing: ".2em", textTransform: "uppercase", color: "var(--mut)", fontWeight: 500, padding: "18px 0 4px" }}>{denikNadpisDne(d)}</div>
+                      {list.map(e => <DenikRadek key={e.id} e={e} onOpen={onOpenDenikVec} dot={false} />)}
+                    </div>
+                  ))}
+                </div>
+              )}
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginTop: 26, fontSize: 12, color: "var(--mut)" }}>
+                <span>{ud.length > 30 ? `posledních 30 z ${ud.length}` : ""}</span>
+                <span onClick={() => onOpenDenik && onOpenDenik("")} style={{ color: "var(--indigo, #4A44B8)", fontWeight: 500, cursor: "pointer" }}>celý Deník ▸</span>
+              </div>
+            </>
           );
         })()}
       </Card>
@@ -20159,7 +20195,7 @@ export default function MauxCRM() {
           {/* DASHBOARD */}
           {mod === "dashboard" && (
             <Dashboard invoices={invoices} workEntries={workEntries} clients={clients}
-              auditLog={auditLog} denikCtx={denikCtx} onOpenDenik={openDenik}
+              auditLog={auditLog} denikCtx={denikCtx} onOpenDenik={openDenik} onOpenDenikVec={openFromDenik}
               financeItems={financeItems}
               dpfoMonths={dpfoMonths}
               loanTrackers={loanTrackers}
