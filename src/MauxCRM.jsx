@@ -648,6 +648,97 @@ function uhradyLogAppend(financeItems, itemId, y, m, paid) {
 }
 const fmtUhradyAt = (iso) => { const d = new Date(iso); return `${d.getDate()}. ${d.getMonth()+1}. ${d.getFullYear()} ${String(d.getHours()).padStart(2,"0")}:${String(d.getMinutes()).padStart(2,"0")}`; };
 
+/* ── LOG ÚHRAD FAKTUR (Tom 16. 9. 2026: "logy klientů, kdy zaplatili FA").
+   Klik na „Uhrazena" ve Fakturaci měnil jen status — KDY klient zaplatil se nikde nedrželo
+   (updated_at přepíše každá editace). Historie žije v config položce finance_items ·
+   fi_faktury_log, stejný recept jako fi_uhrady_log: notes = JSON
+   { "<invoice_id>": [{ at: ISO, status: "uhrazena" | "vystavena" | "dph_odvedeno" }, …] }.
+   Bez SQL migrace, category "config" je ze všech výpočtů vyfiltrovaná. Neořezává se —
+   faktur je pár set za rok a platební morálka klienta se hodí i po letech.
+   Model: okamžik zaplacení = POSLEDNÍ záznam se statusem "uhrazena" (Tom: klik = zaplatili,
+   stejně jako u úhrad nákladů). Čas jde na kartě klienta opravit (fakturyLogFix) — i doplnit
+   u faktur uhrazených před zavedením logu. Fakturace sama nic nového neukazuje (Tom 16. 9.:
+   „tam bude jen jedna věc nová — když kliknu na uhrazeno, zaloguje se"). */
+const FAKTURY_LOG_ID = "fi_faktury_log";
+function fakturyLogRead(financeItems) {
+  const it = (financeItems || []).find(i => i.id === FAKTURY_LOG_ID);
+  try { const p = JSON.parse(it?.notes || "{}"); return p && typeof p === "object" ? p : {}; } catch (e) { return {}; }
+}
+function _fakturyLogItem(financeItems, log) {
+  const prev = (financeItems || []).find(i => i.id === FAKTURY_LOG_ID) || {};
+  return { ...prev, id: FAKTURY_LOG_ID, category: "config", label: "Log úhrad faktur", amount: 0, notes: JSON.stringify(log) };
+}
+function fakturyLogAppend(financeItems, invoiceId, status) {
+  const log = fakturyLogRead(financeItems);
+  log[invoiceId] = [...(log[invoiceId] || []), { at: new Date().toISOString(), status }];
+  return _fakturyLogItem(financeItems, log);
+}
+// Oprava / doplnění okamžiku zaplacení: přepíše `at` posledního záznamu "uhrazena",
+// když žádný není (faktura uhrazená před zavedením logu), založí ho.
+function fakturyLogFix(financeItems, invoiceId, iso) {
+  const log = fakturyLogRead(financeItems);
+  const rows = [...(log[invoiceId] || [])];
+  let idx = -1;
+  for (let i = rows.length - 1; i >= 0; i--) if (rows[i].status === "uhrazena") { idx = i; break; }
+  if (idx >= 0) rows[idx] = { ...rows[idx], at: iso, fixed: true };
+  else rows.push({ at: iso, status: "uhrazena", fixed: true });
+  log[invoiceId] = rows;
+  return _fakturyLogItem(financeItems, log);
+}
+// ISO okamžiku zaplacení faktury, nebo null (nezaplacená, nebo zaplacená bez záznamu v logu).
+function invoicePaidAt(log, inv) {
+  if (!inv || !["uhrazena", "dph_odvedeno"].includes(inv.status)) return null;
+  const rows = (log || {})[inv.id] || [];
+  for (let i = rows.length - 1; i >= 0; i--) if (rows[i].status === "uhrazena") return rows[i].at || null;
+  return null;
+}
+const czDny = (n) => `${n} ${n === 1 ? "den" : n >= 2 && n <= 4 ? "dny" : "dní"}`;
+const czFaktur = (n) => `${n} ${n === 1 ? "faktura" : n >= 2 && n <= 4 ? "faktury" : "faktur"}`;
+const _ymdDiffDays = (fromYmd, toYmd) => Math.round((new Date(toYmd + "T00:00:00") - new Date(fromYmd + "T00:00:00")) / 86400000);
+// Platební morálka klienta: řádky pro tabulku + statistika pro větu. `clientId` null = všichni.
+function clientPlatby(invoices, log, clientId) {
+  const rows = (invoices || [])
+    .filter(i => (clientId == null || i.client_id === clientId) && ["uhrazena", "dph_odvedeno"].includes(i.status))
+    .map(i => {
+      const paidAt = invoicePaidAt(log, i);
+      const paidYmd = paidAt ? localYmd(new Date(paidAt)) : null;
+      const days = paidYmd && i.issue_date ? _ymdDiffDays(i.issue_date.slice(0, 10), paidYmd) : null;
+      const late = !!(paidYmd && i.due_date && paidYmd > i.due_date.slice(0, 10));
+      return { inv: i, paidAt, days, late };
+    })
+    .sort((a, b) => (b.inv.issue_date || "").localeCompare(a.inv.issue_date || ""));
+  const logged = rows.filter(r => r.days != null);
+  const ds = logged.map(r => r.days);
+  return {
+    rows,
+    paidCount: logged.length,
+    unlogged: rows.length - logged.length,
+    avgDays: ds.length ? Math.round(ds.reduce((s, d) => s + d, 0) / ds.length) : null,
+    minDays: ds.length ? Math.min(...ds) : null,
+    maxDays: ds.length ? Math.max(...ds) : null,
+    lateCount: logged.filter(r => r.late).length,
+  };
+}
+// Nezaplacené faktury klienta po splatnosti (dnešní datum − splatnost), nejstarší první.
+function clientPoSplatnosti(invoices, clientId) {
+  const dnes = today();
+  return (invoices || [])
+    .filter(i => (clientId == null || i.client_id === clientId) && invoiceStatus(i) === "po_splatnosti")
+    .map(i => ({ inv: i, days: _ymdDiffDays((i.due_date || dnes).slice(0, 10), dnes) }))
+    .sort((a, b) => b.days - a.days);
+}
+// Štítek v seznamu klientů: 2× a víc zaplaceno po splatnosti (z logu). Jedno zpoždění je náhoda.
+const PLATI_POZDE_MIN = 2;
+function platiPozde(invoices, log, clientId) {
+  return clientPlatby(invoices, log, clientId).lateCount >= PLATI_POZDE_MIN;
+}
+// Věta nad tabulkou. Mluví i o pomalém platiči — je to o klientovi, ne o Tomovi.
+function platbyVerdikt(st) {
+  if (!st || !st.paidCount) return null;
+  const zaklad = st.avgDays < 1 ? "Platí v den vystavení" : `Platí průměrně ${czDny(st.avgDays)} po vystavení`;
+  return zaklad + (st.lateCount ? `, ${st.lateCount}× po splatnosti.` : ", vždy před splatností.");
+}
+
 function isDpfoExpenseItem(item) {
   return /dpfo/i.test(item?.label || "");
 }
@@ -11172,6 +11263,18 @@ function Dashboard({ invoices, workEntries, clients, financeItems, dpfoMonths, l
                     (audit 15. 9. 2026: ukazovalo 0 Kč místo 51 750 Kč). */}
                 {fmtKc(dueD ? nc.cekaAmt : nc.celkemAmt)}
               </div>
+              {/* Průměr z logu úhrad faktur napříč klienty (Tom 16. 9. 2026) — předpověď, ne stav.
+                  Mlčí, dokud log nemá aspoň 3 zaplacené faktury; z jedné se průměr nedělá. */}
+              {(() => {
+                const pl = clientPlatby(invoices, fakturyLogRead(financeItems), null);
+                if (pl.paidCount < 3 || pl.avgDays == null) return null;
+                return (
+                  <div style={{ fontSize: 11.5, color: "var(--mut)", marginTop: 8 }}>
+                    {"Obvykle ti zaplatí do "}<strong className="maux-num" style={{ color: "var(--txt)" }}>{czDny(pl.avgDays)}</strong>{" od vystavení"}
+                    {pl.lateCount > 0 && <>{" · "}{pl.lateCount}{"× po splatnosti"}</>}
+                  </div>
+                );
+              })()}
             </div>
             <div style={{ flex: 1, minWidth: 280, paddingBottom: 8 }}>
               <div style={{ display: "flex", justifyContent: "space-between", gap: 12, fontSize: 9.5, letterSpacing: ".14em", textTransform: "uppercase", color: "var(--mut)", fontWeight: 600, marginBottom: 9 }}>
@@ -15603,8 +15706,13 @@ function DaneModule({ year, taxRecords, financeItems, invoices, dpfoMonths, escr
 
 
 /* ─── KLIENTI ─── */
-function ClientList({ clients, invoices, query, setQuery, filter, setFilter, onOpen, onNew, onRepairClients }) {
+function ClientList({ clients, invoices, financeItems, query, setQuery, filter, setFilter, onOpen, onNew, onRepairClients }) {
   const sum = useMemo(() => clients.reduce((a, c) => a + (c.invoiced || 0), 0), [clients]);
+  // Štítek „platí pozdě" (Tom 16. 9. 2026) — z logu úhrad faktur, 2× a víc po splatnosti.
+  const pozdeIds = useMemo(() => {
+    const log = fakturyLogRead(financeItems);
+    return new Set(clients.filter(c => platiPozde(invoices, log, c.id)).map(c => c.id));
+  }, [clients, invoices, financeItems]);
   const firmy = clients.filter(c => c.type === "firma").length;
   // Faktury vystavené na klienty, kteří v evidenci chybí — seskupíme podle jména
   // odvozeného z poznámky na faktuře (vzor "Jméno klienta - …"), abychom je mohli
@@ -15694,6 +15802,7 @@ function ClientList({ clients, invoices, query, setQuery, filter, setFilter, onO
                   <span className="t-name">{c.name}</span>
                   <span className={"tag " + c.type}>{c.type}</span>
                   {c.status && c.status !== "aktivní" && <span className={"sbadge status-" + c.status}>{c.status}</span>}
+                  {pozdeIds.has(c.id) && <span title="Zaplatil 2× a víc po splatnosti (log úhrad)" style={{ fontSize: 10, fontWeight: 500, letterSpacing: ".06em", color: "#A8443C", borderLeft: "2px solid #A8443C", paddingLeft: 6 }}>platí pozdě</span>}
                 </div>
               </td>
               <td className="t-date">{c.contact || "—"}</td>
@@ -15707,7 +15816,7 @@ function ClientList({ clients, invoices, query, setQuery, filter, setFilter, onO
   );
 }
 
-function ClientDetail({ c, onBack, onEdit, onDelete }) {
+function ClientDetail({ c, invoices, financeItems, onFixPaidAt, onBack, onEdit, onDelete }) {
   return (
     <div className="det">
       <h2 className="serif">
@@ -15739,11 +15848,97 @@ function ClientDetail({ c, onBack, onEdit, onDelete }) {
         {c.file_link && <div className="fld"><div className="l">Odkaz na spis</div><div className="d"><a href={c.file_link} target="_blank" rel="noopener noreferrer">Otevřít spis →</a></div></div>}
       </div>
       {c.notes && <div className="notes"><div className="fld l" style={{ fontSize: 9, letterSpacing: ".2em", textTransform: "uppercase", color: "var(--mut)", fontWeight: 500, marginBottom: 6 }}>Poznámky</div><div className="d notes">{c.notes}</div></div>}
+      <ClientPlatby c={c} invoices={invoices} financeItems={financeItems} onFixPaidAt={onFixPaidAt} />
       <div className="actions">
         <button className="btn gho" onClick={onBack}>← Zpět</button>
         <button className="btn" onClick={onEdit}>Upravit</button>
         <button className="btn dng" onClick={onDelete} style={{ marginLeft: "auto" }}>Smazat</button>
       </div>
+    </div>
+  );
+}
+
+// Sekce „Platby · jak platí" na kartě klienta (Tom 16. 9. 2026, mockup varianta A).
+// Věta závěru nahoře, tabulka faktur jako důkaz; čas = kliknutí „Uhrazena" ve Fakturaci,
+// kliknutím na čas ho Tom opraví (datetime-local → toISOString, lokální parse bez „Z").
+// Faktury uhrazené před zavedením logu mají tichý řádek s odkazem „doplnit datum".
+function ClientPlatby({ c, invoices, financeItems, onFixPaidAt }) {
+  const [editId, setEditId] = useState(null);
+  const log = useMemo(() => fakturyLogRead(financeItems), [financeItems]);
+  const st = useMemo(() => clientPlatby(invoices, log, c.id), [invoices, log, c.id]);
+  const vsichni = useMemo(() => clientPlatby(invoices, log, null), [invoices, log]);
+  const visi = useMemo(() => clientPoSplatnosti(invoices, c.id), [invoices, c.id]);
+  if (!st.rows.length && !visi.length) return null;
+  const verdikt = platbyVerdikt(st);
+  const L = { fontSize: 9, letterSpacing: ".18em", textTransform: "uppercase", color: "var(--mut)", fontWeight: 500 };
+  const th = { ...L, textAlign: "left", padding: "8px 10px", borderBottom: "1px solid var(--line)" };
+  const td = { padding: "9px 10px", borderBottom: "1px solid var(--line)", fontSize: 13, verticalAlign: "middle" };
+  const r = { textAlign: "right" };
+  const fmtCas = (iso) => { const d = new Date(iso); return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`; };
+  const toLocalInput = (iso) => { const d = iso ? new Date(iso) : new Date(); return `${localYmd(d)}T${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`; };
+  const commit = (id, v) => { if (v) onFixPaidAt && onFixPaidAt(id, new Date(v).toISOString()); setEditId(null); };
+  return (
+    <div className="notes">
+      <div style={{ ...L, marginBottom: 8 }}>Platby · jak platí</div>
+      {verdikt
+        ? <div style={{ fontFamily: "'Fraunces',serif", fontWeight: 300, fontSize: 21, lineHeight: 1.25, color: "var(--ink, #1C0A63)", marginBottom: 4 }}>{verdikt}</div>
+        : <div style={{ fontSize: 13, color: "var(--mut)", marginBottom: 4 }}>{st.rows.length ? "Log úhrad běží od 16. 9. 2026 — první zaplacená faktura se tu objeví sama. U starších můžeš datum doplnit." : "Zatím žádná uhrazená faktura."}</div>}
+      {st.paidCount > 0 && (
+        <div style={{ fontSize: 12, color: "var(--mut)", marginBottom: 12 }}>
+          {czFaktur(st.paidCount)} v logu
+          {st.paidCount > 1 && <> · nejrychleji <b className="maux-num" style={{ color: "var(--txt)", fontWeight: 600 }}>{czDny(st.minDays)}</b> · nejpomaleji <b className="maux-num" style={{ color: "var(--txt)", fontWeight: 600 }}>{czDny(st.maxDays)}</b></>}
+          {vsichni.paidCount > st.paidCount && vsichni.avgDays != null && <> · průměr všech klientů <b className="maux-num" style={{ color: "var(--txt)", fontWeight: 600 }}>{czDny(vsichni.avgDays)}</b></>}
+        </div>
+      )}
+      <div style={{ overflowX: "auto" }}>
+        <table style={{ width: "100%", borderCollapse: "collapse" }}>
+          <thead><tr><th style={th}>Faktura</th><th style={th}>Vystaveno</th><th style={th}>Splatnost</th><th style={th}>Zaplaceno</th><th style={{ ...th, ...r }}>Dní</th><th style={{ ...th, ...r }}>Částka</th></tr></thead>
+          <tbody>
+            {/* Nezaplacené po splatnosti stojí nahoře, cihlově — to je jediná věc, která tu hoří. */}
+            {visi.map(({ inv, days }) => (
+              <tr key={"visi_" + inv.id} style={{ background: "rgba(168,68,60,.045)" }}>
+                <td className="maux-num" style={{ ...td, fontWeight: 500, color: "#A8443C", borderLeft: "2px solid #A8443C" }}>{inv.invoice_number || "—"}</td>
+                <td className="maux-num" style={{ ...td, color: "#A8443C" }}>{fmtDate(inv.issue_date)}</td>
+                <td className="maux-num" style={{ ...td, color: "#A8443C" }}>{fmtDate(inv.due_date)}</td>
+                <td style={{ ...td, color: "#A8443C" }}>nezaplaceno · po splatnosti {czDny(days)}</td>
+                <td className="maux-num" style={{ ...td, ...r, color: "#A8443C" }}>—</td>
+                <td className="maux-num" style={{ ...td, ...r, fontWeight: 600, color: "#A8443C" }}>{fmtKc(inv.total || inv.subtotal || 0)}</td>
+              </tr>
+            ))}
+            {st.rows.map(({ inv, paidAt, days, late }) => {
+              const dim = paidAt ? {} : { color: "var(--mut)" };
+              return (
+                <tr key={inv.id}>
+                  <td className="maux-num" style={{ ...td, ...dim, fontWeight: 500 }}>{inv.invoice_number || "—"}</td>
+                  <td className="maux-num" style={{ ...td, ...dim }}>{fmtDate(inv.issue_date)}</td>
+                  <td className="maux-num" style={{ ...td, ...dim }}>{fmtDate(inv.due_date)}</td>
+                  <td style={{ ...td, ...dim }}>
+                    {editId === inv.id ? (
+                      <input type="datetime-local" autoFocus defaultValue={toLocalInput(paidAt)}
+                        onBlur={e => commit(inv.id, e.target.value)}
+                        onKeyDown={e => { if (e.key === "Enter") commit(inv.id, e.target.value); if (e.key === "Escape") setEditId(null); }}
+                        style={{ fontSize: 12, padding: "3px 6px", border: "1px solid var(--line)", borderRadius: 6, fontFamily: "inherit" }} />
+                    ) : paidAt ? (
+                      <>
+                        <span className="maux-num">{fmtDate(paidAt)}</span>
+                        <span title="Kliknutí Uhrazena — klikni pro opravu" onClick={() => setEditId(inv.id)}
+                          style={{ fontSize: 11, color: "var(--mut)", marginLeft: 6, cursor: "pointer", borderBottom: "1px dashed rgba(138,135,158,.5)" }}>{fmtCas(paidAt)}</span>
+                      </>
+                    ) : (
+                      <span>uhrazena · před zavedením logu
+                        <span onClick={() => setEditId(inv.id)} style={{ marginLeft: 8, color: "var(--indigo, #4A44B8)", cursor: "pointer", fontSize: 12 }}>doplnit datum</span>
+                      </span>
+                    )}
+                  </td>
+                  <td className="maux-num" style={{ ...td, ...r, ...dim, fontWeight: 500, color: days == null ? "var(--mut)" : late ? "#A8443C" : "#4A7C59" }}>{days == null ? "—" : days}</td>
+                  <td className="maux-num" style={{ ...td, ...r, ...dim, fontWeight: 600 }}>{fmtKc(inv.total || inv.subtotal || 0)}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+      <div style={{ fontSize: 11, color: "var(--mut)", marginTop: 8 }}>Čas = okamžik, kdy jsi ve Fakturaci klikl „Uhrazena". Kliknutím na čas ho opravíš podle výpisu.</div>
     </div>
   );
 }
@@ -19259,7 +19454,24 @@ export default function MauxCRM() {
     const updated = { ...cleanInv, status: newStatus };
     setInvoices(p => p.map(i => i.id === inv.id ? { ...i, status: newStatus } : i));
     try { await upsertInvoice(updated); }
-    catch (e) { setInvoices(p => p.map(i => i.id === inv.id ? cleanInv : i)); mauxToast("Chyba: " + e.message); }
+    catch (e) { setInvoices(p => p.map(i => i.id === inv.id ? cleanInv : i)); mauxToast("Chyba: " + e.message); return; }
+    // Log kliknutí (datum + čas, každá změna statusu) — viz fakturyLogAppend. Tom 16. 9. 2026:
+    // ve Fakturaci se nic nového neukazuje, čte to karta klienta (sekce Platby).
+    try {
+      const logItem = fakturyLogAppend(financeItems, inv.id, newStatus);
+      await upsertFinanceItem(logItem);
+      setFinanceItems(prev => (prev || []).some(i => i.id === FAKTURY_LOG_ID)
+        ? prev.map(i => i.id === FAKTURY_LOG_ID ? logItem : i) : [...(prev || []), logItem]);
+    } catch (err) { mauxToast("Chyba: log úhrady faktury se neuložil — " + err.message); }
+  };
+  // Oprava / doplnění okamžiku zaplacení z karty klienta (fakturyLogFix).
+  const fixInvoicePaidAt = async (invoiceId, iso) => {
+    try {
+      const logItem = fakturyLogFix(financeItems, invoiceId, iso);
+      await upsertFinanceItem(logItem);
+      setFinanceItems(prev => (prev || []).some(i => i.id === FAKTURY_LOG_ID)
+        ? prev.map(i => i.id === FAKTURY_LOG_ID ? logItem : i) : [...(prev || []), logItem]);
+    } catch (err) { mauxToast("Chyba: oprava data úhrady se neuložila — " + err.message); }
   };
   const openClientFromInvoice = (clientId) => {
     setSel(clientId); navTo("klienti"); setMode("detail");
@@ -19467,10 +19679,10 @@ export default function MauxCRM() {
 
           {/* KLIENTI */}
           {mod === "klienti" && mode === "list" && (
-            <ClientList clients={clients} invoices={invoices} query={query} setQuery={setQuery} filter={filter} setFilter={setFilter} onOpen={id => { setSel(id); setMode("detail"); }} onNew={() => setMode("new")} onRepairClients={repairClientsFromInvoices} />
+            <ClientList clients={clients} invoices={invoices} financeItems={financeItems} query={query} setQuery={setQuery} filter={filter} setFilter={setFilter} onOpen={id => { setSel(id); setMode("detail"); }} onNew={() => setMode("new")} onRepairClients={repairClientsFromInvoices} />
           )}
           {mod === "klienti" && mode === "detail" && selClient && (
-            <ClientDetail c={selClient} onBack={() => setMode("list")} onEdit={() => setMode("edit")} onDelete={() => setConfirmDel(selClient.id)} />
+            <ClientDetail c={selClient} invoices={invoices} financeItems={financeItems} onFixPaidAt={fixInvoicePaidAt} onBack={() => setMode("list")} onEdit={() => setMode("edit")} onDelete={() => setConfirmDel(selClient.id)} />
           )}
           {mod === "klienti" && mode === "edit" && selClient && (
             <ClientForm init={selClient} onSave={saveClient} onCancel={() => setMode("detail")} saving={saving} />
