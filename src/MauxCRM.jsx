@@ -15876,7 +15876,15 @@ function ClientPlatby({ c, invoices, financeItems, onFixPaidAt }) {
   const r = { textAlign: "right" };
   const fmtCas = (iso) => { const d = new Date(iso); return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`; };
   const toLocalInput = (iso) => { const d = iso ? new Date(iso) : new Date(); return `${localYmd(d)}T${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`; };
-  const commit = (id, v) => { if (v) onFixPaidAt && onFixPaidAt(id, new Date(v).toISOString()); setEditId(null); };
+  // Zápis jen na Enter nebo po skutečné změně hodnoty — kliknutí vedle (blur) nesmí zapsat
+  // dnešní datum jako den úhrady (past ověřená 16. 9. při nasazení).
+  const dirtyRef = useRef(false);
+  const cancelRef = useRef(false);
+  const commit = (id, v) => { if (v) onFixPaidAt && onFixPaidAt(id, new Date(v).toISOString()); setEditId(null); dirtyRef.current = false; };
+  const onBlurInput = (id, v) => {
+    if (cancelRef.current) { cancelRef.current = false; return; }
+    if (dirtyRef.current) commit(id, v); else setEditId(null);
+  };
   return (
     <div className="notes">
       <div style={{ ...L, marginBottom: 8 }}>Platby · jak platí</div>
@@ -15915,8 +15923,9 @@ function ClientPlatby({ c, invoices, financeItems, onFixPaidAt }) {
                   <td style={{ ...td, ...dim }}>
                     {editId === inv.id ? (
                       <input type="datetime-local" autoFocus defaultValue={toLocalInput(paidAt)}
-                        onBlur={e => commit(inv.id, e.target.value)}
-                        onKeyDown={e => { if (e.key === "Enter") commit(inv.id, e.target.value); if (e.key === "Escape") setEditId(null); }}
+                        onChange={() => { dirtyRef.current = true; }}
+                        onBlur={e => onBlurInput(inv.id, e.target.value)}
+                        onKeyDown={e => { if (e.key === "Enter") commit(inv.id, e.target.value); if (e.key === "Escape") { cancelRef.current = true; dirtyRef.current = false; setEditId(null); } }}
                         style={{ fontSize: 12, padding: "3px 6px", border: "1px solid var(--line)", borderRadius: 6, fontFamily: "inherit" }} />
                     ) : paidAt ? (
                       <>
