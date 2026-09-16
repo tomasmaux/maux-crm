@@ -954,9 +954,9 @@ function DenikModule({ auditLog, ctx, query, setQuery, onOpen, onRefresh, loadin
   const veta = denikVeta(udalosti);
   return (
     <div className="det" style={{ maxWidth: 980 }}>
-      <div style={{ display: "flex", alignItems: "baseline", gap: 16, flexWrap: "wrap" }}>
-        <h2 className="serif" style={{ fontSize: 30, marginBottom: 6 }}>Deník</h2>
-        <span onClick={onRefresh} style={{ marginLeft: "auto", fontSize: 12, color: "var(--indigo, #4A44B8)", cursor: "pointer", fontWeight: 500 }}>{loading ? "Načítám…" : "Obnovit"}</span>
+      {/* Nadpis nese hlavička listu (App) — tady jen věta a Obnovit, ať „Deník" nestojí dvakrát. */}
+      <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 4 }}>
+        <span onClick={onRefresh} style={{ fontSize: 12, color: "var(--indigo, #4A44B8)", cursor: "pointer", fontWeight: 500 }}>{loading ? "Načítám…" : "Obnovit"}</span>
       </div>
       {veta
         ? <div style={{ fontFamily: "'Fraunces',serif", fontWeight: 300, fontSize: 22, lineHeight: 1.25, color: "var(--ink, #1C0A63)", marginBottom: 14, maxWidth: "60ch" }}>{veta}</div>
@@ -971,7 +971,10 @@ function DenikModule({ auditLog, ctx, query, setQuery, onOpen, onRefresh, loadin
           <span key={k} className={"fchip" + (druh === k ? " on" : "")} onClick={() => setDruh(k)}>{l}</span>
         ))}
       </div>
-      {dny.length === 0 && <div style={{ padding: "30px 0", color: "var(--mut)", fontSize: 13 }}>Nic neodpovídá filtru.</div>}
+      {dny.length === 0 && udalosti.length > 0 && <div style={{ padding: "30px 0", color: "var(--mut)", fontSize: 13 }}>Nic neodpovídá filtru.</div>}
+      {udalosti.length === 0 && <div style={{ padding: "26px 0 6px", color: "var(--mut)", fontSize: 13, maxWidth: "60ch", lineHeight: 1.6 }}>
+        Zapisuje se každé kliknutí, které něco změní: vystavení a úhrada faktury, úprava klienta, pohyb v úschově, zaškrtnutý výdaj, přepsaný zůstatek, Pepův výkaz i docházka. Řádek v Deníku je proklik na věc; na kartě faktury, úschovy a klienta je totéž pod nadpisem Historie.
+      </div>}
       {dny.map(([d, list]) => (
         <div key={d}>
           <div style={{ fontSize: 9, letterSpacing: ".2em", textTransform: "uppercase", color: "var(--mut)", fontWeight: 500, padding: "18px 0 6px", borderBottom: "1px solid var(--line)" }}>{denikNadpisDne(d)}</div>
