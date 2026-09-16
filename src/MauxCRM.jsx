@@ -668,9 +668,9 @@ async function fetchAuditLog(limit = AUDIT_FETCH_LIMIT) {
 }
 const DENIK_DRUHY = [
   ["vse", "Vše"], ["faktura", "Faktury"], ["uhrada", "Úhrady"], ["uschova", "Úschovy"],
-  ["klient", "Klienti"], ["vykaz", "Výkazy"], ["penize", "Peníze"], ["pepa", "Pepa"],
+  ["klient", "Klienti"], ["vykaz", "Výkazy"], ["penize", "Peníze"], ["akcie", "Akcie"], ["pepa", "Pepa"],
 ];
-const DENIK_BARVA = { faktura: "#4A44B8", uhrada: "#C6A86B", uschova: "#4A7C59", klient: "#C3BCAB", vykaz: "#C3BCAB", penize: "#8A879E", pepa: "#C3BCAB" };
+const DENIK_BARVA = { faktura: "#4A44B8", uhrada: "#C6A86B", uschova: "#4A7C59", klient: "#C3BCAB", vykaz: "#C3BCAB", penize: "#8A879E", akcie: "#22C98A", pepa: "#C3BCAB" };
 // Lidské názvy sloupců pro věty „upravena · splatnost, položky"
 const DENIK_POLE = {
   due_date: "splatnost", issue_date: "datum vystavení", duzp: "DUZP", total: "celkem", subtotal: "základ",
@@ -688,7 +688,7 @@ const _dKc = (v) => (v == null || v === "" || isNaN(Number(v))) ? null : Math.ro
 const _dCas = (iso) => { const d = new Date(iso); return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`; };
 const _dDatum = (ymd) => ymd ? fmtDate(String(ymd).slice(0, 10)) : "";
 const _dKratce = (s, n = 70) => { s = String(s || "").replace(/\s+/g, " ").trim(); return s.length > n ? s.slice(0, n - 1) + "…" : s; };
-const _dMesic = (y, m) => (y && m) ? `${czMes(Number(m))} ${y}` : "";
+const _dMesic = (y, m) => (y && m) ? `${czMes(Number(m) - 1)} ${y}` : "";   // czMes je 0-based
 /* Překlad jednoho řádku audit_log → událost { id, at, who, kind, parts, amount, link } nebo null (šum).
    parts = pole [ text | {b: text} ] — tučné je jméno věci a sloveso. */
 function denikPreloz(r, ctx) {
@@ -828,8 +828,52 @@ function denikPreloz(r, ctx) {
       }
       return { ...ev("pepa", ["Docházka · ", { b: "upravena" }, ` · ${_dPole(ch)}`], null, link), who: who || "PEPA" };
     }
-    default:
-      return null;
+    case "xtb_positions": {
+      const sym = row.symbol || "?", ks = Number(row.volume) || 0, link = { mod: "akcie" };
+      if (r.op === "INSERT") return ev("akcie", ["Akcie · ", { b: "nákup" }, ` · ${sym} · ${ks} ks`, row.price ? ` à ${row.price} ${row.currency || ""}` : "", row.trade_date ? ` · ${_dDatum(row.trade_date)}` : ""], null, link);
+      if (r.op === "DELETE") return ev("akcie", ["Akcie · nákup ", { b: "smazán" }, ` · ${sym} · ${ks} ks`], null, link);
+      if (has("closed_volume")) return ev("akcie", ["Akcie · ", { b: sym }, ` · uzavřeno ${n("closed_volume")} z ${ks} ks`], null, link);
+      return ev("akcie", ["Akcie · nákup ", { b: sym }, " · ", { b: "upraven" }, ` · ${_dPole(ch)}`], null, link);
+    }
+    case "xtb_tranches": {
+      const amt = _dKc(row.amount), link = { mod: "akcie" };
+      const typ = String(row.type || "vklad");
+      const slovo = typ === "vklad" ? "vklad na XTB" : typ === "vyber" || typ === "výběr" ? "výběr z XTB" : typ;
+      if (r.op === "INSERT") return ev("akcie", ["Akcie · ", { b: slovo }, row.tranche_date ? ` · ${_dDatum(row.tranche_date)}` : "", row.note ? ` · ${_dKratce(row.note, 40)}` : ""], amt, link);
+      if (r.op === "DELETE") return ev("akcie", ["Akcie · ", slovo, " ", { b: "smazán" }], amt, link);
+      return ev("akcie", ["Akcie · ", slovo, " · ", { b: "upraven" }, ` · ${_dPole(ch)}`], amt, link);
+    }
+    case "xtb_closed_trades": {
+      const sym = row.symbol || "?", ks = Number(row.volume) || 0, zisk = _dKc(row.profit), link = { mod: "akcie" };
+      if (r.op === "INSERT") return ev("akcie", ["Akcie · ", { b: "prodej" }, ` · ${sym} · ${ks} ks`, row.close_time ? ` · ${_dDatum(row.close_time)}` : "", zisk != null ? ` · zisk ${fmtKc(zisk)}` : ""], _dKc(row.amount_czk), link);
+      if (r.op === "DELETE") return ev("akcie", ["Akcie · prodej ", { b: "zrušen" }, ` · ${sym} · ${ks} ks`], _dKc(row.amount_czk), link);
+      return ev("akcie", ["Akcie · prodej ", { b: sym }, " · ", { b: "upraven" }, ` · ${_dPole(ch)}`], _dKc(row.amount_czk), link);
+    }
+    case "xtb_cash_ops": {
+      const typ = String(row.op_type || "pohyb"), amt = _dKc(row.amount_czk), link = { mod: "akcie" };
+      const slovo = /dividend/i.test(typ) ? "dividenda" : /withholding/i.test(typ) ? "srážková daň z dividendy" : /deposit/i.test(typ) ? "vklad" : /withdraw/i.test(typ) ? "výběr" : typ;
+      if (r.op === "INSERT") return ev("akcie", ["XTB · ", { b: slovo }, row.symbol ? ` · ${row.symbol}` : "", row.op_time ? ` · ${_dDatum(row.op_time)}` : ""], amt, link);
+      if (r.op === "DELETE") return ev("akcie", ["XTB · ", slovo, " ", { b: "smazán" }], amt, link);
+      return ev("akcie", ["XTB · ", slovo, " · ", { b: "upraven" }, ` · ${_dPole(ch)}`], amt, link);
+    }
+    case "tax_records": {
+      const lbl = row.label || row.category || "záznam", link = { mod: "dane" };
+      if (r.op === "INSERT") return null;   // založení prázdného roku = šum
+      if (r.op === "DELETE") return ev("uhrada", ["Daně · ", { b: lbl }, ` · ${row.year || ""} · `, { b: "smazán" }], null, link);
+      if (has("actual_settlement")) return ev("uhrada", ["Daně · ", { b: lbl }, ` · ${row.year || ""} · `, { b: "vyúčtování zapsáno" }], _dKc(n("actual_settlement")), link);
+      return ev("uhrada", ["Daně · ", { b: lbl }, ` · ${row.year || ""} · `, { b: "upraven" }, ` · ${_dPole(ch)}`], null, link);
+    }
+    case "tax_ledger": {
+      const ucet = row.account === "dan" ? "daň z příjmu" : row.account === "socialni" ? "sociální" : row.account === "zdravotni" ? "zdravotní" : row.account === "dph" ? "DPH" : (row.account || "");
+      const amt = _dKc(row.amount), link = { mod: "dane" };
+      const slovo = r.op === "INSERT" ? "zapsána" : r.op === "DELETE" ? "smazána" : "upravena";
+      return ev("uhrada", ["Daně · platba · ", { b: ucet }, row.date ? ` · ${_dDatum(row.date)}` : "", " · ", { b: slovo }, row.note ? ` · ${_dKratce(row.note, 40)}` : ""], amt, link);
+    }
+    default: {
+      // Neznámá tabulka (nový hlídač bez věty) — ukázat surově, ať nic nezmizí potichu.
+      const slovo = r.op === "INSERT" ? "založen" : r.op === "DELETE" ? "smazán" : "upraven";
+      return ev("penize", [{ b: r.tbl }, " · záznam ", { b: slovo }, r.op === "UPDATE" ? ` · ${_dPole(ch)}` : ""], _dKc(row.amount), null);
+    }
   }
 }
 const denikText = (e) => (e.parts || []).map(p => typeof p === "string" ? p : p.b).join("");
@@ -875,28 +919,108 @@ function denikVeta(udalosti) {
   const posl = kusy.pop();
   return "Dnes jsi " + (kusy.length ? kusy.join(", ") + " a " + posl : posl) + ".";
 }
+// Tichá věta za tento týden (od pondělí), jen Tomovy události.
+function denikTydenVeta(udalosti) {
+  const d = new Date(); const dow = (d.getDay() + 6) % 7;
+  const po = new Date(d.getFullYear(), d.getMonth(), d.getDate() - dow);
+  const odYmd = localYmd(po);
+  const tyden = udalosti.filter(e => denikDen(e.at) >= odYmd && e.who !== "PEPA");
+  if (!tyden.length) return null;
+  const txt = tyden.map(e => [e.kind, denikText(e)]);
+  const fv = txt.filter(([k, t]) => k === "faktura" && /· vystavena/.test(t)).length;
+  const fu = txt.filter(([k, t]) => k === "faktura" && /Uhrazena/.test(t) && !/vrácena/.test(t)).length;
+  const vy = txt.filter(([k]) => k === "uhrada").length;
+  const us = txt.filter(([k]) => k === "uschova").length;
+  const kl = txt.filter(([k]) => k === "klient").length;
+  const vk = txt.filter(([k]) => k === "vykaz").length;
+  const ak = txt.filter(([k]) => k === "akcie").length;
+  const kusy = [];
+  if (fv) kusy.push(`${fv} ${fv === 1 ? "faktura vystavená" : fv < 5 ? "faktury vystavené" : "faktur vystavených"}`);
+  if (fu) kusy.push(`${fu} ${fu === 1 ? "zaplacená" : fu < 5 ? "zaplacené" : "zaplacených"}`);
+  if (vy) kusy.push(`${vy} ${vy === 1 ? "výdaj uhrazen" : vy < 5 ? "výdaje uhrazené" : "výdajů uhrazených"}`);
+  if (us) kusy.push(`${us} ${us === 1 ? "pohyb" : us < 5 ? "pohyby" : "pohybů"} v úschovách`);
+  if (kl) kusy.push(`${kl}× klient`);
+  if (vk) kusy.push(`${vk} ${vk === 1 ? "výkaz" : vk < 5 ? "výkazy" : "výkazů"}`);
+  if (ak) kusy.push(`${ak}× akcie`);
+  return `Tento týden · ${tyden.length} ${tyden.length === 1 ? "událost" : tyden.length < 5 ? "události" : "událostí"}` + (kusy.length ? ` · ${kusy.join(" · ")}` : "");
+}
+// D) Výkaz Deníku za měsíc — brandované HTML k tisku (stejný recept jako výkaz docházky).
+function exportDenikHtml(udalosti, ym) {
+  const [ey, em] = ym.split("-").map(Number);
+  const rows = udalosti.filter(e => denikDen(e.at).startsWith(ym)).sort((a, b) => a.at.localeCompare(b.at));
+  if (!rows.length) { mauxToast(`Žádná událost za ${czMes(em - 1)} ${ey}.`); return; }
+  const esc = (s) => String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  let lastDay = "";
+  const body = rows.map(e => {
+    const den = denikDen(e.at);
+    const hlav = den !== lastDay ? `<tr class="den"><td colspan="4">${esc(denikNadpisDne(den).replace(/^(Dnes|Včera) · /, ""))}</td></tr>` : "";
+    lastDay = den;
+    const txt = (e.parts || []).map(p => typeof p === "string" ? esc(p) : `<b>${esc(p.b)}</b>`).join("");
+    return hlav + `<tr><td class="cas">${_dCas(e.at)}</td><td>${txt}</td><td class="kdo">${esc(e.who || "")}</td><td class="kc">${e.amount != null ? esc(fmtKc(e.amount)) : ""}</td></tr>`;
+  }).join("");
+  const mes = czMes(em - 1);
+  const html = `<!DOCTYPE html>
+<html lang="cs"><head><meta charset="UTF-8"><title>Deník — ${mes.charAt(0).toUpperCase() + mes.slice(1)} ${ey}</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,300;9..144,400&family=Inter:wght@400;500;600&display=swap');
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Inter', sans-serif; color: #16142A; background: #fff; padding: 48px 56px; max-width: 820px; margin: 0 auto; }
+  .brand { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 36px; }
+  .brand-name { font-family: 'Fraunces', serif; font-size: 22px; color: #3518A5; letter-spacing: .06em; }
+  .brand-sub { font-size: 8px; letter-spacing: .42em; text-transform: uppercase; color: #A08350; margin-top: 3px; font-weight: 600; }
+  .brand-right { text-align: right; font-size: 10px; color: #8A8A93; line-height: 1.7; }
+  h1 { font-family: 'Fraunces', serif; font-size: 28px; font-weight: 300; color: #3518A5; margin-bottom: 4px; }
+  .subtitle { font-size: 11px; letter-spacing: .18em; text-transform: uppercase; color: #8A8A93; font-weight: 600; margin-bottom: 24px; }
+  table { width: 100%; border-collapse: collapse; }
+  tr.den td { font-size: 9px; letter-spacing: .18em; text-transform: uppercase; color: #3518A5; font-weight: 700; padding: 18px 0 6px; border-bottom: 1.5px solid #3518A5; }
+  td { font-size: 12px; padding: 7px 6px 7px 0; border-bottom: 1px solid #ECEBF3; vertical-align: top; }
+  td.cas { width: 48px; color: #8A8A93; font-variant-numeric: tabular-nums; }
+  td.kdo { width: 48px; font-size: 9px; letter-spacing: .08em; color: #8A8A93; }
+  td.kc { width: 110px; text-align: right; font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  b { font-weight: 500; color: #1C0A63; }
+  .foot { margin-top: 28px; font-size: 10px; color: #8A8A93; line-height: 1.7; }
+  @media print { body { padding: 24px 28px; } .no-print { display: none !important; } tr { break-inside: avoid; } }
+</style></head><body>
+<div class="brand"><div><div class="brand-name">MAUX</div><div class="brand-sub">Legal · CRM</div></div>
+<div class="brand-right">Mgr. Tomáš Maux, advokát<br>Riegrovo náměstí 9/8, Poděbrady<br>vytištěno ${new Date().toLocaleDateString("cs-CZ")}</div></div>
+<h1>Deník událostí</h1>
+<div class="subtitle">${mes} ${ey} · ${rows.length} ${rows.length === 1 ? "událost" : rows.length < 5 ? "události" : "událostí"}</div>
+<table>${body}</table>
+<div class="foot">Zdroj: audit_log (hlídač maux_audit v databázi MAUX CRM). Každý řádek nese okamžik zápisu v databázi; „PEPA" = přihlášení asistenta, „SQL" = změna mimo aplikaci.</div>
+<button class="no-print" onclick="window.print()" style="margin-top:28px;padding:10px 22px;background:#3518A5;color:#fff;border:none;border-radius:8px;font-size:13px;font-family:inherit;cursor:pointer;font-weight:600;letter-spacing:.04em">Vytisknout / uložit PDF</button>
+</body></html>`;
+  const w = window.open("", "_blank", "width=860,height=900");
+  w.document.write(html); w.document.close();
+}
 // Jeden řádek události — sdílený Deníkem, Historií na kartě i pruhem Dnes.
-function DenikRadek({ e, onOpen, cas = "time", compact = false }) {
+function DenikRadek({ e, onOpen, onRevert, cas = "time", compact = false }) {
   const t = new Date(e.at);
   const casTxt = cas === "time" ? _dCas(e.at) : `${t.getDate()}. ${t.getMonth() + 1}. · ${_dCas(e.at)}`;
+  const cizi = e.who === "SQL";   // změna mimo appku (SQL editor, skript) — cihlově, ať je vidět hned
+  const vratit = onRevert && e.op !== "INSERT";
   return (
     <div onClick={() => e.link && onOpen && onOpen(e.link)}
-      style={{ display: "grid", gridTemplateColumns: (cas === "time" ? "52px" : "112px") + " 10px 1fr auto", gap: "0 12px", alignItems: "center",
-        padding: compact ? "6px 0" : "9px 0", borderBottom: "1px solid var(--line)", cursor: e.link && onOpen ? "pointer" : "default" }}>
+      style={{ display: "grid", gridTemplateColumns: (cas === "time" ? "52px" : "112px") + " 10px 1fr auto" + (vratit ? " auto" : ""), gap: "0 12px", alignItems: "center",
+        padding: compact ? "6px 0" : "9px 0", borderBottom: "1px solid var(--line)", cursor: e.link && onOpen ? "pointer" : "default",
+        ...(cizi ? { background: "rgba(168,68,60,.045)", borderLeft: "2px solid #A8443C", paddingLeft: 10 } : {}) }}>
       <span className="maux-num" style={{ fontSize: 12, fontWeight: 500, color: "var(--mut)" }}>{casTxt}</span>
       <i style={{ width: 6, height: 6, borderRadius: "50%", display: "block", background: DENIK_BARVA[e.kind] || "#C3BCAB" }} />
       <span style={{ fontSize: 13, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: compact ? "nowrap" : "normal" }}>
         {(e.parts || []).map((p, i) => typeof p === "string" ? <Fragment key={i}>{p}</Fragment> : <b key={i} style={{ fontWeight: 500, color: "var(--ink, #1C0A63)" }}>{p.b}</b>)}
-        {e.who && <span style={{ fontSize: 10, color: "var(--mut)", marginLeft: 8, letterSpacing: ".06em" }}>{e.who}</span>}
+        {e.who && <span style={{ fontSize: 10, color: cizi ? "#A8443C" : "var(--mut)", marginLeft: 8, letterSpacing: ".06em" }}>{cizi ? "MIMO APPKU" : e.who}</span>}
       </span>
       <span className="maux-num" style={{ fontSize: 13, fontWeight: 600, textAlign: "right", whiteSpace: "nowrap", color: e.amount != null && e.amount < 0 ? "var(--mut)" : "var(--txt)" }}>
         {e.amount != null ? fmtKc(e.amount) : ""}
       </span>
+      {vratit && (
+        <span onClick={(ev) => { ev.stopPropagation(); onRevert(e); }} title="Vrátit tento řádek do stavu před změnou"
+          style={{ fontSize: 11, color: "var(--mut)", cursor: "pointer", borderBottom: "1px dashed rgba(138,135,158,.5)", whiteSpace: "nowrap" }}>vrátit</span>
+      )}
     </div>
   );
 }
 // Historie na kartě věci (faktura, úschova, klient) — max 8 řádků, zbytek v Deníku.
-function HistorieKarty({ auditLog, ctx, tbl, rowId, hledat, onOpen, onOpenDenik }) {
+function HistorieKarty({ auditLog, ctx, tbl, rowId, hledat, onOpen, onOpenDenik, onRevert }) {
   const udalosti = useMemo(() => denikUdalosti(auditLog, ctx), [auditLog, ctx]);
   const moje = useMemo(() => denikProVec(udalosti, tbl, rowId, ctx), [udalosti, tbl, rowId, ctx]);
   const L = { fontSize: 9, letterSpacing: ".18em", textTransform: "uppercase", color: "var(--mut)", fontWeight: 500 };
@@ -908,7 +1032,7 @@ function HistorieKarty({ auditLog, ctx, tbl, rowId, hledat, onOpen, onOpenDenik 
       </div>
       {moje.length === 0
         ? <div style={{ fontSize: 12.5, color: "var(--mut)" }}>Deník běží od 16. 9. 2026 — od té doby se tady nic nezměnilo.</div>
-        : moje.slice(0, 8).map(e => <DenikRadek key={e.id} e={e} onOpen={onOpen} cas="date" compact />)}
+        : moje.slice(0, 8).map(e => <DenikRadek key={e.id} e={e} onOpen={onOpen} onRevert={onRevert} cas="date" compact />)}
     </div>
   );
 }
@@ -938,8 +1062,9 @@ function DnesPruh({ auditLog, ctx, onOpenDenik }) {
   );
 }
 // List Deník
-function DenikModule({ auditLog, ctx, query, setQuery, onOpen, onRefresh, loading }) {
+function DenikModule({ auditLog, ctx, query, setQuery, onOpen, onRefresh, loading, onRevert }) {
   const [druh, setDruh] = useState("vse");
+  const [expYm, setExpYm] = useState(() => today().slice(0, 7));
   const udalosti = useMemo(() => denikUdalosti(auditLog, ctx), [auditLog, ctx]);
   const q = (query || "").trim().toLowerCase();
   const filtr = useMemo(() => udalosti.filter(e =>
@@ -952,15 +1077,24 @@ function DenikModule({ auditLog, ctx, query, setQuery, onOpen, onRefresh, loadin
     return [...m.entries()];
   }, [filtr]);
   const veta = denikVeta(udalosti);
+  const tyden = denikTydenVeta(udalosti);
+  const mesice = useMemo(() => { const s = new Set(udalosti.map(e => denikDen(e.at).slice(0, 7))); s.add(today().slice(0, 7)); return [...s].sort().reverse(); }, [udalosti]);
+  const selStyle = { appearance: "none", WebkitAppearance: "none", border: "1px solid rgba(28,10,99,.14)", background: "rgba(255,255,255,.75)", borderRadius: 8, padding: "5px 26px 5px 10px", fontSize: 12, fontFamily: "inherit", color: "var(--ink, #1C0A63)", fontWeight: 500,
+    backgroundImage: "url(\"data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='6'><path d='M1 1l4 4 4-4' fill='none' stroke='%234A44B8' stroke-width='1.4'/></svg>\")", backgroundRepeat: "no-repeat", backgroundPosition: "right 9px center" };
   return (
     <div className="det" style={{ maxWidth: 980 }}>
       {/* Nadpis nese hlavička listu (App) — tady jen věta a Obnovit, ať „Deník" nestojí dvakrát. */}
-      <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 4 }}>
-        <span onClick={onRefresh} style={{ fontSize: 12, color: "var(--indigo, #4A44B8)", cursor: "pointer", fontWeight: 500 }}>{loading ? "Načítám…" : "Obnovit"}</span>
+      <div style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", gap: 14, marginBottom: 4, flexWrap: "wrap" }}>
+        <select value={expYm} onChange={e => setExpYm(e.target.value)} style={selStyle}>
+          {mesice.map(ym => <option key={ym} value={ym}>{czMes(Number(ym.slice(5)) - 1)} {ym.slice(0, 4)}</option>)}
+        </select>
+        <span onClick={() => exportDenikHtml(udalosti, expYm)} style={{ fontSize: 12, color: "var(--indigo, #4A44B8)", cursor: "pointer", fontWeight: 500 }}>⬇ Výkaz za měsíc</span>
+        <span onClick={onRefresh} style={{ fontSize: 12, color: "var(--mut)", cursor: "pointer", fontWeight: 500 }}>{loading ? "Načítám…" : "Obnovit"}</span>
       </div>
       {veta
         ? <div style={{ fontFamily: "'Fraunces',serif", fontWeight: 300, fontSize: 22, lineHeight: 1.25, color: "var(--ink, #1C0A63)", marginBottom: 14, maxWidth: "60ch" }}>{veta}</div>
-        : <div style={{ fontSize: 13, color: "var(--mut)", marginBottom: 14 }}>{udalosti.length ? "Dnes zatím žádná událost." : "Deník běží od 16. 9. 2026 — první událost se objeví po prvním kliknutí v appce."}</div>}
+        : <div style={{ fontSize: 13, color: "var(--mut)", marginBottom: 6 }}>{udalosti.length ? "Dnes zatím žádná událost." : "Deník běží od 16. 9. 2026 — první událost se objeví po prvním kliknutí v appce."}</div>}
+      {tyden && <div style={{ fontSize: 12, color: "var(--mut)", marginBottom: 14, marginTop: veta ? -8 : 0 }}>{tyden}</div>}
       <div className="tools" style={{ marginBottom: 6 }}>
         <div className="search"><span style={{ color: "#ccc" }}>⌕</span>
           <input placeholder="Hledat: číslo faktury, klient, úschova, výdaj…" value={query || ""} onChange={e => setQuery(e.target.value)} />
@@ -978,7 +1112,7 @@ function DenikModule({ auditLog, ctx, query, setQuery, onOpen, onRefresh, loadin
       {dny.map(([d, list]) => (
         <div key={d}>
           <div style={{ fontSize: 9, letterSpacing: ".2em", textTransform: "uppercase", color: "var(--mut)", fontWeight: 500, padding: "18px 0 6px", borderBottom: "1px solid var(--line)" }}>{denikNadpisDne(d)}</div>
-          {list.map(e => <DenikRadek key={e.id} e={e} onOpen={onOpen} />)}
+          {list.map(e => <DenikRadek key={e.id} e={e} onOpen={onOpen} onRevert={onRevert} />)}
         </div>
       ))}
       {auditLog && auditLog.length >= AUDIT_FETCH_LIMIT && <div style={{ fontSize: 11, color: "var(--mut)", marginTop: 12 }}>Zobrazeno posledních {AUDIT_FETCH_LIMIT} záznamů.</div>}
@@ -19293,6 +19427,42 @@ export default function MauxCRM() {
     navTo(link.mod);
     if (link.id && (link.mod === "fakturace" || link.mod === "klienti")) { setSel(link.id); setMode("detail"); }
   };
+  // Vrátit řádek do stavu před změnou (Deník · „vrátit"). Bere `before` z audit_log a upsertne ho
+  // zpět — pro UPDATE i DELETE. INSERT se nevrací (smazání by bylo destruktivní tlačítko bez náhledu).
+  // Vrácení samo vytvoří novou událost v Deníku, takže je dohledatelné i to.
+  const reloadTable = async (tbl, before) => {
+    const now = new Date();
+    switch (tbl) {
+      case "invoices": setInvoices(await fetchInvoices()); break;
+      case "clients": setClients(await fetchClients()); break;
+      case "work_entries": setWorkEntries(await fetchWorkEntries()); break;
+      case "escrows": case "escrow_tranches": case "escrow_aml_persons": setEscrows(await fetchEscrows()); break;
+      case "finance_items": setFinanceItems(await fetchFinanceItems()); break;
+      case "expense_checklist": setExpenseChecks(await fetchExpenseChecks(now.getFullYear(), now.getMonth() + 1)); break;
+      case "dpfo_months": setDpfoMonths(await ensureDpfoYear(now.getFullYear())); break;
+      case "loan_trackers": setLoanTrackers(await fetchLoanTrackers()); break;
+      case "loan_transactions": if (before && before.loan_id) { const cerstve = await fetchLoanTransactions(before.loan_id); setLoanTransactions(p => ({ ...p, [before.loan_id]: cerstve })); } break;
+      case "assistant_work_logs": setAssistantLogs(await fetchAssistantWorkLogs("asistent@maux.cz")); break;
+      case "assistant_attendance": setAssistantAttendance(await fetchAssistantAttendance("asistent@maux.cz")); break;
+      case "xtb_positions": setXtbPositions(await fetchXtbPositions()); break;
+      case "xtb_tranches": setXtbTranches(await fetchXtbTranches()); break;
+      case "xtb_closed_trades": setXtbClosedTrades(await fetchXtbClosedTrades()); break;
+      case "xtb_cash_ops": setXtbCashOps(await fetchXtbCashOps()); break;
+      default: break;
+    }
+  };
+  const revertAudit = async (e) => {
+    const raw = (auditLog || []).find(r => r.id === e.id);
+    if (!raw || !raw.before) { mauxToast("Žádný stav před změnou — tohle vrátit nejde."); return; }
+    if (!confirm(`Vrátit „${denikText(e)}“ do stavu před změnou?\n\nPřepíše se tím i vše, co se na tomhle řádku změnilo později.`)) return;
+    try {
+      const { error } = await supabase.from(raw.tbl).upsert(raw.before);
+      if (error) throw error;
+      await reloadTable(raw.tbl, raw.before);
+      refreshAudit();
+      mauxToast("Vráceno do stavu před změnou.");
+    } catch (err) { mauxToast("Chyba: vrácení se nepovedlo — " + err.message); }
+  };
   // Z karty věci do Deníku s předvyplněným hledáním (provázání oběma směry).
   const openDenik = (q) => { setDenikQuery(q || ""); navTo("denik"); refreshAudit(); };
   useEffect(() => { if (mod === "denik" && session) refreshAudit(); }, [mod]);
@@ -20065,7 +20235,7 @@ export default function MauxCRM() {
           )}
           {mod === "fakturace" && mode === "detail" && selInvoice && (
             <InvoiceDetail inv={selInvoice} clients={clients} onBack={() => setMode("list")} onEdit={() => setMode("edit")} onDelete={() => setConfirmDel(selInvoice.id)}
-              historie={<HistorieKarty auditLog={auditLog} ctx={denikCtx} tbl="invoices" rowId={selInvoice.id} hledat={selInvoice.invoice_number || ""} onOpen={openFromDenik} onOpenDenik={openDenik} />} />
+              historie={<HistorieKarty auditLog={auditLog} ctx={denikCtx} tbl="invoices" rowId={selInvoice.id} hledat={selInvoice.invoice_number || ""} onOpen={openFromDenik} onOpenDenik={openDenik} onRevert={revertAudit} />} />
           )}
           {mod === "fakturace" && mode === "edit" && selInvoice && (
             <InvoiceForm init={selInvoice} clients={clients} invoices={invoices} onSave={saveInvoice} onCancel={() => setMode("detail")} saving={saving} />
@@ -20080,7 +20250,7 @@ export default function MauxCRM() {
           )}
           {mod === "klienti" && mode === "detail" && selClient && (
             <ClientDetail c={selClient} invoices={invoices} financeItems={financeItems} onFixPaidAt={fixInvoicePaidAt} onBack={() => setMode("list")} onEdit={() => setMode("edit")} onDelete={() => setConfirmDel(selClient.id)}
-              historie={<HistorieKarty auditLog={auditLog} ctx={denikCtx} tbl="clients" rowId={selClient.id} hledat={selClient.name || ""} onOpen={openFromDenik} onOpenDenik={openDenik} />} />
+              historie={<HistorieKarty auditLog={auditLog} ctx={denikCtx} tbl="clients" rowId={selClient.id} hledat={selClient.name || ""} onOpen={openFromDenik} onOpenDenik={openDenik} onRevert={revertAudit} />} />
           )}
           {mod === "klienti" && mode === "edit" && selClient && (
             <ClientForm init={selClient} onSave={saveClient} onCancel={() => setMode("detail")} saving={saving} />
@@ -20103,7 +20273,7 @@ export default function MauxCRM() {
               onMarkPaid={markTranchePaid}
               onPayment={handleEscrowPaymentRefresh}
               onSetNavrh={setEscrowNavrhPodan}
-              renderHistorie={e => <HistorieKarty auditLog={auditLog} ctx={denikCtx} tbl="escrows" rowId={e.id} hledat={e.escrow_number || ""} onOpen={openFromDenik} onOpenDenik={openDenik} />}
+              renderHistorie={e => <HistorieKarty auditLog={auditLog} ctx={denikCtx} tbl="escrows" rowId={e.id} hledat={e.escrow_number || ""} onOpen={openFromDenik} onOpenDenik={openDenik} onRevert={revertAudit} />}
             />
             </>
           )}
@@ -20170,7 +20340,7 @@ export default function MauxCRM() {
           {/* OSTATNÍ — DPFO, úvěry, pohledávky (přesunuto z Přehledu) */}
           {mod === "denik" && (
             <DenikModule auditLog={auditLog} ctx={denikCtx} query={denikQuery} setQuery={setDenikQuery}
-              onOpen={openFromDenik} onRefresh={refreshAudit} loading={auditLoading} />
+              onOpen={openFromDenik} onRefresh={refreshAudit} loading={auditLoading} onRevert={revertAudit} />
           )}
           {mod === "ostatni" && (
             <OstatniModule
