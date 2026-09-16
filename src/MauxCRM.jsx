@@ -19160,13 +19160,14 @@ export default function MauxCRM() {
     [xtbPositions, xtbClosedTrades, xtbTranches, xtbCashOps, xtbHist]
   );
   const [escrows, setEscrows] = useState([]);
+  // Kontext pro překlad Deníku — musí stát PŘED navSignals (TDZ v těle App).
+  const denikCtx = useMemo(() => ({ clients, invoices, escrows, financeItems, loanTrackers }), [clients, invoices, escrows, financeItems, loanTrackers]);
 
   // ── Signály v levém menu (Tom 14. 9. 2026) ──────────────────────────
   // V menu svítí JEN to, co tiká: lhůta (plomba úschovy), dluh (faktura po splatnosti)
   // a ticho ve výkazu. Zásoby (nevyfakturovaná práce, obraty) sem NEPATŘÍ — ty žijí
   // na Přehledu; jinak by se z panelu stal druhý dashboard. Když nic netiká, menu mlčí.
   // Barvu i počet alertů bere ze sdíleného escrowAlertState — jedna metoda s dlaždicí ALERTY.
-  useEffect(() => { if (mod === "denik" && session) refreshAudit(); }, [mod]);
   const navSignals = useMemo(() => {
     const out = {};
     // Deník: tichý signál „dnes N" (jen Tomovy události, Pepovy ne — ty nese jeho řádek)
@@ -19291,7 +19292,7 @@ export default function MauxCRM() {
   };
   // Z karty věci do Deníku s předvyplněným hledáním (provázání oběma směry).
   const openDenik = (q) => { setDenikQuery(q || ""); navTo("denik"); refreshAudit(); };
-  const denikCtx = useMemo(() => ({ clients, invoices, escrows, financeItems, loanTrackers }), [clients, invoices, escrows, financeItems, loanTrackers]);
+  useEffect(() => { if (mod === "denik" && session) refreshAudit(); }, [mod]);
   const goBack = () => { if (mode !== "list" && mode !== "") { setMode("list"); setSel(null); return; } const prev = modHistory[modHistory.length-1]; if (prev) { setModHistory(h => h.slice(0,-1)); setMod(prev.mod); try { localStorage.setItem("maux_mod", prev.mod); } catch {} setMode("list"); setSel(null); } };
   // Chytré kliknutí na den v kalendáři výkazů → přímo otevře "Nový záznam" s předdoplněným datem
   const [prefillDate, setPrefillDate] = useState(null);
