@@ -601,6 +601,12 @@ async function fetchExpenseChecks(year, month) {
   if (error) throw error;
   return data || [];
 }
+// Historie pro pás uzavřených měsíců (backfill 18. 9. 2026) — jen zaplacené řádky, všechny měsíce.
+async function fetchExpenseChecksPaidAll() {
+  const { data, error } = await supabase.from("expense_checklist").select("item_id,year,month,paid,paid_at").eq("paid", true);
+  if (error) throw error;
+  return data || [];
+}
 async function setExpenseCheck(itemId, year, month, paid) {
   const id = `${itemId}_${year}_${month}`;
   const { error } = await supabase.from("expense_checklist").upsert({
@@ -662,6 +668,34 @@ function syncDaneLogAppend(financeItems, zapisy) {
 }
 // Byl tenhle audit řádek dílem syncu? Stejná položka, zápis do dvou minut od události.
 const syncDaneMatch = (financeItems, itemId, at) => syncDaneLogRead(financeItems).some(z => z.id === itemId && Math.abs(new Date(z.at) - new Date(at)) < 120e3);
+/* ── VÝDAJE PO ZAPLACENÍ — varianta A „Řádek s historií" (Tom 18. 9. 2026: „když zaplatím
+   všechny náklady, ať se to do konce měsíce elegantně minimalizuje a přeskládá; 1. dalšího
+   měsíce znovu tabulka; logovat měsíc po měsíci"). Jakmile je vše odškrtnuté, karta Výdaje
+   se složí do jednoho řádku přes celou šířku panelu a Osobní majetek se roztáhne. Uzavřené
+   měsíce se logují do config položky fi_vydaje_uzavreno { "YYYY-MM": {at, total, n} }. */
+const VYDAJE_UZAVRENO_ID = "fi_vydaje_uzavreno";
+function vydajeStav(financeItems, expenseChecks) {
+  const ids = [...(financeItems || []).filter(i => i.category === "nutne" || i.category === "luxus").map(i => i.id), "josef_wage"];
+  const paid = (expenseChecks || []).filter(c => c.paid && ids.includes(c.item_id));
+  const paidCount = ids.filter(id => paid.some(c => c.item_id === id)).length;
+  const lastAt = paid.reduce((m, c) => c.paid_at && (!m || c.paid_at > m) ? c.paid_at : m, null);
+  return { n: ids.length, paidCount, allDone: ids.length > 0 && paidCount === ids.length, lastAt };
+}
+function vydajeUzavrenoRead(financeItems) {
+  const it = (financeItems || []).find(i => i.id === VYDAJE_UZAVRENO_ID);
+  try { const p = JSON.parse(it?.notes || "{}"); return p && typeof p === "object" ? p : {}; } catch (e) { return {}; }
+}
+function vydajeUzavrenoItemZLogu(financeItems, log) {
+  const keys = Object.keys(log).sort();
+  while (keys.length > 36) delete log[keys.shift()];
+  const prev = (financeItems || []).find(i => i.id === VYDAJE_UZAVRENO_ID) || {};
+  return { ...prev, id: VYDAJE_UZAVRENO_ID, category: "config", label: "Uzavřené měsíce výdajů", amount: 0, notes: JSON.stringify(log) };
+}
+function vydajeUzavrenoItem(financeItems, ym, zapis) {
+  return vydajeUzavrenoItemZLogu(financeItems, { ...vydajeUzavrenoRead(financeItems), [ym]: zapis });
+}
+const CZ_MES_KRATCE = ["led", "úno", "bře", "dub", "kvě", "čvn", "čvc", "srp", "zář", "říj", "lis", "pro"];
+const fmtDenMesic = (iso) => { const d = new Date(iso); return `${d.getDate()}. ${d.getMonth() + 1}.`; };
 const fmtUhradyAt = (iso) => { const d = new Date(iso); return `${d.getDate()}. ${d.getMonth()+1}. ${d.getFullYear()} ${String(d.getHours()).padStart(2,"0")}:${String(d.getMinutes()).padStart(2,"0")}`; };
 
 /* ── DENÍK UDÁLOSTÍ (Tom 16. 9. 2026: "chci, aby appka ukládala historii změn — den a čas,
@@ -7630,7 +7664,7 @@ function EscrowLiveTile({ escrows, onNav, onOpenEscrow }) {
 /* ─── TRI GRAFY PANEL — Majetek + Rezerva jako interaktivní donut grafy (Spořák je teď samostatná dlaždice na Přehledu) ─── */
 function TriGrafyPanel({ financeItems, onSaveFinance, invoices, dpfoMonths, loanTransactions, escrows, josefAvg = 0,
                          xtbSnapshots = [], xtbPositions = [], xtbClosedTrades = [], xtbCashOps = [], xtbTranches = [], xtbMarket = null,
-                         loanTrackers = [], wealthSnapshots = [] }) {
+                         loanTrackers = [], wealthSnapshots = [], wide = false }) {
   // ── SPOŘÁK ──
   const sporaci    = (financeItems||[]).filter(i => i.category === "sporaci" && i.notes !== "SKIP_DISPLAY");
   const zItem      = sporaci.find(i => i.id === "fi_sp_99");
@@ -7890,16 +7924,17 @@ function TriGrafyPanel({ financeItems, onSaveFinance, invoices, dpfoMonths, loan
               )}
             </div>
           ) : (
-            <div>
-              {/* Kontextový řádek — nikdy neopakuje hrdinské číslo pod sebou (jedno číslo, jedno místo). */}
-              <div style={{ fontSize: 10.5, color: "var(--mut)", lineHeight: 1.5 }}>
+            <div style={wide ? { display: "grid", gridTemplateColumns: "minmax(0,1fr) 210px minmax(0,1.25fr)", gap: "0 28px", alignItems: "center" } : undefined}>
+              {/* Kontextový řádek — nikdy neopakuje hrdinské číslo pod sebou (jedno číslo, jedno místo).
+                  wide (18. 9. 2026, po zaplacení výdajů): hrdina vlevo · koláč uprostřed · legenda vpravo. */}
+              <div style={{ fontSize: 10.5, color: "var(--mut)", lineHeight: 1.5, gridColumn: wide ? "1 / -1" : undefined, marginBottom: wide ? 6 : 0 }}>
                 {majDonut.length} {slozkyTvar(majDonut.length)}
                 {topSeg ? ` · ${Math.round(topSeg.pct * 100)} % z toho ${topSeg.label.toLowerCase()}` : ""}
                 {dluhy.osobni > 0 ? ` · hrubý ${fmtKc(totalMaj)}` : " · žádné osobní dluhy"}
               </div>
 
               {/* HRDINA — čistý majetek. Zlatá = osobní majetek (Tom 3. 8. 2026). */}
-              <div style={{ marginTop: 12 }}>
+              <div style={{ marginTop: wide ? 0 : 12 }}>
                 <div className="maux-num" style={{ fontSize: 36, fontWeight: 600, color: MAJ_HERO, lineHeight: 1, letterSpacing: "-.02em", whiteSpace: "nowrap" }}>{fmtKc(cistyMaj)}</div>
                 <div style={{ fontSize: 12, color: "var(--ink)", marginTop: 7, opacity: .8 }}>
                   čistý majetek
@@ -7910,8 +7945,8 @@ function TriGrafyPanel({ financeItems, onSaveFinance, invoices, dpfoMonths, loan
 
               {/* VELKÝ KOLÁČ — r 88, viewBox 290, živý střed, vnější vlasový prstenec.
                   Stejná anatomie jako Spořicí účet, ale BEZ záře a BEZ plovoucích pixelů. */}
-              <div style={{ display: "flex", justifyContent: "center", marginTop: 6 }}>
-                <svg viewBox="0 0 290 290" style={{ width: "100%", maxWidth: 272, display: "block" }}>
+              <div style={{ display: "flex", justifyContent: "center", marginTop: wide ? 0 : 6 }}>
+                <svg viewBox="0 0 290 290" style={{ width: "100%", maxWidth: wide ? 210 : 272, display: "block" }}>
                   <circle cx="145" cy="145" r={R_MAJ} fill="none" stroke="#F7F4ED" strokeWidth="34" />
                   {majDonut.map((s, i) => (
                     <circle key={i} cx="145" cy="145" r={R_MAJ}
@@ -7948,7 +7983,7 @@ function TriGrafyPanel({ financeItems, onSaveFinance, invoices, dpfoMonths, loan
               </div>
 
               {/* LEGENDA — stejný rytmus jako u Spořicího účtu, řádky propojené s koláčem přes majHov. */}
-              <div style={{ display: "flex", flexDirection: "column", gap: 1, marginTop: 16, paddingTop: 11, borderTop: "1px solid rgba(0,0,0,.06)" }}>
+              <div style={{ display: "flex", flexDirection: "column", gap: 1, marginTop: wide ? 0 : 16, paddingTop: wide ? 0 : 11, borderTop: wide ? "none" : "1px solid rgba(0,0,0,.06)" }}>
                 {majDonut.map((s, i) => (
                   <div key={i}
                     onMouseEnter={() => setMajHov(i)} onMouseLeave={() => setMajHov(null)}
@@ -7990,7 +8025,7 @@ function TriGrafyPanel({ financeItems, onSaveFinance, invoices, dpfoMonths, loan
               </div>
 
               {dluhy.investicni > 0 && (
-                <div style={{ fontSize: 9.5, color: "var(--mut)", opacity: .65, marginTop: 10, lineHeight: 1.5 }}>
+                <div style={{ fontSize: 9.5, color: "var(--mut)", opacity: .65, marginTop: 10, lineHeight: 1.5, gridColumn: wide ? "1 / -1" : undefined }}>
                   Investiční úvěr {fmtKc(dluhy.investicni)} tu není — kryje ho nemovitost.
                 </div>
               )}
@@ -8008,7 +8043,7 @@ function TriGrafyPanel({ financeItems, onSaveFinance, invoices, dpfoMonths, loan
    editovatelný checklist nákladů (dřív v Bilance, kde dělal dlaždici zbytečně vysokou) se přesunul
    sem — sem patří logicky (firemní výdaje) a tahle dlaždice dřív stejně jen ukazovala mrtvý souhrn.
    Firemní rezerva (LiquidTank) zůstala v Bilanci dole — viz Panel id="finance". */
-function FirmaBar({ financeItems, invoices, dpfoMonths, loanTransactions, escrows, onSaveFinance, onDeleteFinance, expenseChecks, onToggleExpenseCheck, josefWage, josefYm, onNav }) {
+function FirmaBar({ financeItems, invoices, dpfoMonths, loanTransactions, escrows, onSaveFinance, onDeleteFinance, expenseChecks, onToggleExpenseCheck, josefWage, josefYm, onNav, collapsed = false, onPeek, onOpenDenik }) {
   const nutne      = (financeItems||[]).filter(i => i.category === "nutne");
   const luxus      = (financeItems||[]).filter(i => i.category === "luxus");
   const totalNutne = Math.abs(nutne.reduce((s,i)=>s+(i.amount||0),0)) + (josefWage||0);
@@ -8028,20 +8063,51 @@ function FirmaBar({ financeItems, invoices, dpfoMonths, loanTransactions, escrow
   const allDone = pct === 100;
 
   const [showDetail, setShowDetail] = useState(true);
-  const [confettiShown, setConfettiShown] = useState(false);
   // Rozbalený log kliknutí u položky (Tom 15. 9. 2026). Klik na čas u položky = rozbal / sbal.
   const [logOpenId, setLogOpenId] = useState(null);
   const uhradyLog = uhradyLogRead(financeItems);
   const logEntriesOf = (id) => { const n = new Date(); return uhradyLog[uhradyLogKey(id, n.getFullYear(), n.getMonth() + 1)] || []; };
 
-  // Trigger confetti once when allDone
+  // Uzavřený měsíc → log fi_vydaje_uzavreno (kdy jsi dozaškrtal a za kolik). Zapisuje se jen
+  // při změně, jinak by se refetch financeItems točil dokola.
+  const stav = vydajeStav(financeItems, expenseChecks);
+  const _d0 = new Date();
+  const ymNow = `${_d0.getFullYear()}-${String(_d0.getMonth() + 1).padStart(2, "0")}`;
   useEffect(() => {
-    if (allDone && !confettiShown) setConfettiShown(true);
-  }, [allDone]);
-  // Reset confetti when not allDone
+    if (!allDone || !stav.lastAt || !onSaveFinance) return;
+    const cur = vydajeUzavrenoRead(financeItems)[ymNow];
+    if (cur && cur.at === stav.lastAt && cur.total === Math.round(totalVyd)) return;
+    onSaveFinance(vydajeUzavrenoItem(financeItems, ymNow, { at: stav.lastAt, total: Math.round(totalVyd), n: stav.n }));
+  }, [allDone, stav.lastAt, totalVyd]);
+  // Backfill historie (Tom 18. 9. 2026: „ať je pás plný hned"): minulé měsíce bez záznamu se
+  // doplní z expense_checklist — datum posledního zaplaceného kliknutí v měsíci, počet položek.
+  // Jednou za načtení, jen chybějící měsíce; ruční / živé záznamy se nepřepisují.
+  const backfillRef = useRef(false);
   useEffect(() => {
-    if (!allDone) setConfettiShown(false);
-  }, [allDone]);
+    if (backfillRef.current || !(financeItems || []).length || !onSaveFinance) return;
+    backfillRef.current = true;
+    (async () => {
+      try {
+        const rows = await fetchExpenseChecksPaidAll();
+        const log = vydajeUzavrenoRead(financeItems);
+        const byYm = {};
+        rows.forEach(r => {
+          if (!r.paid_at) return;
+          const ym = `${r.year}-${String(r.month).padStart(2, "0")}`;
+          if (ym >= ymNow) return;
+          (byYm[ym] = byYm[ym] || []).push(r.paid_at);
+        });
+        let changed = false;
+        Object.keys(byYm).forEach(ym => {
+          if (log[ym]) return;
+          const ats = byYm[ym].sort();
+          log[ym] = { at: ats[ats.length - 1], n: ats.length, backfill: true };
+          changed = true;
+        });
+        if (changed) await onSaveFinance(vydajeUzavrenoItemZLogu(financeItems, log));
+      } catch (e) { console.warn("výdaje · backfill historie:", e.message); }
+    })();
+  }, [(financeItems || []).length]);
 
   const Check = ({item, color}) => {
     const p = isPaid(item.id);
@@ -8128,61 +8194,74 @@ function FirmaBar({ financeItems, invoices, dpfoMonths, loanTransactions, escrow
     );
   };
 
-  // Confetti particles
-  const ConfettiParticles = () => {
-    const particles = Array.from({length:24},(_,i)=>i);
-    const colors = ["#16A34A","#22C55E","#4ADE80","#86EFAC","#3518A5","#6366F1","#F59E0B","#EC4899"];
+  if (collapsed) {
+    const log = vydajeUzavrenoRead(financeItems);
+    const mesice = [];   // předchozí uzavřené měsíce, nejnovější první, max 5
+    for (let k = 1; k <= 12 && mesice.length < 5; k++) {
+      const d = new Date(now.getFullYear(), now.getMonth() - k, 1);
+      const ym = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+      if (log[ym] && log[ym].at) mesice.push({ m: d.getMonth(), y: d.getFullYear(), at: log[ym].at });
+    }
+    // Průměrný den uzavření z historie (aspoň dva měsíce) — tichá věta, ne verdikt.
+    const dnyUz = [...mesice.map(x => x.at), stav.lastAt].filter(Boolean).map(a => new Date(a).getDate());
+    const prumDen = dnyUz.length >= 2 ? Math.round(dnyUz.reduce((s, v) => s + v, 0) / dnyUz.length) : null;
+    const doDeniku = (m, y) => (e) => { e.stopPropagation(); onOpenDenik && onOpenDenik(`${czMes(m)} ${y}`); };
+    const dalsi = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+    const { queue } = provozData(financeItems);
+    const chip = (txt, kind, key, onClick) => (
+      <span key={key} onClick={onClick} title={onClick ? "Otevřít v Deníku" : undefined}
+        style={{ fontSize: 10.5, padding: "3px 9px", borderRadius: 999, whiteSpace: "nowrap", cursor: onClick ? "pointer" : "inherit",
+        background: kind === "now" ? "#4A44B8" : kind === "o" ? "transparent" : "rgba(74,68,184,.07)",
+        color: kind === "now" ? "#fff" : kind === "o" ? "var(--mut)" : "#3A3494",
+        border: kind === "o" ? "1px dashed rgba(74,68,184,.3)" : "1px solid transparent" }}>{txt}</span>
+    );
     return (
-      <div style={{position:"absolute",inset:0,overflow:"hidden",pointerEvents:"none",zIndex:5}}>
-        {particles.map(i => {
-          const c = colors[i%colors.length];
-          const left = 5+Math.random()*90;
-          const delay = Math.random()*1.2;
-          const dur = 1.8+Math.random()*1.2;
-          const size = 4+Math.random()*5;
-          const shape = i%3===0?"50%":"2px";
-          return <span key={i} style={{
-            position:"absolute",left:`${left}%`,top:"-8px",width:size,height:size,borderRadius:shape,
-            background:c,opacity:0,
-            animation:`expenseConfettiFall ${dur}s ${delay}s ease-out forwards`
-          }} />;
-        })}
-        <style>{`@keyframes expenseConfettiFall { 0%{opacity:1;transform:translateY(0) rotate(0deg) scale(1)} 60%{opacity:1} 100%{opacity:0;transform:translateY(180px) rotate(${360+Math.random()*360}deg) scale(.3)} }`}</style>
+      <div onClick={() => onPeek && onPeek(true)} title="Rozbalit tabulku — do konce dne, pak se zase složí"
+        style={{ ...MAUX_GLASS, borderLeft: "2px solid #4A44B8", borderRadius: "0 14px 14px 0", padding: "12px 20px",
+          display: "flex", alignItems: "center", gap: 18, flexWrap: "wrap", cursor: "pointer" }}>
+        <span style={{ fontSize: 13, fontWeight: 500, color: "var(--ink)" }}>{currentMonth.charAt(0).toUpperCase() + currentMonth.slice(1)} uhrazeno</span>
+        <span className="maux-num" style={{ fontSize: 15, fontWeight: 600, color: "var(--ink)" }}>{fmtKc(totalVyd)}</span>
+        <span style={{ fontSize: 10.5, color: "var(--mut)" }}>{stav.n} položek{stav.lastAt ? ` · poslední klik ${fmtPaidAt(new Date(stav.lastAt))}` : ""}{prumDen ? ` · průměrně uzavíráš ${prumDen}. den` : ""}</span>
+        <div style={{ marginLeft: "auto", display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+          {chip(`${CZ_MES_KRATCE[dalsi.getMonth()]} · od 1. ${dalsi.getMonth() + 1}.`, "o", "next")}
+          {chip(`${CZ_MES_KRATCE[now.getMonth()]} ✓ ${stav.lastAt ? fmtDenMesic(stav.lastAt) : ""}`, "now", "now", doDeniku(now.getMonth(), now.getFullYear()))}
+          {mesice.map(x => chip(`${CZ_MES_KRATCE[x.m]} ✓ ${fmtDenMesic(x.at)}`, "", `m${x.y}${x.m}`, doDeniku(x.m, x.y)))}
+          {queue.length > 0 && (
+            <span onClick={e => { e.stopPropagation(); onNav && onNav("provoz"); }} title="Otevřít Provoz kanceláře"
+              style={{ fontSize: 9.5, fontWeight: 600, letterSpacing: ".06em", textTransform: "uppercase", color: "#3A3494",
+                background: "#EFEEF8", borderRadius: 3, padding: "3px 8px", marginLeft: 6, whiteSpace: "nowrap" }}>
+              Provoz · {provozPluralNezatridene(queue.length)} →
+            </span>
+          )}
+        </div>
       </div>
     );
-  };
+  }
 
   return (
     <div style={{
-      background: allDone
-        ? "linear-gradient(135deg, #F0FDF4 0%, #DCFCE7 50%, #F0FDF4 100%)"
-        : "var(--card)",
-      border: allDone ? "1.5px solid rgba(22,163,74,.3)" : "1px solid var(--line)",
+      background: "var(--card)",
+      border: allDone ? "1px solid rgba(74,68,184,.28)" : "1px solid var(--line)",
       borderRadius: 12,
       padding: allDone && !showDetail ? "16px 24px" : "20px 28px",
       position: "relative",
       overflow: "hidden",
       transition: "all .5s ease",
-      boxShadow: allDone ? "0 0 20px rgba(22,163,74,.12), inset 0 0 0 1px rgba(22,163,74,.08)" : "0 1px 4px rgba(53,24,165,.04)",
+      boxShadow: "0 1px 4px rgba(53,24,165,.04)",
     }}>
-      {/* Confetti animation when all done */}
-      {allDone && confettiShown && <ConfettiParticles />}
 
       {/* Header — prominent month title */}
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",cursor:"pointer",position:"relative",zIndex:6}}
-        onClick={()=>setShowDetail(v=>!v)}>
+        title={allDone && onPeek ? "Sbalit zpět na řádek" : undefined}
+        onClick={()=> (allDone && onPeek) ? onPeek(false) : setShowDetail(v=>!v)}>
         <div style={{display:"flex",alignItems:"center",gap:8}}>
-          {allDone ? (
-            <span style={{fontSize:18,animation:"expensePulse 2s infinite"}}>✅</span>
-          ) : (
-            <span style={{width:7,height:7,borderRadius:"50%",background:"#3518A5",boxShadow:"0 0 6px rgba(53,24,165,.5)"}} />
-          )}
+          <span style={{width:7,height:7,borderRadius:"50%",background:"#3518A5",boxShadow:"0 0 6px rgba(53,24,165,.5)"}} />
           <div>
             <div style={{fontSize:13,fontWeight:800,letterSpacing:".06em",textTransform:"uppercase",
-              color:allDone?"#16A34A":"#3518A5",lineHeight:1}}>
+              color:allDone?"#3A3494":"#3518A5",lineHeight:1}}>
               {allDone ? "Vše zaplaceno" : `Výdaje ${currentMonth}`}
             </div>
-            <div style={{fontSize:9.5,color:allDone?"#15803D":"var(--mut)",fontWeight:600,marginTop:2,letterSpacing:".02em"}}>
+            <div style={{fontSize:9.5,color:allDone?"var(--mut)":"var(--mut)",fontWeight:600,marginTop:2,letterSpacing:".02em"}}>
               {allDone
                 ? `${currentMonth} ${now.getFullYear()} — kompletně uhrazeno`
                 : `${paidCount}/${all.length} zaplaceno`}
@@ -8190,12 +8269,12 @@ function FirmaBar({ financeItems, invoices, dpfoMonths, loanTransactions, escrow
           </div>
         </div>
         <div style={{textAlign:"right"}}>
-          <span className="maux-num" style={{fontSize:22,fontWeight:700,color:allDone?"#16A34A":"#3518A5",
+          <span className="maux-num" style={{fontSize:22,fontWeight:700,color:allDone?"#3A3494":"#3518A5",
             letterSpacing:"-.02em",lineHeight:1}}>{fmtKc(totalVyd)}</span>
           {allDone && (
             <div style={{fontSize:8,fontWeight:700,letterSpacing:".15em",textTransform:"uppercase",
-              color:"#16A34A",background:"rgba(22,163,74,.1)",borderRadius:4,padding:"2px 8px",marginTop:4,
-              display:"inline-block",animation:"expenseGlow 2s infinite"}}>
+              color:"#3A3494",background:"rgba(74,68,184,.1)",borderRadius:4,padding:"2px 8px",marginTop:4,
+              display:"inline-block"}}>
               HOTOVO
             </div>
           )}
@@ -8203,11 +8282,11 @@ function FirmaBar({ financeItems, invoices, dpfoMonths, loanTransactions, escrow
       </div>
 
       {/* Progress bar */}
-      <div style={{height:4,borderRadius:4,background:allDone?"rgba(22,163,74,.15)":"rgba(53,24,165,.08)",overflow:"hidden",marginTop:10}}>
+      <div style={{height:4,borderRadius:4,background:allDone?"rgba(74,68,184,.15)":"rgba(53,24,165,.08)",overflow:"hidden",marginTop:10}}>
         <div style={{height:"100%",width:`${pct}%`,borderRadius:4,
-          background:allDone?"linear-gradient(90deg,#16A34A,#22C55E)":"linear-gradient(90deg,#3518A5,#6366F1)",
+          background:allDone?"linear-gradient(90deg,#3A3494,#6366F1)":"linear-gradient(90deg,#3518A5,#6366F1)",
           transition:"width .7s ease",
-          boxShadow:allDone?"0 0 8px rgba(22,163,74,.4)":"none"}} />
+          boxShadow:allDone?"0 0 8px rgba(74,68,184,.4)":"none"}} />
       </div>
 
       {/* Detail — two columns: NUTNÉ | LUSUS */}
@@ -8239,30 +8318,30 @@ function FirmaBar({ financeItems, invoices, dpfoMonths, loanTransactions, escrow
 
       {/* Collapsed "allDone" — click to expand */}
       {allDone && !showDetail && (
-        <div style={{fontSize:10,color:"#15803D",textAlign:"center",marginTop:6,cursor:"pointer",opacity:.7}}
+        <div style={{fontSize:10,color:"var(--mut)",textAlign:"center",marginTop:6,cursor:"pointer",opacity:.7}}
           onClick={()=>setShowDetail(true)}>
           klikni pro detail
         </div>
       )}
       {allDone && showDetail && (
         <div style={{marginTop:14,display:"grid",gridTemplateColumns:"1fr 1fr",gap:20,position:"relative",zIndex:2,
-          opacity:.55,filter:"grayscale(.3)"}}>
+          opacity:.6}}>
           <div>
             <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:8,
-              borderBottom:"1px solid rgba(22,163,74,.1)",paddingBottom:4}}>
-              <span style={{fontSize:8,letterSpacing:".25em",textTransform:"uppercase",color:"#16A34A",fontWeight:800}}>Nutné</span>
+              borderBottom:"1px solid rgba(74,68,184,.1)",paddingBottom:4}}>
+              <span style={{fontSize:8,letterSpacing:".25em",textTransform:"uppercase",color:"#3A3494",fontWeight:800}}>Nutné</span>
               <span style={{fontSize:9,color:"var(--mut)",fontWeight:600}}>{fmtKc(totalNutne)}</span>
             </div>
-            {nutne.map((i,idx) => <Row key={idx} item={i} color="#16A34A" />)}
-            <Row item={josefPseudo} color="#16A34A" isJosef />
+            {nutne.map((i,idx) => <Row key={idx} item={i} color="#3A3494" />)}
+            <Row item={josefPseudo} color="#3A3494" isJosef />
           </div>
           <div>
             <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:8,
-              borderBottom:"1px solid rgba(22,163,74,.1)",paddingBottom:4}}>
-              <span style={{fontSize:8,letterSpacing:".25em",textTransform:"uppercase",color:"#16A34A",fontWeight:800}}>Luxus</span>
+              borderBottom:"1px solid rgba(74,68,184,.1)",paddingBottom:4}}>
+              <span style={{fontSize:8,letterSpacing:".25em",textTransform:"uppercase",color:"#3A3494",fontWeight:800}}>Luxus</span>
               <span style={{fontSize:9,color:"var(--mut)",fontWeight:600}}>{fmtKc(totalLuxus)}</span>
             </div>
-            {luxus.map((i,idx) => <Row key={idx} item={i} color="#16A34A" />)}
+            {luxus.map((i,idx) => <Row key={idx} item={i} color="#3A3494" />)}
           </div>
         </div>
       )}
@@ -8275,10 +8354,6 @@ function FirmaBar({ financeItems, invoices, dpfoMonths, loanTransactions, escrow
       {/* Provoz kanceláře — vstup do modulu + hlídač nezatříděných dokladů */}
       <ProvozTile financeItems={financeItems} onNav={onNav} />
 
-      <style>{`
-        @keyframes expensePulse { 0%,100%{transform:scale(1)} 50%{transform:scale(1.15)} }
-        @keyframes expenseGlow { 0%,100%{box-shadow:0 0 4px rgba(22,163,74,.2)} 50%{box-shadow:0 0 12px rgba(22,163,74,.4)} }
-      `}</style>
     </div>
   );
 }
@@ -11301,6 +11376,10 @@ function Dashboard({ auditLog, denikCtx, onOpenDenik, onOpenDenikVec, invoices, 
   const [dochazkaOdeslana, setDochazkaOdeslana] = useState(() => !!localStorage.getItem(dochazkaKey));
   const [editLayout, setEditLayout] = useState(false);
   const [panelState, setPanelState] = useState(loadPanelState);
+  // Výdaje po zaplacení (18. 9. 2026): vše odškrtnuté → karta se složí do řádku a majetek se
+  // roztáhne. Klik na řádek = rozbalit jen na teď (peek); nový měsíc = čistý checklist → rozloženo.
+  const [vydajePeek, setVydajePeek] = useState(false);
+  const vydajeCollapsed = vydajeStav(financeItems, expenseChecks).allDone && !vydajePeek;
   const [dragOver, setDragOver] = useState(null);
   const [hoverBar, setHoverBar] = useState(null);
   // Rozbaleni pasu "Na ceste" na jmena klientu. Hook musi byt na urovni panelu,
@@ -11853,20 +11932,21 @@ function Dashboard({ auditLog, denikCtx, onOpenDenik, onOpenDenikVec, invoices, 
           Tom 3.8.2026: "dej majetek na stejný level jako výdaje, ušetříme level scrollování."
           Samostatný panel "trigrafy" tím zanikl (proto PANEL_LAYOUT_VERSION 11 → 12). */}
       <Panel id="firma">
-      <div style={{display:"flex",gap:16,alignItems:"stretch"}}>
-        <div style={{flex:3,minWidth:0,display:"flex",flexDirection:"column"}}>
+      <div style={{display:"flex",gap:16,alignItems:"stretch",flexDirection:vydajeCollapsed?"column":"row",transition:"gap .2s"}}>
+        <div style={{flex:vydajeCollapsed?"none":3,minWidth:0,display:"flex",flexDirection:"column"}}>
           <FirmaBar financeItems={financeItems} invoices={invoices} dpfoMonths={dpfoMonths}
             loanTransactions={loanTransactions} escrows={escrows} onSaveFinance={onSaveFinance}
             onDeleteFinance={onDeleteFinance} expenseChecks={expenseChecks} onToggleExpenseCheck={onToggleExpenseCheck}
-            josefWage={josefWage} josefYm={_josefYm} onNav={onNav} />
+            josefWage={josefWage} josefYm={_josefYm} onNav={onNav}
+            collapsed={vydajeCollapsed} onPeek={(v = true) => setVydajePeek(!!v)} onOpenDenik={onOpenDenik} />
         </div>
-        <div style={{flex:2,minWidth:0,display:"flex",flexDirection:"column"}}>
+        <div style={{flex:vydajeCollapsed?"none":2,minWidth:0,display:"flex",flexDirection:"column"}}>
           <TriGrafyPanel financeItems={financeItems} onSaveFinance={onSaveFinance}
             invoices={invoices} dpfoMonths={dpfoMonths}
             loanTransactions={loanTransactions} escrows={escrows} josefAvg={josefAvg3m}
             xtbSnapshots={xtbSnapshots} xtbPositions={xtbPositions} xtbClosedTrades={xtbClosedTrades}
             xtbCashOps={xtbCashOps} xtbTranches={xtbTranches} xtbMarket={xtbMarket}
-            loanTrackers={loanTrackers} wealthSnapshots={wealthSnapshots} />
+            loanTrackers={loanTrackers} wealthSnapshots={wealthSnapshots} wide={vydajeCollapsed} />
         </div>
       </div>
       </Panel>
