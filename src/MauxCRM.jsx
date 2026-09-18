@@ -1242,10 +1242,16 @@ function dpfoSavingRowFor(dpfoMonths, year, month) {
 async function syncDpfoSavingPaid(dpfoMonths, year, month, paid, fallbackAmount) {
   const row = dpfoSavingRowFor(dpfoMonths, year, month);
   if (row) {
-    if (!!row.is_paid === paid) return dpfoMonths;
+    // Klik „uhrazeno" = Tom poslal to, co stálo ve Výdajích. Řádek z lednové kalibrace
+    // může nést starou částku (18. 9. 2026: září 8 050 v obálce, 6 500 poslal) — při
+    // zaškrtnutí se obálka srovná na částku z Výdajů a rozdíl se ohlásí toastem.
+    const nova = paid && fallbackAmount > 0 ? Math.round(fallbackAmount) : (row.amount || 0);
+    const lisiSe = paid && nova !== Math.round(row.amount || 0);
+    if (!!row.is_paid === paid && !lisiSe) return dpfoMonths;
     const { error } = await supabase.from("dpfo_months")
-      .upsert({ ...row, is_paid: paid, paid_at: paid ? new Date().toISOString() : null });
+      .upsert({ ...row, amount: nova, is_paid: paid, paid_at: paid ? new Date().toISOString() : null });
     if (error) throw error;
+    if (lisiSe) mauxToast(`DPFO: obálka za ${month}/${year} srovnána na ${fmtKc(nova)} (v kalibraci bylo ${fmtKc(row.amount || 0)})`);
     return fetchDpfoMonths(year);
   }
   if (!paid || !(fallbackAmount > 0)) return dpfoMonths;   // není co založit ani co odškrtnout
