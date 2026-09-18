@@ -647,6 +647,21 @@ function uhradyLogAppend(financeItems, itemId, y, m, paid) {
   const prev = (financeItems || []).find(i => i.id === UHRADY_LOG_ID) || {};
   return { ...prev, id: UHRADY_LOG_ID, category: "config", label: "Log úhrad nákladů", amount: 0, notes: JSON.stringify(log) };
 }
+/* ── LOG AUTOMATICKÝCH PŘEPISŮ VÝDAJŮ Z DANÍ (18. 9. 2026). Config položka, trigger ji
+   vynechává; Deník podle ní pozná, že „přepsán" u Sociálky / VZP / DPFO nebyl Tomův klik,
+   ale sync z listu Daně — a ukáže štítek SYNC DANĚ. Drží posledních 200 zápisů. */
+const SYNC_DANE_LOG_ID = "fi_sync_dane_log";
+function syncDaneLogRead(financeItems) {
+  const it = (financeItems || []).find(i => i.id === SYNC_DANE_LOG_ID);
+  try { const p = JSON.parse(it?.notes || "[]"); return Array.isArray(p) ? p : []; } catch (e) { return []; }
+}
+function syncDaneLogAppend(financeItems, zapisy) {
+  const log = [...syncDaneLogRead(financeItems), ...zapisy].slice(-200);
+  const prev = (financeItems || []).find(i => i.id === SYNC_DANE_LOG_ID) || {};
+  return { ...prev, id: SYNC_DANE_LOG_ID, category: "config", label: "Log přepisů z Daní", amount: 0, notes: JSON.stringify(log) };
+}
+// Byl tenhle audit řádek dílem syncu? Stejná položka, zápis do dvou minut od události.
+const syncDaneMatch = (financeItems, itemId, at) => syncDaneLogRead(financeItems).some(z => z.id === itemId && Math.abs(new Date(z.at) - new Date(at)) < 120e3);
 const fmtUhradyAt = (iso) => { const d = new Date(iso); return `${d.getDate()}. ${d.getMonth()+1}. ${d.getFullYear()} ${String(d.getHours()).padStart(2,"0")}:${String(d.getMinutes()).padStart(2,"0")}`; };
 
 /* ── DENÍK UDÁLOSTÍ (Tom 16. 9. 2026: "chci, aby appka ukládala historii změn — den a čas,
@@ -777,7 +792,9 @@ function denikPreloz(r, ctx) {
       if (has("amount")) {
         const oo = _dKc(ch.amount.o), nn = _dKc(ch.amount.n);
         const jm = row.id === "fi_sp_99" ? "Zůstatek spořáku" : lbl;
-        return ev("penize", [{ b: jm }, " · ", { b: "přepsán" }, ` · ${fmtKc(oo)} → ${fmtKc(nn)}`], nn == null || oo == null ? null : nn - oo, link);
+        const delta = nn == null || oo == null ? null : nn - oo;
+        if (syncDaneMatch(financeItems, row.id, r.at)) return { ...ev("penize", [{ b: jm }, " · ", { b: "přepočítán" }, ` · ${fmtKc(oo)} → ${fmtKc(nn)}`], delta, link), who: "SYNC DANĚ" };
+        return ev("penize", [{ b: jm }, " · ", { b: "přepsán" }, ` · ${fmtKc(oo)} → ${fmtKc(nn)}`], delta, link);
       }
       return ev("penize", ["Položka ", { b: lbl }, " · ", { b: "upravena" }, ` · ${_dPole(ch)}`], null, link);
     }
@@ -15808,12 +15825,28 @@ function computeTaxYear({ year, invoices, escrows, dpfoMonths, ledger, settings,
   const fuFuture = (S.fu_zalohy || []).filter(z => z.date > todayS).sort((a, b) => a.date < b.date ? -1 : 1);
   const nearest = fuFuture[0] || null;
   const monthsTo = (ds) => { const d = new Date(ds); return Math.max(0.5, (d.getFullYear() - now.getFullYear()) * 12 + d.getMonth() - now.getMonth() - (d.getDate() < 15 ? 0.5 : 0)); };
-  const leftPay = { soc: 12 - curM, vzp: 12 - curM, dan: (12 - curM) + 4 };
+  // Běžící měsíc se počítá jen jednou (18. 9. 2026). Jakmile Tom odklikne „uhrazeno"
+  // na Přehledu, záloha za tento měsíc leží v ledgeru (soc/vzp) nebo v dpfo_months (dan)
+  // a je v `paid` — pak už tento měsíc NENÍ „k zaplacení". Dřív se září počítalo jako
+  // zaplacené i jako zbývající, měsíční částka klesla o čtvrtinu (Sociálka 19 700 → 14 800,
+  // VZP 8 000 → 6 000) a sync ji rovnou propsal do Výdajů. Tom: „to číslo se přece
+  // nesmí samo měnit". Přepočet se smí projevit až 1. dne dalšího měsíce.
+  const curYm = `${year}-${String(curM + 1).padStart(2, "0")}`;
+  const paidThisMonth = (acct) => L.some(e => e.account === acct && Number(e.tax_year) === year && e.kind === "zaloha" && (e.date || "").startsWith(curYm));
+  const dpfoThisMonth = (dpfoMonths || []).some(m => m.year === year && m.month === curM + 1 && m.is_paid && (m.amount || 0) > 0);
+  const leftPay = {
+    soc: 12 - curM - (paidThisMonth("soc") ? 1 : 0),
+    vzp: 12 - curM - (paidThisMonth("vzp") ? 1 : 0),
+    dan: (12 - curM) + 4 - (dpfoThisMonth ? 1 : 0),
+  };
   const cushion = S.target_cushion || 0;
+  // Když už žádná platba nezbývá (prosinec po odkliknutí), zbytek se neděli nulou —
+  // ukáže se celý jako jedna částka.
+  const perOf = (need, left) => left > 0 ? need / left : need;
   const per = {};
-  per.soc = taxCeil100(Math.max(S.min_soc, (must.soc + cushion - paid.soc) / leftPay.soc));
-  per.vzp = taxCeil100(Math.max(S.min_vzp, (must.vzp + cushion - paid.vzp) / leftPay.vzp));
-  const danNeed = (must.dan + cushion - paid.dan) / leftPay.dan;
+  per.soc = taxCeil100(Math.max(S.min_soc, perOf(must.soc + cushion - paid.soc, leftPay.soc)));
+  per.vzp = taxCeil100(Math.max(S.min_vzp, perOf(must.vzp + cushion - paid.vzp, leftPay.vzp)));
+  const danNeed = perOf(must.dan + cushion - paid.dan, leftPay.dan);
   const danGuard = nearest ? (nearest.amount - sporak) / monthsTo(nearest.date) : 0;
   per.dan = taxCeil100(Math.max(danNeed, danGuard));
   const end = {}; TAX_ACCTS.forEach(a => { end[a] = paid[a] + leftPay[a] * per[a] - must[a]; });
@@ -19606,7 +19639,8 @@ export default function MauxCRM() {
      z listu Daně automaticky — jednou za měsíc, když se načtou faktury. Bez ledgeru
      (migrace neproběhla) se nic nepřepisuje. Po zápisu se financeItems načtou znovu;
      efekt na ně nezávisí, takže se neroztočí. Odškrtnutá platba částku nemění —
-     ta už odešla, přepočet se týká dalších měsíců (a ty přijdou s 1. dnem). */
+     ta už odešla; efekt ji přeskakuje (kontrola expense_checklist) a computeTaxYear
+     ji nepočítá jako zbývající (leftPay). Přepočet přijde s 1. dnem. */
   const taxSyncDone = useRef("");
   useEffect(() => {
     if (!(invoices || []).length || !(financeItems || []).length) return;
@@ -19619,13 +19653,27 @@ export default function MauxCRM() {
         if (!l.length) return;                     // bez kalibrace z portálů nepřepisuj ruční čísla
         const T = computeTaxYear({ year: y, invoices, escrows, dpfoMonths, ledger: l, settings: s || taxDefaultSettings(y) });
         let changed = false;
+        const zapisy = [];   // co sync přepsal → log pro Deník + toast (žádná tichá změna peněz)
+        // Odškrtnutá položka = peníze už odešly v téhle výši. Její částka se v běžícím
+        // měsíci NIKDY nepřepisuje (18. 9. 2026: po kliknutí na „uhrazeno" spadla Sociálka
+        // z 19 700 na 14 800). Nová částka se propíše až 1. dne, kdy je checklist čistý.
+        const chk = await fetchExpenseChecks(y, new Date().getMonth() + 1);
+        const jeOdskrtnuta = (id) => chk.some(c => c.item_id === id && c.paid);
         for (const it of financeItems.filter(i => ["nutne", "luxus"].includes(i.category))) {
           const acct = taxAcctForExpenseItem(it) || (isDpfoExpenseItem(it) ? "dan" : null);
           if (!acct) continue;
+          if (jeOdskrtnuta(it.id)) continue;
           const v = T.per[acct], signed = (it.amount || 0) < 0 ? -v : v;
-          if (Math.round(it.amount || 0) !== Math.round(signed)) { await upsertFinanceItem({ ...it, amount: signed }); changed = true; }
+          if (Math.round(it.amount || 0) !== Math.round(signed)) {
+            zapisy.push({ at: new Date().toISOString(), id: it.id, label: it.label, o: it.amount || 0, n: signed });
+            await upsertFinanceItem({ ...it, amount: signed }); changed = true;
+          }
         }
-        if (changed) setFinanceItems(await fetchFinanceItems());
+        if (changed) {
+          try { await upsertFinanceItem(syncDaneLogAppend(financeItems, zapisy)); } catch (e) { console.warn("sync log:", e.message); }
+          setFinanceItems(await fetchFinanceItems());
+          mauxToast("Daně upravily " + zapisy.map(z => `${z.label}: ${fmtKc(Math.abs(z.o))} → ${fmtKc(Math.abs(z.n))}`).join(" · "));
+        }
       } catch (e) { console.warn("tax sync:", e.message); }
     })();
   }, [invoices, dpfoMonths, escrows]);
