@@ -1328,7 +1328,28 @@ function upominkyAppend(financeItems, invoiceId, stupen) {
   const prev = (financeItems || []).find(i => i.id === UPOMINKY_LOG_ID) || {};
   return { ...prev, id: UPOMINKY_LOG_ID, category: "config", label: "Log upomínek", amount: 0, notes: JSON.stringify(log) };
 }
-// PDF z náhledu: každý .inv-page = jedna strana A4. CSS zoom (fit-to-page) html2canvas neumí,
+// VEKTOROVÉ PDF (Tom 18. 9. 2026: „vektorové pdf") — /api/pdf na Vercelu spustí headless
+// Chromium a vyrenderuje tentýž dokument (stejné <style>, fonty i print pravidla), jako když
+// Tom tiskne. Výsledek = text, QR i fonty vektorově. Posílá se HTML náhledu + Supabase token
+// (funkce ho ověří, jinak 401). Když funkce selže, spadne to na obrázkové PDF níže.
+async function renderInvoicePdfVector(root, filename) {
+  const { data } = await supabase.auth.getSession();
+  const token = data && data.session && data.session.access_token;
+  if (!token) throw new Error("bez přihlášení do appky");
+  const links = Array.from(document.querySelectorAll('link[rel="stylesheet"], link[rel="preconnect"]')).map(l => l.outerHTML).join("");
+  const styles = Array.from(document.querySelectorAll("style")).map(s => s.outerHTML).join("");
+  const html = `<!DOCTYPE html><html lang="cs"><head><meta charset="utf-8">${links}${styles}<style>@page{size:A4;margin:0}html,body{margin:0;padding:0;background:#fff}.no-print{display:none!important}</style></head><body><div class="print-root">${root.innerHTML}</div></body></html>`;
+  const res = await fetch("/api/pdf", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: "Bearer " + token, "x-apikey": supabase.supabaseKey || "" },
+    body: JSON.stringify({ html, filename }),
+  });
+  if (!res.ok) { let m = "HTTP " + res.status; try { m = (await res.json()).error || m; } catch (e) { /* bez těla */ } throw new Error(m); }
+  const blob = await res.blob();
+  if (!blob || blob.size < 1000) throw new Error("prázdné PDF");
+  return blob;
+}
+// Náhradní PDF z náhledu: každý .inv-page = jedna strana A4. CSS zoom (fit-to-page) html2canvas neumí,
 // proto se na dobu renderu přepne na transform:scale — stejný výsledek, jiná mechanika.
 async function renderInvoicePdfBlob(root) {
   if (!window.html2canvas || !window.jspdf) throw new Error("knihovny pro PDF se nenačetly — obnov stránku");
@@ -3688,8 +3709,9 @@ function InvoicePrintPreview({ invoice, client, workEntries, onBack, onIssue, on
     try {
       setM365Stav("Přihlašuji k Microsoft 365…");
       await m365Token();
-      setM365Stav("Připravuji PDF…");
-      const blob = await renderInvoicePdfBlob(printRootRef.current);
+      let blob;
+      try { setM365Stav("Připravuji PDF…"); blob = await renderInvoicePdfVector(printRootRef.current, filename); }
+      catch (e) { console.warn("vektorové PDF:", e.message); setM365Stav("Připravuji PDF (náhradně, obrázkové)…"); blob = await renderInvoicePdfBlob(printRootRef.current); }
       setM365Stav(`Ukládám do ${m365DuzpFolderName(ym)}…`);
       await m365UlozFakturuPdf(blob, filename, ym);
       let veta = `Faktura ${invoice.invoice_number} uložena do ${m365DuzpFolderName(ym)}`;
