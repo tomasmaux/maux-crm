@@ -5,6 +5,11 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>MAUX CRM</title>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='20' fill='%231c0a63'/%3E%3Ctext y='.85em' x='50%25' text-anchor='middle' font-size='64' fill='%23b8923d'%3EM%3C/text%3E%3C/svg%3E" />
+  <!-- Microsoft 365 (18. 9. 2026): PDF v prohlížeči + přihlášení k Graphu. Načítá se před appkou,
+       appka je čte z window.html2canvas / window.jspdf / window.msal. Verze pinované. -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/3.0.1/jspdf.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@azure/msal-browser@3.30.0/lib/msal-browser.min.js"></script>
   <script type="module" src="/src/main.jsx"></script>
 </head>
 <body style="margin:0;padding:0;background-color:#FAFAFC">

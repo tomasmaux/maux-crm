@@ -1182,6 +1182,179 @@ function DenikModule({ auditLog, ctx, query, setQuery, onOpen, onRefresh, loadin
    stejně jako u úhrad nákladů). Čas jde na kartě klienta opravit (fakturyLogFix) — i doplnit
    u faktur uhrazených před zavedením logu. Fakturace sama nic nového neukazuje (Tom 16. 9.:
    „tam bude jen jedna věc nová — když kliknu na uhrazeno, zaloguje se"). */
+/* ── MICROSOFT 365 (18. 9. 2026, Tom: „ať se faktura uloží sama do FAKTURY VYDANÉ a připraví
+   mi e-mail v konceptech — posílat se bude z fakturace"). Appka je v Entra registrovaná jako
+   „MAUX CRM" (SPA, jen tenant MAUX Legal); delegovaná oprávnění Files.ReadWrite.All +
+   Mail.ReadWrite.Shared + User.Read, souhlas správce udělen. Odesílat poštu appka NEUMÍ
+   a nesmí — koncept zakládá ve sdílené schránce fakturace@, odesílá Tom z Outlooku.
+   Knihovny (MSAL, html2canvas, jsPDF) načítá nasazeni/index.html do window.
+   PDF vzniká v prohlížeči z náhledu (.inv-page → canvas → A4), tedy obrázkové PDF —
+   tiskový dialog zůstává jako záloha, když M365 selže. */
+const M365_CLIENT_ID = "1277a3c1-62ec-4ee4-9b8a-d88a0b36eb62";
+const M365_TENANT_ID = "5c7d6e1a-758c-474e-8630-7103dab9a9d5";
+const M365_SCOPES = ["User.Read", "Files.ReadWrite.All", "Mail.ReadWrite.Shared"];
+const M365_DRIVE_ID = "b!LxoYVwDSnUGyNvGz3j1-vxtJhjBqGitNmLQJM0ybVgUY6g9ti6qfRql6YWX4-O4m";   // Sdílené dokumenty (MAUXLegal)
+const M365_FAKTURY_FOLDER_ID = "01VJDXHO6W4FNUQTC375HLDSD6ZC2UX52Q";                            // 004_KANCELÁŘ / 001_FAKTURY VYDANÉ
+const M365_FAKTURACE_MAILBOX = "fakturace@maux.cz";
+let _msalApp = null;
+function m365App() {
+  if (_msalApp) return _msalApp;
+  if (!window.msal) throw new Error("Knihovna pro přihlášení k Microsoft 365 se nenačetla — zkus obnovit stránku.");
+  _msalApp = new window.msal.PublicClientApplication({
+    auth: { clientId: M365_CLIENT_ID, authority: "https://login.microsoftonline.com/" + M365_TENANT_ID, redirectUri: window.location.origin, navigateToLoginRequestUrl: false },
+    cache: { cacheLocation: "localStorage" },
+  });
+  return _msalApp;
+}
+// Token: tiše z cache; když chybí, popup s přihlášením. Volat z klikací akce (popup blockery).
+async function m365Token() {
+  const app = m365App();
+  if (app.initialize) await app.initialize();
+  const acc = app.getActiveAccount() || app.getAllAccounts()[0] || null;
+  if (acc) {
+    try { const r = await app.acquireTokenSilent({ scopes: M365_SCOPES, account: acc }); return r.accessToken; } catch (e) { /* padá na popup */ }
+  }
+  const r = await app.loginPopup({ scopes: M365_SCOPES, loginHint: acc ? acc.username : undefined });
+  app.setActiveAccount(r.account);
+  return r.accessToken;
+}
+async function graph(path, { method = "GET", body = null, raw = false, headers = {} } = {}) {
+  const token = await m365Token();
+  const res = await fetch("https://graph.microsoft.com/v1.0" + path, {
+    method,
+    headers: { Authorization: "Bearer " + token, ...(body && !raw ? { "Content-Type": "application/json" } : {}), ...headers },
+    body: body == null ? undefined : (raw ? body : JSON.stringify(body)),
+  });
+  if (!res.ok) {
+    let msg = "HTTP " + res.status;
+    try { const j = await res.json(); msg = (j.error && j.error.message) || msg; } catch (e) { /* bez těla */ }
+    const err = new Error("Microsoft 365: " + msg); err.status = res.status; throw err;
+  }
+  if (res.status === 204) return null;
+  return res.json();
+}
+const m365DuzpFolderName = (ym) => { const [y, m] = String(ym).split("-"); return `DUZP_${m}_${y}`; };
+// Složka DUZP_MM_RRRR v 001_FAKTURY VYDANÉ — když chybí, založí se (1. dne nového měsíce).
+async function m365DuzpFolder(ym, create = true) {
+  const name = m365DuzpFolderName(ym);
+  try { return await graph(`/drives/${M365_DRIVE_ID}/items/${M365_FAKTURY_FOLDER_ID}:/${encodeURIComponent(name)}`); }
+  catch (e) {
+    if (e.status !== 404 || !create) throw e;
+    return graph(`/drives/${M365_DRIVE_ID}/items/${M365_FAKTURY_FOLDER_ID}/children`, { method: "POST", body: { name, folder: {}, "@microsoft.graph.conflictBehavior": "fail" } });
+  }
+}
+async function m365UlozFakturuPdf(blob, filename, ym) {
+  const folder = await m365DuzpFolder(ym, true);
+  return graph(`/drives/${M365_DRIVE_ID}/items/${folder.id}:/${encodeURIComponent(filename)}:/content?@microsoft.graph.conflictBehavior=replace`,
+    { method: "PUT", body: blob, raw: true, headers: { "Content-Type": "application/pdf" } });
+}
+// PDF už vystavené faktury (pro upomínku) — hledá se podle čísla v DUZP složce jejího období.
+async function m365NajdiFakturuPdf(inv) {
+  const ym = vatPeriodKey(inv);
+  const folder = await m365DuzpFolder(ym, false);
+  const num = (inv.invoice_number || "").replace(/\//g, "-");
+  const kids = await graph(`/drives/${M365_DRIVE_ID}/items/${folder.id}/children?$select=id,name,@microsoft.graph.downloadUrl&$top=200`);
+  const hit = (kids.value || []).find(k => (k.name || "").startsWith(`Faktura č. ${num}`) && /\.pdf$/i.test(k.name));
+  if (!hit) throw new Error(`PDF faktury ${inv.invoice_number} v ${m365DuzpFolderName(ym)} není`);
+  const url = hit["@microsoft.graph.downloadUrl"];
+  const res = await fetch(url);
+  if (!res.ok) throw new Error("stažení PDF selhalo");
+  return { blob: await res.blob(), name: hit.name };
+}
+const _blobToBase64 = (blob) => new Promise((ok, ko) => { const r = new FileReader(); r.onload = () => ok(String(r.result).split(",")[1]); r.onerror = ko; r.readAsDataURL(blob); });
+// Koncept ve sdílené schránce fakturace@ — vznikne v Konceptech, Tom ho odešle z Outlooku.
+async function m365Koncept({ to, subject, html, blob = null, filename = "" }) {
+  const body = {
+    subject,
+    body: { contentType: "HTML", content: html },
+    toRecipients: (to || []).map(a => ({ emailAddress: { address: a } })),
+  };
+  if (blob) body.attachments = [{ "@odata.type": "#microsoft.graph.fileAttachment", name: filename, contentType: "application/pdf", contentBytes: await _blobToBase64(blob) }];
+  return graph(`/users/${M365_FAKTURACE_MAILBOX}/messages`, { method: "POST", body });
+}
+// Brand šablona e-mailu — přepis Tomovy šablony ze schránky fakturace@ (v1.1 → 3.0).
+function m365BrandMail(odstavce, osloveni = "Vážený kliente,") {
+  const esc = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  const p = (t, last) => `<p style="line-height:1.75;margin:0 0 ${last ? 30 : 18}px;font-size:15px;color:#2a2a2a">${esc(t)}</p>`;
+  return `<table style="background:#faf9f6;width:100%" cellpadding="0" cellspacing="0"><tr><td style="padding:24px">
+<table style="border:1px solid #ece9f7;background:#fff;width:600px;max-width:600px" cellpadding="0" cellspacing="0">
+<tr><td style="background:#1c0a63;height:5px;line-height:5px;font-size:1px">&nbsp;</td></tr>
+<tr><td style="text-align:center;padding:36px 40px 26px"><p style="margin:0;letter-spacing:1px;font-family:Georgia,'Times New Roman',serif;font-size:22px;font-weight:700;color:#1c0a63">MAUX LEGAL</p><p style="margin:5px 0 0;letter-spacing:2px;font-family:-apple-system,Arial,sans-serif;font-size:10px;color:#8a86a0">Advokátní kancelář · Poděbrady</p></td></tr>
+<tr><td style="padding:0 40px"><div style="background:#ece9f7;height:1px;line-height:1px;font-size:1px">&nbsp;</div></td></tr>
+<tr><td style="text-align:center;padding:26px 40px 0"><div style="display:inline-block;background:#1c0a63;padding:6px 16px;border-radius:20px;font-family:-apple-system,Arial,sans-serif;font-size:10px;color:#fff">Systémová zpráva</div><p style="line-height:1.6;margin:12px 0 0;font-family:-apple-system,Arial,sans-serif;font-size:12px;color:#8a86a0">Zpráva byla vygenerována automatizovaným systémem MAUX Legal CRM 3.0. Prosíme, neodpovídejte přímo na tuto zprávu.</p></td></tr>
+<tr><td style="padding:24px 40px 8px;font-family:-apple-system,Arial,sans-serif"><p style="margin:0 0 20px;color:#1a1a1a">${esc(osloveni)}</p>${odstavce.map((t, i) => p(t, i === odstavce.length - 1)).join("")}<p style="margin:0 0 2px;font-size:15px;color:#555"><i>S úctou,</i></p><p style="margin:0;letter-spacing:.3px;font-size:18px;font-weight:700;color:#1c0a63">MAUX Legal</p></td></tr>
+<tr><td style="padding:28px 40px 0"><div style="background:#ece9f7;height:1px;line-height:1px;font-size:1px">&nbsp;</div></td></tr>
+<tr><td style="padding:22px 40px;color:#333;font-family:-apple-system,Arial,sans-serif"><p style="margin:0;font-size:14px;font-weight:700;color:#1c0a63">Mgr. Tomáš Maux, advokát</p><p style="margin:3px 0;color:#666"><i>zapsaný u České advokátní komory pod ev. č. 21517</i></p><p style="margin:3px 0;color:#666">se sídlem Riegrovo náměstí 9/8, 290 01 Poděbrady III</p><p style="margin:6px 0 0;font-size:11.5px;color:#888">IČO: ${FIRMA.ico} &nbsp;·&nbsp; DIČ: ${FIRMA.dic}</p><p style="margin:12px 0 0;font-size:12px;color:#444">M: ${FIRMA.tel} &nbsp;·&nbsp; E: ${M365_FAKTURACE_MAILBOX} &nbsp;·&nbsp; W: <a href="https://www.maux.cz" style="color:#1c0a63;text-decoration:none">maux.cz</a></p></td></tr>
+<tr><td style="border-top:1px solid #f2f0f9;padding:16px 40px 32px;font-family:-apple-system,Arial,sans-serif;font-size:10.5px;line-height:1.6;color:#a19dae">Obsah této zprávy podléhá advokátní mlčenlivosti dle § 21 zákona č. 85/1996 Sb., o advokacii. Zveřejnění, předání či jiné nakládání s touto komunikací nebo jejími přílohami je bez souhlasu odesílatele nepřípustné a může zakládat povinnost k náhradě škody. Pokud nejste adresátem, prosíme o její vymazání.</td></tr>
+</table></td></tr></table>`;
+}
+const m365PredmetFaktury = (inv) => `Faktura za právní služby č. ${(inv.invoice_number || "").replace(/\//g, "_")}`;
+function m365MailFaktura() {
+  return m365BrandMail([
+    "děkujeme Vám za důvěru, kterou naší advokátní kanceláři projevujete.",
+    "Vaší spolupráce si vážíme a je nám ctí podílet se na Vašich záležitostech.",
+    "V příloze tohoto e-mailu Vám zasíláme fakturu za poskytnuté právní služby.",
+    "Za včasnou úhradu Vám již nyní srdečně děkujeme.",
+  ]);
+}
+// Upomínka: 1. stupeň zdvořilá připomínka, 2. stupeň lhůta 7 dní + ohlášení předžalobní výzvy.
+// 3. stupeň se e-mailem NEDĚLÁ — to je listina podle § 142a o. s. ř. (skill predzalobni-vyzva).
+function m365MailUpominka(inv, stupen, prvniAt) {
+  const cislo = inv.invoice_number || "";
+    const vs = inv.var_symbol || "";
+  const dni = Math.max(0, Math.round((new Date() - new Date(inv.due_date)) / 864e5));
+  const castka = fmtKc(inv.total || 0);
+  const ucet = `${FIRMA.account} (${FIRMA.bank})${vs ? `, variabilní symbol ${vs}` : ""}`;
+  if (stupen === 1) return m365BrandMail([
+    `dovolujeme si Vás upozornit, že faktura č. ${cislo} ze dne ${fmtDate(inv.issue_date)} na částku ${castka}, splatná dne ${fmtDate(inv.due_date)}, nebyla k dnešnímu dni uhrazena.`,
+    `Prosíme o její úhradu v nejbližších dnech na účet ${ucet}. Fakturu pro Vaše pohodlí přikládáme znovu.`,
+    "Pokud jste platbu již odeslali, považujte prosím tuto zprávu za bezpředmětnou a přijměte naše poděkování.",
+  ]);
+  return m365BrandMail([
+    `navazujeme na naši upomínku${prvniAt ? ` ze dne ${fmtDate(String(prvniAt).slice(0, 10))}` : ""}. Faktura č. ${cislo} ze dne ${fmtDate(inv.issue_date)} na částku ${castka} dosud nebyla uhrazena a je ${dni} dní po splatnosti.`,
+    `Prosíme o úhradu nejpozději do 7 dnů od doručení této zprávy na účet ${ucet}. Fakturu přikládáme.`,
+    "Nedojde-li v této lhůtě k úhradě, budeme nuceni přistoupit k předžalobní výzvě a uplatnit zákonný úrok z prodlení spolu s náhradou nákladů spojených s uplatněním pohledávky. Věříme, že k tomu nebude třeba přistoupit.",
+  ]);
+}
+// Log upomínek — config položka, stejný recept jako fi_faktury_log: { "<invoice_id>": [{at, stupen}] }.
+const UPOMINKY_LOG_ID = "fi_upominky";
+function upominkyRead(financeItems) {
+  const it = (financeItems || []).find(i => i.id === UPOMINKY_LOG_ID);
+  try { const p = JSON.parse(it?.notes || "{}"); return p && typeof p === "object" ? p : {}; } catch (e) { return {}; }
+}
+function upominkyAppend(financeItems, invoiceId, stupen) {
+  const log = upominkyRead(financeItems);
+  log[invoiceId] = [...(log[invoiceId] || []), { at: new Date().toISOString(), stupen }];
+  const prev = (financeItems || []).find(i => i.id === UPOMINKY_LOG_ID) || {};
+  return { ...prev, id: UPOMINKY_LOG_ID, category: "config", label: "Log upomínek", amount: 0, notes: JSON.stringify(log) };
+}
+// PDF z náhledu: každý .inv-page = jedna strana A4. CSS zoom (fit-to-page) html2canvas neumí,
+// proto se na dobu renderu přepne na transform:scale — stejný výsledek, jiná mechanika.
+async function renderInvoicePdfBlob(root) {
+  if (!window.html2canvas || !window.jspdf) throw new Error("knihovny pro PDF se nenačetly — obnov stránku");
+  const pages = Array.from(root.querySelectorAll(".inv-page"));
+  if (!pages.length) throw new Error("náhled faktury nemá žádnou stranu");
+  const fits = Array.from(root.querySelectorAll("[data-fit]"));
+  const saved = fits.map(el => ({ el, zoom: el.style.zoom, transform: el.style.transform, origin: el.style.transformOrigin, width: el.style.width }));
+  fits.forEach(el => {
+    const z = parseFloat(el.style.zoom) || 1;
+    if (z !== 1) { el.style.zoom = "1"; el.style.transform = `scale(${z})`; el.style.transformOrigin = "top left"; el.style.width = `${100 / z}%`; }
+  });
+  try {
+    const { jsPDF } = window.jspdf;
+    const pdf = new jsPDF({ unit: "mm", format: "a4", compress: true });
+    for (let i = 0; i < pages.length; i++) {
+      const canvas = await window.html2canvas(pages[i], { scale: 2, useCORS: true, backgroundColor: "#FDFCFA", logging: false });
+      if (i > 0) pdf.addPage();
+      const h = Math.min(297, 210 * canvas.height / canvas.width);
+      pdf.addImage(canvas.toDataURL("image/jpeg", 0.9), "JPEG", 0, 0, 210, h);
+    }
+    return pdf.output("blob");
+  } finally {
+    saved.forEach(s => { s.el.style.zoom = s.zoom; s.el.style.transform = s.transform; s.el.style.transformOrigin = s.origin; s.el.style.width = s.width; });
+  }
+}
+
 const FAKTURY_LOG_ID = "fi_faktury_log";
 function fakturyLogRead(financeItems) {
   const it = (financeItems || []).find(i => i.id === FAKTURY_LOG_ID);
@@ -3408,6 +3581,7 @@ function InvoicePrintPreview({ invoice, client, workEntries, onBack, onIssue, on
   const [issueConfirmDialog, setIssueConfirmDialog] = useState(false);
   const [editConfirmDialog, setEditConfirmDialog] = useState(false);
   const [issued, setIssued] = useState(false);
+  const [m365Stav, setM365Stav] = useState("");   // krok automatiky v hlavičce náhledu
   // ⚠️ FIT-TO-PAGE strany 1 (3. 9. 2026, faktura 076/2026 Buldok): 4 paušální řádky
   // + přefakturace přetekly A4 o ~25 mm, tiskárna rozřízla patičku s QR a udělala z ní
   // druhou, jinak prázdnou stranu. Pravidlo: strana 1 se VŽDY vejde na jeden list.
@@ -3504,12 +3678,48 @@ function InvoicePrintPreview({ invoice, client, workEntries, onBack, onIssue, on
     if (callback) callback();
   };
 
+  // Microsoft 365 automatika (18. 9. 2026): PDF z náhledu → 001_FAKTURY VYDANÉ/DUZP_MM_RRRR
+  // → koncept ve fakturace@ s PDF v příloze. Token se bere HNED v kliknutí (popup blockery),
+  // teprve pak se renderuje. Když cokoli selže, spadne to na tiskový dialog jako dřív —
+  // faktura se vystaví v obou případech.
+  const vyrobAUlozPdf = async ({ koncept }) => {
+    const filename = buildPdfFilename() + ".pdf";
+    const ym = (invoice.duzp || lastDayPrevMonth(invoice.issue_date)).slice(0, 7);
+    try {
+      setM365Stav("Přihlašuji k Microsoft 365…");
+      await m365Token();
+      setM365Stav("Připravuji PDF…");
+      const blob = await renderInvoicePdfBlob(printRootRef.current);
+      setM365Stav(`Ukládám do ${m365DuzpFolderName(ym)}…`);
+      await m365UlozFakturuPdf(blob, filename, ym);
+      let veta = `Faktura ${invoice.invoice_number} uložena do ${m365DuzpFolderName(ym)}`;
+      if (koncept) {
+        const to = (client?.emails || []).filter(Boolean);
+        if (to.length) {
+          setM365Stav("Připravuji koncept ve fakturace@…");
+          await m365Koncept({ to, subject: m365PredmetFaktury(invoice), html: m365MailFaktura(), blob, filename });
+          veta += ` · koncept čeká v Konceptech fakturace@ (${to.join(", ")})`;
+        } else veta += " · klient nemá e-mail, koncept nevznikl";
+      }
+      setM365Stav("");
+      mauxToast(veta);
+      return true;
+    } catch (e) {
+      setM365Stav("");
+      mauxToast("Chyba: Microsoft 365 selhalo (" + e.message + ") — PDF stáhni tiskem.");
+      return false;
+    }
+  };
+
   const handleConfirmIssue = async () => {
     setIssueConfirmDialog(false);
-    const original = document.title;
-    document.title = buildPdfFilename();
-    window.print();
-    setTimeout(() => { document.title = original; }, 2000);
+    const ok = await vyrobAUlozPdf({ koncept: true });
+    if (!ok) {
+      const original = document.title;
+      document.title = buildPdfFilename();
+      window.print();
+      setTimeout(() => { document.title = original; }, 2000);
+    }
     await onIssue(true);
     setIssued(true);
   };
@@ -3598,7 +3808,7 @@ function InvoicePrintPreview({ invoice, client, workEntries, onBack, onIssue, on
       {/* Toolbar */}
       <div className="no-print" style={{ background: "#1A0E5C", padding: "14px 28px", display: "flex", alignItems: "center", gap: 12 }}>
         <button className="btn" style={{ background: "rgba(255,255,255,.1)", color: "#fff", border: "1px solid rgba(255,255,255,.2)", fontSize: 12 }} onClick={onBack}>← Zpět</button>
-        <div style={{ flex: 1, color: "#fff", opacity: .7, fontSize: 13 }}>Náhled faktury {invoice.invoice_number} — {client?.name}</div>
+        <div style={{ flex: 1, color: "#fff", opacity: .7, fontSize: 13 }}>Náhled faktury {invoice.invoice_number} — {client?.name}{m365Stav ? <span style={{ marginLeft: 14, opacity: .9 }}>· {m365Stav}</span> : null}</div>
         {issued ? (
           <button onClick={onDone || onBack} style={{ background: "#16A34A", color: "#fff", border: "none", borderRadius: 8, padding: "9px 20px", fontSize: 13, fontWeight: 600, cursor: "pointer", display: "flex", alignItems: "center", gap: 8, boxShadow: "0 0 16px rgba(22,163,74,.45)", letterSpacing: ".01em" }}>
             ✓ Vystaveno · zpět na faktury
@@ -3611,7 +3821,7 @@ function InvoicePrintPreview({ invoice, client, workEntries, onBack, onIssue, on
           </button>
         ) : (
           <button className="btn pri" style={{ fontSize: 13 }} onClick={() => setIssueConfirmDialog(true)} disabled={saving}>
-            Stáhnout PDF a vystavit →
+            Vystavit fakturu →
           </button>
         )}
       </div>
@@ -4054,8 +4264,8 @@ function InvoicePrintPreview({ invoice, client, workEntries, onBack, onIssue, on
               V obou případech se stáhne PDF.
             </div>
             <div style={{ display:"flex", gap:10 }}>
-              <button className="btn gho" style={{ flex:1 }} onClick={() => { setEditConfirmDialog(false); printWithFilename(() => onConfirmEdit && onConfirmEdit(false)); }}>Ne — jen PDF</button>
-              <button className="btn pri" style={{ flex:1 }} onClick={() => { setEditConfirmDialog(false); printWithFilename(() => onConfirmEdit && onConfirmEdit(true)); }}>Ano — uložit &amp; PDF</button>
+              <button className="btn gho" style={{ flex:1 }} onClick={async () => { setEditConfirmDialog(false); const ok = await vyrobAUlozPdf({ koncept: false }); if (!ok) printWithFilename(); onConfirmEdit && onConfirmEdit(false); }}>Ne — jen PDF</button>
+              <button className="btn pri" style={{ flex:1 }} onClick={async () => { setEditConfirmDialog(false); const ok = await vyrobAUlozPdf({ koncept: false }); if (!ok) printWithFilename(); onConfirmEdit && onConfirmEdit(true); }}>Ano — uložit &amp; PDF</button>
             </div>
           </div>
         </div>
@@ -4066,7 +4276,7 @@ function InvoicePrintPreview({ invoice, client, workEntries, onBack, onIssue, on
             <div style={{ fontFamily: "Fraunces, serif", fontSize: 22, fontWeight: 300, color: "var(--txt)", marginBottom: 10 }}>Opravdu vystavit fakturu?</div>
             <div style={{ fontSize: 13, color: "var(--mut)", marginBottom: 24 }}>
               {invoice.invoice_number} · {client?.name}<br />
-              Po potvrzení se stáhne PDF a faktura se uloží jako <strong>Vystavena</strong>.
+              Po potvrzení se PDF uloží do SharePointu (001_FAKTURY VYDANÉ), ve fakturace@ vznikne koncept e-mailu a faktura se uloží jako <strong>Vystavena</strong>.
             </div>
             <div style={{ display: "flex", gap: 10 }}>
               <button className="btn" style={{ flex: 1 }} onClick={() => setIssueConfirmDialog(false)}>Ještě ne</button>
@@ -13933,7 +14143,7 @@ function orphanWorkEntries(workEntries, invoices) {
   });
 }
 
-function InvoiceList({ invoices, clients, workEntries, escrows, onOpen, onOpenClient, onToggleStatus, onGenerateInvoice, onPreviewInvoice, onEditInvoice, onOpenDiscountModal, onOpenAltSubjectModal, altSubjects, onAddWorkEntry, onRevertInvoice, onIssueExistingInvoice, onDeleteDraftInvoice, onFreeOrphans, loading }) {
+function InvoiceList({ invoices, clients, workEntries, escrows, onOpen, onOpenClient, onToggleStatus, onGenerateInvoice, onPreviewInvoice, onEditInvoice, onOpenDiscountModal, onOpenAltSubjectModal, altSubjects, onAddWorkEntry, onRevertInvoice, onIssueExistingInvoice, onDeleteDraftInvoice, onFreeOrphans, loading, onUpominka = null, upominky = {} }) {
   const [search, setSearch] = useState("");
   const [filterStatus, setFilterStatus] = useState("vse");
   const [filterClient, setFilterClient] = useState("");
@@ -14050,6 +14260,19 @@ function InvoiceList({ invoices, clients, workEntries, escrows, onOpen, onOpenCl
           onClick={e => { e.stopPropagation(); if (s !== "dph_odvedeno") onToggleStatus(inv); }}>
           {label}
         </span>
+        {s === "po_splatnosti" && onUpominka && (() => {
+          // Upomínka na klik (18. 9. 2026): koncept ve fakturace@, Tom odešle z Outlooku.
+          const n = (upominky[inv.id] || []).length;
+          const kdy = n ? fmtDate(String(upominky[inv.id][n - 1].at).slice(0, 10)) : "";
+          const label = n === 0 ? "Upomínka →" : n === 1 ? "2. upomínka →" : "→ výzva";
+          const title = n === 0 ? "Připravit upomínku do konceptů fakturace@" : n === 1 ? `1. upomínka ${kdy} · připravit druhou` : `2 upomínky (poslední ${kdy}) · třetí stupeň = předžalobní výzva`;
+          return (
+            <span style={{ fontSize: 9.5, padding: "3px 8px", borderRadius: 20, background: "#FEF2F2", color: "#991B1B", cursor: "pointer", fontWeight: 600, whiteSpace: "nowrap", border: "1px solid #FECACA" }}
+              title={title} onClick={e => { e.stopPropagation(); onUpominka(inv); }}>
+              {label}
+            </span>
+          );
+        })()}
         {s === "uhrazena" && (
           <span style={{ fontSize: 9.5, padding: "3px 8px", borderRadius: 20, background: "#FEF3C7", color: "#92400E", cursor: "pointer", fontWeight: 600, whiteSpace: "nowrap", border: "1px solid #FDE68A" }}
             title="Označit DPH jako odvedené"
@@ -20122,6 +20345,28 @@ export default function MauxCRM() {
     } catch (err) { mauxToast("Chyba: " + err.message); } finally { setSaving(false); }
   };
 
+  // Upomínka na klik (18. 9. 2026): 1. a 2. stupeň jako koncept ve fakturace@ s PDF faktury ze
+  // SharePointu v příloze; 3. stupeň = předžalobní výzva (listina, ne e-mail). Nic se neodesílá.
+  const upominkaFaktury = async (inv) => {
+    const client = clients.find(c => c.id === inv.client_id) || {};
+    const dosud = upominkyRead(financeItems)[inv.id] || [];
+    const stupen = dosud.length + 1;
+    if (stupen > 2) { mauxToast("Dvě upomínky už odešly — třetí stupeň je předžalobní výzva podle § 142a o. s. ř., tu připravíme jako listinu, ne e-mailem."); return; }
+    const to = (client.emails || []).filter(Boolean);
+    if (!to.length) { mauxToast("Zadej klientovi e-mail na jeho kartě — bez něj koncept upomínky nevznikne."); return; }
+    const nazev = stupen === 1 ? "Upomínka" : "Druhá upomínka";
+    try {
+      await m365Token();
+      mauxToast(`Připravuji: ${nazev.toLowerCase()} pro ${client.name || "klienta"}…`);
+      let priloha = null;
+      try { priloha = await m365NajdiFakturuPdf(inv); } catch (e) { console.warn("upomínka · PDF:", e.message); }
+      await m365Koncept({ to, subject: `${nazev} · faktura č. ${(inv.invoice_number || "").replace(/\//g, "_")}`,
+        html: m365MailUpominka(inv, stupen, dosud[0] && dosud[0].at), blob: priloha && priloha.blob, filename: priloha && priloha.name });
+      await upsertFinanceItem(upominkyAppend(financeItems, inv.id, stupen));
+      setFinanceItems(await fetchFinanceItems());
+      mauxToast(`${nazev} k faktuře ${inv.invoice_number} čeká v Konceptech fakturace@ (${to.join(", ")})${priloha ? "" : " — bez přílohy, PDF faktury v SharePointu nenalezeno"}.`);
+    } catch (e) { mauxToast("Chyba: " + e.message); }
+  };
   const issueExistingInvoice = (inv) => {
     // Otevře standardní InvoiceIssueModal s předvyplněnými daty existující faktury.
     // Modal zachová číslo faktury (invoice_number) a id — pouze přestaví status na 'vystavena'.
@@ -20401,6 +20646,8 @@ export default function MauxCRM() {
               onDeleteDraftInvoice={doDeleteInvoice}
               onFreeOrphans={freeOrphanEntries}
               loading={dataLoading}
+              onUpominka={upominkaFaktury}
+              upominky={upominkyRead(financeItems)}
             />
           )}
           {mod === "fakturace" && mode === "detail" && selInvoice && (
