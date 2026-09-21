@@ -929,7 +929,10 @@ function denikPreloz(r, ctx) {
 }
 const denikText = (e) => (e.parts || []).map(p => typeof p === "string" ? p : p.b).join("");
 function denikUdalosti(log, ctx) {
-  return (log || []).map(r => { try { return denikPreloz(r, ctx); } catch (err) { return null; } }).filter(Boolean);
+  const zDb = (log || []).map(r => { try { return denikPreloz(r, ctx); } catch (err) { return null; } }).filter(Boolean);
+  let soupisy = []; try { soupisy = denikSoupisUdalosti(ctx); } catch (err) { soupisy = []; }
+  if (!soupisy.length) return zDb;
+  return [...zDb, ...soupisy].sort((a, b) => (b.at || "").localeCompare(a.at || ""));
 }
 // Události k jedné věci: řádek sám + navěšené řádky (tranše a AML osoby úschovy, faktury klienta).
 function denikProVec(udalosti, tbl, rowId, ctx) {
@@ -1374,6 +1377,173 @@ async function renderInvoicePdfBlob(root) {
   } finally {
     saved.forEach(s => { s.el.style.zoom = s.zoom; s.el.style.transform = s.transform; s.el.style.transformOrigin = s.origin; s.el.style.width = s.width; });
   }
+}
+
+// ── PRŮBĚŽNÝ SOUPIS PRO KLIENTA (Tom 21. 9. 2026: „aktuální seznam provedených prací
+// v tomto měsíci ke dni vyexportování — přehled mezitímní, kolik už bude na faktuře,
+// klientovi na vědomí"). Varianta A: klient dostane předem přesně to, co pak uvidí jako
+// přílohu faktury (SOUPIS PRÁVNÍCH ÚKONŮ) — stejná hlavička, stejné řádky, stejný vzorec.
+// Bere VŠECHNY dosud nevyfakturované výkazy klienta (= to, co půjde na příští fakturu).
+// Nikdy: notář (Tomův vlastní náklad skrytý v amount), bankovní spojení, QR, číslo
+// faktury — dokument se nesmí dát zaměnit s fakturou. Fonty a barvy = příloha faktury.
+function _esc(s) { return String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;"); }
+function _kcRaw(n) { return new Intl.NumberFormat("cs-CZ").format(Math.round(n || 0)) + " Kč"; }
+function prubeznySoupisData(entries) {
+  const sorted = [...(entries || [])].sort((a, b) => (a.entry_date || "").localeCompare(b.entry_date || ""));
+  const rows = sorted.map(e => {
+    const discAmt = Math.min(Number(e.discount_amount) || 0, e.amount || 0);
+    const lineTotal = (e.amount || 0) + (Number(e.sig_count) || 0) * SIGNATURE_DECL_FEE + (Number(e.admin_fee) || 0);
+    return { e, discAmt, lineTotal, lineFinal: lineTotal - discAmt };
+  });
+  const discount = rows.reduce((s, r) => s + r.discAmt, 0);
+  const workAmt = Math.max(rows.reduce((s, r) => s + (r.e.amount || 0), 0) - discount, 0);
+  const pref = rows.reduce((s, r) => s + (Number(r.e.admin_fee) || 0) + (Number(r.e.sig_count) || 0) * SIGNATURE_DECL_FEE, 0);
+  const vat = Math.round(workAmt * 0.21);
+  const hours = rows.reduce((s, r) => s + (r.e.hours || 0), 0);
+  const first = sorted[0]?.entry_date || today(), last = sorted[sorted.length - 1]?.entry_date || today();
+  return { rows, discount, workAmt, pref, vat, total: workAmt + vat + pref, hours, first, last };
+}
+function prubeznySoupisHtml(client, entries) {
+  const d = prubeznySoupisData(entries);
+  const now = new Date();
+  const nextM = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+  const dueD = new Date(now.getFullYear(), now.getMonth() + 1, 15);
+  const fy = Number(d.first.slice(0, 4)), fm = Number(d.first.slice(5, 7)) - 1;
+  const ly = Number(d.last.slice(0, 4)), lm = Number(d.last.slice(5, 7)) - 1;
+  const obdobi = (fy === ly && fm === lm) ? `${czMes(lm)} ${ly}` : `${czMes(fm)}${fy !== ly ? " " + fy : ""} – ${czMes(lm)} ${ly}`;
+  const stavK = now.toLocaleDateString("cs-CZ", { day: "numeric", month: "numeric", year: "numeric" });
+  const doDne = new Date(now.getFullYear(), now.getMonth() + 1, 0).toLocaleDateString("cs-CZ", { day: "numeric", month: "numeric", year: "numeric" });
+  const rowsHtml = d.rows.map((r, i) => {
+    const e = r.e;
+    const sazba = e.hours > 0 ? _kcRaw(e.rate) : (e.rate > 0 ? "—" : '<span class="pau">paušál</span>');
+    const sub = [];
+    if (Number(e.sig_count) > 0) sub.push(`<div class="sub">+ prohlášení o pravosti podpisu (${e.sig_count}× ${_kcRaw(SIGNATURE_DECL_FEE)}) — ${_esc(SIGNATURE_DECL_NOTE)}</div>`);
+    if (r.discAmt > 0) sub.push(`<div class="sub disc">Na tomto úkonu uplatněna sleva ${_kcRaw(r.discAmt)} oproti standardní sazbě.</div>`);
+    const kc = r.discAmt > 0 ? `<div class="strike">${_kcRaw(r.lineTotal)}</div><div class="discv">${_kcRaw(r.lineFinal)}</div>` : _kcRaw(r.lineTotal);
+    return `<tr class="${i % 2 ? "alt" : ""}"><td class="d">${fmtDate(e.entry_date)}</td><td class="p">${_esc(e.description)}${sub.join("")}</td><td class="h r">${e.hours > 0 ? e.hours + " h" : "—"}</td><td class="h r">${sazba}</td><td class="k r">${kc}</td></tr>`;
+  }).join("");
+  const title = `Průběžný soupis · ${client?.name || ""} · stav k ${stavK}`;
+  return `<!DOCTYPE html><html lang="cs"><head><meta charset="utf-8"><title>${_esc(title)}</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500&family=Inter:wght@300;400;500;600&display=swap">
+<style>
+@page{size:A4;margin:0}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{background:#EDEBF3}
+body{font-family:'Inter',Arial,sans-serif;color:#1a1530;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+.bar{position:sticky;top:0;z-index:5;background:#1C0A63;color:#fff;padding:10px 18px;display:flex;justify-content:space-between;align-items:center;gap:12px;font-size:12.5px}
+.bar button{background:#3DDC97;color:#0B2A1F;border:none;border-radius:8px;padding:8px 16px;font:600 12.5px 'Inter',sans-serif;cursor:pointer;letter-spacing:.02em}
+.bar .hint{opacity:.7;font-weight:300}
+.page{width:210mm;min-height:297mm;margin:18px auto;background:#FDFCFA;position:relative;box-shadow:0 16px 60px rgba(28,10,99,.16)}
+.hdr{background:#3518A5;position:relative;overflow:hidden}
+.hdr .in{position:relative;z-index:1;padding:11mm 18mm 9mm}
+.hdr .row{display:flex;justify-content:space-between;align-items:flex-start;gap:24px}
+.hdr .t{font-family:'Cormorant Garamond',serif;font-size:19px;font-weight:400;color:#fff;letter-spacing:.14em;line-height:1;white-space:nowrap}
+.hdr .s{font-size:7.5px;letter-spacing:.4em;color:rgba(255,255,255,.4);margin-top:8px;text-transform:uppercase;font-weight:300}
+.hdr .cl{text-align:right;min-width:0;max-width:46%}.hdr .cl .l{font-size:6.5px;letter-spacing:.4em;color:rgba(255,255,255,.32);text-transform:uppercase;margin-bottom:5px}
+.hdr .cl .n{font-family:'Cormorant Garamond',serif;font-size:17px;color:rgba(255,255,255,.9);letter-spacing:.04em;line-height:1.2;overflow-wrap:anywhere}
+.meta{margin-top:6mm;display:flex;gap:8mm;padding-top:4mm;border-top:1px solid rgba(255,255,255,.12)}
+.meta .l{font-size:6px;letter-spacing:.4em;color:rgba(255,255,255,.35);text-transform:uppercase;margin-bottom:3px}
+.meta .v{font-size:11px;color:rgba(255,255,255,.8);font-weight:300;white-space:nowrap}
+.hdr .rule{height:1px;background:linear-gradient(90deg,#3518A5 0%,rgba(255,255,255,.22) 25%,rgba(255,255,255,.42) 50%,rgba(255,255,255,.22) 75%,#3518A5 100%)}
+.tbl{padding:9mm 18mm 0}
+table{width:100%;border-collapse:collapse;table-layout:fixed}
+th{font-size:6.5px;letter-spacing:.38em;color:#B8B0D6;text-transform:uppercase;font-weight:400;padding:0 4mm 11px 0;border-bottom:.5px solid rgba(53,24,165,.12);text-align:left}
+.r{text-align:right}th.r{padding-right:0}
+td{padding:12px 4mm 12px 0;border-bottom:.5px solid rgba(53,24,165,.06);font-size:11.5px;font-weight:300;line-height:1.55;vertical-align:top;color:#2d2840}
+td.r{padding-right:0}
+tr.alt td{background:rgba(53,24,165,.012)}
+tr{break-inside:avoid;page-break-inside:avoid}
+td.d{font-size:10.5px;color:#9C96B5;white-space:nowrap}
+td.h{font-size:11px;color:#B0ABCA;white-space:nowrap}
+td.k{font-size:12px;color:#1a1530;font-weight:400;white-space:nowrap}
+.pau{color:#D4CEEA}
+.sub{font-size:9px;color:#B0ABCA;margin-top:3px;max-width:340px;line-height:1.5}
+.sub.disc{color:#A8527A;font-style:italic;font-size:9.5px}
+.strike{text-decoration:line-through;color:#B0ABCA;font-size:10px;font-weight:300}
+.discv{color:#A8527A}
+.tot{padding:6mm 18mm 0;display:flex;justify-content:flex-end;break-inside:avoid}
+.tot .box{min-width:270px;border-top:.5px solid rgba(53,24,165,.15);padding-top:5mm}
+.tot .ln{display:flex;justify-content:space-between;gap:32px;align-items:baseline;margin-bottom:7px}
+.tot .l{font-size:7px;color:#C4BDDC;letter-spacing:.42em;text-transform:uppercase}
+.tot .v{font-size:12px;color:#2d2840;font-weight:300;white-space:nowrap}
+.tot .v.b{font-weight:500}
+.tot .big{font-family:'Cormorant Garamond',serif;font-size:28px;font-weight:500;color:#3518A5;letter-spacing:.02em;line-height:1;white-space:nowrap}
+.next{margin:8mm 18mm 0;padding:5mm 6mm;background:#F4F3FF;border-left:2px solid #3518A5;font-size:10.5px;line-height:1.65;color:#2d2840;break-inside:avoid}
+.next b{font-weight:600;color:#3518A5}
+.ft{margin:10mm 18mm 0;padding:5mm 0 8mm;border-top:.5px solid rgba(53,24,165,.07);display:flex;justify-content:space-between;align-items:center;font-size:8.5px;color:#C4BDDC;font-weight:300;letter-spacing:.04em}
+.ft .m{font-family:'Cormorant Garamond',serif;font-size:11px;color:rgba(53,24,165,.35);letter-spacing:.2em}
+@media print{html,body{background:#fff}.bar{display:none!important}.page{margin:0;box-shadow:none;width:210mm}}
+</style></head><body>
+<div class="bar"><span><b>Průběžný soupis</b> · ${_esc(client?.name || "")} <span class="hint">· v dialogu zvol „Uložit jako PDF" (vektorové, bez okrajů)</span></span><button onclick="window.print()">Uložit PDF</button></div>
+<div class="page">
+  <div class="hdr"><div class="in">
+    <div class="row">
+      <div><div class="t">PRŮBĚŽNÝ SOUPIS PRÁVNÍCH ÚKONŮ</div><div class="s">Stav k ${stavK} · nejde o daňový doklad</div></div>
+      <div class="cl"><div class="l">Klient</div><div class="n">${_esc(client?.name || "—")}</div></div>
+    </div>
+    <div class="meta">
+      <div><div class="l">Období</div><div class="v">${_esc(obdobi)}</div></div>
+      <div><div class="l">Stav ke dni</div><div class="v">${stavK}</div></div>
+      <div><div class="l">Faktura bude vystavena</div><div class="v">${fmtDate(nextM)}</div></div>
+      <div><div class="l">Úkonů</div><div class="v">${d.rows.length}${d.hours > 0 ? ` · ${Math.round(d.hours * 10) / 10} h` : ""}</div></div>
+    </div>
+  </div><div class="rule"></div></div>
+  <div class="tbl"><table>
+    <colgroup><col style="width:22mm"><col><col style="width:14mm"><col style="width:22mm"><col style="width:24mm"></colgroup>
+    <thead><tr><th>Datum</th><th>Popis plnění</th><th class="r">Hod.</th><th class="r">Sazba / hod.</th><th class="r">Bez DPH</th></tr></thead>
+    <tbody>${rowsHtml}</tbody>
+  </table></div>
+  <div class="tot"><div class="box">
+    <div class="ln"><span class="l">Základ bez DPH</span><span class="big">${_kcRaw(d.workAmt)}</span></div>
+    <div class="ln"><span class="l">DPH 21 %</span><span class="v">${_kcRaw(d.vat)}</span></div>
+    ${d.pref > 0 ? `<div class="ln"><span class="l">Přefakturované položky bez DPH</span><span class="v">${_kcRaw(d.pref)}</span></div>` : ""}
+    <div class="ln"><span class="l">Předpokládaná částka s DPH</span><span class="v b">${_kcRaw(d.total)}</span></div>
+  </div></div>
+  <div class="next">Tento soupis je <b>průběžný přehled provedené práce</b> k uvedenému dni a slouží jen pro Vaši informaci — není fakturou ani výzvou k platbě. Práce v měsíci dále pokračuje; <b>faktura bude vystavena ${fmtDate(nextM)}</b> se splatností ${fmtDate(dueD)} a bude obsahovat všechny úkony provedené do ${doDne}. Přehled byl vygenerován automaticky systémem MAUX Legal CRM ke dni exportu; jednotlivé úkony jsou uvedeny tak, jak byly průběžně zaznamenány.</div>
+  <div class="ft"><span>${_esc(FIRMA.name)} · IČO ${FIRMA.ico} · ${FIRMA.email}<br>Automaticky vygenerováno systémem MAUX Legal CRM · ${stavK} ${now.toLocaleTimeString("cs-CZ", { hour: "2-digit", minute: "2-digit" })}</span><span class="m">MAUX LEGAL</span></div>
+</div>
+</body></html>`;
+}
+// Otevře hotový A4 v novém okně SYNCHRONNĚ z kliknutí (jinak by ho Chrome zablokoval jako
+// popup) — tlačítko „Uložit PDF" = tiskový dialog → vektorové PDF, stejně jako Výkaz pro
+// účetní. Až bude /api/pdf na Vercelu spolehlivé, sem patří přímé stažení souboru.
+function stahnoutPrubeznySoupis(client, entries, onLog = null) {
+  if (!entries || !entries.length) { mauxToast("Žádné nevyfakturované výkazy pro tohoto klienta."); return; }
+  const w = window.open("", "_blank", "width=900,height=1000");
+  if (!w) { mauxToast("Chyba: prohlížeč zablokoval nové okno se soupisem."); return; }
+  w.document.write(prubeznySoupisHtml(client, entries));
+  w.document.close();
+  // Deník: kdy a s jakou částkou klient soupis dostal — kdyby se pak divil rozdílu na faktuře.
+  if (onLog && client?.id) { const d = prubeznySoupisData(entries); onLog(client.id, d.workAmt, d.rows.length); }
+}
+// Log stažených soupisů (config položka, bez migrace; trigger Deníku config vynechává, proto
+// se události do Deníku přimíchávají syntetickou cestou v denikUdalosti).
+const SOUPIS_LOG_ID = "fi_soupis_log";
+function soupisLogRead(financeItems) {
+  const it = (financeItems || []).find(i => i.id === SOUPIS_LOG_ID);
+  try { const p = JSON.parse(it?.notes || "{}"); return p && typeof p === "object" ? p : {}; } catch (e) { return {}; }
+}
+function soupisLogAppend(financeItems, clientId, amount, n) {
+  const log = soupisLogRead(financeItems);
+  const hranice = new Date(Date.now() - 730 * 86400000).toISOString();   // 24 měsíců
+  log[clientId] = [...(log[clientId] || []).filter(r => (r.at || "") >= hranice), { at: new Date().toISOString(), amount: Math.round(amount || 0), n: n || 0 }];
+  const prev = (financeItems || []).find(i => i.id === SOUPIS_LOG_ID) || {};
+  return { ...prev, id: SOUPIS_LOG_ID, category: "config", label: "Log průběžných soupisů", amount: 0, notes: JSON.stringify(log) };
+}
+// Syntetické události Deníku ze soupisů: tbl "clients" → vidět i v Historii na kartě klienta;
+// op "INSERT" → bez tlačítka „vrátit" (není co vracet).
+function denikSoupisUdalosti(ctx) {
+  const { clients = [], financeItems = [] } = ctx || {};
+  const log = soupisLogRead(financeItems), out = [];
+  Object.keys(log).forEach(cid => {
+    const kl = (clients.find(c => c.id === cid) || {}).name || "klient";
+    (log[cid] || []).forEach(r => out.push({
+      id: `soupis_${cid}_${r.at}`, at: r.at, who: null, kind: "faktura",
+      parts: ["Soupis ", { b: kl }, " · ", { b: "stažen pro klienta" }, ` · ${r.n} ${r.n === 1 ? "úkon" : r.n < 5 ? "úkony" : "úkonů"} · stav k ${_dDatum(r.at)}`],
+      amount: r.amount == null ? null : r.amount, link: { mod: "klienti", id: cid }, tbl: "clients", row_id: cid, op: "INSERT",
+    }));
+  });
+  return out;
 }
 
 const FAKTURY_LOG_ID = "fi_faktury_log";
@@ -14165,7 +14335,7 @@ function orphanWorkEntries(workEntries, invoices) {
   });
 }
 
-function InvoiceList({ invoices, clients, workEntries, escrows, onOpen, onOpenClient, onToggleStatus, onGenerateInvoice, onPreviewInvoice, onEditInvoice, onOpenDiscountModal, onOpenAltSubjectModal, altSubjects, onAddWorkEntry, onRevertInvoice, onIssueExistingInvoice, onDeleteDraftInvoice, onFreeOrphans, loading, onUpominka = null, upominky = {} }) {
+function InvoiceList({ invoices, clients, workEntries, escrows, onOpen, onOpenClient, onToggleStatus, onGenerateInvoice, onPreviewInvoice, onEditInvoice, onOpenDiscountModal, onOpenAltSubjectModal, altSubjects, onAddWorkEntry, onRevertInvoice, onIssueExistingInvoice, onDeleteDraftInvoice, onFreeOrphans, loading, onUpominka = null, upominky = {}, onSoupisLog = null }) {
   const [search, setSearch] = useState("");
   const [filterStatus, setFilterStatus] = useState("vse");
   const [filterClient, setFilterClient] = useState("");
@@ -14469,6 +14639,7 @@ function InvoiceList({ invoices, clients, workEntries, escrows, onOpen, onOpenCl
                   </div>
                   <div className="maux-num" style={{ textAlign: "right", fontSize: 14.5, fontWeight: 600, color: "var(--txt)" }}>{fmtKc(d.total)}</div>
                   <div style={{ display: "flex", alignItems: "center", gap: 6, justifyContent: "flex-end" }}>
+                    <button className="btn" style={{ fontSize: 12 }} title="Průběžný soupis pro klienta — stav k dnešku, není daňový doklad" onClick={() => stahnoutPrubeznySoupis(d.client, d.entries, onSoupisLog)}>Soupis</button>
                     <button className="btn" style={{ fontSize: 12 }} onClick={() => onPreviewInvoice && onPreviewInvoice(d.clientId, d.entries)}>Náhled</button>
                     <button className="btn pri" style={{ fontSize: 12 }} onClick={() => onGenerateInvoice(d.clientId, d.entries)}>Vystavit →</button>
                     <button title="Změny · jiný subjekt" onClick={() => setMenuDraft(menuDraft === d.clientId ? null : d.clientId)}
@@ -20661,6 +20832,7 @@ export default function MauxCRM() {
               onEditInvoice={openEditInvModal}
               onOpenDiscountModal={openDiscountModal}
               onOpenAltSubjectModal={openAltSubjectModal}
+              onSoupisLog={(clientId, amount, n) => saveFinanceItem(soupisLogAppend(financeItems, clientId, amount, n))}
               altSubjects={altSubjects}
               onAddWorkEntry={navToNewWorkEntry}
               onRevertInvoice={revertInvoiceToDraft}
