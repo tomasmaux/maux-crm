@@ -673,9 +673,51 @@ const syncDaneMatch = (financeItems, itemId, at) => syncDaneLogRead(financeItems
    měsíce znovu tabulka; logovat měsíc po měsíci"). Jakmile je vše odškrtnuté, karta Výdaje
    se složí do jednoho řádku přes celou šířku panelu a Osobní majetek se roztáhne. Uzavřené
    měsíce se logují do config položky fi_vydaje_uzavreno { "YYYY-MM": {at, total, n} }. */
+/* ── PLATNOST NÁKLADOVÉ POLOŽKY (22. 9. 2026) ────────────────────────────
+   Tom zrušil Apple Music a přešel na Spotify: "od příštího měsíce se již nebude
+   zobrazovat k zaškrtnutí a celkový náklad se sníží". Položka ale měla jen `label`
+   a `amount` — žádnou časovou platnost. Změna ceny nebo názvu proto přepisovala
+   i minulost: červen–září by tvrdily, že už tehdy platil Spotify.
+
+   Platnost se ukládá do `notes` jako { od, do } ve tvaru "YYYY-MM" (včetně obou konců).
+   Žádná SQL migrace. Staré hodnoty notes ("", "TBD", "SKIP_DISPLAY") se neparsují
+   a vrací prázdnou platnost — položka tedy platí vždy, jako dosud.                    */
+function itemPlatnost(it) {
+  try {
+    const p = JSON.parse((it && it.notes) || "");
+    if (p && typeof p === "object" && !Array.isArray(p) && (p.od || p.do)) {
+      return { od: p.od || null, do: p.do || null };
+    }
+  } catch (e) {}
+  return { od: null, do: null };
+}
+// Platí položka v měsíci ym ("YYYY-MM")? Bez platnosti platí vždy.
+function itemPlatiV(it, ym) {
+  const p = itemPlatnost(it);
+  if (p.od && ym < p.od) return false;
+  if (p.do && ym > p.do) return false;
+  return true;
+}
+function itemPlatnostSet(it, od, doM) {
+  const clean = {};
+  if (od) clean.od = od;
+  if (doM) clean.do = doM;
+  return { ...it, notes: Object.keys(clean).length ? JSON.stringify(clean) : "" };
+}
+const ymOfDate = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+const ymThis = () => ymOfDate(new Date());
+// Pozor na setDate(1) — bez něj by 31. ledna + 1 měsíc skočilo na březen.
+const ymPlus = (n) => { const d = new Date(); d.setDate(1); d.setMonth(d.getMonth() + n); return ymOfDate(d); };
+const ymLabel = (ym) => {
+  if (!ym) return "";
+  const [r, m] = String(ym).split("-");
+  return `${CZ_MES_KRATCE[Number(m) - 1]} ${r}`;
+};
+
 const VYDAJE_UZAVRENO_ID = "fi_vydaje_uzavreno";
-function vydajeStav(financeItems, expenseChecks) {
-  const ids = [...(financeItems || []).filter(i => i.category === "nutne" || i.category === "luxus").map(i => i.id), "josef_wage"];
+function vydajeStav(financeItems, expenseChecks, ym) {
+  const _ym = ym || ymThis();
+  const ids = [...(financeItems || []).filter(i => (i.category === "nutne" || i.category === "luxus") && itemPlatiV(i, _ym)).map(i => i.id), "josef_wage"];
   const paid = (expenseChecks || []).filter(c => c.paid && ids.includes(c.item_id));
   const paidCount = ids.filter(id => paid.some(c => c.item_id === id)).length;
   const lastAt = paid.reduce((m, c) => c.paid_at && (!m || c.paid_at > m) ? c.paid_at : m, null);
@@ -8491,8 +8533,10 @@ function TriGrafyPanel({ financeItems, onSaveFinance, invoices, dpfoMonths, loan
    sem — sem patří logicky (firemní výdaje) a tahle dlaždice dřív stejně jen ukazovala mrtvý souhrn.
    Firemní rezerva (LiquidTank) zůstala v Bilanci dole — viz Panel id="finance". */
 function FirmaBar({ financeItems, invoices, dpfoMonths, loanTransactions, escrows, onSaveFinance, onDeleteFinance, expenseChecks, onToggleExpenseCheck, josefWage, josefYm, onNav, collapsed = false, onPeek, onOpenDenik }) {
-  const nutne      = (financeItems||[]).filter(i => i.category === "nutne");
-  const luxus      = (financeItems||[]).filter(i => i.category === "luxus");
+  // Položky s ukončenou/budoucí platností se v běžícím měsíci nezobrazují ani nepočítají.
+  const _ymBezi    = ymThis();
+  const nutne      = (financeItems||[]).filter(i => i.category === "nutne" && itemPlatiV(i, _ymBezi));
+  const luxus      = (financeItems||[]).filter(i => i.category === "luxus" && itemPlatiV(i, _ymBezi));
   const totalNutne = Math.abs(nutne.reduce((s,i)=>s+(i.amount||0),0)) + (josefWage||0);
   const totalLuxus = Math.abs(luxus.reduce((s,i)=>s+(i.amount||0),0));
   const totalVyd   = totalNutne + totalLuxus;
@@ -8512,6 +8556,8 @@ function FirmaBar({ financeItems, invoices, dpfoMonths, loanTransactions, escrow
   const [showDetail, setShowDetail] = useState(true);
   // Rozbalený log kliknutí u položky (Tom 15. 9. 2026). Klik na čas u položky = rozbal / sbal.
   const [logOpenId, setLogOpenId] = useState(null);
+  // Rozbalená editace platnosti položky (22. 9. 2026) — od/do ve tvaru "YYYY-MM".
+  const [platOpenId, setPlatOpenId] = useState(null);
   const uhradyLog = uhradyLogRead(financeItems);
   const logEntriesOf = (id) => { const n = new Date(); return uhradyLog[uhradyLogKey(id, n.getFullYear(), n.getMonth() + 1)] || []; };
 
@@ -8607,7 +8653,27 @@ function FirmaBar({ financeItems, invoices, dpfoMonths, loanTransactions, escrow
                 {JOSEF_WAGE_MANUAL_OVERRIDES[josefYm]!=null?"ručně":"auto"} · {josefYm}
               </span>
             </span>
-          ) : <EditableLabel item={item} onSave={onSaveFinance} />}
+          ) : (
+            <>
+              <EditableLabel item={item} onSave={onSaveFinance} />
+              {(() => {
+                const pl = itemPlatnost(item);
+                const konci = pl.do && pl.do === _ymBezi;
+                const text = pl.do ? (konci ? "kon\u010d\u00ed " + ymLabel(pl.do) : "do " + ymLabel(pl.do))
+                           : pl.od ? "od " + ymLabel(pl.od) : "";
+                return (
+                  <span onClick={e => { e.stopPropagation(); setPlatOpenId(v => v === item.id ? null : item.id); }}
+                    title={text ? "Platnost polo\u017eky \u2014 klikni pro \u00fapravu" : "Nastavit platnost od / do"}
+                    style={{ marginLeft: 6, fontSize: 8, fontWeight: 600, letterSpacing: ".02em",
+                      padding: "1px 5px", borderRadius: 3, cursor: "pointer", whiteSpace: "nowrap",
+                      background: text ? "rgba(198,168,107,.14)" : "transparent",
+                      color: text ? "#96773C" : "var(--mut)", opacity: text ? 1 : .28 }}>
+                    {text || "\u25cb"}
+                  </span>
+                );
+              })()}
+            </>
+          )}
         </span>
         <span style={{display:"flex",alignItems:"center",gap:3,flexShrink:0}}>
           {(p && paidAtOf(item.id) || logEntriesOf(item.id).length > 0) && (
@@ -8629,6 +8695,37 @@ function FirmaBar({ financeItems, invoices, dpfoMonths, loanTransactions, escrow
           )}
         </span>
       </div>
+      {platOpenId === item.id && !isJosef && (() => {
+        const pl = itemPlatnost(item);
+        const save = (od, doM) => { onSaveFinance && onSaveFinance(itemPlatnostSet(item, od, doM)); };
+        return (
+          <div style={{margin:"2px 0 6px 21px",padding:"8px 10px",borderLeft:"2px solid #C6A86B",
+            background:"rgba(198,168,107,.06)",fontSize:10,color:"var(--mut)",lineHeight:1.6}}>
+            <div style={{display:"flex",gap:10,alignItems:"center",flexWrap:"wrap"}}>
+              <label style={{display:"flex",alignItems:"center",gap:4}}>od
+                <input type="month" defaultValue={pl.od || ""}
+                  onChange={e => save(e.target.value || null, pl.do)}
+                  style={{fontSize:10,padding:"2px 4px",border:"1px solid rgba(28,10,99,.14)",
+                    borderRadius:4,background:"#fff",color:"var(--ink)",fontFamily:"inherit"}} />
+              </label>
+              <label style={{display:"flex",alignItems:"center",gap:4}}>do
+                <input type="month" defaultValue={pl.do || ""}
+                  onChange={e => save(pl.od, e.target.value || null)}
+                  style={{fontSize:10,padding:"2px 4px",border:"1px solid rgba(28,10,99,.14)",
+                    borderRadius:4,background:"#fff",color:"var(--ink)",fontFamily:"inherit"}} />
+              </label>
+              {(pl.od || pl.do) && (
+                <button onClick={() => { save(null, null); setPlatOpenId(null); }}
+                  style={{background:"none",border:"none",color:"var(--mut)",cursor:"pointer",
+                    fontSize:9.5,textDecoration:"underline",padding:0}}>zru\u0161it omezen\u00ed</button>
+              )}
+            </div>
+            <div style={{fontSize:9,opacity:.8,marginTop:4}}>
+              Oba m\u011bs\u00edce se po\u010d\u00edtaj\u00ed v\u010detn\u011b. Mimo rozsah polo\u017eka zmiz\u00ed z v\u00fddaj\u016f i ze sou\u010dt\u016f \u2014 historie z\u016fstane.
+            </div>
+          </div>
+        );
+      })()}
       {logRows.length > 0 && (
         <div style={{margin:"2px 0 6px 21px",padding:"6px 10px",borderLeft:"2px solid #4A44B8",background:"rgba(74,68,184,.05)",fontSize:10,color:"var(--mut)",lineHeight:1.6}}>
           {logRows.slice().reverse().map((e, i) => (
@@ -11925,8 +12022,11 @@ function Dashboard({ auditLog, denikCtx, onOpenDenik, onOpenDenikVec, invoices, 
   const onTheWayInv = invoices.filter(i => ["vystavena","po_splatnosti"].includes(invoiceStatus(i))).reduce((s,i)=>s+(i.subtotal||0),0);
 
   // Personal finance
-  const nutne = (financeItems||[]).filter(i => i.category === "nutne");
-  const luxus = (financeItems||[]).filter(i => i.category === "luxus");
+  // Projekce na PŘÍŠTÍ měsíc → filtr platnosti také podle příštího měsíce.
+  // Položka ukončená k září se tedy v bilanci října neobjeví a náklad sama sníží.
+  const _ymPristi = ymPlus(1);
+  const nutne = (financeItems||[]).filter(i => i.category === "nutne" && itemPlatiV(i, _ymPristi));
+  const luxus = (financeItems||[]).filter(i => i.category === "luxus" && itemPlatiV(i, _ymPristi));
   const totalNutne = nutne.reduce((s,i) => s+(i.amount||0), 0);
   const totalLuxus = luxus.reduce((s,i) => s+(i.amount||0), 0);
   // Josef Řehák — živý automatický náklad za AKTUÁLNÍ (běžící) měsíc.
