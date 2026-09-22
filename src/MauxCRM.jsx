@@ -8717,11 +8717,11 @@ function FirmaBar({ financeItems, invoices, dpfoMonths, loanTransactions, escrow
               {(pl.od || pl.do) && (
                 <button onClick={() => { save(null, null); setPlatOpenId(null); }}
                   style={{background:"none",border:"none",color:"var(--mut)",cursor:"pointer",
-                    fontSize:9.5,textDecoration:"underline",padding:0}}>zru\u0161it omezen\u00ed</button>
+                    fontSize:9.5,textDecoration:"underline",padding:0}}>zrušit omezení</button>
               )}
             </div>
             <div style={{fontSize:9,opacity:.8,marginTop:4}}>
-              Oba m\u011bs\u00edce se po\u010d\u00edtaj\u00ed v\u010detn\u011b. Mimo rozsah polo\u017eka zmiz\u00ed z v\u00fddaj\u016f i ze sou\u010dt\u016f \u2014 historie z\u016fstane.
+              Oba měsíce se počítají včetně. Mimo rozsah položka zmizí z výdajů i ze součtů — historie zůstane.
             </div>
           </div>
         );
