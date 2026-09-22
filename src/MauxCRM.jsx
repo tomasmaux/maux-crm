@@ -1579,6 +1579,31 @@ function invoicePaidAt(log, inv) {
   for (let i = rows.length - 1; i >= 0; i--) if (rows[i].status === "uhrazena") return rows[i].at || null;
   return null;
 }
+/* ── ODVOD DPH — samostatná osa, nezávislá na stavu faktury (22. 9. 2026) ─────
+   Tom: "Jen nemohu kliknout na odvedeno u faktur, které nemám uhrazeno ještě, ale vystaveno ano."
+   Měl pravdu — a původní model to nedovoloval z dobrého důvodu: "dph_odvedeno" byl STAV
+   faktury a invoiceStatus() jím přebíjí po_splatnosti. Faktura by zmizela z pásu Na cestě,
+   z "Po splatnosti ti dluží" i z upomínek — jedním kliknutím by přišel o vymáhání.
+
+   DPH se odvádí podle DUZP, bez ohledu na úhradu — jsou to dvě nezávislé věci.
+   Odvod proto žije ve config položce fi_dph_odvody jako { "<id faktury>": "<ISO>" },
+   stejně jako fi_uhrady_log a fi_faktury_log. Žádná SQL migrace, žádná změna schématu.
+   Historický stav "dph_odvedeno" se dál čte jako odvedený — nic naklikaného se neztratí.   */
+const DPH_ODVODY_ID = "fi_dph_odvody";
+function dphOdvodyRead(financeItems) {
+  const it = (financeItems || []).find(i => i.id === DPH_ODVODY_ID);
+  try { const p = JSON.parse(it?.notes || "{}"); return p && typeof p === "object" ? p : {}; } catch (e) { return {}; }
+}
+function dphOdvedena(inv, odvody) {
+  if (!inv) return false;
+  return !!(odvody || {})[inv.id] || inv.status === "dph_odvedeno";
+}
+function dphOdvodSet(financeItems, invoiceId, iso) {
+  const map = dphOdvodyRead(financeItems);
+  if (iso) map[invoiceId] = iso; else delete map[invoiceId];
+  const prev = (financeItems || []).find(i => i.id === DPH_ODVODY_ID) || {};
+  return { ...prev, id: DPH_ODVODY_ID, category: "config", label: "Odvody DPH", amount: 0, notes: JSON.stringify(map) };
+}
 const czDny = (n) => `${n} ${n === 1 ? "den" : n >= 2 && n <= 4 ? "dny" : "dní"}`;
 const czFaktur = (n) => `${n} ${n === 1 ? "faktura" : n >= 2 && n <= 4 ? "faktury" : "faktur"}`;
 const _ymdDiffDays = (fromYmd, toYmd) => Math.round((new Date(toYmd + "T00:00:00") - new Date(fromYmd + "T00:00:00")) / 86400000);
@@ -5644,8 +5669,11 @@ function computeEscrowMilestone(escrows, target = ESCROW_MILESTONE) {
 // a Firemní rezerva by skákala nahoru a dolů bez důvodu.
 function dphObalkaUnsettled(invoices, financeItems) {
   const periodKey = vatPeriodKey;
+  // Odvod už zapsán (fi_dph_odvody) → obálku neživí. Starý stav "dph_odvedeno" vypadne
+  // už filtrem na "uhrazena". Díky tomu pozdější úhrada klienta obálku nerozhýbe zpětně.
+  const odvody = dphOdvodyRead(financeItems);
   const vatByPeriod = {};
-  (invoices || []).filter(i => i.status === "uhrazena").forEach(i => {
+  (invoices || []).filter(i => i.status === "uhrazena" && !dphOdvedena(i, odvody)).forEach(i => {
     const k = periodKey(i);
     vatByPeriod[k] = (vatByPeriod[k] || 0) + (i.vat_amount || 0);
   });
@@ -5672,6 +5700,23 @@ function dphObalkaUnsettled(invoices, financeItems) {
    Vrací i `free` = firemní rezerva (volné peníze nad rámec obálek).
    Barvy si každá komponenta mapuje sama — to je prezentace, ne výpočet.
    ═══════════════════════════════════════════════════════════════════════════ */
+/* SCHODEK ODVODU (22. 9. 2026) — kolik z nejbližšího odvodu DPH NENÍ kryté obálkou.
+   Obálka roste jen z UHRAZENÝCH faktur (správně — kopíruje reálný převod na spořák),
+   ale daň se odvádí podle DUZP. Za fakturu, kterou klient nezaplatil, tedy platíš
+   z firemní rezervy. Srpen 2026: Karlitzr 2 625 + Martinková 5 250 = 7 875 Kč.
+   Vrací null, když je období vyřízené nebo všechno zaplacené. */
+function dphSchodek(invoices, financeItems, periodYm) {
+  const odvody = dphOdvodyRead(financeItems);
+  const nekryte = (invoices || []).filter(i =>
+    vatPeriodKey(i) === periodYm
+    && i.status !== "uhrazena" && i.status !== "dph_odvedeno"
+    && !dphOdvedena(i, odvody)
+  );
+  const castka = nekryte.reduce((s, i) => s + (i.vat_amount || 0), 0);
+  if (castka <= 0) return null;
+  return { castka, faktury: nekryte, pocet: nekryte.length };
+}
+
 function computeSporakEnvelopes(financeItems, invoices, dpfoMonths, loanTransactions, escrows) {
   const sporaci = (financeItems || []).filter(i => i.category === "sporaci" && i.notes !== "SKIP_DISPLAY");
   const balance = sporaci.find(i => i.id === "fi_sp_99")?.amount || 0;
@@ -12732,6 +12777,10 @@ function Dashboard({ auditLog, denikCtx, onOpenDenik, onOpenDenikVec, invoices, 
                 {(() => {
                   // Jediný zdroj pravdy — viz computeSporakEnvelopes
                   const _envS = computeSporakEnvelopes(financeItems, invoices, dpfoMonths, loanTransactions, escrows);
+                   /* Odvod DPH vs. obálka (22. 9. 2026): obálka roste jen z uhrazených faktur,
+                      ale daň se platí podle DUZP — za nezaplacené faktury jde odvod z rezervy. */
+                   const _schodekYm = (() => { const d = new Date(); d.setMonth(d.getMonth() - 1); return localYmd(d).slice(0, 7); })();
+                   const _schodek = dphSchodek(invoices, financeItems, _schodekYm);
                   const sporBalS = _envS.balance;
                   // POZOR: tahle proměnná tu do 3.8.2026 chyběla — saveSporBal na ni sahal a spadl
                   // s ReferenceError, takže tlačítko ✓ ani Enter zůstatek neuložily. Esbuild to
@@ -12962,6 +13011,26 @@ function Dashboard({ auditLog, denikCtx, onOpenDenik, onOpenDenikVec, invoices, 
                           </div>
                         ))}
                       </div>
+
+                      {/* SCHODEK ODVODU — stavový pruh podle lekce 6. 8. 2026: vlasový okraj
+                          vlevo, žádné ikony, verdikt větou a čísla pod ním jako důkaz. */}
+                      {_schodek && (
+                        <div style={{
+                          marginTop:12, borderLeft:"2px solid #A8443C", borderRadius:0,
+                          background:"rgba(168,68,60,.045)", padding:"9px 12px",
+                        }}>
+                          <div style={{fontSize:11.5,color:"var(--txt)",lineHeight:1.45}}>
+                            Odvod DPH za {czMes(new Date(_schodekYm + "-01T00:00:00").getMonth())} bude o{" "}
+                            <b className="maux-num" style={{color:"#A8443C"}}>{fmtKc(_schodek.castka)}</b>{" "}
+                            vyšší, než kolik drží obálka — tolik jde z firemní rezervy.
+                          </div>
+                          <div style={{fontSize:10.5,color:"var(--mut)",marginTop:3}}>
+                            Daň se odvádí podle DUZP, ne podle úhrady.{" "}
+                            {_schodek.faktury.slice(0,3).map(f => (f.clients?.name || "faktura " + (f.invoice_number || ""))).join(" · ")}
+                            {_schodek.pocet > 3 ? " · +" + (_schodek.pocet - 3) : ""} zatím nezaplatili.
+                          </div>
+                        </div>
+                      )}
                     </div>
                   );
                 })()}
@@ -14333,7 +14402,7 @@ function orphanWorkEntries(workEntries, invoices) {
   });
 }
 
-function InvoiceList({ invoices, clients, workEntries, escrows, onOpen, onOpenClient, onToggleStatus, onGenerateInvoice, onPreviewInvoice, onEditInvoice, onOpenDiscountModal, onOpenAltSubjectModal, altSubjects, onAddWorkEntry, onRevertInvoice, onIssueExistingInvoice, onDeleteDraftInvoice, onFreeOrphans, loading, onUpominka = null, upominky = {}, onSoupisLog = null }) {
+function InvoiceList({ invoices, clients, workEntries, escrows, dphOdvody = {}, onOpen, onOpenClient, onToggleStatus, onGenerateInvoice, onPreviewInvoice, onEditInvoice, onOpenDiscountModal, onOpenAltSubjectModal, altSubjects, onAddWorkEntry, onRevertInvoice, onIssueExistingInvoice, onDeleteDraftInvoice, onFreeOrphans, loading, onUpominka = null, upominky = {}, onSoupisLog = null }) {
   const [search, setSearch] = useState("");
   const [filterStatus, setFilterStatus] = useState("vse");
   const [filterClient, setFilterClient] = useState("");
@@ -14433,11 +14502,14 @@ function InvoiceList({ invoices, clients, workEntries, escrows, onOpen, onOpenCl
 
   const StatusToggle = ({ inv }) => {
     const s = invoiceStatus(inv);
+    // Odvod DPH je od 22. 9. 2026 samostatna osa (fi_dph_odvody) — faktura muze mit
+    // odvedenou DPH a PRESTO byt po splatnosti. Proto se stav a odvod ctou zvlast.
+    const odveden = dphOdvedena(inv, dphOdvody);
     const badgeClass = s === "uhrazena" ? "b-ok" : s === "po_splatnosti" ? "b-late" : s === "pripravena" ? "b-prep" : "b-vy";
     const label = s === "uhrazena" ? "Uhrazena ✓" : s === "po_splatnosti" ? "Po splatnosti" : s === "pripravena" ? "Připravena" : "Vystavena";
     // Uzavřený případ nekřičí (5.8.2026): "DPH odvedeno" svítilo smaragdově na VŠECH řádcích,
     // takže nenese žádnou informaci a přebíjí řádky, které něco chtějí. Teď tichá fajfka.
-    if (s === "dph_odvedeno") return (
+    if (s === "dph_odvedeno" || (odveden && s === "uhrazena")) return (
       <div style={{ display: "flex", alignItems: "center", gap: 6, justifyContent: "flex-end",
         fontSize: 10.5, color: "var(--mut)", whiteSpace: "nowrap" }} title="Uhrazeno · DPH odvedeno">
         <span style={{ color: "#9C9689" }}>✓</span> vyřízeno
@@ -14463,11 +14535,20 @@ function InvoiceList({ invoices, clients, workEntries, escrows, onOpen, onOpenCl
             </span>
           );
         })()}
-        {s === "uhrazena" && (
+        {/* DPH se odvadi podle DUZP, ne podle uhrady — pilulka svitit i u nezaplacene faktury.
+            Klik NEMENI stav faktury, jen zapise odvod, takze po_splatnosti a upominky zustavaji. */}
+        {!odveden && ["uhrazena", "vystavena", "po_splatnosti"].includes(s) && (
           <span style={{ fontSize: 9.5, padding: "3px 8px", borderRadius: 20, background: "#FEF3C7", color: "#92400E", cursor: "pointer", fontWeight: 600, whiteSpace: "nowrap", border: "1px solid #FDE68A" }}
-            title="Označit DPH jako odvedené"
+            title={s === "uhrazena" ? "Označit DPH jako odvedené" : "Označit DPH jako odvedené — faktura zůstane nezaplacená, včetně upomínek"}
             onClick={e => { e.stopPropagation(); onToggleStatus({ ...inv, _forceDph: true }); }}>
             DPH →
+          </span>
+        )}
+        {odveden && s !== "uhrazena" && (
+          <span style={{ fontSize: 9.5, padding: "3px 8px", borderRadius: 20, background: "var(--bg)", color: "var(--mut)", fontWeight: 600, whiteSpace: "nowrap", cursor: "pointer" }}
+            title="DPH odvedena — klikni pro zrušení zápisu"
+            onClick={e => { e.stopPropagation(); onToggleStatus({ ...inv, _forceDph: true }); }}>
+            DPH ✓
           </span>
         )}
       </div>
@@ -20614,13 +20695,36 @@ export default function MauxCRM() {
     catch (e) { mauxToast("Chyba: " + e.message); }
   };
   const toggleInvoiceStatus = async (inv) => {
-    let newStatus;
+    // ODVOD DPH — samostatna osa, NEMENI stav faktury (22. 9. 2026).
+    // Driv se tim faktura prepnula na "dph_odvedeno", coz v invoiceStatus() prebilo
+    // po_splatnosti: zmizela z Na ceste, z "Po splatnosti ti dluzi" i z upominek.
+    // Proto se odvod zapisuje do fi_dph_odvody a stav zustava, jaky je.
     if (inv._forceDph) {
-      newStatus = "dph_odvedeno";
-    } else if (inv.status === "uhrazena") {
+      const odvody = dphOdvodyRead(financeItems);
+      const uz = dphOdvedena(inv, odvody);
+      try {
+        const item = dphOdvodSet(financeItems, inv.id, uz ? null : new Date().toISOString());
+        await upsertFinanceItem(item);
+        setFinanceItems(prev => (prev || []).some(i => i.id === DPH_ODVODY_ID)
+          ? prev.map(i => i.id === DPH_ODVODY_ID ? item : i) : [...(prev || []), item]);
+        // Historicky stav "dph_odvedeno" prepiseme zpet na "uhrazena", aby faktura mela
+        // jen jednu pravdu: stav = zaplaceno klientem, fi_dph_odvody = odvedeno statu.
+        if (inv.status === "dph_odvedeno") {
+          const { _forceDph, ...clean } = inv;
+          const back = { ...clean, status: "uhrazena" };
+          setInvoices(p => p.map(i => i.id === inv.id ? { ...i, status: "uhrazena" } : i));
+          await upsertInvoice(back);
+        }
+        mauxToast(uz ? "Zápis o odvodu DPH zrušen" : "DPH označena jako odvedená");
+      } catch (e) { mauxToast("Chyba: " + e.message); }
+      refreshAudit();
+      return;
+    }
+    let newStatus;
+    if (inv.status === "uhrazena") {
       newStatus = "vystavena";
     } else if (inv.status === "dph_odvedeno") {
-      newStatus = "uhrazena"; // revert if needed
+      newStatus = "uhrazena"; // historicky stav — klik ho srovna na "uhrazena"
     } else {
       newStatus = "uhrazena";
     }
@@ -20822,6 +20926,7 @@ export default function MauxCRM() {
           {mod === "fakturace" && curMod?.live && mode === "list" && (
             <InvoiceList
               invoices={invoices} clients={clients} workEntries={workEntries} escrows={escrows}
+              dphOdvody={dphOdvodyRead(financeItems)}
               onOpen={(id, action) => {
                 setSel(id);
                 if (action === "edit") setMode("edit");
