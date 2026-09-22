@@ -11720,6 +11720,20 @@ const MAUX_GLASS_MODAL = {
   boxShadow: "0 24px 64px rgba(28,10,99,.22)",
 };
 
+/* ── GRAF PŘÍJMŮ · paleta „Klid" (Tom 22. 9. 2026) ────────────────────────────
+   Tom: „nějaký elegantní neon, ale samozřejmě bílé pozadí." Neon na bílé není
+   světlo (bloom by jen zašedl) — je to CHROMA: sytá barva obklopená tichem plus
+   barevný stín, co tvrdí, že za sloupcem někde svítí zdroj. Z laboratoře vybral
+   předvolbu Klid (mix 18 / halo 38 / matnost 70) a příští měsíc „rozjetý".
+   Laťka nákladů dělí sloupec: pod ní matné sklo (šlo na provoz), nad ní svítí
+   jen to, co Tomovi zbylo. Měsíce bez laťky (před 6/2026) zůstávají plně syté —
+   o rozdělení u nich nic nevíme a tvrdit opak by byla lež v druhou stranu. */
+const GK = {
+  indBot: "#3A339A", indTop: "#6C5CDA", indTopNow: "#7D6FE4",
+  mintBot: "#15D991", mintTop: "#3AF5A7",
+  paleInd: "#C9C6E5", paleMint: "#CBE6DC",
+  live: "#6548E5", latka: "#8C83B9",
+};
 const BP = {
   // Tom 27.7.: "barvy nepatrně sytější, okraje apple kulaté" — o stupeň víc chroma,
   // ale pořád daleko od neonu; poloměry v apple měřítku (22/20/18).
@@ -13312,6 +13326,38 @@ function Dashboard({ auditLog, denikCtx, onOpenDenik, onOpenDenikVec, invoices, 
               </div>
 
               <svg width="100%" viewBox={`0 0 ${W} ${padT + BAR_AREA_H + padB}`} style={{overflow:"visible"}}>
+                <defs>
+                  <linearGradient id="gkInv" x1="0" y1="1" x2="0" y2="0">
+                    <stop offset="0" stopColor={GK.indBot} /><stop offset="1" stopColor={GK.indTop} />
+                  </linearGradient>
+                  <linearGradient id="gkInvNow" x1="0" y1="1" x2="0" y2="0">
+                    <stop offset="0" stopColor={GK.indBot} /><stop offset="1" stopColor={GK.indTopNow} />
+                  </linearGradient>
+                  <linearGradient id="gkEsc" x1="0" y1="1" x2="0" y2="0">
+                    <stop offset="0" stopColor={GK.mintBot} /><stop offset="1" stopColor={GK.mintTop} />
+                  </linearGradient>
+                  {/* halo = barevný stín, jediné poctivé „svícení" na bílé */}
+                  <filter id="gkHi" x="-80%" y="-80%" width="260%" height="260%">
+                    <feDropShadow dx="0" dy="1" stdDeviation="6.4" floodColor={GK.indTop} floodOpacity="0.059" />
+                  </filter>
+                  <filter id="gkHm" x="-80%" y="-80%" width="260%" height="260%">
+                    <feDropShadow dx="0" dy="1" stdDeviation="6.8" floodColor={GK.mintTop} floodOpacity="0.129" />
+                  </filter>
+                  <filter id="gkHl" x="-80%" y="-80%" width="260%" height="260%">
+                    <feDropShadow dx="0" dy="1" stdDeviation="8.4" floodColor={GK.live} floodOpacity="0.16" />
+                  </filter>
+                  {/* ořez: sytá vrstva se kreslí jen NAD laťkou */}
+                  {barData.map((d, i) => {
+                    const c = d.isLive ? null : nakladyHist[d.key];
+                    if (!c) return null;
+                    const yc = nakY(c.total);
+                    return (
+                      <clipPath key={i} id={`gkCp${i}`}>
+                        <rect x={barX(i) - 2} y={padT - 30} width={barW + 4} height={Math.max(yc - (padT - 30), 0)} />
+                      </clipPath>
+                    );
+                  })}
+                </defs>
                 {/* Náklady — schodovitá laťka z měřených dat (22. 9. 2026), žádná osa.
                     Dřív: jedno dnešní číslo natažené přes všechny měsíce. Teď: za každý
                     měsíc to, co bylo reálně odškrtnuto + Pepova mzda. Měsíc bez dat nemá bod. */}
@@ -13323,17 +13369,17 @@ function Dashboard({ auditLog, denikCtx, onOpenDenik, onOpenDenikVec, invoices, 
                       const yPrev = prev ? nakY(prev.v) : null;
                       return (
                         <g key={r.i}>
-                          <line x1={nakXA(r.i)} x2={nakXB(r.i)} y1={y} y2={y} stroke="#9C96B5"
+                          <line x1={nakXA(r.i)} x2={nakXB(r.i)} y1={y} y2={y} stroke={GK.latka}
                             strokeWidth={1.2} strokeDasharray={nakDash(r.zdroj)} opacity={nakOpa(r.zdroj)} />
                           {prev && yPrev !== y && (
-                            <line x1={nakXA(r.i)} x2={nakXA(r.i)} y1={yPrev} y2={y} stroke="#9C96B5"
+                            <line x1={nakXA(r.i)} x2={nakXA(r.i)} y1={yPrev} y2={y} stroke={GK.latka}
                               strokeWidth={1} strokeDasharray="2,3" opacity={0.3} />
                           )}
                         </g>
                       );
                     })}
                     <text x={W - padR} y={nakY(nakRows[nakRows.length - 1].v) - 5} textAnchor="end"
-                      fontSize={8} fontFamily="Inter" fill="#9C96B5">
+                      fontSize={8} fontFamily="Inter" fill={GK.latka}>
                       náklady {"≈"} {Math.round(nakRows[nakRows.length - 1].v / 1000)} tis.
                     </text>
                   </g>
@@ -13347,32 +13393,79 @@ function Dashboard({ auditLog, denikCtx, onOpenDenik, onOpenDenikVec, invoices, 
                   const totalH = invH + escH;
                   const isNow = d.isCurrent, isLive = !!d.isLive, isHov = hoverBar === i;
                   const dim = hoverBar != null && !isHov ? 0.45 : 1;
-                  const fillInv = isLive ? "rgba(74,68,184,.28)" : (isNow ? BP.indigoDeep : BP.indigo);
-                  const fillEsc = isLive ? "rgba(61,220,151,.35)" : (isNow ? BP.ziskDeep : BP.zisk);
-                  const liveStroke = isLive ? { stroke: BP.indigo, strokeWidth: 1.2, strokeDasharray: "4,3" } : {};
                   const label = d.label.replace("_", " ");
+                  // Laťka rozdělí sloupec: pod ní matné sklo (šlo na provoz), nad ní svítí
+                  // jen to, co zbylo. Měsíc bez laťky se nedělí — o rozdělení nic nevíme.
+                  const naklad = isLive ? nakladyLive : ((nakladyHist[d.key] || {}).total || 0);
+                  const deleno = !isLive && naklad > 0 && naklad < d.total;
+                  const fInv = isNow ? "url(#gkInvNow)" : "url(#gkInv)";
                   return (
                     <g key={i} onMouseEnter={() => setHoverBar(i)} onMouseLeave={() => setHoverBar(h => h === i ? null : h)} style={{ cursor: "pointer" }}>
                       <rect x={x-gap/2} y={padT-24} width={barW+gap} height={BAR_AREA_H+50} fill="transparent" />
-                      {d.inv > 0 && (
-                        <rect x={x} y={baseY - invH} width={barW} height={invH} rx={d.escrow > 0 ? 0 : 4} ry={d.escrow > 0 ? 0 : 4}
-                          fill={fillInv} opacity={dim} {...liveStroke} style={{ transition: "opacity .12s" }} />
-                      )}
-                      {d.escrow > 0 && (
-                        <rect x={x} y={baseY - totalH} width={barW} height={escH} rx={4} ry={4}
-                          fill={fillEsc} opacity={dim} {...liveStroke} style={{ transition: "opacity .12s" }} />
+                      {isLive ? (
+                        /* „Rozjetý" — to číslo není předpověď, je to odpracováno a naúročeno
+                           k dnešku. Proto plný sloupec v poloviční síle, ne prázdná bedna;
+                           čárkované víko říká, že měsíc ještě není dopsaný. */
+                        <g opacity={dim} style={{ transition: "opacity .12s" }}>
+                          <g opacity={0.62}>
+                            {d.inv > 0 && (
+                              <rect x={x} y={baseY - invH} width={barW} height={invH}
+                                rx={d.escrow > 0 ? 0 : 4} ry={d.escrow > 0 ? 0 : 4}
+                                fill="url(#gkInv)" filter="url(#gkHi)" />
+                            )}
+                            {d.escrow > 0 && (
+                              <rect x={x} y={baseY - totalH} width={barW} height={escH} rx={4} ry={4}
+                                fill="url(#gkEsc)" filter="url(#gkHm)" />
+                            )}
+                          </g>
+                          <line x1={x} x2={x + barW} y1={baseY - totalH} y2={baseY - totalH}
+                            stroke={GK.live} strokeWidth={2.4} strokeDasharray="5,3" strokeLinecap="round" />
+                          {naklad > 0 && naklad < d.total && (
+                            <line x1={x} x2={x + barW} y1={nakY(naklad)} y2={nakY(naklad)}
+                              stroke={GK.live} strokeWidth={1.2} strokeDasharray="3,2" opacity={0.55} />
+                          )}
+                        </g>
+                      ) : (
+                        <g opacity={dim} style={{ transition: "opacity .12s" }}>
+                          {d.inv > 0 && (
+                            <rect x={x} y={baseY - invH} width={barW} height={invH}
+                              rx={d.escrow > 0 ? 0 : 4} ry={d.escrow > 0 ? 0 : 4}
+                              fill={deleno ? GK.paleInd : fInv} filter={deleno ? undefined : "url(#gkHi)"} />
+                          )}
+                          {d.escrow > 0 && (
+                            <rect x={x} y={baseY - totalH} width={barW} height={escH} rx={4} ry={4}
+                              fill={deleno ? GK.paleMint : "url(#gkEsc)"} filter={deleno ? undefined : "url(#gkHm)"} />
+                          )}
+                          {deleno && (
+                            <g clipPath={`url(#gkCp${i})`}>
+                              {d.inv > 0 && (
+                                <rect x={x} y={baseY - invH} width={barW} height={invH}
+                                  rx={d.escrow > 0 ? 0 : 4} ry={d.escrow > 0 ? 0 : 4}
+                                  fill={fInv} filter="url(#gkHi)" />
+                              )}
+                              {d.escrow > 0 && (
+                                <rect x={x} y={baseY - totalH} width={barW} height={escH} rx={4} ry={4}
+                                  fill="url(#gkEsc)" filter="url(#gkHm)" />
+                              )}
+                            </g>
+                          )}
+                          {deleno && (
+                            <line x1={x} x2={x + barW} y1={nakY(naklad)} y2={nakY(naklad)}
+                              stroke="#FFFFFF" strokeWidth={1.4} opacity={0.9} />
+                          )}
+                        </g>
                       )}
                       {/* JEDNO číslo na sloupec */}
                       {d.total > 0 && (
                         <text x={x + barW/2} y={baseY - totalH - 7} textAnchor="middle" fontSize={11}
                           fontFamily="Inter,ui-sans-serif,system-ui,sans-serif" fontWeight="600"
-                          fill={isLive ? "#8F84E6" : "var(--txt)"}>
+                          fill={isLive ? GK.live : "var(--txt)"}>
                           {Math.round(d.total/1000)}k
                         </text>
                       )}
                       <text x={x + barW/2} y={baseY + 16} textAnchor="middle" fontSize={9} letterSpacing="1"
                         fontFamily="Inter,ui-sans-serif,system-ui,sans-serif" fontWeight={isNow ? "600" : "400"}
-                        fill={isLive ? "#8F84E6" : (isNow ? "var(--ink)" : "var(--mut)")}>
+                        fill={isLive ? GK.live : (isNow ? "var(--ink)" : "var(--mut)")}>
                         {label}{isLive ? " ›" : ""}
                       </text>
                     </g>
@@ -13388,7 +13481,7 @@ function Dashboard({ auditLog, denikCtx, onOpenDenik, onOpenDenikVec, invoices, 
                     <g key={"pop" + p.i} style={{ pointerEvents: "none" }}>
                       <rect x={x} y={p.y - 8} width={w} height={11} rx={3} fill="var(--surface)" opacity={0.92} />
                       <text x={x + w / 2} y={p.y} textAnchor="middle" fontSize={7.5}
-                        fontFamily="Inter" fill="#9C96B5">{p.t}</text>
+                        fontFamily="Inter" fill={GK.latka}>{p.t}</text>
                     </g>
                   );
                 })}
