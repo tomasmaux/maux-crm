@@ -736,6 +736,52 @@ function vydajeUzavrenoItemZLogu(financeItems, log) {
 function vydajeUzavrenoItem(financeItems, ym, zapis) {
   return vydajeUzavrenoItemZLogu(financeItems, { ...vydajeUzavrenoRead(financeItems), [ym]: zapis });
 }
+
+/* ── KŘIVKA NÁKLADŮ V GRAFU PŘÍJMŮ (22. 9. 2026) ──────────────────────────────
+   Tom: „náklady tam jsou rovná linka, ale mně se přeci vyvíjeli."
+   Rovná linka byla JEDNO dnešní číslo natažené přes všechny měsíce. Místo modelu
+   bereme měřená data, která appka už má:
+     · expense_checklist — které položky Tom v daném měsíci reálně odškrtl jako zaplacené
+     · docházka asistenta — Pepova mzda; platí se ZPĚTNĚ, mzda v měsíci X = práce X−1
+     · fi_vydaje_uzavreno — byl měsíc doklikaný do konce? U měsíců uzavřených po
+       18. 9. 2026 je tam i uložený `total` — nejpravdivější číslo, ceny té doby.
+   Měsíc, který nebyl nikdy uzavřen, NEDOSTANE bod — v grafu zůstane díra.
+   Naivní součet podklikaného měsíce by kreslil pokles nákladů, který se nestal. */
+function ymMinus1(ym) {
+  const [r, m] = String(ym).split("-").map(Number);
+  const d = new Date(r, m - 2, 1);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+}
+function nakladyPoMesicich(financeItems, paidRows, assistantAttendance) {
+  const uzavreno = vydajeUzavrenoRead(financeItems);
+  const castka = {};
+  (financeItems || []).forEach(i => {
+    if (i.category === "nutne" || i.category === "luxus") castka[i.id] = Math.abs(i.amount || 0);
+  });
+  const idsByYm = {};
+  (paidRows || []).forEach(rw => {
+    const ym = `${rw.year}-${String(rw.month).padStart(2, "0")}`;
+    (idsByYm[ym] = idsByYm[ym] || new Set()).add(rw.item_id);
+  });
+  const out = {};
+  Object.keys(uzavreno).forEach(ym => {
+    const zap = uzavreno[ym] || {};
+    const ids = idsByYm[ym] || new Set();
+    if (typeof zap.total === "number" && zap.total > 0) {
+      out[ym] = { total: zap.total, zdroj: "zapsano", ids };
+      return;
+    }
+    if (!ids.size) return;                      // uzavřeno, ale bez řádků → nekreslíme
+    // mzda vyplacená v ym = práce předchozího měsíce (mzda se platí zpětně)
+    const mzda = josefWageForYm(ymMinus1(ym), assistantAttendance, financeItems);
+    let p = 0;
+    ids.forEach(id => { p += castka[id] || 0; });  // josef_wage v castka není — přičte se zvlášť
+    const total = p + mzda;
+    if (total <= 0) return;
+    out[ym] = { total, zdroj: "dopocteno", ids };
+  });
+  return out;
+}
 const CZ_MES_KRATCE = ["led", "úno", "bře", "dub", "kvě", "čvn", "čvc", "srp", "zář", "říj", "lis", "pro"];
 const fmtDenMesic = (iso) => { const d = new Date(iso); return `${d.getDate()}. ${d.getMonth() + 1}.`; };
 const fmtUhradyAt = (iso) => { const d = new Date(iso); return `${d.getDate()}. ${d.getMonth()+1}. ${d.getFullYear()} ${String(d.getHours()).padStart(2,"0")}:${String(d.getMinutes()).padStart(2,"0")}`; };
@@ -8570,7 +8616,7 @@ function FirmaBar({ financeItems, invoices, dpfoMonths, loanTransactions, escrow
     if (!allDone || !stav.lastAt || !onSaveFinance) return;
     const cur = vydajeUzavrenoRead(financeItems)[ymNow];
     if (cur && cur.at === stav.lastAt && cur.total === Math.round(totalVyd)) return;
-    onSaveFinance(vydajeUzavrenoItem(financeItems, ymNow, { at: stav.lastAt, total: Math.round(totalVyd), n: stav.n }));
+    onSaveFinance(vydajeUzavrenoItem(financeItems, ymNow, { at: stav.lastAt, total: Math.round(totalVyd), n: stav.n, mzda: Math.round(josefWage || 0) }));
   }, [allDone, stav.lastAt, totalVyd]);
   // Backfill historie (Tom 18. 9. 2026: „ať je pás plný hned"): minulé měsíce bez záznamu se
   // doplní z expense_checklist — datum posledního zaplaceného kliknutí v měsíci, počet položek.
@@ -11926,6 +11972,15 @@ function Dashboard({ auditLog, denikCtx, onOpenDenik, onOpenDenikVec, invoices, 
   const vydajeCollapsed = vydajeStav(financeItems, expenseChecks).allDone && !vydajePeek;
   const [dragOver, setDragOver] = useState(null);
   const [hoverBar, setHoverBar] = useState(null);
+  // Křivka nákladů (22. 9. 2026) — historie odškrtaných položek, jedno čtení při načtení.
+  const [nakladyRows, setNakladyRows] = useState([]);
+  useEffect(() => {
+    let alive = true;
+    fetchExpenseChecksPaidAll()
+      .then(r => { if (alive) setNakladyRows(r); })
+      .catch(e => console.warn("křivka nákladů:", e.message));
+    return () => { alive = false; };
+  }, []);
   // Rozbaleni pasu "Na ceste" na jmena klientu. Hook musi byt na urovni panelu,
   // ne v zanorenem IIFE, ktere pas vykresluje.
   const [ncOpen, setNcOpen] = useState(false);
@@ -12175,6 +12230,10 @@ function Dashboard({ auditLog, denikCtx, onOpenDenik, onOpenDenikVec, invoices, 
     return result;
   })();
   const maxBarV = Math.max(...barData.map(d=>d.total), 1);
+  // Náklady po měsících — měřeno, ne modelováno (viz nakladyPoMesicich).
+  const nakladyHist = nakladyPoMesicich(financeItems, nakladyRows, assistantAttendance);
+  // Živý sloupec (příští měsíc) — projekce ze stejné báze jako nextMonthBalance.
+  const nakladyLive = Math.abs(totalNutne + totalLuxus - josefWageNext);
 
   // Chart data pro eventuelní použití jinde (kompatibilita)
   const months = Array.from({length: now.getMonth()+1}, (_,i) => {
@@ -13220,16 +13279,60 @@ function Dashboard({ auditLog, denikCtx, onOpenDenik, onOpenDenikVec, invoices, 
               </div>
 
               <svg width="100%" viewBox={`0 0 ${W} ${padT + BAR_AREA_H + padB}`} style={{overflow:"visible"}}>
-                {/* Náklady — tichá referenční linka, žádná osa */}
-                {/* totalVydaje je v Dashboardu ZÁPORNÉ (výdaje se sčítají se znaménkem) — proto
-                    stará podmínka `> 0` linku nikdy nevykreslila. Bereme absolutní hodnotu. */}
-                {Math.abs(totalVydaje) > 0 && (() => {
-                  const naklady = Math.abs(totalVydaje);
-                  const costY = baseY - toBarH(Math.min(naklady, range));
+                {/* Náklady — schodovitá laťka z měřených dat (22. 9. 2026), žádná osa.
+                    Dřív: jedno dnešní číslo natažené přes všechny měsíce. Teď: za každý
+                    měsíc to, co bylo reálně odškrtnuto + Pepova mzda. Měsíc bez dat nemá bod. */}
+                {(() => {
+                  const rows = barData.map((d, i) => {
+                    if (d.isLive) return nakladyLive > 0 ? { i, v: nakladyLive, zdroj: "projekce", ids: null } : null;
+                    const c = nakladyHist[d.key];
+                    return c ? { i, v: c.total, zdroj: c.zdroj, ids: c.ids } : null;
+                  }).filter(Boolean);
+                  if (!rows.length) return null;
+                  const yOf = (v) => baseY - toBarH(Math.min(v, range));
+                  const xA = (i) => Math.max(barX(i) - gap / 2, padL);
+                  const xB = (i) => Math.min(barX(i) + barW + gap / 2, W - padR);
+                  const opa = (z) => z === "zapsano" ? 0.62 : z === "dopocteno" ? 0.5 : 0.34;
+                  const dash = (z) => z === "projekce" ? "2,4" : "2,3";
+                  const nazev = (id) => id === "josef_wage" ? "Pepa"
+                    : (((financeItems || []).find(x => x.id === id) || {}).label || "");
+                  const vaha = (id) => id === "josef_wage" ? 1e9
+                    : Math.abs((((financeItems || []).find(x => x.id === id) || {}).amount) || 0);
+                  // Co ten schod způsobilo — rozdíl odškrtaných položek proti minulému měsíci.
+                  const duvod = (p, c) => {
+                    if (!p || !c || !p.ids || !c.ids) return null;
+                    const pri = [...c.ids].filter(id => !p.ids.has(id)).sort((a, b) => vaha(b) - vaha(a));
+                    const ub = [...p.ids].filter(id => !c.ids.has(id)).sort((a, b) => vaha(b) - vaha(a));
+                    const vyb = pri.length ? { zn: "+", id: pri[0] } : (ub.length ? { zn: "−", id: ub[0] } : null);
+                    if (!vyb) return null;
+                    const n = nazev(vyb.id);
+                    return n ? `${vyb.zn} ${n}` : null;
+                  };
+                  const posl = rows[rows.length - 1];
                   return (
                     <g style={{ pointerEvents: "none" }}>
-                      <line x1={padL} x2={W-padR} y1={costY} y2={costY} stroke="#9C96B5" strokeWidth={1} strokeDasharray="2,3" opacity={0.55} />
-                      <text x={W-padR} y={costY-5} textAnchor="end" fontSize={8} fontFamily="Inter" fill="#9C96B5">náklady ≈ {Math.round(naklady/1000)} tis.</text>
+                      {rows.map((r, k) => {
+                        const y = yOf(r.v);
+                        const prev = k > 0 && rows[k - 1].i === r.i - 1 ? rows[k - 1] : null;
+                        const yPrev = prev ? yOf(prev.v) : null;
+                        const pop = prev && Math.abs(r.v - prev.v) >= 3000 ? duvod(prev, r) : null;
+                        return (
+                          <g key={r.i}>
+                            <line x1={xA(r.i)} x2={xB(r.i)} y1={y} y2={y} stroke="#9C96B5"
+                              strokeWidth={1.2} strokeDasharray={dash(r.zdroj)} opacity={opa(r.zdroj)} />
+                            {prev && yPrev !== y && (
+                              <line x1={xA(r.i)} x2={xA(r.i)} y1={yPrev} y2={y} stroke="#9C96B5"
+                                strokeWidth={1} strokeDasharray="2,3" opacity={0.3} />
+                            )}
+                            {pop && (
+                              <text x={xA(r.i) + 3} y={Math.min(yPrev, y) - 4} fontSize={7.5}
+                                fontFamily="Inter" fill="#9C96B5" opacity={0.85}>{pop}</text>
+                            )}
+                          </g>
+                        );
+                      })}
+                      <text x={W - padR} y={yOf(posl.v) - 5} textAnchor="end" fontSize={8}
+                        fontFamily="Inter" fill="#9C96B5">náklady {"≈"} {Math.round(posl.v / 1000)} tis.</text>
                     </g>
                   );
                 })()}
@@ -13278,13 +13381,21 @@ function Dashboard({ auditLog, denikCtx, onOpenDenik, onOpenDenikVec, invoices, 
                 {hov && (() => {
                   const i = hoverBar;
                   const [hy, hm] = hov.key.split("-").map(Number);
+                  const hc = hov.isLive
+                    ? (nakladyLive > 0 ? { total: nakladyLive, zdroj: "projekce" } : null)
+                    : nakladyHist[hov.key];
+                  const zbylo = hc ? hov.total - hc.total : 0;
+                  const marze = hc && hov.total > 0 ? Math.round((zbylo / hov.total) * 100) : null;
                   const lines = [
                     `${czMes(hm - 1)} ${hy}${hov.isLive ? " · živě" : ""}`,
                     `faktury ${fmtKc(hov.inv)} · úschovy ${fmtKc(hov.escrow)}`,
                     `celkem ${fmtKc(hov.total)}`,
+                    ...(hc ? [`náklady ${fmtKc(hc.total)}${hc.zdroj === "projekce" ? " · projekce" : ""}`] : []),
+                    ...(hc && hov.total > 0 ? [`zbylo ${fmtKc(zbylo)} · marže ${marze} %`] : []),
+                    ...(hc && hc.zdroj === "dopocteno" ? ["dopočteno z odškrtaných položek"] : []),
                     ...(hov.isLive ? ["roste s každým výkazem a dnem úroku"] : []),
                   ];
-                  const boxW = 236, boxH = 14 + lines.length * 13;
+                  const boxW = 252, boxH = 14 + lines.length * 13;
                   const tx = Math.min(Math.max(barX(i) + barW/2, boxW/2 + 4), W - boxW/2 - 4);
                   const ty = padT - 10;
                   return (
