@@ -11728,6 +11728,13 @@ const MAUX_GLASS_MODAL = {
    Laťka nákladů dělí sloupec: pod ní matné sklo (šlo na provoz), nad ní svítí
    jen to, co Tomovi zbylo. Měsíce bez laťky (před 6/2026) zůstávají plně syté —
    o rozdělení u nich nic nevíme a tvrdit opak by byla lež v druhou stranu. */
+// Čepička úschov musí dosednout na indigo. `rect` zaobluje všechny čtyři rohy
+// a na světlém vrcholu gradientu pak spodní oblouky prosvítají bíle — čepička
+// vypadá odlepená. Proto cesta se zaoblením jen nahoře.
+function gkCapD(x, y, w, h, r) {
+  const rr = Math.max(0, Math.min(r, w / 2, h));
+  return `M${x},${y + h} L${x},${y + rr} Q${x},${y} ${x + rr},${y} L${x + w - rr},${y} Q${x + w},${y} ${x + w},${y + rr} L${x + w},${y + h} Z`;
+}
 const GK = {
   indBot: "#3A339A", indTop: "#6C5CDA", indTopNow: "#7D6FE4",
   mintBot: "#15D991", mintTop: "#3AF5A7",
@@ -13414,7 +13421,7 @@ function Dashboard({ auditLog, denikCtx, onOpenDenik, onOpenDenikVec, invoices, 
                                 fill="url(#gkInv)" filter="url(#gkHi)" />
                             )}
                             {d.escrow > 0 && (
-                              <rect x={x} y={baseY - totalH} width={barW} height={escH} rx={4} ry={4}
+                              <path d={gkCapD(x, baseY - totalH, barW, escH, 4)}
                                 fill="url(#gkEsc)" filter="url(#gkHm)" />
                             )}
                           </g>
@@ -13433,7 +13440,7 @@ function Dashboard({ auditLog, denikCtx, onOpenDenik, onOpenDenikVec, invoices, 
                               fill={deleno ? GK.paleInd : fInv} filter={deleno ? undefined : "url(#gkHi)"} />
                           )}
                           {d.escrow > 0 && (
-                            <rect x={x} y={baseY - totalH} width={barW} height={escH} rx={4} ry={4}
+                            <path d={gkCapD(x, baseY - totalH, barW, escH, 4)}
                               fill={deleno ? GK.paleMint : "url(#gkEsc)"} filter={deleno ? undefined : "url(#gkHm)"} />
                           )}
                           {deleno && (
@@ -13444,7 +13451,7 @@ function Dashboard({ auditLog, denikCtx, onOpenDenik, onOpenDenikVec, invoices, 
                                   fill={fInv} filter="url(#gkHi)" />
                               )}
                               {d.escrow > 0 && (
-                                <rect x={x} y={baseY - totalH} width={barW} height={escH} rx={4} ry={4}
+                                <path d={gkCapD(x, baseY - totalH, barW, escH, 4)}
                                   fill="url(#gkEsc)" filter="url(#gkHm)" />
                               )}
                             </g>
