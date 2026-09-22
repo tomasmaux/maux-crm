@@ -11852,15 +11852,13 @@ function Dashboard({ auditLog, denikCtx, onOpenDenik, onOpenDenikVec, invoices, 
 
   // Revenue metrics
   const ytd = invoices.filter(i => (i.issue_date||"").startsWith(String(year))).reduce((s,i) => s+(i.subtotal||0), 0);
-  const ytdTotal = invoices.filter(i => (i.issue_date||"").startsWith(String(year))).reduce((s,i) => s+(i.total||0), 0);
   const mRev = invoices.filter(i => (i.issue_date||"").startsWith(thisMonth)).reduce((s,i) => s+(i.subtotal||0), 0);
   const mRevPrev = invoices.filter(i => (i.issue_date||"").startsWith(prevMonth)).reduce((s,i) => s+(i.subtotal||0), 0);
   const trend = mRevPrev > 0 ? Math.round(((mRev-mRevPrev)/mRevPrev)*100) : null;
   // Fakturováno tento měsíc — čistě vlastní odměna z vystavených faktur (subtotal = bez DPH),
   // BEZ přefakturací (notář/sp.pop./prohlášení o pravosti podpisu — to nejsou Tomovy peníze, jen průtok)
-  // a BEZ úschov (ty jdou samostatně). mRev = bez DPH, mRevWithVat = s DPH.
-  const mRevVatAmt = invoices.filter(i => (i.issue_date||"").startsWith(thisMonth)).reduce((s,i) => s+(i.vat_amount||0), 0);
-  const mRevWithVat = mRev + mRevVatAmt;
+  // a BEZ úschov (ty jdou samostatně). mRev = bez DPH. Varianta s DPH tu byla a nikde se
+  // nepoužívala — vyříznuta 22. 9. 2026 (hlavní číslo v appce je vždy základ).
 
   // DPH spořák — uhrazené faktury, DPH ještě neodvedeno
   const dphReserved = dphObalkaUnsettled(invoices, financeItems); // vybrané DPH minus odpočet období
@@ -11869,7 +11867,7 @@ function Dashboard({ auditLog, denikCtx, onOpenDenik, onOpenDenikVec, invoices, 
   const unbilled = workEntries.filter(e => !e.invoice_id);
   // Reálná (čistá) hodnota nevyfakturované práce — bez DPH (to není Tomovo, jen průtok přes
   // firmu) a bez přefakturací notáře/sp.poplatku/prohlášení o pravosti podpisu (taky jen průtok,
-  // viz komentář u mRevVatAmt výše). Stejná báze jako invoice.subtotal a jako "Tento měsíc"
+  // viz komentář u mRev výše). Stejná báze jako invoice.subtotal a jako "Tento měsíc"
   // v hlavičkové liště — Tom, 29.6.2026: "já chci reálnou moji bilanci financí, mých peněz."
   const unbilledAmt = unbilledWorkNetNoVat(workEntries);
 
@@ -14539,11 +14537,11 @@ function InvoiceList({ invoices, clients, workEntries, escrows, onOpen, onOpenCl
                       </div>
                     </div>
                     <div style={{ textAlign: "right", marginRight: 16 }}>
-                      <div style={{ fontFamily:"Inter,ui-sans-serif,system-ui,sans-serif",fontVariantNumeric:"tabular-nums", fontSize: 18, fontWeight:600, color: "var(--gold)" }}>
-                        {fmtKc(inv.total || 0)}
+                      <div style={{ fontFamily:"Inter,ui-sans-serif,system-ui,sans-serif",fontVariantNumeric:"tabular-nums", fontSize: 18, fontWeight:600, color: "var(--ink)" }}>
+                        {fmtKc(inv.subtotal || 0)}
                       </div>
-                      <div style={{ fontSize: 11, color: "var(--mut)" }}>
-                        základ {fmtKc(inv.subtotal || 0)} + DPH {fmtKc((inv.total || 0) - (inv.subtotal || 0))}
+                      <div className="maux-num" style={{ fontSize: 11, color: "var(--mut)" }}>
+                        + DPH {fmtKc((inv.total || 0) - (inv.subtotal || 0))} · {fmtKc(inv.total || 0)} s DPH
                       </div>
                     </div>
                     <button className="btn" style={{ fontSize: 12, flexShrink: 0 }}
@@ -14634,10 +14632,15 @@ function InvoiceList({ invoices, clients, workEntries, escrows, onOpen, onOpenCl
                     {alt && <div style={{ fontSize: 10.5, color: "var(--ink)", marginTop: 2 }}>→ odběratel na faktuře: <b>{alt.name}</b></div>}
                   </div>
                   <div style={{ fontSize: 11.5, color: "var(--mut)" }}>
-                    základ {fmtKc(d.workAmt)} + DPH {fmtKc(d.vat)}{(d.admin + d.sig) > 0 ? ` + přef. ${fmtKc(d.admin + d.sig)}` : ""}
+                    + DPH {fmtKc(d.vat)}{(d.admin + d.sig) > 0 ? ` + přef. ${fmtKc(d.admin + d.sig)}` : ""}
                     {d.discount > 0 && <div style={{ fontSize: 10.5, color: "#A8527A", marginTop: 1 }}>sleva −{fmtKc(d.discount)}</div>}
                   </div>
-                  <div className="maux-num" style={{ textAlign: "right", fontSize: 14.5, fontWeight: 600, color: "var(--txt)" }}>{fmtKc(d.total)}</div>
+                  {/* Hlavní číslo = základ bez DPH (Tom 22. 9. 2026: DPH není příjem, účetní i KPI
+                      mluví základem). Brutto zůstává šedě pod ním — je to, co klient pošle na účet. */}
+                  <div style={{ textAlign: "right" }}>
+                    <div className="maux-num" style={{ fontSize: 14.5, fontWeight: 600, color: "var(--txt)" }}>{fmtKc(d.workAmt)}</div>
+                    <div className="maux-num" style={{ fontSize: 10.5, color: "var(--mut)", marginTop: 2 }}>{fmtKc(d.total)} s DPH</div>
+                  </div>
                   <div style={{ display: "flex", alignItems: "center", gap: 6, justifyContent: "flex-end" }}>
                     <button className="btn" style={{ fontSize: 12 }} title="Průběžný soupis pro klienta — stav k dnešku, není daňový doklad" onClick={() => stahnoutPrubeznySoupis(d.client, d.entries, onSoupisLog)}>Soupis</button>
                     <button className="btn" style={{ fontSize: 12 }} onClick={() => onPreviewInvoice && onPreviewInvoice(d.clientId, d.entries)}>Náhled</button>
@@ -14846,7 +14849,7 @@ function InvoiceDetail({ inv, clients, onBack, onEdit, onDelete, historie }) {
         <div className="mf"><div className="ml">Klient</div><div className="mv">{clientName}</div></div>
         <div className="mf"><div className="ml">Vystavena</div><div className="mv">{fmtDate(inv.issue_date)}</div></div>
         <div className="mf"><div className="ml">Splatnost</div><div className="mv">{fmtDate(inv.due_date)}</div></div>
-        <div className="mf"><div className="ml">Základ bez DPH</div><div className="mv" style={{ fontFamily:"Inter,ui-sans-serif,system-ui,sans-serif",fontVariantNumeric:"tabular-nums", fontSize: 20, fontWeight:600, color: "var(--gold)" }}>{fmtKc(inv.subtotal)}</div></div>
+        <div className="mf"><div className="ml">Základ bez DPH</div><div className="mv" style={{ fontFamily:"Inter,ui-sans-serif,system-ui,sans-serif",fontVariantNumeric:"tabular-nums", fontSize: 20, fontWeight:600, color: "var(--ink)" }}>{fmtKc(inv.subtotal)}</div></div>
         <div className="mf"><div className="ml">Celkem s DPH</div><div className="mv" style={{ fontSize: 14, color: "var(--mut)" }}>{fmtKc(inv.total)}</div></div>
       </div>
       <table className="inv-items-det">
@@ -16958,7 +16961,7 @@ function ClientPlatby({ c, invoices, financeItems, onFixPaidAt }) {
       )}
       <div style={{ overflowX: "auto" }}>
         <table style={{ width: "100%", borderCollapse: "collapse" }}>
-          <thead><tr><th style={th}>Faktura</th><th style={th}>Vystaveno</th><th style={th}>Splatnost</th><th style={th}>Zaplaceno</th><th style={{ ...th, ...r }}>Dní</th><th style={{ ...th, ...r }}>Částka</th></tr></thead>
+          <thead><tr><th style={th}>Faktura</th><th style={th}>Vystaveno</th><th style={th}>Splatnost</th><th style={th}>Zaplaceno</th><th style={{ ...th, ...r }}>Dní</th><th style={{ ...th, ...r }} title="Co reálně přišlo na účet — proto s DPH, na rozdíl od zbytku appky">Částka s DPH</th></tr></thead>
           <tbody>
             {/* Nezaplacené po splatnosti stojí nahoře, cihlově — to je jediná věc, která tu hoří. */}
             {visi.map(({ inv, days }) => (
