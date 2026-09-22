@@ -13251,6 +13251,39 @@ function Dashboard({ auditLog, denikCtx, onOpenDenik, onOpenDenikVec, invoices, 
               </svg>
             );
           };
+          // ── Laťka nákladů — spočítat tady, vykreslit na dvakrát ──
+          // Čára patří POD sloupce (ať je graf tichý), popisky schodů NAD ně —
+          // jinak je sloupec překreslí a z „+ Claude Max" zbyde „+ C".
+          const nakRows = barData.map((d, i) => {
+            if (d.isLive) return nakladyLive > 0 ? { i, v: nakladyLive, zdroj: "projekce", ids: null } : null;
+            const c = nakladyHist[d.key];
+            return c ? { i, v: c.total, zdroj: c.zdroj, ids: c.ids } : null;
+          }).filter(Boolean);
+          const nakY = (v) => baseY - toBarH(Math.min(v, range));
+          const nakXA = (i) => Math.max(barX(i) - gap / 2, padL);
+          const nakXB = (i) => Math.min(barX(i) + barW + gap / 2, W - padR);
+          const nakOpa = (z) => z === "zapsano" ? 0.62 : z === "dopocteno" ? 0.5 : 0.34;
+          const nakDash = (z) => z === "projekce" ? "2,4" : "2,3";
+          const nakNazev = (id) => id === "josef_wage" ? "Pepa"
+            : (((financeItems || []).find(x => x.id === id) || {}).label || "");
+          const nakVaha = (id) => id === "josef_wage" ? 1e9
+            : Math.abs((((financeItems || []).find(x => x.id === id) || {}).amount) || 0);
+          // Co ten schod způsobilo — rozdíl odškrtaných položek proti minulému měsíci.
+          const nakDuvod = (p, c) => {
+            if (!p || !c || !p.ids || !c.ids) return null;
+            const pri = [...c.ids].filter(id => !p.ids.has(id)).sort((x, y) => nakVaha(y) - nakVaha(x));
+            const ub = [...p.ids].filter(id => !c.ids.has(id)).sort((x, y) => nakVaha(y) - nakVaha(x));
+            const vyb = pri.length ? { zn: "+", id: pri[0] } : (ub.length ? { zn: "−", id: ub[0] } : null);
+            if (!vyb) return null;
+            const n = nakNazev(vyb.id);
+            return n ? `${vyb.zn} ${n}` : null;
+          };
+          const nakPopisky = nakRows.map((r, k) => {
+            const prev = k > 0 && nakRows[k - 1].i === r.i - 1 ? nakRows[k - 1] : null;
+            if (!prev || Math.abs(r.v - prev.v) < 3000) return null;
+            const t = nakDuvod(prev, r);
+            return t ? { i: r.i, t, y: Math.min(nakY(prev.v), nakY(r.v)) - 7 } : null;
+          }).filter(Boolean);
           const hov = hoverBar != null ? barData[hoverBar] : null;
           return (
             <>
@@ -13282,60 +13315,29 @@ function Dashboard({ auditLog, denikCtx, onOpenDenik, onOpenDenikVec, invoices, 
                 {/* Náklady — schodovitá laťka z měřených dat (22. 9. 2026), žádná osa.
                     Dřív: jedno dnešní číslo natažené přes všechny měsíce. Teď: za každý
                     měsíc to, co bylo reálně odškrtnuto + Pepova mzda. Měsíc bez dat nemá bod. */}
-                {(() => {
-                  const rows = barData.map((d, i) => {
-                    if (d.isLive) return nakladyLive > 0 ? { i, v: nakladyLive, zdroj: "projekce", ids: null } : null;
-                    const c = nakladyHist[d.key];
-                    return c ? { i, v: c.total, zdroj: c.zdroj, ids: c.ids } : null;
-                  }).filter(Boolean);
-                  if (!rows.length) return null;
-                  const yOf = (v) => baseY - toBarH(Math.min(v, range));
-                  const xA = (i) => Math.max(barX(i) - gap / 2, padL);
-                  const xB = (i) => Math.min(barX(i) + barW + gap / 2, W - padR);
-                  const opa = (z) => z === "zapsano" ? 0.62 : z === "dopocteno" ? 0.5 : 0.34;
-                  const dash = (z) => z === "projekce" ? "2,4" : "2,3";
-                  const nazev = (id) => id === "josef_wage" ? "Pepa"
-                    : (((financeItems || []).find(x => x.id === id) || {}).label || "");
-                  const vaha = (id) => id === "josef_wage" ? 1e9
-                    : Math.abs((((financeItems || []).find(x => x.id === id) || {}).amount) || 0);
-                  // Co ten schod způsobilo — rozdíl odškrtaných položek proti minulému měsíci.
-                  const duvod = (p, c) => {
-                    if (!p || !c || !p.ids || !c.ids) return null;
-                    const pri = [...c.ids].filter(id => !p.ids.has(id)).sort((a, b) => vaha(b) - vaha(a));
-                    const ub = [...p.ids].filter(id => !c.ids.has(id)).sort((a, b) => vaha(b) - vaha(a));
-                    const vyb = pri.length ? { zn: "+", id: pri[0] } : (ub.length ? { zn: "−", id: ub[0] } : null);
-                    if (!vyb) return null;
-                    const n = nazev(vyb.id);
-                    return n ? `${vyb.zn} ${n}` : null;
-                  };
-                  const posl = rows[rows.length - 1];
-                  return (
-                    <g style={{ pointerEvents: "none" }}>
-                      {rows.map((r, k) => {
-                        const y = yOf(r.v);
-                        const prev = k > 0 && rows[k - 1].i === r.i - 1 ? rows[k - 1] : null;
-                        const yPrev = prev ? yOf(prev.v) : null;
-                        const pop = prev && Math.abs(r.v - prev.v) >= 3000 ? duvod(prev, r) : null;
-                        return (
-                          <g key={r.i}>
-                            <line x1={xA(r.i)} x2={xB(r.i)} y1={y} y2={y} stroke="#9C96B5"
-                              strokeWidth={1.2} strokeDasharray={dash(r.zdroj)} opacity={opa(r.zdroj)} />
-                            {prev && yPrev !== y && (
-                              <line x1={xA(r.i)} x2={xA(r.i)} y1={yPrev} y2={y} stroke="#9C96B5"
-                                strokeWidth={1} strokeDasharray="2,3" opacity={0.3} />
-                            )}
-                            {pop && (
-                              <text x={xA(r.i) + 3} y={Math.min(yPrev, y) - 4} fontSize={7.5}
-                                fontFamily="Inter" fill="#9C96B5" opacity={0.85}>{pop}</text>
-                            )}
-                          </g>
-                        );
-                      })}
-                      <text x={W - padR} y={yOf(posl.v) - 5} textAnchor="end" fontSize={8}
-                        fontFamily="Inter" fill="#9C96B5">náklady {"≈"} {Math.round(posl.v / 1000)} tis.</text>
-                    </g>
-                  );
-                })()}
+                {nakRows.length > 0 && (
+                  <g style={{ pointerEvents: "none" }}>
+                    {nakRows.map((r, k) => {
+                      const y = nakY(r.v);
+                      const prev = k > 0 && nakRows[k - 1].i === r.i - 1 ? nakRows[k - 1] : null;
+                      const yPrev = prev ? nakY(prev.v) : null;
+                      return (
+                        <g key={r.i}>
+                          <line x1={nakXA(r.i)} x2={nakXB(r.i)} y1={y} y2={y} stroke="#9C96B5"
+                            strokeWidth={1.2} strokeDasharray={nakDash(r.zdroj)} opacity={nakOpa(r.zdroj)} />
+                          {prev && yPrev !== y && (
+                            <line x1={nakXA(r.i)} x2={nakXA(r.i)} y1={yPrev} y2={y} stroke="#9C96B5"
+                              strokeWidth={1} strokeDasharray="2,3" opacity={0.3} />
+                          )}
+                        </g>
+                      );
+                    })}
+                    <text x={W - padR} y={nakY(nakRows[nakRows.length - 1].v) - 5} textAnchor="end"
+                      fontSize={8} fontFamily="Inter" fill="#9C96B5">
+                      náklady {"≈"} {Math.round(nakRows[nakRows.length - 1].v / 1000)} tis.
+                    </text>
+                  </g>
+                )}
                 <line x1={padL} x2={W-padR} y1={baseY} y2={baseY} stroke="rgba(28,10,99,.12)" strokeWidth={1} />
 
                 {barData.map((d, i) => {
@@ -13373,6 +13375,20 @@ function Dashboard({ auditLog, denikCtx, onOpenDenik, onOpenDenikVec, invoices, 
                         fill={isLive ? "#8F84E6" : (isNow ? "var(--ink)" : "var(--mut)")}>
                         {label}{isLive ? " ›" : ""}
                       </text>
+                    </g>
+                  );
+                })}
+
+                {/* Popisky schodů — až za sloupci, jinak je sloupec překreslí. Čip
+                    v barvě karty drží text čitelný i tam, kde leží přes sloupec. */}
+                {nakPopisky.map(p => {
+                  const w = p.t.length * 4.1 + 8;
+                  const x = Math.min(Math.max(nakXA(p.i) - w / 2, padL), W - padR - w);
+                  return (
+                    <g key={"pop" + p.i} style={{ pointerEvents: "none" }}>
+                      <rect x={x} y={p.y - 8} width={w} height={11} rx={3} fill="var(--surface)" opacity={0.92} />
+                      <text x={x + w / 2} y={p.y} textAnchor="middle" fontSize={7.5}
+                        fontFamily="Inter" fill="#9C96B5">{p.t}</text>
                     </g>
                   );
                 })}
