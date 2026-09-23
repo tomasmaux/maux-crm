@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo, useRef, Fragment, createContext, useContext } from "react";
+import { createPortal } from "react-dom";
 import { supabase } from "./supabase";
 import QRCode from "qrcode";
 
@@ -1019,8 +1020,9 @@ const denikText = (e) => (e.parts || []).map(p => typeof p === "string" ? p : p.
 function denikUdalosti(log, ctx) {
   const zDb = (log || []).map(r => { try { return denikPreloz(r, ctx); } catch (err) { return null; } }).filter(Boolean);
   let soupisy = []; try { soupisy = denikSoupisUdalosti(ctx); } catch (err) { soupisy = []; }
-  if (!soupisy.length) return zDb;
-  return [...zDb, ...soupisy].sort((a, b) => (b.at || "").localeCompare(a.at || ""));
+  let prani = []; try { prani = denikPraniUdalosti(ctx); } catch (err) { prani = []; }
+  if (!soupisy.length && !prani.length) return zDb;
+  return [...zDb, ...soupisy, ...prani].sort((a, b) => (b.at || "").localeCompare(a.at || ""));
 }
 // Události k jedné věci: řádek sám + navěšené řádky (tranše a AML osoby úschovy, faktury klienta).
 function denikProVec(udalosti, tbl, rowId, ctx) {
@@ -1632,6 +1634,215 @@ function denikSoupisUdalosti(ctx) {
     }));
   });
   return out;
+}
+
+/* ── NAROZENINY KLIENTŮ (23. 9. 2026) ─────────────────────────────────────────────────
+   Tom: „reminder na přehledu, čí narozky se blíží" → „místo sparkline, ta mi nic neříká" →
+   „tlačítko poslat e-mail… k Vašim dnešním narozeninám; kulaté jako bych to psal fakt já".
+   Schválena varianta 2 „Týden dopředu": roh v hlavičce kalendáře, nejbližších 7 dní.
+   • Tlačítko NIKDY neodesílá — založí koncept v Tomově schránce (/me/messages), stejný
+     model jako upomínky ve fakturace@. Přání na jiný den dostane ODLOŽENÉ DORUČENÍ na 8:00
+     v den narozenin (PidTagDeferredSendTime = Outlook „Zpozdit doručení"): Tom odešle hned,
+     Exchange zprávu podrží. Přání na dnešek jde bez odkladu.
+   • Zdroj = pole Narozen v kartě klienta (smlouvy, faktury), NE AML záznamy — čl. 41 odst. 3
+     směrnice 2015/849 zakazuje zpracovávat AML data k obchodním účelům.
+   • Jen aktivní a spící klienti (spící = přání je nejhezčí důvod se připomenout), ukončení ne.
+   • Texty: běžné = šablona, kulaté = banka po dekádách psaná Tomovým hlasem (Claude,
+     23. 9. 2026). Varianta se točí podle roku a klienta — nikdo nedostane dvakrát totéž.
+     Nic neopouští appku: žádné API, žádné jméno ven. Rod se neodhaduje v textu — texty
+     jsou psané bez příčestí (dal/dala), rod řeší jen oslovení.
+   • Oslovení v 5. pádě navrhne appka (czVokativ); když se netrefí, Tom ho opraví přímo
+     v okně konceptu a appka si ho pamatuje (fi_prani.osloveni — config, bez migrace).
+   • Log fi_prani.log → tlačítko se změní na „koncept" a Deník ukáže syntetickou událost. */
+const PRANI_ID = "fi_prani";
+const MAUX_ZALOZENI = "2025-10-01";   // Tomovo oficiální založení kanceláře (převzetí Riegrova nám.)
+function praniRead(financeItems) {
+  const it = (financeItems || []).find(i => i.id === PRANI_ID);
+  try {
+    const p = JSON.parse(it?.notes || "{}") || {};
+    return { osloveni: (p.osloveni && typeof p.osloveni === "object") ? p.osloveni : {}, log: Array.isArray(p.log) ? p.log : [] };
+  } catch (e) { return { osloveni: {}, log: [] }; }
+}
+function _praniItem(financeItems, data) {
+  const prev = (financeItems || []).find(i => i.id === PRANI_ID) || {};
+  return { ...prev, id: PRANI_ID, category: "config", label: "Přání k narozeninám", amount: 0, notes: JSON.stringify(data) };
+}
+function praniLogAppend(financeItems, zaznam) {
+  const d = praniRead(financeItems);
+  const hranice = new Date(Date.now() - 3 * 365 * 86400000).toISOString();   // 3 roky stačí
+  d.log = [...d.log.filter(r => (r.at || "") >= hranice), { at: new Date().toISOString(), ...zaznam }];
+  return _praniItem(financeItems, d);
+}
+function praniOsloveniSet(financeItems, clientId, text) {
+  const d = praniRead(financeItems);
+  const t = String(text || "").trim();
+  if (t) d.osloveni[clientId] = t; else delete d.osloveni[clientId];
+  return _praniItem(financeItems, d);
+}
+
+// Rod a 5. pád. Záměrně jednoduché — výsledek vždy vidí Tom v okně konceptu a může ho opravit.
+const _CZ_ZENSKA_JMENA_BEZ_A = ["dagmar", "ester", "miriam", "ingrid", "carmen", "karin", "nikol", "ivet", "ruth", "edith", "beatrice", "alice", "adéla", "marie", "lucie", "zoe", "natálie", "rachel", "nicole", "michelle", "jacqueline", "noemi"];
+function _czJmenoPrijmeni(c) {
+  const casti = String(c?.name || "").trim().split(/\s+/).filter(Boolean);
+  return {
+    jmeno: String(c?.first_name || casti[0] || "").trim(),
+    prijmeni: String(c?.last_name || (casti.length > 1 ? casti[casti.length - 1] : "") || "").trim(),
+  };
+}
+function czZena(c) {
+  const { jmeno, prijmeni } = _czJmenoPrijmeni(c);
+  const ln = prijmeni.toLowerCase(), fn = jmeno.toLowerCase();
+  if (/(ová|á)$/.test(ln)) return true;           // Horáková, Veselá
+  if (/ý$/.test(ln)) return false;                 // Veselý
+  if (_CZ_ZENSKA_JMENA_BEZ_A.includes(fn)) return true;
+  return /a$/.test(fn);                            // Jana, Eva (mužská jména na -a jsou v kartách vzácná)
+}
+function czVokativPrijmeni(s) {
+  const w = String(s || "").trim();
+  if (w.length < 2) return w;
+  const low = w.toLowerCase();
+  if (/(ý|í|é|ů|o|u|i|e)$/.test(low)) return w;                        // Veselý, Krejčí, Janů — beze změny
+  if (/a$/.test(low)) return w.slice(0, -1) + "o";                        // Svoboda → Svobodo
+  if (/něk$/.test(low)) return w.slice(0, -3) + "ňku";                    // Vaněk → Vaňku
+  if (/děk$/.test(low)) return w.slice(0, -3) + "ďku";
+  if (/těk$/.test(low)) return w.slice(0, -3) + "ťku";
+  if (/ek$/.test(low) && w.length > 3) return w.slice(0, -2) + "ku";      // Marek → Marku, Sedláček → Sedláčku
+  if (/ec$/.test(low) && w.length > 3) return w.slice(0, -2) + "če";      // Němec → Němče
+  if (/[^aeiouyáéíóúůý]el$/.test(low)) return w.slice(0, -2) + "le";      // Havel → Havle
+  if (/(k|h|g|ch)$/.test(low)) return w + "u";                            // Novák → Nováku, Vlach → Vlachu
+  if (/[^aeiouyáéíóúůý]r$/.test(low)) return w.slice(0, -1) + "ře";       // Petr → Petře
+  if (/[žščřcjďťňsxz]$/.test(low)) return w + "i";                        // Beneš → Beneši, Kolář → Koláři
+  if (/[bdflmnprtvw]$/.test(low)) return w + "e";                         // Zeman → Zemane, Doležal → Doležale
+  return w;
+}
+function czOsloveni(c, prani) {
+  const vlastni = prani && prani.osloveni && prani.osloveni[c?.id];
+  if (vlastni) return vlastni;
+  const { prijmeni } = _czJmenoPrijmeni(c);
+  if (!prijmeni) return "";
+  return czZena(c) ? `paní ${prijmeni}` : `pane ${czVokativPrijmeni(prijmeni)}`;
+}
+
+// Kdo slaví v nejbližších `dni` dnech (dnes = 0). 29. 2. slaví v nepřestupném roce 28. 2.
+const _jePrestupny = (r) => (r % 4 === 0 && r % 100 !== 0) || r % 400 === 0;
+function narozeninyOkno(clients, dni = 7, ted = new Date()) {
+  const t0 = new Date(ted.getFullYear(), ted.getMonth(), ted.getDate());
+  const out = [];
+  (clients || []).forEach(c => {
+    if (!c || !c.birth_date || c.status === "ukončený") return;
+    const [by, bm, bd] = String(c.birth_date).slice(0, 10).split("-").map(Number);
+    if (!by || !bm || !bd) return;
+    for (const rok of [t0.getFullYear(), t0.getFullYear() + 1]) {
+      const den = (bm === 2 && bd === 29 && !_jePrestupny(rok)) ? 28 : bd;
+      const dt = new Date(rok, bm - 1, den);
+      const diff = Math.round((dt - t0) / 86400000);   // round: přechod na letní čas
+      if (diff >= 0 && diff < dni) {
+        const vek = rok - by;
+        out.push({ client: c, datum: localYmd(dt), rok, diff, vek, kulate: vek >= 20 && vek % 10 === 0 });
+        break;
+      }
+    }
+  });
+  return out.sort((a, b) => a.diff - b.diff || String(a.client.name || "").localeCompare(String(b.client.name || ""), "cs"));
+}
+// Výročí kanceláře (1. 10.) — tichý řádek bez tlačítka, když padne do okna.
+function mauxVyroci(dni = 7, ted = new Date()) {
+  const [zy, zm, zd] = MAUX_ZALOZENI.split("-").map(Number);
+  const t0 = new Date(ted.getFullYear(), ted.getMonth(), ted.getDate());
+  for (const rok of [t0.getFullYear(), t0.getFullYear() + 1]) {
+    const dt = new Date(rok, zm - 1, zd);
+    const diff = Math.round((dt - t0) / 86400000);
+    if (diff >= 0 && diff < dni && rok > zy) return { datum: localYmd(dt), diff, roky: rok - zy };
+  }
+  return null;
+}
+const _PRANI_DNY_KRATCE = ["ne", "po", "út", "st", "čt", "pá", "so"];
+const _PRANI_DNY_AKUZ = ["neděli", "pondělí", "úterý", "středu", "čtvrtek", "pátek", "sobotu"];
+const _PRANI_DNY_NOM = ["neděle", "pondělí", "úterý", "středa", "čtvrtek", "pátek", "sobota"];
+const praniKdy = (diff, ymd) => diff === 0 ? "dnes" : diff === 1 ? "zítra" : _PRANI_DNY_KRATCE[new Date(ymd + "T00:00:00").getDay()];
+const praniTlacitko = (diff, ymd) => diff === 0 ? "Připravit přání" : diff === 1 ? "Připravit na zítra" : "Připravit na " + _PRANI_DNY_AKUZ[new Date(ymd + "T00:00:00").getDay()];
+const praniDoruceniIso = (ymd) => { const [y, m, d] = ymd.split("-").map(Number); return new Date(y, m - 1, d, 8, 0, 0).toISOString(); };
+const praniDoruceniText = (ymd) => { const d = new Date(ymd + "T00:00:00"); return `${_PRANI_DNY_NOM[d.getDay()]} ${d.getDate()}. ${d.getMonth() + 1}. v 8:00`; };
+
+// Banka textů. Oslovení a podpis doplní praniSestav. Bez příčestí → sedí na muže i ženy.
+const PRANI_BEZNE = [
+  { s: "Všechno nejlepší k narozeninám", t: "k Vašim dnešním narozeninám Vám posílám upřímné přání všeho dobrého — hodně zdraví, klidu a radosti z věcí, na kterých Vám záleží.\n\nKrásný den!" },
+  { s: "Krásné narozeniny", t: "dovolte mi popřát Vám k Vašim dnešním narozeninám. Ať je další rok klidný, zdravý a plný dobrých zpráv.\n\nS přáním všeho dobrého" },
+  { s: "Všechno nejlepší", t: "k Vašim dnešním narozeninám Vám přeji hodně zdraví, pohody a radosti — ať se Vám v dalším roce daří doma i v práci.\n\nKrásný den!" },
+  { s: "K Vašim narozeninám", t: "jen krátce, ale od srdce: k Vašim dnešním narozeninám Vám přeji pevné zdraví, dobrou náladu a co nejvíc dní, na které se dá těšit.\n\nVšechno nejlepší!" },
+  { s: "Hezké narozeniny", t: "přeji Vám k Vašim dnešním narozeninám všechno dobré. Ať Vás další rok těší — lidmi kolem Vás, zdravím i drobnostmi, které dělají den lepším.\n\nMějte krásný den" },
+];
+const PRANI_KULATE = {
+  30: [
+    { s: "Ke třicítce", t: "třicítka je skvělý věk: zkušeností dost na dobrá rozhodnutí a pořád spousta času je naplno využít. Přeji Vám, ať to další desetiletí stojí za to.\n\nHodně zdraví, energie a lidí, se kterými je radost slavit. A díky za důvěru, kterou mi dáváte.\n\nKrásnou oslavu!" },
+    { s: "Všechno nejlepší ke třicetinám", t: "dnes je to třicet — a to si zaslouží víc než jeden řádek. Ať je další desítka plná dobrých začátků, klidných dní a věcí, které Vás baví.\n\nDěkuji za důvěru a těším se, až se zase potkáme.\n\nVšechno nejlepší!" },
+  ],
+  40: [
+    { s: "Ke čtyřicítce", t: "čtyřicítka je prý věk, kdy člověk konečně ví, co chce — a pořád má dost energie jít si pro to. Přeji Vám, ať ta kombinace vydrží co nejdéle.\n\nHodně zdraví, klidu a lidí kolem sebe, se kterými je radost slavit. A díky za důvěru, kterou mi dáváte.\n\nKrásnou oslavu!" },
+    { s: "Všechno nejlepší ke kulatinám", t: "dnes je to čtyřicet — a to si zaslouží víc než jeden řádek. Ať je další desítka ještě lepší než ta, kterou máte za sebou: se zdravím, s lidmi, na kterých Vám záleží, a s věcmi, které Vás baví.\n\nDěkuji za důvěru a těším se, až se zase potkáme.\n\nVšechno nejlepší!" },
+  ],
+  50: [
+    { s: "K padesátinám", t: "padesátka je krásný milník: půl století zkušeností a pořád dost chuti do dalších plánů. Přeji Vám, ať další roky přinesou hlavně zdraví, klid a radost z toho, co máte rozjeté, i z toho, co teprve přijde.\n\nDěkuji za důvěru, kterou mi dáváte.\n\nKrásnou oslavu!" },
+    { s: "Všechno nejlepší k padesátinám", t: "k Vašim dnešním padesátinám Vám posílám upřímné přání všeho dobrého. Ať je druhá polovina století ještě lepší než ta první — s pevným zdravím, s lidmi, na kterých Vám záleží, a s časem na to, co Vás těší.\n\nVšechno nejlepší!" },
+  ],
+  60: [
+    { s: "K šedesátinám", t: "šedesát let je důvod k oslavě i k ohlédnutí — a podle mě hlavně k tomu podívat se dopředu. Přeji Vám, ať další roky přinesou zdraví, klid a spoustu dobrých chvil s blízkými.\n\nDěkuji za důvěru, kterou mi dáváte.\n\nKrásnou oslavu!" },
+    { s: "Všechno nejlepší k šedesátinám", t: "k Vašim dnešním šedesátinám Vám přeji hlavně pevné zdraví a pohodu. Ať je každý další rok plný věcí, na které se dá těšit, a lidí, se kterými je radost je sdílet.\n\nVšechno nejlepší!" },
+  ],
+  70: [
+    { s: "K sedmdesátinám", t: "sedmdesát let — krásné číslo a za ním spousta příběhů. Přeji Vám, ať těch dobrých ještě hodně přibude: ve zdraví, v klidu a v kruhu lidí, na kterých Vám záleží.\n\nDěkuji za důvěru, kterou mi dáváte.\n\nS úctou a přáním všeho dobrého" },
+    { s: "Všechno nejlepší k sedmdesátinám", t: "k Vašim dnešním sedmdesátinám Vám posílám upřímné přání. Hodně zdraví, sil a radosti ze všedních dnů i z těch svátečních.\n\nKrásnou oslavu!" },
+  ],
+  80: [
+    { s: "K osmdesátinám", t: "osmdesát let je úctyhodný kus cesty. Přeji Vám, ať je ta další co nejlaskavější — s pevným zdravím, klidnou myslí a s blízkými nablízku.\n\nDěkuji za důvěru, kterou mi dáváte.\n\nS úctou a přáním všeho dobrého" },
+    { s: "Všechno nejlepší k osmdesátinám", t: "k Vašim dnešním osmdesátinám Vám ze srdce přeji hodně zdraví, pohody a radosti. Ať je každý den o kousek hezčí než ten předchozí.\n\nS úctou" },
+  ],
+  90: [
+    { s: "K devadesátinám", t: "devadesát let — obdivuhodné číslo. Přeji Vám hodně zdraví, klidu a radosti z každého dne a kolem sebe lidi, kteří Vám jsou oporou.\n\nS úctou a přáním všeho dobrého" },
+    { s: "Všechno nejlepší k devadesátinám", t: "k Vašim dnešním devadesátinám Vám posílám srdečné přání všeho dobrého. Ať Vám zdraví slouží a dny přinášejí hodně radosti.\n\nS úctou" },
+  ],
+};
+const PRANI_KULATE_OBECNE = [
+  { s: "Ke kulatým narozeninám", t: "k Vašim dnešním kulatým narozeninám Vám posílám upřímné přání všeho dobrého. Ať je další desítka ještě lepší než ta předchozí — se zdravím, s lidmi, na kterých Vám záleží, a s věcmi, které Vás baví.\n\nVšechno nejlepší!" },
+  { s: "Všechno nejlepší ke kulatinám", t: "kulaté narozeniny si zaslouží víc než jeden řádek. Přeji Vám hodně zdraví, klidu a radosti — a ať je každý další rok o kus lepší.\n\nDěkuji za důvěru, kterou mi dáváte.\n\nKrásnou oslavu!" },
+];
+const _praniHash = (s) => { let h = 0; for (const ch of String(s || "")) h = (h * 31 + ch.charCodeAt(0)) >>> 0; return h; };
+// Sestaví přání: kind, předmět, text náhledu a HTML konceptu. `posun` = kolikrát Tom klikl „Jiný text".
+function praniSestav(p, prani, posun = 0) {
+  const banka = p.kulate ? (PRANI_KULATE[p.vek] || PRANI_KULATE_OBECNE) : PRANI_BEZNE;
+  const v = (_praniHash(p.client.id) + p.rok + posun) % banka.length;
+  const t = banka[v];
+  const osl = czOsloveni(p.client, prani);
+  const pozdrav = osl ? `Dobrý den, ${osl},` : "Dobrý den,";
+  const odstavce = [pozdrav, ...t.t.split("\n\n"), "Tomáš Maux"];
+  const esc = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  const font = "font-family:-apple-system,'Segoe UI',Arial,sans-serif";
+  const html = odstavce.map(o => `<p style="margin:0 0 14px;${font};font-size:15px;line-height:1.6;color:#1a1a1a">${esc(o)}</p>`).join("")
+    + `<p style="margin:18px 0 0;${font};font-size:12px;color:#8a86a0">MAUX Legal · advokátní kancelář · <a href="https://www.maux.cz" style="color:#1c0a63;text-decoration:none">maux.cz</a></p>`;
+  return { kind: p.kulate ? "kulate" : "bezne", v, osl, predmet: t.s, text: odstavce.join("\n\n"), html };
+}
+// Koncept v Tomově vlastní schránce (/me). Odložené doručení = Outlook „Zpozdit doručení".
+async function m365KonceptPrani({ to, subject, html, doruceni = null }) {
+  const body = {
+    subject,
+    body: { contentType: "HTML", content: html },
+    toRecipients: (to || []).map(a => ({ emailAddress: { address: a } })),
+  };
+  if (doruceni) body.singleValueExtendedProperties = [{ id: "SystemTime 0x3FEF", value: doruceni }];
+  return graph("/me/messages", { method: "POST", body });
+}
+// Deník: syntetické události z logu přání (tbl "clients" → i v Historii na kartě klienta).
+function denikPraniUdalosti(ctx) {
+  const { clients = [], financeItems = [] } = ctx || {};
+  return praniRead(financeItems).log.map(r => {
+    const kl = (clients.find(c => c.id === r.cid) || {}).name || "klient";
+    const kdy = r.doruceni ? ` · doručení ${_dDatum(r.doruceni)} v 8:00` : "";
+    return {
+      id: `prani_${r.cid}_${r.at}`, at: r.at, who: null, kind: "klient",
+      parts: ["Přání k narozeninám · ", { b: kl }, " · ", { b: r.kind === "kulate" ? "kulaté · koncept v Outlooku" : "koncept v Outlooku" }, kdy],
+      amount: null, link: { mod: "klienti", id: r.cid }, tbl: "clients", row_id: r.cid, op: "INSERT",
+    };
+  });
 }
 
 const FAKTURY_LOG_ID = "fi_faktury_log";
@@ -12820,6 +13031,7 @@ function Dashboard({ auditLog, denikCtx, onOpenDenik, onOpenDenikVec, invoices, 
             {/* KALENDÁŘ VÝKAZŮ — náhled, kolik práce (Kč) bylo který den zapsáno */}
             <div style={{aspectRatio:"1", minWidth:0}}>
               <VykazyCalendar workEntries={workEntries} escrows={escrows} invoices={invoices}
+                clients={clients} financeItems={financeItems} onSaveFinance={onSaveFinance}
                 onOpenFull={() => onNav("vykaz")} onAddEntry={onAddWorkEntry} />
             </div>
 
@@ -14263,7 +14475,162 @@ function WorkEntryList({ entries, clients, invoices, financeItems, onNew, onEdit
 }
 
 /* ─── KALENDÁŘ FAKTUROVÁNÍ — měsíční náhled, kolik bylo který den vyfakturováno (zeleně "svítí"), s historií ─── */
-function VykazyCalendar({ workEntries, escrows, invoices, dense = false, onOpenFull, onAddEntry, onOpenDetail }) {
+/* ── Roh „Narozeniny · příštích 7 dní" v hlavičce kalendáře (23. 9. 2026, varianta 2) ────
+   Stojí tam, kde byla sparkline (Tom: „toto mi nic neříká, nekoukám na to"). Mlčí, když
+   v okně nikdo není; při listování do jiných měsíců se schová s celým hero (hero === null).
+   Okno konceptu jde přes portál do body — Panel má trvale transform: scale(1) a position:
+   fixed by se jinak vztahoval k panelu, ne k obrazovce. */
+function NarozeninyRoh({ clients, financeItems, onSaveFinance }) {
+  const [otevreno, setOtevreno] = useState(null);   // id klienta v okně konceptu
+  const [posun, setPosun] = useState(0);            // kolikrát Tom klikl „Jiný text"
+  const [oslDraft, setOslDraft] = useState(null);   // rozepsané oslovení (null = needituje se)
+  const [busy, setBusy] = useState(false);
+  const polozky = useMemo(() => narozeninyOkno(clients, 7), [clients]);
+  const prani = useMemo(() => praniRead(financeItems), [financeItems]);
+  const vyroci = mauxVyroci(7);
+  if (!polozky.length && !vyroci) return null;
+
+  const hotovo = (p) => prani.log.filter(r => r.cid === p.client.id && r.rok === p.rok).pop() || null;
+  const radky = [
+    ...polozky.map(p => ({ typ: "klient", diff: p.diff, p })),
+    ...(vyroci ? [{ typ: "maux", diff: vyroci.diff, v: vyroci }] : []),
+  ].sort((a, b) => a.diff - b.diff);
+  const ukaz = radky.slice(0, 5), navic = radky.length - ukaz.length;
+
+  const akt = otevreno ? polozky.find(p => p.client.id === otevreno) || null : null;
+  // Náhled počítá s rozepsaným oslovením — Tom vidí změnu hned, uloží se až Enterem nebo založením.
+  const praniNahled = akt && oslDraft != null ? { ...prani, osloveni: { ...prani.osloveni, [akt.client.id]: oslDraft } } : prani;
+  const sest = akt ? praniSestav(akt, praniNahled, posun) : null;
+  const to = akt ? (akt.client.emails || []).filter(Boolean) : [];
+  const doruceni = akt && akt.diff > 0 ? praniDoruceniIso(akt.datum) : null;
+
+  const otevri = (p) => { setOtevreno(p.client.id); setPosun(0); setOslDraft(null); };
+  const zavri = () => { if (busy) return; setOtevreno(null); setOslDraft(null); };
+  const ulozOsloveni = async () => {
+    if (!akt || oslDraft == null) return;
+    await onSaveFinance(praniOsloveniSet(financeItems, akt.client.id, oslDraft));
+    setOslDraft(null);
+  };
+  const zalozit = async () => {
+    if (!akt || !sest || busy) return;
+    setBusy(true);
+    try {
+      await m365Token();
+      await m365KonceptPrani({ to, subject: sest.predmet, html: sest.html, doruceni });
+      // Jeden zápis: rozepsané oslovení + log (dva zápisy za sebou by si přepsaly config položku).
+      let fi = financeItems || [];
+      if (oslDraft != null) fi = [...fi.filter(i => i.id !== PRANI_ID), praniOsloveniSet(fi, akt.client.id, oslDraft)];
+      await onSaveFinance(praniLogAppend(fi, { cid: akt.client.id, rok: akt.rok, kind: sest.kind, v: sest.v, doruceni }));
+      mauxToast(`Přání pro ${akt.client.name || "klienta"} čeká v tvých Konceptech${doruceni ? " — doručí se " + praniDoruceniText(akt.datum) : ""}${to.length ? "" : " · e-mail v kartě chybí, adresáta doplň v Outlooku"}.`);
+      setOtevreno(null); setOslDraft(null);
+    } catch (e) { mauxToast("Chyba: " + e.message); }
+    finally { setBusy(false); }
+  };
+
+  const radekS = { display: "grid", gridTemplateColumns: "34px minmax(0,1fr) auto", alignItems: "center", columnGap: 10, minHeight: 32 };
+  const kdyS = (dnes) => ({ fontSize: 11, fontWeight: dnes ? 600 : 500, color: dnes ? BP.indigo : "var(--mut)" });
+  const vekS = { fontSize: 13, fontWeight: 600, color: BP.indigoDeep, whiteSpace: "nowrap" };
+  const pillS = { display: "inline-flex", alignItems: "center", height: 17, padding: "0 7px", borderRadius: 999, border: "1px solid rgba(74,68,184,.35)", fontSize: 9.5, fontWeight: 600, letterSpacing: ".08em", textTransform: "uppercase", color: BP.indigoDeep, flexShrink: 0 };
+  const btnS = { height: 30, padding: "0 13px", borderRadius: 999, border: 0, background: "rgba(74,68,184,.09)", color: BP.indigoDeep, fontSize: 12, fontWeight: 600, whiteSpace: "nowrap", cursor: "pointer", fontFamily: "inherit" };
+  const ghostS = { height: 36, padding: "0 16px", borderRadius: 999, border: "1px solid rgba(74,68,184,.22)", background: "transparent", color: BP.indigoDeep, fontSize: 12.5, fontWeight: 500, cursor: "pointer", fontFamily: "inherit" };
+  const fajfka = <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5" /></svg>;
+  const hhmm = (iso) => { const d = new Date(iso); return `${d.getHours()}:${String(d.getMinutes()).padStart(2, "0")}`; };
+
+  const okno = akt && sest && createPortal(
+    <div onClick={zavri} style={{ position: "fixed", inset: 0, zIndex: 9000, background: "rgba(22,20,42,.28)", display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }}>
+      <div role="dialog" aria-label="Koncept přání k narozeninám" onClick={e => e.stopPropagation()}
+        style={{ ...MAUX_GLASS_MODAL, width: 560, maxWidth: "100%", maxHeight: "calc(100vh - 48px)", overflowY: "auto", boxSizing: "border-box", borderRadius: 22, padding: "24px 30px 22px", display: "flex", flexDirection: "column", gap: 16, textAlign: "left", fontFamily: "Inter, system-ui, sans-serif", color: "var(--txt)" }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          <span style={{ fontSize: 10.5, fontWeight: 600, letterSpacing: ".14em", textTransform: "uppercase", color: "var(--mut)" }}>Koncept do Outlooku · odešleš ty</span>
+          <button onClick={zavri} aria-label="Zavřít" style={{ width: 32, height: 32, borderRadius: "50%", border: 0, background: "#F4F4FA", color: "#55556A", fontSize: 17, lineHeight: 1, cursor: "pointer" }}>×</button>
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "72px minmax(0,1fr)", rowGap: 6, alignItems: "baseline", fontSize: 13 }}>
+          <span style={{ color: "var(--mut)" }}>Komu</span>
+          <span style={{ color: to.length ? "var(--txt)" : "var(--mut)" }}>{to.length ? to.join(", ") : "e-mail v kartě klienta chybí — doplníš v Outlooku"}</span>
+          <span style={{ color: "var(--mut)" }}>Oslovení</span>
+          {oslDraft == null ? (
+            <span>
+              {sest.osl || <span style={{ color: "var(--mut)" }}>bez jména</span>}
+              <span onClick={() => setOslDraft(sest.osl || "")} style={{ marginLeft: 10, fontSize: 11.5, fontWeight: 600, color: BP.indigo, cursor: "pointer" }}>upravit</span>
+            </span>
+          ) : (
+            <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <input autoFocus value={oslDraft} onChange={e => setOslDraft(e.target.value)}
+                onKeyDown={e => { if (e.key === "Enter") ulozOsloveni(); if (e.key === "Escape") setOslDraft(null); }}
+                placeholder="pane Dvořáku" style={{ flex: 1, minWidth: 0, height: 30, padding: "0 10px", border: "1px solid rgba(74,68,184,.25)", borderRadius: 8, fontSize: 13, fontFamily: "inherit", color: "var(--txt)", background: "#fff" }} />
+              <span style={{ fontSize: 11, color: "var(--mut)", whiteSpace: "nowrap" }}>Enter uloží · prázdné = automaticky</span>
+            </span>
+          )}
+          <span style={{ color: "var(--mut)" }}>Předmět</span>
+          <span style={{ fontWeight: 600 }}>{sest.predmet}</span>
+        </div>
+        <div style={{ padding: "16px 0", borderTop: "1px solid rgba(28,10,99,.08)", borderBottom: "1px solid rgba(28,10,99,.08)", fontSize: 14, lineHeight: 1.6, whiteSpace: "pre-line" }}>{sest.text}</div>
+        {doruceni && (
+          <div style={{ padding: "10px 14px", borderRadius: 12, background: "rgba(74,68,184,.06)", fontSize: 12.5, fontWeight: 500, color: BP.indigoDeep, lineHeight: 1.5 }}>
+            {`Odložené doručení: ${praniDoruceniText(akt.datum)}. Odešli ho klidně hned — Outlook ho podrží a doručí ráno v den narozenin. Poprvé mrkni v Outlooku do Možnosti → Zpozdit doručení, že tam 8:00 opravdu je.`}
+          </div>
+        )}
+        <div style={{ fontSize: 12, fontWeight: akt.kulate ? 500 : 400, color: akt.kulate ? BP.indigoDeep : "var(--mut)" }}>
+          {akt.kulate ? `Kulaté narozeniny (${akt.vek}) · text psaný tvým hlasem — přečti, dolaď, odešli.` : "Šablona se správným oslovením · každý rok jiná varianta."}
+        </div>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+          <button onClick={() => setPosun(n => n + 1)} style={ghostS}>Jiný text</button>
+          <div style={{ display: "flex", gap: 8 }}>
+            <button onClick={zavri} style={{ ...ghostS, border: "1px solid rgba(28,10,99,.12)", color: "#55556A" }}>Zavřít</button>
+            <button onClick={zalozit} disabled={busy} style={{ ...ghostS, border: 0, padding: "0 18px", background: BP.indigo, color: "#fff", fontWeight: 600, opacity: busy ? .6 : 1, cursor: busy ? "default" : "pointer" }}>{busy ? "Zakládám…" : "Založit koncept"}</button>
+          </div>
+        </div>
+      </div>
+    </div>,
+    document.body
+  );
+
+  return (
+    <div style={{ width: 380, flexShrink: 0, marginTop: 6, display: "flex", flexDirection: "column", gap: 6 }}>
+      <div style={{ fontSize: 9, fontWeight: 600, letterSpacing: ".14em", textTransform: "uppercase", color: "var(--mut)" }}>Narozeniny · příštích 7 dní</div>
+      {ukaz.map(r => {
+        if (r.typ === "maux") {
+          const n = r.v.roky;
+          return (
+            <div key="maux-vyroci" style={radekS}>
+              <span style={kdyS(r.diff === 0)}>{praniKdy(r.diff, r.v.datum)}</span>
+              <span style={{ display: "flex", alignItems: "baseline", gap: 7, minWidth: 0 }}>
+                <span style={{ fontFamily: "Fraunces, serif", fontSize: 14.5, letterSpacing: ".03em", color: "#1C0A63", whiteSpace: "nowrap" }}>MAUX Legal</span>
+                <span className="maux-num" style={vekS}>{n} {n === 1 ? "rok" : n < 5 ? "roky" : "let"}</span>
+              </span>
+              <span style={{ fontSize: 11, color: "var(--mut)", textAlign: "right" }}>{n === 1 ? "rok kanceláře" : "výročí kanceláře"}</span>
+            </div>
+          );
+        }
+        const p = r.p, h = hotovo(p);
+        return (
+          <div key={p.client.id} style={radekS}>
+            <span style={kdyS(p.diff === 0)}>{praniKdy(p.diff, p.datum)}</span>
+            <span style={{ display: "flex", alignItems: "baseline", gap: 7, minWidth: 0 }}>
+              <span title={p.client.name} style={{ fontSize: 14, fontWeight: 500, color: "var(--txt)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{p.client.name}</span>
+              <span className="maux-num" style={vekS}>{p.vek}</span>
+              {p.kulate && <span style={pillS}>kulaté</span>}
+            </span>
+            <span style={{ display: "flex", justifyContent: "flex-end" }}>
+              {h ? (
+                <span onClick={() => otevri(p)} title="Koncept už je v Outlooku — klikem připravíš znovu"
+                  style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11.5, fontWeight: 500, color: BP.indigo, whiteSpace: "nowrap", cursor: "pointer" }}>
+                  {fajfka}{h.doruceni ? `doručí ${praniKdy(p.diff, p.datum)} v 8:00` : `koncept · ${hhmm(h.at)}`}
+                </span>
+              ) : (
+                <button onClick={() => otevri(p)} style={btnS}>{praniTlacitko(p.diff, p.datum)}</button>
+              )}
+            </span>
+          </div>
+        );
+      })}
+      {navic > 0 && <div style={{ fontSize: 11, color: "var(--mut)" }}>{`+ ${navic} další v tomto týdnu`}</div>}
+      {okno}
+    </div>
+  );
+}
+
+function VykazyCalendar({ workEntries, escrows, invoices, clients, financeItems, onSaveFinance, dense = false, onOpenFull, onAddEntry, onOpenDetail }) {
   const [monthOffset, setMonthOffset] = useState(0);
   const [selectedDay, setSelectedDay] = useState(null);
   // Hero blok pod velkym cislem: v klidu jen VETA + osa. Sest opernych cisel
@@ -14452,12 +14819,6 @@ function VykazyCalendar({ workEntries, escrows, invoices, dense = false, onOpenF
           const todayAmt = (dayTotals[todayStr] || 0) + (escDayTotals[todayStr] || 0);
           const dailyTarget = hero && hero.wdLeft > 0 && hero.rem > 0 ? Math.round(hero.rem / hero.wdLeft) : 0;
           const sep = <span style={{margin:"0 9px",opacity:.35}}>·</span>;
-          // Sparkline
-          const barW = 10, gap = 4, chartH = 44;
-          const sr = hero ? hero.rows : [];
-          const maxTotal = hero ? Math.max(...sr.map(r => r.totalM), hero.goal, 1) : 1;
-          const svgW = Math.max(1, sr.length * (barW + gap) - gap);
-          const yGoal = hero && hero.goal > 0 ? (chartH - Math.min(1, hero.goal / maxTotal) * chartH + 4) : null;
           return (
             <div style={{marginTop:dense?8:14,display:"flex",alignItems:"flex-start",justifyContent:"space-between",gap:28}}>
               <div style={{flex:"1 1 auto",minWidth:0}}>
@@ -14542,33 +14903,9 @@ function VykazyCalendar({ workEntries, escrows, invoices, dense = false, onOpenF
                   )}
                 </div>
               </div>
-              {/* Sparkline historie — tvar, ne čísla. Hodnoty jen v tooltipu. */}
-              {hero && sr.length > 1 && (
-                <div style={{textAlign:"right",flexShrink:0,marginTop:6}}>
-                  <svg width={svgW} height={chartH + 8} style={{display:"block",overflow:"visible"}}>
-                    {yGoal !== null && <line x1={-3} y1={yGoal} x2={svgW + 3} y2={yGoal} stroke="rgba(74,68,184,.45)" strokeWidth="1" strokeDasharray="3,3" />}
-                    {hero.prevTot > 0 && (
-                      <line x1={-3} y1={chartH - Math.min(1, hero.prevTot / maxTotal) * chartH + 4} x2={svgW + 3}
-                        y2={chartH - Math.min(1, hero.prevTot / maxTotal) * chartH + 4}
-                        stroke="rgba(74,68,184,.30)" strokeWidth="1" strokeDasharray="2,4" />
-                    )}
-                    {sr.map((r, idx) => {
-                      const h = Math.max(2, (r.totalM / maxTotal) * chartH);
-                      const mmYY = `${r.ym.slice(5,7)}/${r.ym.slice(2,4)}`;
-                      return (
-                        <g key={r.ym} className="spark-g">
-                          <title>{`${mmYY}${r.live ? " (živě)" : ""}: ${Math.round(r.totalM).toLocaleString("cs-CZ")} Kč · meta ${hero.goal.toLocaleString("cs-CZ")} Kč`}</title>
-                          <rect className="spark-bar" x={idx * (barW + gap)} y={chartH - h + 4} width={barW} height={h} rx={3}
-                            fill={r.live ? PHOS : (r.totalM >= hero.goal ? "rgba(74,68,184,.42)" : "rgba(74,68,184,.17)")} />
-                        </g>
-                      );
-                    })}
-                  </svg>
-                  <div style={{fontSize:9,letterSpacing:".14em",color:"var(--mut)",textTransform:"uppercase",marginTop:8,opacity:.8,whiteSpace:"nowrap"}}>
-                    {sr.length} měsíců · plná výplň = nad metou
-                  </div>
-                </div>
-              )}
+              {/* Narozeniny klientů — místo sparkline (Tom 23. 9. 2026: „toto mi nic neříká, nekoukám
+                  na to"). Mlčí, když v okně 7 dní nikdo neslaví; hero === null v jiném měsíci i v dense. */}
+              {hero && <NarozeninyRoh clients={clients} financeItems={financeItems} onSaveFinance={onSaveFinance} />}
             </div>
           );
         })()}
