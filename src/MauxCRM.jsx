@@ -14527,11 +14527,13 @@ function NarozeninyRoh({ clients, financeItems, onSaveFinance }) {
     finally { setBusy(false); }
   };
 
-  const radekS = { display: "grid", gridTemplateColumns: "34px minmax(0,1fr) auto", alignItems: "center", columnGap: 10, minHeight: 32 };
+  // Hero řádek kalendáře má na Tomově obrazovce jen ~600 px a velké číslo zabírá ~290 —
+  // roh proto bere nejvýš 300 px a vždy nechá 340 px číslu (23. 9. 2026: první verze s pevnými
+  // 380 px číslo překryla). Jméno se případně zkrátí se třemi tečkami, celé je v title.
+  const radekS = { display: "grid", gridTemplateColumns: "24px minmax(0,1fr) auto", alignItems: "center", columnGap: 8, minHeight: 30 };
   const kdyS = (dnes) => ({ fontSize: 11, fontWeight: dnes ? 600 : 500, color: dnes ? BP.indigo : "var(--mut)" });
   const vekS = { fontSize: 13, fontWeight: 600, color: BP.indigoDeep, whiteSpace: "nowrap" };
-  const pillS = { display: "inline-flex", alignItems: "center", height: 17, padding: "0 7px", borderRadius: 999, border: "1px solid rgba(74,68,184,.35)", fontSize: 9.5, fontWeight: 600, letterSpacing: ".08em", textTransform: "uppercase", color: BP.indigoDeep, flexShrink: 0 };
-  const btnS = { height: 30, padding: "0 13px", borderRadius: 999, border: 0, background: "rgba(74,68,184,.09)", color: BP.indigoDeep, fontSize: 12, fontWeight: 600, whiteSpace: "nowrap", cursor: "pointer", fontFamily: "inherit" };
+  const btnS = { height: 26, padding: "0 11px", borderRadius: 999, border: 0, background: "rgba(74,68,184,.09)", color: BP.indigoDeep, fontSize: 11.5, fontWeight: 600, whiteSpace: "nowrap", cursor: "pointer", fontFamily: "inherit" };
   const ghostS = { height: 36, padding: "0 16px", borderRadius: 999, border: "1px solid rgba(74,68,184,.22)", background: "transparent", color: BP.indigoDeep, fontSize: 12.5, fontWeight: 500, cursor: "pointer", fontFamily: "inherit" };
   const fajfka = <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5" /></svg>;
   const hhmm = (iso) => { const d = new Date(iso); return `${d.getHours()}:${String(d.getMinutes()).padStart(2, "0")}`; };
@@ -14586,7 +14588,7 @@ function NarozeninyRoh({ clients, financeItems, onSaveFinance }) {
   );
 
   return (
-    <div style={{ width: 380, flexShrink: 0, marginTop: 6, display: "flex", flexDirection: "column", gap: 6 }}>
+    <div style={{ width: "min(300px, calc(100% - 340px))", flexShrink: 0, minWidth: 0, marginTop: 6, display: "flex", flexDirection: "column", gap: 4 }}>
       <div style={{ fontSize: 9, fontWeight: 600, letterSpacing: ".14em", textTransform: "uppercase", color: "var(--mut)" }}>Narozeniny · příštích 7 dní</div>
       {ukaz.map(r => {
         if (r.typ === "maux") {
@@ -14595,10 +14597,10 @@ function NarozeninyRoh({ clients, financeItems, onSaveFinance }) {
             <div key="maux-vyroci" style={radekS}>
               <span style={kdyS(r.diff === 0)}>{praniKdy(r.diff, r.v.datum)}</span>
               <span style={{ display: "flex", alignItems: "baseline", gap: 7, minWidth: 0 }}>
-                <span style={{ fontFamily: "Fraunces, serif", fontSize: 14.5, letterSpacing: ".03em", color: "#1C0A63", whiteSpace: "nowrap" }}>MAUX Legal</span>
+                <span style={{ fontFamily: "Fraunces, serif", fontSize: 13.5, letterSpacing: ".03em", color: "#1C0A63", whiteSpace: "nowrap" }}>MAUX Legal</span>
                 <span className="maux-num" style={vekS}>{n} {n === 1 ? "rok" : n < 5 ? "roky" : "let"}</span>
               </span>
-              <span style={{ fontSize: 11, color: "var(--mut)", textAlign: "right" }}>{n === 1 ? "rok kanceláře" : "výročí kanceláře"}</span>
+              <span style={{ fontSize: 11, color: "var(--mut)", textAlign: "right", whiteSpace: "nowrap" }}>{n === 1 ? "rok kanceláře" : "výročí"}</span>
             </div>
           );
         }
@@ -14607,18 +14609,18 @@ function NarozeninyRoh({ clients, financeItems, onSaveFinance }) {
           <div key={p.client.id} style={radekS}>
             <span style={kdyS(p.diff === 0)}>{praniKdy(p.diff, p.datum)}</span>
             <span style={{ display: "flex", alignItems: "baseline", gap: 7, minWidth: 0 }}>
-              <span title={p.client.name} style={{ fontSize: 14, fontWeight: 500, color: "var(--txt)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{p.client.name}</span>
-              <span className="maux-num" style={vekS}>{p.vek}</span>
-              {p.kulate && <span style={pillS}>kulaté</span>}
+              <span title={p.client.name} style={{ fontSize: 13.5, fontWeight: 500, color: "var(--txt)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", minWidth: 0 }}>{p.client.name}</span>
+              <span className="maux-num" style={{ ...vekS, flexShrink: 0 }}>{p.vek}</span>
+              {p.kulate && <span style={{ fontSize: 10.5, fontWeight: 600, color: BP.indigoDeep, whiteSpace: "nowrap", flexShrink: 0 }}>· kulaté</span>}
             </span>
             <span style={{ display: "flex", justifyContent: "flex-end" }}>
               {h ? (
-                <span onClick={() => otevri(p)} title="Koncept už je v Outlooku — klikem připravíš znovu"
+                <span onClick={() => otevri(p)} title={h.doruceni ? `Koncept v Outlooku, doručení ${praniDoruceniText(p.datum)} — klikem připravíš znovu` : "Koncept už je v Outlooku — klikem připravíš znovu"}
                   style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11.5, fontWeight: 500, color: BP.indigo, whiteSpace: "nowrap", cursor: "pointer" }}>
-                  {fajfka}{h.doruceni ? `doručí ${praniKdy(p.diff, p.datum)} v 8:00` : `koncept · ${hhmm(h.at)}`}
+                  {fajfka}{h.doruceni ? `${praniKdy(p.diff, p.datum)} 8:00` : hhmm(h.at)}
                 </span>
               ) : (
-                <button onClick={() => otevri(p)} style={btnS}>{praniTlacitko(p.diff, p.datum)}</button>
+                <button onClick={() => otevri(p)} title={praniTlacitko(p.diff, p.datum)} style={btnS}>Přání</button>
               )}
             </span>
           </div>
