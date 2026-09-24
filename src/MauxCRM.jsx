@@ -178,6 +178,8 @@ const CZ_MES_NOM = ["leden","únor","březen","duben","květen","červen","červ
 const CZ_MES_GEN = ["ledna","února","března","dubna","května","června","července","srpna","září","října","listopadu","prosince"];
 const CZ_MES_LOK = ["lednu","únoru","březnu","dubnu","květnu","červnu","červenci","srpnu","září","říjnu","listopadu","prosinci"];
 const czMes = (m, pad = "nom") => (pad === "gen" ? CZ_MES_GEN : pad === "lok" ? CZ_MES_LOK : CZ_MES_NOM)[m] || "";
+/* Český tvar podle počtu: 1 záznam · 2–4 záznamy · 0 a 5+ záznamů (24. 9. 2026 — „3 záznamů"). */
+const czPocet = (n, one, few, many) => (n === 1 ? one : n >= 2 && n <= 4 ? few : many);
 const addDays = (d, n) => { const dt = new Date(d); dt.setDate(dt.getDate() + n); return localYmd(dt); };
 
 /* ─── ARES (Administrativní registr ekonomických subjektů) ─── */
@@ -2971,6 +2973,31 @@ function lastDayPrevMonth(issueDateStr) {
 // (Pozor: u PŘIJATÝCH dokladů platí naopak datum vystavení — to řeší evidence účtenek.)
 function vatPeriodKey(i) {
   return (((i && i.duzp) || lastDayPrevMonth(i && i.issue_date)) + "").slice(0, 7);
+}
+// ── FAKTUROVÁNO KLIENTOVI — počítá se z faktur, nikdy ručně (Tom 24. 9. 2026) ──
+// Dřív appka četla ruční pole clients.invoiced: vyplnilo se jednou při importu klientů
+// (s DPH, za všechny roky) a od té doby stálo — Buldok přibyl po importu a měl navždy 0,
+// RUFU investiční ukazovalo „letos" 100 128 Kč, ač má všechny faktury z roku 2025.
+// Teď: ZÁKLAD bez DPH (pravidlo 22. 9.), rok podle DUZP (vatPeriodKey — stejně jako DPH),
+// připravené faktury se nepočítají, přefakturace nikdy (subtotal ji neobsahuje).
+// Pole clients.invoiced v DB zůstává nedotčené, appka ho už jen nečte.
+// Vrací { [client_id]: { letos, celkem, loni, pocet, rows (letošní faktury), posledni } }.
+function clientInvoicedMap(invoices, year) {
+  const y = String(year || new Date().getFullYear());
+  const loniY = String(Number(y) - 1);
+  const m = {};
+  for (const i of invoices || []) {
+    if (!i || !i.client_id || i.status === "pripravena") continue;
+    const s = Number(i.subtotal) || 0;
+    const per = vatPeriodKey(i);
+    const r = m[i.client_id] || (m[i.client_id] = { letos: 0, celkem: 0, loni: 0, pocet: 0, rows: [], posledni: null });
+    r.celkem += s; r.pocet += 1;
+    if (per.slice(0, 4) === y) { r.letos += s; r.rows.push({ id: i.id, cislo: i.invoice_number || "—", per, zaklad: s }); }
+    else if (per.slice(0, 4) === loniY) r.loni += s;
+    if (!r.posledni || (i.issue_date || "") > (r.posledni.issue_date || "")) r.posledni = i;
+  }
+  for (const k in m) m[k].rows.sort((a, b) => b.per.localeCompare(a.per) || String(b.cislo).localeCompare(String(a.cislo)));
+  return m;
 }
 function nextDueDate(issueDateStr) {
   const d = issueDateStr ? new Date(issueDateStr) : new Date();
@@ -14291,9 +14318,9 @@ function WorkEntryList({ entries, clients, invoices, financeItems, onNew, onEdit
   // naopak skutečně navíc (bez DPH), proto se přičítají bez vatování.
   // sleva (discount_amount, potvrzená přes "Změny") se musí odečíst — jinak metrika ukazuje
   // víc, než klient fakticky zaplatí (i u výkonu se slevou na 0 Kč).
-  const totalWorkAmt = unbilled.reduce((s, e) => s + Math.max((e.amount || 0) - (Number(e.discount_amount) || 0), 0), 0);
-  const totalAdminSig = unbilled.reduce((s, e) => s + (e.admin_fee || 0) + (Number(e.sig_count) || 0) * SIGNATURE_DECL_FEE, 0);
-  const totalAmount = Math.round(totalWorkAmt * 1.21) + totalAdminSig;
+  // 24. 9. 2026: hlavní číslo = ZÁKLAD bez DPH (pravidlo 22. 9.) — dřív se ukazovalo s DPH
+  // a s přefakturací (194 552 místo 158 700 Kč). Stejná hodnota jako „Celkem k vystavení · základ".
+  const totalWorkAmt = unbilledWorkNetNoVat(unbilled);
 
   const clientName = (e) => e.clients?.name || clients.find(c => c.id === e.client_id)?.name || "—";
 
@@ -14302,8 +14329,8 @@ function WorkEntryList({ entries, clients, invoices, financeItems, onNew, onEdit
       <div className="kpi-row">
         <div className="kpi hi">
           <div className="k">Nevyfakturováno</div>
-          <div className="v">{maskNum(new Intl.NumberFormat("cs-CZ").format(totalAmount))} Kč</div>
-          <div className="s">{unbilled.length} záznamů · {totalHours.toFixed(1)} h</div>
+          <div className="v">{maskNum(new Intl.NumberFormat("cs-CZ").format(totalWorkAmt))} Kč</div>
+          <div className="s">{unbilled.length} {czPocet(unbilled.length, "záznam", "záznamy", "záznamů")} · {totalHours.toFixed(1)} h</div>
         </div>
         <div className="kpi">
           <div className="k">Celkem záznamů</div>
@@ -14364,19 +14391,15 @@ function WorkEntryList({ entries, clients, invoices, financeItems, onNew, onEdit
       {!loading && unbilledByMonth.map(([month, monthEntries]) => {
         const mHours = monthEntries.reduce((s,e) => s + (e.hours||0), 0);
         const mWork = monthEntries.reduce((s,e) => s + Math.max((e.amount||0)-(Number(e.discount_amount)||0),0), 0);
-        const mNotary = monthEntries.reduce((s,e) => s + (e.notary_fee||0), 0);
-        const mAdmin = monthEntries.reduce((s,e) => s + (e.admin_fee||0), 0);
-        const mSig = monthEntries.reduce((s,e) => s + (Number(e.sig_count)||0) * SIGNATURE_DECL_FEE, 0);
-        const mTotal = Math.round(mWork * 1.21) + mAdmin + mSig;
-        const clients_in_month = [...new Set(monthEntries.map(e => e.client_id))];
+        // Hlavička měsíce ukazuje ZÁKLAD bez DPH (24. 9. 2026) — dřív s DPH + přefakturace, zlatě.
 
         return (
           <div key={month} style={{ marginBottom: 24 }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12, gap: 12 }}>
               <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
                 <span style={{ fontFamily:"Inter,ui-sans-serif,system-ui,sans-serif",fontVariantNumeric:"tabular-nums", fontSize: 17, fontWeight:600, color: "var(--txt)" }}>{monthLabel(month)}</span>
-                <span style={{ fontSize: 11, color: "var(--mut)" }}>{mHours.toFixed(1)} h · {monthEntries.length} záznamů</span>
-                <span style={{ fontSize: 13, fontFamily: "var(--num)", fontVariantNumeric: "tabular-nums", fontWeight: 500, color: "var(--gold)" }}>{maskNum(new Intl.NumberFormat("cs-CZ").format(mTotal))} Kč</span>
+                <span style={{ fontSize: 11, color: "var(--mut)" }}>{mHours.toFixed(1)} h · {monthEntries.length} {czPocet(monthEntries.length, "záznam", "záznamy", "záznamů")}</span>
+                <span style={{ fontSize: 13, fontFamily: "var(--num)", fontVariantNumeric: "tabular-nums", fontWeight: 600, color: "var(--ink)" }}>{maskNum(new Intl.NumberFormat("cs-CZ").format(mWork))} Kč</span>
               </div>
               <div style={{ display: "flex", gap: 8 }}>
                 {filterClient ? (
@@ -17514,7 +17537,10 @@ function DaneModule({ year, taxRecords, financeItems, invoices, dpfoMonths, escr
 
 /* ─── KLIENTI ─── */
 function ClientList({ clients, invoices, financeItems, query, setQuery, filter, setFilter, onOpen, onNew, onRepairClients }) {
-  const sum = useMemo(() => clients.reduce((a, c) => a + (c.invoiced || 0), 0), [clients]);
+  // Fakturováno = z faktur (clientInvoicedMap), ne z ručního pole clients.invoiced (24. 9. 2026).
+  const fakt = useMemo(() => clientInvoicedMap(invoices), [invoices]);
+  const faktOf = (c) => fakt[c.id] || { letos: 0, celkem: 0 };
+  const sum = useMemo(() => clients.reduce((a, c) => a + faktOf(c).letos, 0), [clients, fakt]);
   // Štítek „platí pozdě" (Tom 16. 9. 2026) — z logu úhrad faktur, 2× a víc po splatnosti.
   const pozdeIds = useMemo(() => {
     const log = fakturyLogRead(financeItems);
@@ -17547,14 +17573,14 @@ function ClientList({ clients, invoices, financeItems, query, setQuery, filter, 
     return clients
       .filter(c => !filter || (c.services || []).includes(filter))
       .filter(c => !q || c.name.toLowerCase().includes(q) || (c.contact || "").toLowerCase().includes(q) || (c.notes || "").toLowerCase().includes(q) || (c.emails || []).join(" ").toLowerCase().includes(q))
-      .sort((a, b) => (b.invoiced || 0) - (a.invoiced || 0));
-  }, [clients, query, filter]);
+      .sort((a, b) => (faktOf(b).letos - faktOf(a).letos) || (faktOf(b).celkem - faktOf(a).celkem));
+  }, [clients, query, filter, fakt]);
 
   return (
     <>
       <div className="stat-row">
         <div className="stat"><div className="k">Klientů</div><div className="v">{clients.length}</div></div>
-        <div className="stat gold"><div className="k">Fakturováno celkem</div><div className="v">{fmtKc(sum)}</div></div>
+        <div className="stat gold"><div className="k">Fakturováno letos</div><div className="v">{fmtKc(sum)}</div></div>
         <div className="stat"><div className="k">Firmy / osoby</div><div className="v">{firmy} / {clients.length - firmy}</div></div>
       </div>
       {orphanGroups.length > 0 && (
@@ -17598,7 +17624,7 @@ function ClientList({ clients, invoices, financeItems, query, setQuery, filter, 
       </div>
       <table className="tbl">
         <thead><tr>
-          <th>Klient</th><th>Kontakt</th><th>Specializace</th><th>Fakturováno</th>
+          <th>Klient</th><th>Kontakt</th><th>Specializace</th><th>Fakturováno letos</th>
         </tr></thead>
         <tbody>
           {filtered.length === 0 && <tr><td colSpan={4} style={{ textAlign: "center", padding: "40px 0", color: "var(--mut)" }}>Nic neodpovídá filtru.</td></tr>}
@@ -17614,7 +17640,7 @@ function ClientList({ clients, invoices, financeItems, query, setQuery, filter, 
               </td>
               <td className="t-date">{c.contact || "—"}</td>
               <td><ServiceDots list={c.services || []} /></td>
-              <td className="t-amt">{fmtKc(c.invoiced)}</td>
+              <td className="t-amt">{fmtKc(faktOf(c).letos)}</td>
             </tr>
           ))}
         </tbody>
@@ -17623,7 +17649,24 @@ function ClientList({ clients, invoices, financeItems, query, setQuery, filter, 
   );
 }
 
-function ClientDetail({ c, invoices, financeItems, onFixPaidAt, onBack, onEdit, onDelete, historie }) {
+function ClientDetail({ c, invoices, workEntries, financeItems, onFixPaidAt, onBack, onEdit, onDelete, historie }) {
+  // Fakturováno (Tom 24. 9. 2026, varianta A „číslo a řádek pod ním"): letošní základ z faktur,
+  // pod ním řádek důkazů (celkem · počet · loni) a indigem práce čekající na příští fakturu.
+  // Klik na číslo rozbalí „Jak vzniklo" — metoda + letošní faktury. Nic se neskrývá, jen přidává.
+  const [faktOpen, setFaktOpen] = useState(false);
+  const fk = clientInvoicedMap(invoices)[c.id] || { letos: 0, celkem: 0, loni: 0, pocet: 0, rows: [], posledni: null };
+  const kVys = (workEntries || []).filter(e => e.client_id === c.id && !e.invoice_id);
+  const kVysKc = unbilledWorkNetNoVat(kVys);
+  const dnes = new Date();
+  const rokLetos = dnes.getFullYear();
+  const pristiMes = czMes((dnes.getMonth() + 1) % 12, "gen");
+  const perNazev = (per) => `${czMes(Number(per.slice(5, 7)) - 1)} ${per.slice(0, 4)}`;
+  const faktGrid = { display: "grid", gridTemplateColumns: "140px minmax(0, 1fr) 150px", gap: 12 };
+  const prazdnoText = fk.pocet === 0
+    ? "Klientovi zatím nebyla vystavena žádná faktura."
+    : fk.posledni
+      ? (() => { const p = vatPeriodKey(fk.posledni); return `Letos zatím žádná faktura. Poslední, ${fk.posledni.invoice_number || "—"} vystavená ${fmtDate(fk.posledni.issue_date)}, má DUZP v ${czMes(Number(p.slice(5, 7)) - 1, "lok")} ${p.slice(0, 4)} — proto se počítá do roku ${p.slice(0, 4)}.`; })()
+      : "Letos zatím žádná faktura.";
   return (
     <div className="det">
       <h2 className="serif">
@@ -17634,7 +17677,15 @@ function ClientDetail({ c, invoices, financeItems, onFixPaidAt, onBack, onEdit, 
       </h2>
       <div className="grid2">
         <div className="fld"><div className="l">Kontaktní osoba</div><div className="d">{c.contact || "—"}</div></div>
-        <div className="fld"><div className="l">Fakturováno (letos)</div><div className="bigval">{fmtKc(c.invoiced)}</div></div>
+        <div className="fld"><div className="l">Fakturováno (letos)</div>
+          <button type="button" className="bigval" onClick={() => setFaktOpen(o => !o)} aria-expanded={faktOpen} title="Klikni: jak to číslo vzniklo"
+            style={{ color: "#1C0A63", background: "none", border: "none", borderBottom: "1px dashed rgba(53,24,165,.32)", padding: "0 0 2px", cursor: "pointer", lineHeight: 1.15, letterSpacing: "-.02em" }}>{fmtKc(fk.letos)}</button>
+          <div className="maux-num" style={{ fontSize: 12.5, color: "var(--mut)", marginTop: 9 }}>
+            {fk.pocet === 0 ? "zatím žádná vystavená faktura"
+              : <>celkem {fmtKc(fk.celkem)} · {fk.pocet} {czPocet(fk.pocet, "faktura", "faktury", "faktur")} · loni {fk.loni > 0 ? fmtKc(fk.loni) : "—"}</>}
+          </div>
+          {kVysKc > 0 && <div className="maux-num" style={{ fontSize: 12.5, color: "#4A44B8", marginTop: 3 }}>+ {fmtKc(kVysKc)} na fakturu 1. {pristiMes}</div>}
+        </div>
         <div className="fld"><div className="l">E-maily</div><div className="d">
           {(c.emails || []).length ? (c.emails || []).map(e => <div key={e}><a href={"mailto:" + e}>{e}</a></div>) : "—"}
         </div></div>
@@ -17654,6 +17705,33 @@ function ClientDetail({ c, invoices, financeItems, onFixPaidAt, onBack, onEdit, 
         {c.last_work_date && <div className="fld"><div className="l">Datum poslední práce</div><div className="d">{fmtDate(c.last_work_date)}</div></div>}
         {c.file_link && <div className="fld"><div className="l">Odkaz na spis</div><div className="d"><a href={c.file_link} target="_blank" rel="noopener noreferrer">Otevřít spis →</a></div></div>}
       </div>
+      {faktOpen && (
+        <div style={{ marginTop: 28, background: "var(--bg)", borderRadius: 10, padding: "20px 24px" }}>
+          <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 16 }}>
+            <div className="serif" style={{ fontSize: 19, fontWeight: 300 }}>Jak vzniklo <span className="maux-num" style={{ fontWeight: 600, fontSize: 17 }}>{fmtKc(fk.letos)}</span></div>
+            <button type="button" onClick={() => setFaktOpen(false)} style={{ fontSize: 12, color: "var(--ink)", background: "none", border: "none", cursor: "pointer", padding: "4px 0" }}>Sbalit</button>
+          </div>
+          <p style={{ margin: "8px 0 0", fontSize: 13, lineHeight: 1.6, color: "#3F3B55", maxWidth: 660 }}>Součet základů bez DPH všech vystavených faktur, jejichž DUZP spadá do roku {rokLetos} — stejné pravidlo jako u DPH. Přefakturace (správní poplatky) a připravené faktury se nepočítají.</p>
+          {fk.rows.length > 0 ? (
+            <div style={{ marginTop: 14 }}>
+              <div style={{ ...faktGrid, padding: "0 0 7px", borderBottom: "1px solid var(--line)", fontSize: 9.5, letterSpacing: ".12em", textTransform: "uppercase", color: "var(--mut)", fontWeight: 500 }}>
+                <span>Faktura</span><span>Patří do měsíce (DUZP)</span><span style={{ textAlign: "right" }}>Základ bez DPH</span>
+              </div>
+              {fk.rows.map(r => (
+                <div key={r.id} className="maux-num" style={{ ...faktGrid, padding: "9px 0", borderBottom: "1px solid var(--line)", fontSize: 13 }}>
+                  <span style={{ fontWeight: 500 }}>{r.cislo}</span><span style={{ color: "#5E5A76" }}>{perNazev(r.per)}</span><span style={{ textAlign: "right" }}>{fmtKc(r.zaklad)}</span>
+                </div>
+              ))}
+              <div className="maux-num" style={{ ...faktGrid, padding: "10px 0 0", fontSize: 13, fontWeight: 600 }}>
+                <span>Letos celkem</span><span></span><span style={{ textAlign: "right", color: "#1C0A63" }}>{fmtKc(fk.letos)}</span>
+              </div>
+            </div>
+          ) : (
+            <p style={{ margin: "14px 0 0", fontSize: 13, lineHeight: 1.6, maxWidth: 660 }}>{prazdnoText}</p>
+          )}
+          {kVysKc > 0 && <p style={{ margin: "12px 0 0", fontSize: 12, color: "var(--mut)" }}>Na fakturu 1. {pristiMes} čeká {fmtKc(kVysKc)} z {kVys.length} {kVys.length === 1 ? "výkazu" : "výkazů"}. Do letošního čísla se přičte, jakmile ji vystavíš.</p>}
+        </div>
+      )}
       {c.notes && <div className="notes"><div className="fld l" style={{ fontSize: 9, letterSpacing: ".2em", textTransform: "uppercase", color: "var(--mut)", fontWeight: 500, marginBottom: 6 }}>Poznámky</div><div className="d notes">{c.notes}</div></div>}
       <ClientPlatby c={c} invoices={invoices} financeItems={financeItems} onFixPaidAt={onFixPaidAt} />
       {historie}
@@ -17850,9 +17928,9 @@ function ClientForm({ init, onSave, onCancel, saving }) {
         <div className="frow"><label>DIČ</label><input value={d.dic || ""} onChange={e => set("dic", e.target.value)} placeholder="CZ12345678" /></div>
       )}
       <div className="frow"><label>{isOsoba ? "Bydliště" : "Sídlo"}</label><input value={d.reg || ""} onChange={e => set("reg", e.target.value)} placeholder={isOsoba ? "Ulice č.p., PSČ Město" : "Sídlo zapsané v OR — ulice č.p., PSČ Město"} /></div>
-      <div className="three">
+      {/* Ruční „Fakturováno (Kč)" zrušeno 24. 9. 2026 — číslo se počítá z faktur (clientInvoicedMap). */}
+      <div className="two">
         <div className="frow"><label>Kontaktní osoba</label><input value={d.contact || ""} onChange={e => set("contact", e.target.value)} /></div>
-        <div className="frow"><label>Fakturováno (Kč)</label><input type="number" value={d.invoiced || 0} onChange={e => set("invoiced", e.target.value)} /></div>
         <div className="frow"><label>Hodinová sazba (Kč)</label><input type="number" value={d.hourly_rate || 0} onChange={e => set("hourly_rate", e.target.value)} /></div>
       </div>
       <div className="two">
@@ -21634,7 +21712,7 @@ export default function MauxCRM() {
             <ClientList clients={clients} invoices={invoices} financeItems={financeItems} query={query} setQuery={setQuery} filter={filter} setFilter={setFilter} onOpen={id => { setSel(id); setMode("detail"); }} onNew={() => setMode("new")} onRepairClients={repairClientsFromInvoices} />
           )}
           {mod === "klienti" && mode === "detail" && selClient && (
-            <ClientDetail c={selClient} invoices={invoices} financeItems={financeItems} onFixPaidAt={fixInvoicePaidAt} onBack={() => setMode("list")} onEdit={() => setMode("edit")} onDelete={() => setConfirmDel(selClient.id)}
+            <ClientDetail c={selClient} invoices={invoices} workEntries={workEntries} financeItems={financeItems} onFixPaidAt={fixInvoicePaidAt} onBack={() => setMode("list")} onEdit={() => setMode("edit")} onDelete={() => setConfirmDel(selClient.id)}
               historie={<HistorieKarty auditLog={auditLog} ctx={denikCtx} tbl="clients" rowId={selClient.id} hledat={selClient.name || ""} onOpen={openFromDenik} onOpenDenik={openDenik} onRevert={revertAudit} />} />
           )}
           {mod === "klienti" && mode === "edit" && selClient && (
