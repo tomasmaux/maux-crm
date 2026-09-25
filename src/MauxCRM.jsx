@@ -407,6 +407,16 @@ body{height:100%;background-color:#FAFAFC;background-repeat:no-repeat;background
 .svwrap{display:flex;gap:6px;flex-wrap:wrap;margin-top:4px}
 .sdot{display:inline-flex;align-items:center;gap:5px;font-size:11.5px;color:var(--txt);font-weight:400;background:#F5F4FA;border-radius:20px;padding:3px 9px}
 .sdot i{width:6px;height:6px;border-radius:50%;display:inline-block;flex-shrink:0}
+.mx-stamp{display:inline-block;font-family:var(--num);font-size:9px;font-weight:600;letter-spacing:.16em;text-transform:uppercase;color:#8C8A9B;border:1.5px solid #8C8A9B;border-radius:3px;padding:1px 6px 1px 7px;transform:rotate(-2.5deg);line-height:1.5;white-space:nowrap}
+.mx-stamp.big{font-size:13px;letter-spacing:.2em;padding:5px 12px 5px 14px;border-width:2px;transform:rotate(-5deg);box-shadow:inset 0 0 0 2px #fff,inset 0 0 0 3px #8C8A9B;opacity:.9}
+.tbl tr.mx-done .t-name{color:#77758A;font-weight:400}
+.tbl tr.mx-done .t-amt{color:#8C8A9B;font-weight:500}
+.tbl tr.mx-done .tag,.tbl tr.mx-done .sdot{filter:grayscale(1);opacity:.7}
+.stat.mx-sw{cursor:pointer;text-align:left;font:inherit;color:inherit}
+.stat.mx-sw:hover{border-color:var(--line2)}
+.stat.mx-sw.on{border-color:rgba(53,24,165,.35);box-shadow:inset 0 -2px 0 var(--ink)}
+.stat.mx-sw.grey .v{color:#8C8A9B}
+.stat.mx-sw.grey.on{border-color:rgba(140,138,155,.5);box-shadow:inset 0 -2px 0 #8C8A9B}
 .notes{margin-top:22px;padding-top:20px;border-top:1px solid var(--line)}
 .notes .d{font-size:13.5px;color:var(--txt);line-height:1.7;white-space:pre-wrap}
 .actions{display:flex;gap:8px;margin-top:24px;padding-top:20px;border-top:1px solid var(--line)}
@@ -1638,6 +1648,126 @@ function denikSoupisUdalosti(ctx) {
   return out;
 }
 
+/* ── KLIENTI · AKTIVNÍ / DOKONČENO (25. 9. 2026) ─────────────────────────────────────
+   Tom: „některé klienty označit za DOKONČENO — šedivý štempl, nebudou se mi ukazovat mezi
+   aktivními klienty, nebudou se mi ukazovat jejich narozeniny… appka sama: DOKONČENO, pokud
+   více jak 6 měsíců nebyl přidán žádný výkaz." Schválena varianta A „Dvě hromádky"
+   (živý mockup 25. 9.): dlaždice Aktivní / Dokončeno jsou zároveň přepínač seznamu.
+   • POSLEDNÍ PRÁCE = nejnovější z: Tomův výkaz (entry_date) · Pepův výkaz · DUZP poslední
+     vydané faktury · ruční „Datum poslední práce" na kartě (sem píše „Vrátit mezi aktivní").
+     Když nic z toho, den založení karty.
+   • PROČ I FAKTURY: výkazy vede appka od 1. 6. 2026, faktury od 1/2025. Bez faktur by appka
+     25. 9. 2026 nedokončila nikoho a první klienti by odešli až v prosinci. NEVYHAZOVAT.
+   • AUTO: poslední práce + 6 měsíců (konec měsíce zarovnán, 31. 3. → 30. 9.) < dnes.
+     Počítá se při renderu, nic neběží na pozadí, auto stav se do DB NEZAPISUJE.
+   • RUČNĚ: clients.status = "dokončeno" (starý „ukončený" = totéž). Nový výkaz (Tom
+     saveWorkEntry, Pepa AsistentVykazy.save) vrátí klienta mezi aktivní: status "aktivní"
+     + last_work_date = dnes. Bez migrace — sloupec status existoval.
+   • Kde: seznam Klienti, razítko + stavový pruh na kartě, roh Narozeniny (hotoví vynecháni),
+     našeptávač Tomova výkazu (hotoví dole, šedě). Pepův našeptávač beze změny (nenačítá
+     faktury, stav by neuměl spočítat stejně). Fakturace, úschovy, upomínky beze změny. */
+const KLIENT_DOKONCENO_MES = 6;
+const KLIENT_HOTOVO_STAVY = ["dokončeno", "ukončený"];
+function _klientPlusMesice(ymdStr, n) {
+  const [y, m, d] = String(ymdStr).slice(0, 10).split("-").map(Number);
+  const posledni = new Date(y, m - 1 + n + 1, 0).getDate();
+  return localYmd(new Date(y, m - 1 + n, Math.min(d, posledni)));
+}
+// Den DUZP vydané faktury (YYYY-MM-DD) — duzp, jinak poslední den období z vatPeriodKey.
+function klientDuzpDen(inv) {
+  if (!inv) return "";
+  if (inv.duzp) return String(inv.duzp).slice(0, 10);
+  const per = vatPeriodKey(inv);
+  if (!/^\d{4}-\d{2}$/.test(per)) return "";
+  const [y, m] = per.split("-").map(Number);
+  return localYmd(new Date(y, m, 0));
+}
+// → Map(client_id → { done, rucne, auto, posledni, zdroj, faktura, odkdy })
+//   odkdy = první den, kdy je (nebo bude) klient automaticky v Dokončeno.
+function klientiStav(clients, workEntries, assistantLogs, invoices, ted = new Date()) {
+  const dnes = localYmd(ted);
+  const posl = {};
+  const bump = (id, d, zdroj, faktura) => {
+    if (!id || !d) return;
+    const den = String(d).slice(0, 10);
+    if (!posl[id] || den > posl[id].d) posl[id] = { d: den, zdroj, faktura: faktura || "" };
+  };
+  (workEntries || []).forEach(e => e && bump(e.client_id, e.entry_date, "výkaz"));
+  (assistantLogs || []).forEach(l => l && bump(l.client_id, l.entry_date, "výkaz Pepy"));
+  (invoices || []).forEach(i => { if (i && i.status !== "pripravena") bump(i.client_id, klientDuzpDen(i), "DUZP faktury", i.invoice_number); });
+  const out = new Map();
+  (clients || []).forEach(c => {
+    if (!c) return;
+    let p = posl[c.id] || null;
+    const rucniDen = c.last_work_date ? String(c.last_work_date).slice(0, 10) : "";
+    if (rucniDen && (!p || rucniDen > p.d)) p = { d: rucniDen, zdroj: "datum poslední práce na kartě", faktura: "" };
+    if (!p) p = { d: String(c.created_at || dnes).slice(0, 10), zdroj: "založení karty", faktura: "" };
+    const odkdy = addDays(_klientPlusMesice(p.d, KLIENT_DOKONCENO_MES), 1);
+    const rucne = KLIENT_HOTOVO_STAVY.includes(c.status);
+    const auto = !rucne && odkdy <= dnes;
+    out.set(c.id, { done: rucne || auto, rucne, auto, posledni: p.d, zdroj: p.zdroj, faktura: p.faktura, odkdy });
+  });
+  return out;
+}
+function klientiHotoviIds(stav) {
+  const s = new Set();
+  if (stav) stav.forEach((v, k) => { if (v && v.done) s.add(k); });
+  return s;
+}
+// ── DUPLICITNÍ KARTY (25. 9. 2026) — import 5. a 7. 6. 2026 založil 8 klientů dvakrát
+// (5. 6. karta s kontaktem a narozeninami, 7. 6. karta, na kterou visí faktury). Bez sloučení
+// by DOKONČENO lhalo: karta s fakturou se dokončí, karta s narozeninami zůstane aktivní.
+// Páruje shodu jména bez diakritiky a mezer; od 10 znaků i jeden překlep (Richad/Richard).
+// Zůstává karta s víc kontaktními údaji (narozeniny > e-mail > kontakt > telefon > výkazy).
+function klientNormJmeno(s) {
+  return String(s || "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+function _klientLev1(a, b) {
+  if (a === b) return true;
+  if (Math.abs(a.length - b.length) > 1) return false;
+  let i = 0, j = 0, chyb = 0;
+  while (i < a.length && j < b.length) {
+    if (a[i] === b[j]) { i++; j++; continue; }
+    if (++chyb > 1) return false;
+    if (a.length > b.length) i++; else if (b.length > a.length) j++; else { i++; j++; }
+  }
+  return chyb + (a.length - i) + (b.length - j) <= 1;
+}
+function klientiDuplicity(clients, invoices, workEntries, assistantLogs) {
+  const list = (clients || []).filter(Boolean);
+  const pocet = (arr, id) => (arr || []).filter(x => x && x.client_id === id).length;
+  const skore = c => (c.birth_date ? 8 : 0) + ((c.emails || []).length ? 4 : 0) + (c.contact ? 2 : 0) + (c.phone ? 1 : 0)
+    + (pocet(workEntries, c.id) + pocet(assistantLogs, c.id) > 0 ? 1 : 0);
+  const druhe = new Set(), pary = [];
+  for (let i = 0; i < list.length; i++) {
+    for (let j = i + 1; j < list.length; j++) {
+      const a = list[i], b = list[j];
+      if (druhe.has(a.id) || druhe.has(b.id)) continue;
+      const na = klientNormJmeno(a.name), nb = klientNormJmeno(b.name);
+      if (!na || !nb) continue;
+      if (!(na === nb || (Math.min(na.length, nb.length) >= 10 && _klientLev1(na, nb)))) continue;
+      const sa = skore(a), sb = skore(b);
+      const prvni = sa > sb || (sa === sb && String(a.created_at || "") <= String(b.created_at || ""));
+      const hlavni = prvni ? a : b, druha = prvni ? b : a;
+      druhe.add(druha.id);
+      pary.push({ hlavni, druha, faktur: pocet(invoices, druha.id), vykazu: pocet(workEntries, druha.id), pepa: pocet(assistantLogs, druha.id) });
+    }
+  }
+  return pary;
+}
+// Sloučená karta: hlavní drží, co má; prázdná pole doplní z druhé, seznamy sjednotí.
+function klientSloucit(hlavni, druha) {
+  const m = { ...hlavni };
+  ["ico", "dic", "reg", "contact", "phone", "first_name", "last_name", "birth_date", "file_link"].forEach(k => { if (!m[k] && druha[k]) m[k] = druha[k]; });
+  if (!(Number(m.hourly_rate) > 0) && Number(druha.hourly_rate) > 0) m.hourly_rate = druha.hourly_rate;
+  m.emails = [...new Set([...(hlavni.emails || []), ...(druha.emails || [])].filter(Boolean))];
+  m.services = [...new Set([...(hlavni.services || []), ...(druha.services || [])].filter(Boolean))];
+  m.uschovaaml = !!(hlavni.uschovaaml || druha.uschovaaml);
+  const n1 = String(hlavni.notes || "").trim(), n2 = String(druha.notes || "").trim();
+  m.notes = n1 && n2 && n1 !== n2 ? `${n1}\n${n2}` : (n1 || n2);
+  return m;
+}
+
 /* ── NAROZENINY KLIENTŮ (23. 9. 2026) ─────────────────────────────────────────────────
    Tom: „reminder na přehledu, čí narozky se blíží" → „místo sparkline, ta mi nic neříká" →
    „tlačítko poslat e-mail… k Vašim dnešním narozeninám; kulaté jako bych to psal fakt já".
@@ -1731,7 +1861,7 @@ function narozeninyOkno(clients, dni = 7, ted = new Date()) {
   const t0 = new Date(ted.getFullYear(), ted.getMonth(), ted.getDate());
   const out = [];
   (clients || []).forEach(c => {
-    if (!c || !c.birth_date || c.status === "ukončený") return;
+    if (!c || !c.birth_date || KLIENT_HOTOVO_STAVY.includes(c.status)) return;   // ručně dokončení; auto-dokončené odfiltruje NarozeninyRoh (hotoviIds)
     const [by, bm, bd] = String(c.birth_date).slice(0, 10).split("-").map(Number);
     if (!by || !bm || !bd) return;
     for (const rok of [t0.getFullYear(), t0.getFullYear() + 1]) {
@@ -12218,7 +12348,7 @@ function MilestoneCelebration({ row, nextGoal, variant = "closed", onClose }) {
     </div>
   );
 }
-function Dashboard({ auditLog, denikCtx, onOpenDenik, onOpenDenikVec, invoices, workEntries, clients, financeItems, dpfoMonths, loanTrackers, loanTransactions, escrows, expenseChecks, onToggleExpenseCheck, onNav, onAddWorkEntry, onSaveFinance, onDeleteFinance, onDpfoToggle, onLoanTxAdd, onLoanTxToggle, onLoanTxDelete, onLoanUpdate, assistantLogs=[], assistantAttendance=[], assistantAvailability=null, xtbTranches=[], xtbSnapshots=[], xtbPositions=[], xtbClosedTrades=[], xtbCashOps=[], xtbMarket=null, wealthSnapshots=[] }) {
+function Dashboard({ auditLog, denikCtx, onOpenDenik, onOpenDenikVec, invoices, workEntries, clients, financeItems, dpfoMonths, loanTrackers, loanTransactions, escrows, expenseChecks, onToggleExpenseCheck, onNav, onAddWorkEntry, onSaveFinance, onDeleteFinance, onDpfoToggle, onLoanTxAdd, onLoanTxToggle, onLoanTxDelete, onLoanUpdate, assistantLogs=[], assistantAttendance=[], assistantAvailability=null, xtbTranches=[], xtbSnapshots=[], xtbPositions=[], xtbClosedTrades=[], xtbCashOps=[], xtbMarket=null, wealthSnapshots=[], klientHotovi = null }) {
   const [escrowAlertDismissed, setEscrowAlertDismissed] = useState(false);
   const prevMonthStr = (() => { const d = new Date(); d.setDate(1); d.setMonth(d.getMonth()-1); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`; })();
   const dochazkaKey = `maux_dochazka_odeslana_${prevMonthStr}`;
@@ -13059,7 +13189,7 @@ function Dashboard({ auditLog, denikCtx, onOpenDenik, onOpenDenikVec, invoices, 
             <div style={{aspectRatio:"1", minWidth:0}}>
               <VykazyCalendar workEntries={workEntries} escrows={escrows} invoices={invoices}
                 clients={clients} financeItems={financeItems} onSaveFinance={onSaveFinance}
-                onOpenFull={() => onNav("vykaz")} onAddEntry={onAddWorkEntry} />
+                onOpenFull={() => onNav("vykaz")} onAddEntry={onAddWorkEntry} hotoviIds={klientHotovi} />
             </div>
 
           </div>
@@ -13786,7 +13916,7 @@ const CZ_MONTHS = ["Leden","Únor","Březen","Duben","Květen","Červen","Červe
 const monthKey = (d) => d ? d.slice(0, 7) : "";
 const monthLabel = (k) => { const [y,m] = k.split("-"); return `${CZ_MONTHS[parseInt(m)-1]} ${y}`; };
 
-function WorkEntryForm({ init, prefillDate, clients, onSave, onCancel, saving, assistantLogs = [] }) {
+function WorkEntryForm({ init, prefillDate, clients, onSave, onCancel, saving, assistantLogs = [], hotoviIds = null }) {
   const [d, setD] = useState(() => init || {
     id: uid(), client_id: "", entry_date: prefillDate || today(),
     description: "", hours: "", rate: 2000,
@@ -13810,9 +13940,10 @@ function WorkEntryForm({ init, prefillDate, clients, onSave, onCancel, saving, a
   const [clientOpen, setClientOpen] = useState(false);
   const filteredClients = (() => {
     const q = clientQuery.trim().toLowerCase();
+    const hot = (c) => (hotoviIds && hotoviIds.has(c.id)) ? 1 : 0;   // dokončení až pod aktivními (25. 9. 2026)
     return clients
       .filter(c => !q || (c.name || "").toLowerCase().includes(q) || (c.ico || "").includes(q) || (c.contact || "").toLowerCase().includes(q))
-      .sort((a, b) => a.name.localeCompare(b.name, "cs"))
+      .sort((a, b) => (hot(a) - hot(b)) || a.name.localeCompare(b.name, "cs"))
       .slice(0, 8);
   })();
   const pickClient = (c) => {
@@ -13859,13 +13990,16 @@ function WorkEntryForm({ init, prefillDate, clients, onSave, onCancel, saving, a
             placeholder="Začni psát jméno klienta…"
             autoComplete="off"
           />
+          {d.client_id && hotoviIds && hotoviIds.has(d.client_id) && !clientOpen && (
+            <div style={{ fontSize: 11.5, color: "#77758A", marginTop: 5 }}>Klient je v Dokončeno. Výkaz ho vrátí mezi aktivní.</div>
+          )}
           {clientOpen && filteredClients.length > 0 && (
             <div style={{ position: "absolute", top: "100%", left: 0, right: 0, zIndex: 30, background: "#fff", border: "1px solid var(--line)", borderRadius: 8, marginTop: 4, boxShadow: "0 8px 24px rgba(0,0,0,.10)", maxHeight: 230, overflowY: "auto" }}>
               {filteredClients.map(c => (
                 <div key={c.id}
                   onMouseDown={() => pickClient(c)}
                   style={{ padding: "8px 12px", fontSize: 12.5, cursor: "pointer", borderBottom: "1px solid var(--line)", background: d.client_id === c.id ? "#F7F5FF" : "#fff" }}>
-                  <div style={{ fontWeight: 500, color: "var(--ink)" }}>{c.name}</div>
+                  <div style={{ fontWeight: 500, color: hotoviIds && hotoviIds.has(c.id) ? "#77758A" : "var(--ink)", display: "flex", alignItems: "center", gap: 8 }}>{c.name}{hotoviIds && hotoviIds.has(c.id) && <span className="mx-stamp" style={{ fontSize: 8 }}>Dokončeno</span>}</div>
                   {(c.ico || c.contact) && <div style={{ fontSize: 10.5, color: "var(--mut)", marginTop: 1 }}>{[c.ico && `IČO ${c.ico}`, c.contact].filter(Boolean).join(" · ")}</div>}
                 </div>
               ))}
@@ -14503,12 +14637,12 @@ function WorkEntryList({ entries, clients, invoices, financeItems, onNew, onEdit
    v okně nikdo není; při listování do jiných měsíců se schová s celým hero (hero === null).
    Okno konceptu jde přes portál do body — Panel má trvale transform: scale(1) a position:
    fixed by se jinak vztahoval k panelu, ne k obrazovce. */
-function NarozeninyRoh({ clients, financeItems, onSaveFinance }) {
+function NarozeninyRoh({ clients, financeItems, onSaveFinance, hotoviIds = null }) {
   const [otevreno, setOtevreno] = useState(null);   // id klienta v okně konceptu
   const [posun, setPosun] = useState(0);            // kolikrát Tom klikl „Jiný text"
   const [oslDraft, setOslDraft] = useState(null);   // rozepsané oslovení (null = needituje se)
   const [busy, setBusy] = useState(false);
-  const polozky = useMemo(() => narozeninyOkno(clients, 7), [clients]);
+  const polozky = useMemo(() => narozeninyOkno(hotoviIds ? (clients || []).filter(c => !hotoviIds.has(c.id)) : clients, 7), [clients, hotoviIds]);
   const prani = useMemo(() => praniRead(financeItems), [financeItems]);
   const vyroci = mauxVyroci(7);
   if (!polozky.length && !vyroci) return null;
@@ -14655,7 +14789,7 @@ function NarozeninyRoh({ clients, financeItems, onSaveFinance }) {
   );
 }
 
-function VykazyCalendar({ workEntries, escrows, invoices, clients, financeItems, onSaveFinance, dense = false, onOpenFull, onAddEntry, onOpenDetail }) {
+function VykazyCalendar({ workEntries, escrows, invoices, clients, financeItems, onSaveFinance, dense = false, onOpenFull, onAddEntry, onOpenDetail, hotoviIds = null }) {
   const [monthOffset, setMonthOffset] = useState(0);
   const [selectedDay, setSelectedDay] = useState(null);
   // Hero blok pod velkym cislem: v klidu jen VETA + osa. Sest opernych cisel
@@ -14930,7 +15064,7 @@ function VykazyCalendar({ workEntries, escrows, invoices, clients, financeItems,
               </div>
               {/* Narozeniny klientů — místo sparkline (Tom 23. 9. 2026: „toto mi nic neříká, nekoukám
                   na to"). Mlčí, když v okně 7 dní nikdo neslaví; hero === null v jiném měsíci i v dense. */}
-              {hero && <NarozeninyRoh clients={clients} financeItems={financeItems} onSaveFinance={onSaveFinance} />}
+              {hero && <NarozeninyRoh clients={clients} financeItems={financeItems} onSaveFinance={onSaveFinance} hotoviIds={hotoviIds} />}
             </div>
           );
         })()}
@@ -17536,7 +17670,7 @@ function DaneModule({ year, taxRecords, financeItems, invoices, dpfoMonths, escr
 
 
 /* ─── KLIENTI ─── */
-function ClientList({ clients, invoices, financeItems, query, setQuery, filter, setFilter, onOpen, onNew, onRepairClients }) {
+function ClientList({ clients, invoices, financeItems, query, setQuery, filter, setFilter, onOpen, onNew, onRepairClients, stav = null, view = "aktivni", setView = () => {}, duplicity = [], onMerge }) {
   // Fakturováno = z faktur (clientInvoicedMap), ne z ručního pole clients.invoiced (24. 9. 2026).
   const fakt = useMemo(() => clientInvoicedMap(invoices), [invoices]);
   const faktOf = (c) => fakt[c.id] || { letos: 0, celkem: 0 };
@@ -17552,6 +17686,17 @@ function ClientList({ clients, invoices, financeItems, query, setQuery, filter, 
   // jedním klikem doplnit do evidence bez ručního zadávání.
   const [repairOpen, setRepairOpen] = useState(false);
   const [repairing, setRepairing] = useState(false);
+  // Duplicitní karty (25. 9. 2026) — sloučení odklikne Tom, smazání druhé karty potvrdí confirm().
+  const [dupOpen, setDupOpen] = useState(false);
+  const [merging, setMerging] = useState(false);
+  const slouc = async (pary) => {
+    const txt = pary.length === 1
+      ? `Sloučit kartu ${pary[0].druha.name} do karty ${pary[0].hlavni.name}? Faktury a výkazy se přesunou, druhá karta se smaže.`
+      : `Sloučit ${pary.length} dvojic? Faktury a výkazy se přesunou na kartu, která zůstane, druhá karta každé dvojice se smaže.`;
+    if (!window.confirm(txt)) return;
+    setMerging(true);
+    try { await onMerge(pary); } finally { setMerging(false); }
+  };
   const orphanGroups = useMemo(() => {
     const ids = new Set(clients.map(c => c.id));
     const orphans = (invoices || []).filter(inv => !inv.client_id || !ids.has(inv.client_id));
@@ -17575,14 +17720,50 @@ function ClientList({ clients, invoices, financeItems, query, setQuery, filter, 
       .filter(c => !q || c.name.toLowerCase().includes(q) || (c.contact || "").toLowerCase().includes(q) || (c.notes || "").toLowerCase().includes(q) || (c.emails || []).join(" ").toLowerCase().includes(q))
       .sort((a, b) => (faktOf(b).letos - faktOf(a).letos) || (faktOf(b).celkem - faktOf(a).celkem));
   }, [clients, query, filter, fakt]);
+  // AKTIVNÍ / DOKONČENO (25. 9. 2026) — stav počítá App (klientiStav), tady se jen dělí.
+  const hotovy = (c) => !!(stav && stav.get(c.id) && stav.get(c.id).done);
+  const pocetHotovych = clients.filter(hotovy).length;
+  const vHot = view === "dokonceno";
+  const fAkt = filtered.filter(c => !hotovy(c));
+  const fHot = filtered.filter(hotovy).sort((a, b) => String((stav.get(b.id) || {}).posledni || "").localeCompare(String((stav.get(a.id) || {}).posledni || "")));
+  const radky = vHot ? fHot : fAkt;
 
   return (
     <>
       <div className="stat-row">
-        <div className="stat"><div className="k">Klientů</div><div className="v">{clients.length}</div></div>
+        <button type="button" className={"stat mx-sw" + (!vHot ? " on" : "")} aria-pressed={!vHot} onClick={() => setView("aktivni")}><div className="k">Aktivní</div><div className="v">{clients.length - pocetHotovych}</div></button>
+        <button type="button" className={"stat mx-sw grey" + (vHot ? " on" : "")} aria-pressed={vHot} onClick={() => setView("dokonceno")}><div className="k">Dokončeno</div><div className="v">{pocetHotovych}</div></button>
         <div className="stat gold"><div className="k">Fakturováno letos</div><div className="v">{fmtKc(sum)}</div></div>
         <div className="stat"><div className="k">Firmy / osoby</div><div className="v">{firmy} / {clients.length - firmy}</div></div>
       </div>
+      {duplicity && duplicity.length > 0 && (
+        <div style={{ borderLeft: "2px solid #4A44B8", background: "rgba(74,68,184,.045)", padding: "13px 16px", marginBottom: 16 }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+            <div style={{ lineHeight: 1.5 }}>
+              <div style={{ fontSize: 13, fontWeight: 500, color: "var(--txt)" }}>{duplicity.length} {czPocet(duplicity.length, "klient má", "klienti mají", "klientů má")} v evidenci dvě karty</div>
+              <div style={{ fontSize: 12, color: "var(--mut)", marginTop: 2 }}>Sloučením zůstane karta s kontaktem a narozeninami. Faktury i výkazy se přesunou na ni, druhá karta se smaže.</div>
+            </div>
+            <div style={{ display: "flex", gap: 8 }}>
+              <button className="btn gho" style={{ fontSize: 11.5 }} onClick={() => setDupOpen(v => !v)}>{dupOpen ? "Skrýt dvojice" : "Zobrazit dvojice"}</button>
+              <button className="btn pri" style={{ fontSize: 11.5 }} disabled={merging} onClick={() => slouc(duplicity)}>{merging ? "Slučuji…" : `Sloučit vše (${duplicity.length})`}</button>
+            </div>
+          </div>
+          {dupOpen && (
+            <div style={{ marginTop: 10 }}>
+              {duplicity.map(p => (
+                <div key={p.druha.id} style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) auto", gap: 12, alignItems: "center", padding: "9px 0", borderTop: "1px solid var(--line)", fontSize: 12.5 }}>
+                  <div>
+                    <span style={{ fontWeight: 500 }}>{p.hlavni.name}</span>
+                    <span style={{ color: "var(--mut)" }}> · zůstane karta {[p.hlavni.birth_date && "s narozeninami", (p.hlavni.emails || []).length > 0 && "s e-mailem", p.hlavni.contact && "s kontaktem"].filter(Boolean).join(", ") || "založená dřív"}</span>
+                    <div style={{ fontSize: 11.5, color: "var(--mut)", marginTop: 2 }}>z karty {p.druha.name} se přesune: {[p.faktur > 0 && `${p.faktur} ${czPocet(p.faktur, "faktura", "faktury", "faktur")}`, p.vykazu > 0 && `${p.vykazu} ${czPocet(p.vykazu, "výkaz", "výkazy", "výkazů")}`, p.pepa > 0 && `${p.pepa} ${czPocet(p.pepa, "výkaz Pepy", "výkazy Pepy", "výkazů Pepy")}`].filter(Boolean).join(" · ") || "nic, karta je prázdná"}</div>
+                  </div>
+                  <button className="btn gho" style={{ fontSize: 11.5 }} disabled={merging} onClick={() => slouc([p])}>Sloučit</button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
       {orphanGroups.length > 0 && (
         <div style={{ background: "#FEF6E7", border: "1px solid #F4DFAF", borderRadius: 12, padding: "13px 16px", marginBottom: 16 }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
@@ -17622,34 +17803,48 @@ function ClientList({ clients, invoices, financeItems, query, setQuery, filter, 
           <span key={s} className={"fchip" + (filter === s ? " on" : "")} onClick={() => setFilter(filter === s ? null : s)}>{s}</span>
         ))}
       </div>
+      {!vHot && query.trim() && fHot.length > 0 && (
+        <div style={{ fontSize: 12.5, color: "var(--mut)", margin: "0 0 12px" }}>
+          Shoda i v Dokončeno: {fHot.slice(0, 3).map(c => c.name).join(", ")}{fHot.length > 3 ? " a další" : ""} · <span onClick={() => setView("dokonceno")} style={{ color: "#4A44B8", cursor: "pointer", borderBottom: "1px dashed rgba(74,68,184,.4)" }}>zobrazit</span>
+        </div>
+      )}
+      {vHot && (
+        <div style={{ borderLeft: "2px solid #8C8A9B", background: "rgba(140,138,155,.07)", padding: "9px 13px", fontSize: 12.5, color: "#77758A", marginBottom: 12 }}>
+          Klienti bez výkazu déle než 6 měsíců a ti, které jsi dokončil ručně. Nemají narozeniny na Přehledu. Nový výkaz je vrátí mezi aktivní.
+        </div>
+      )}
       <table className="tbl">
         <thead><tr>
-          <th>Klient</th><th>Kontakt</th><th>Specializace</th><th>Fakturováno letos</th>
+          <th>Klient</th><th>{vHot ? "Poslední práce" : "Kontakt"}</th><th>Specializace</th><th>Fakturováno letos</th>
         </tr></thead>
         <tbody>
-          {filtered.length === 0 && <tr><td colSpan={4} style={{ textAlign: "center", padding: "40px 0", color: "var(--mut)" }}>Nic neodpovídá filtru.</td></tr>}
-          {filtered.map(c => (
-            <tr key={c.id} onClick={() => onOpen(c.id)}>
-              <td>
-                <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
-                  <span className="t-name">{c.name}</span>
-                  <span className={"tag " + c.type}>{c.type}</span>
-                  {c.status && c.status !== "aktivní" && <span className={"sbadge status-" + c.status}>{c.status}</span>}
-                  {pozdeIds.has(c.id) && <span title="Zaplatil 2× a víc po splatnosti (log úhrad)" style={{ fontSize: 10, fontWeight: 500, letterSpacing: ".06em", color: "#A8443C", borderLeft: "2px solid #A8443C", paddingLeft: 6 }}>platí pozdě</span>}
-                </div>
-              </td>
-              <td className="t-date">{c.contact || "—"}</td>
-              <td><ServiceDots list={c.services || []} /></td>
-              <td className="t-amt">{fmtKc(faktOf(c).letos)}</td>
-            </tr>
-          ))}
+          {radky.length === 0 && <tr><td colSpan={4} style={{ textAlign: "center", padding: "40px 0", color: "var(--mut)" }}>{vHot ? "Žádný dokončený klient neodpovídá filtru." : "Nic neodpovídá filtru."}</td></tr>}
+          {radky.map(c => {
+            const st = stav && stav.get(c.id);
+            const hot = !!(st && st.done);
+            return (
+              <tr key={c.id} className={hot ? "mx-done" : undefined} onClick={() => onOpen(c.id)}>
+                <td>
+                  <div style={{ display: "flex", alignItems: "center", gap: 9, flexWrap: "wrap" }}>
+                    <span className="t-name">{c.name}</span>
+                    <span className={"tag " + c.type}>{c.type}</span>
+                    {hot && <span className="mx-stamp">Dokončeno</span>}
+                    {pozdeIds.has(c.id) && <span title="Zaplatil 2× a víc po splatnosti (log úhrad)" style={{ fontSize: 10, fontWeight: 500, letterSpacing: ".06em", color: "#A8443C", borderLeft: "2px solid #A8443C", paddingLeft: 6 }}>platí pozdě</span>}
+                  </div>
+                </td>
+                <td className="t-date">{hot ? <>poslední práce {fmtDate(st.posledni)}<div style={{ fontSize: 11, color: "var(--mut)", marginTop: 2 }}>{st.zdroj}{st.faktura ? " " + st.faktura : ""}</div></> : (c.contact || "—")}</td>
+                <td><ServiceDots list={c.services || []} /></td>
+                <td className="t-amt">{fmtKc(faktOf(c).letos)}</td>
+              </tr>
+            );
+          })}
         </tbody>
       </table>
     </>
   );
 }
 
-function ClientDetail({ c, invoices, workEntries, financeItems, onFixPaidAt, onBack, onEdit, onDelete, historie }) {
+function ClientDetail({ c, invoices, workEntries, financeItems, onFixPaidAt, onBack, onEdit, onDelete, historie, stav = null, onStav }) {
   // Fakturováno (Tom 24. 9. 2026, varianta A „číslo a řádek pod ním"): letošní základ z faktur,
   // pod ním řádek důkazů (celkem · počet · loni) a indigem práce čekající na příští fakturu.
   // Klik na číslo rozbalí „Jak vzniklo" — metoda + letošní faktury. Nic se neskrývá, jen přidává.
@@ -17662,6 +17857,12 @@ function ClientDetail({ c, invoices, workEntries, financeItems, onFixPaidAt, onB
   const pristiMes = czMes((dnes.getMonth() + 1) % 12, "gen");
   const perNazev = (per) => `${czMes(Number(per.slice(5, 7)) - 1)} ${per.slice(0, 4)}`;
   const faktGrid = { display: "grid", gridTemplateColumns: "140px minmax(0, 1fr) 150px", gap: 12 };
+  // AKTIVNÍ / DOKONČENO (25. 9. 2026) — verdikt větou, důkaz pod ním, jedno tlačítko.
+  const stZdroj = stav ? stav.zdroj + (stav.faktura ? " " + stav.faktura : "") : "";
+  const stavVerdikt = !stav ? "" : stav.rucne ? "Dokončeno ručně" : stav.auto ? `Dokončeno automaticky ${fmtDate(stav.odkdy)}` : "Aktivní";
+  const stavDukaz = !stav ? "" : stav.done
+    ? `Poslední práce ${fmtDate(stav.posledni)} (${stZdroj}).${stav.auto ? " Od té doby přes 6 měsíců žádný výkaz." : ""} Nový výkaz ho vrátí mezi aktivní.`
+    : `Poslední práce ${fmtDate(stav.posledni)} (${stZdroj}). Když se nic nezapíše, přejde do Dokončeno ${fmtDate(stav.odkdy)}.`;
   const prazdnoText = fk.pocet === 0
     ? "Klientovi zatím nebyla vystavena žádná faktura."
     : fk.posledni
@@ -17672,9 +17873,22 @@ function ClientDetail({ c, invoices, workEntries, financeItems, onFixPaidAt, onB
       <h2 className="serif">
         {c.name}
         <span className={"tag " + c.type}>{c.type}</span>
-        {c.status && c.status !== "aktivní" && <span className={"sbadge status-" + c.status}>{c.status}</span>}
+        {stav && stav.done && <span className="mx-stamp big">Dokončeno</span>}
         {c.uschovaaml && <span className="sbadge" style={{ background: "#fdf5e8", color: "#7a5a1a" }}>Úschova / AML</span>}
       </h2>
+      {stav && (
+        <div style={{ margin: "14px 0 24px", display: "flex", flexDirection: "column", gap: 12, maxWidth: 760 }}>
+          <div style={{ borderLeft: `2px solid ${stav.done ? "#8C8A9B" : "#4A44B8"}`, background: stav.done ? "rgba(140,138,155,.07)" : "rgba(74,68,184,.045)", padding: "11px 15px" }}>
+            <div style={{ fontSize: 14, fontWeight: 500, color: "var(--txt)" }}>{stavVerdikt}</div>
+            <div style={{ fontSize: 12.5, color: "var(--mut)", marginTop: 3, lineHeight: 1.5 }}>{stavDukaz}</div>
+          </div>
+          <div>
+            {stav.done
+              ? <button className="btn pri" onClick={() => onStav && onStav(c, "vratit")}>Vrátit mezi aktivní</button>
+              : <button className="btn gho" onClick={() => onStav && onStav(c, "dokoncit")}>Označit jako dokončené</button>}
+          </div>
+        </div>
+      )}
       <div className="grid2">
         <div className="fld"><div className="l">Kontaktní osoba</div><div className="d">{c.contact || "—"}</div></div>
         <div className="fld"><div className="l">Fakturováno (letos)</div>
@@ -17701,7 +17915,7 @@ function ClientDetail({ c, invoices, workEntries, financeItems, onFixPaidAt, onB
         {c.ico && <div className="fld"><div className="l">IČO</div><div className="d">{c.ico}</div></div>}
         {c.dic && <div className="fld"><div className="l">DIČ</div><div className="d">{c.dic}</div></div>}
         {c.reg && <div className="fld"><div className="l">{c.type === "osoba" ? "Bydliště" : "Sídlo"}</div><div className="d" style={{ whiteSpace: "pre-line" }}>{c.reg}</div></div>}
-        {c.birth_date && <div className="fld"><div className="l">Narozen</div><div className="d">{fmtDate(c.birth_date)}{!c.ico && <span style={{ color: "var(--mut)", fontWeight: 400 }}> · zobrazí se na faktuře (bez IČO)</span>}</div></div>}
+        {c.birth_date && <div className="fld"><div className="l">Narozen</div><div className="d">{fmtDate(c.birth_date)}{!c.ico && <span style={{ color: "var(--mut)", fontWeight: 400 }}> · zobrazí se na faktuře (bez IČO)</span>}{stav && stav.done && <span style={{ color: "var(--mut)", fontWeight: 400 }}> · dokud je dokončený, v narozeninách na Přehledu se neukáže</span>}</div></div>}
         {c.last_work_date && <div className="fld"><div className="l">Datum poslední práce</div><div className="d">{fmtDate(c.last_work_date)}</div></div>}
         {c.file_link && <div className="fld"><div className="l">Odkaz na spis</div><div className="d"><a href={c.file_link} target="_blank" rel="noopener noreferrer">Otevřít spis →</a></div></div>}
       </div>
@@ -17908,8 +18122,8 @@ function ClientForm({ init, onSave, onCancel, saving }) {
         <div className="frow"><label>Typ</label><select value={d.type} onChange={e => set("type", e.target.value)}>
           <option value="firma">firma</option><option value="osoba">osoba</option>
         </select></div>
-        <div className="frow"><label>Stav</label><select value={d.status || "aktivní"} onChange={e => set("status", e.target.value)}>
-          <option value="aktivní">aktivní</option><option value="spící">spící</option><option value="ukončený">ukončený</option>
+        <div className="frow"><label>Stav</label><select value={KLIENT_HOTOVO_STAVY.includes(d.status) ? "dokončeno" : "aktivní"} onChange={e => set("status", e.target.value)}>
+          <option value="aktivní">aktivní · podle práce</option><option value="dokončeno">dokončeno</option>
         </select></div>
         {isOsoba
           ? <div className="frow"><label>Narozen</label><input type="date" value={d.birth_date || ""} onChange={e => set("birth_date", e.target.value)} /></div>
@@ -18893,6 +19107,12 @@ function AsistentVykazy({ email, clients, onRefresh, onClientsRefresh, presetDat
         client_id: isBdForm ? null : form.client_id,
         bd_category: isBdForm ? form.bd_category : null };
       await upsertAssistantWorkLog(rec);
+      // KLIENTI · DOKONČENO (25. 9. 2026): Pepův nový výkaz vrátí ručně dokončeného klienta mezi aktivní.
+      const kl = !isBdForm && (clients || []).find(c => c.id === rec.client_id);
+      if (kl && KLIENT_HOTOVO_STAVY.includes(kl.status) && !logs.some(l => l.id === rec.id)) {
+        try { await upsertClient({ ...kl, status: "aktivní", last_work_date: today() }); onClientsRefresh?.(); }
+        catch (e2) { console.warn("oživení klienta:", e2.message); }
+      }
       const updated = await fetchAssistantWorkLogs(email);
       setLogs(updated); onRefresh?.();
       setForm({ id: uid(), client_id: "", entry_date: today(), description: "", hours: "", notes: "", entry_type: "client", bd_category: "" });
@@ -20887,6 +21107,12 @@ export default function MauxCRM() {
   const [assistantLogs, setAssistantLogs] = useState([]);
   const [assistantAttendance, setAssistantAttendance] = useState([]);
   const [assistantAvailability, setAssistantAvailability] = useState(null);
+  // KLIENTI · AKTIVNÍ / DOKONČENO (25. 9. 2026) — jediný výpočet stavu pro seznam, kartu,
+  // našeptávač výkazu i narozeniny na Přehledu. Duplicitní karty pro lištu Sloučit.
+  const [klientView, setKlientView] = useState("aktivni");
+  const klientStav = useMemo(() => klientiStav(clients, workEntries, assistantLogs, invoices), [clients, workEntries, assistantLogs, invoices]);
+  const klientHotovi = useMemo(() => klientiHotoviIds(klientStav), [klientStav]);
+  const klientDuplicity = useMemo(() => klientiDuplicity(clients, invoices, workEntries, assistantLogs), [clients, invoices, workEntries, assistantLogs]);
   const [previewModal, setPreviewModal] = useState(null); // { invoice, client, workEntries }
   const [editInvModal, setEditInvModal] = useState(null); // { inv } — edit existing invoice
   const [discountModal, setDiscountModal] = useState(null); // { clientId, entries } — "Změny" krok před vystavením faktury
@@ -21200,12 +21426,25 @@ export default function MauxCRM() {
     catch(e) { mauxToast("Chyba: " + e.message); }
   };
 
+  // Nový výkaz vrátí ručně dokončeného klienta mezi aktivní (25. 9. 2026). Auto-dokončeného
+  // vrátí sám výpočet — nový výkaz posune poslední práci.
+  const ozivKlienta = async (clientId) => {
+    const c = clients.find(x => x.id === clientId);
+    if (!c || !KLIENT_HOTOVO_STAVY.includes(c.status)) return;
+    try {
+      await upsertClient({ ...c, status: "aktivní", last_work_date: today() });
+      setClients(await fetchClients());
+      mauxToast(`Nový výkaz · ${c.name} je zpět mezi aktivními.`);
+    } catch (err) { console.warn("oživení klienta:", err.message); }
+  };
   const saveWorkEntry = async (e) => {
     setSaving(true);
     try {
+      const novyVykaz = !workEntries.some(w => w.id === e.id);
       await upsertWorkEntry(e);
       const updated = await fetchWorkEntries();
       setWorkEntries(updated);
+      if (novyVykaz) await ozivKlienta(e.client_id);
       setMode("list"); setSel(null); setPrefillDate(null);
     } catch (err) { mauxToast("Chyba: " + err.message); } finally { setSaving(false); }
   };
@@ -21399,6 +21638,60 @@ export default function MauxCRM() {
     setSaving(true);
     try { await upsertClient(c); const updated = await fetchClients(); setClients(updated); setSel(c.id); setMode("detail"); }
     catch (e) { mauxToast("Chyba: " + e.message); } finally { setSaving(false); }
+  };
+  // KLIENTI · DOKONČENO (25. 9. 2026) — ruční přepnutí z karty klienta. Zapisuje Deník (trigger na clients).
+  const nastavStavKlienta = async (c, akce) => {
+    try {
+      const novy = akce === "dokoncit" ? { ...c, status: "dokončeno" } : { ...c, status: "aktivní", last_work_date: today() };
+      await upsertClient(novy);
+      setClients(await fetchClients());
+      refreshAudit();
+      mauxToast(akce === "dokoncit"
+        ? `${c.name} · přesunuto do Dokončeno. Nový výkaz ho vrátí mezi aktivní.`
+        : `${c.name} je zpět mezi aktivními. Šest měsíců se počítá od dneška.`);
+    } catch (e) { mauxToast("Chyba: " + e.message); }
+  };
+  // SLOUČENÍ DUPLICITNÍCH KARET (25. 9. 2026). Pořadí je pojistka: nejdřív se přesunou
+  // faktury, výkazy a Pepovy výkazy, pak se v DB ověří, že na druhou kartu už nic neukazuje
+  // (ani řádky, které appka nenačetla), teprve pak se karta smaže. Deník zapíše vše.
+  const slucKlienty = async (pary) => {
+    setSaving(true);
+    let hotovo = 0;
+    const slite = {};
+    try {
+      let fi = financeItems;
+      for (const p of pary) {
+        const hlavni = slite[p.hlavni.id] || p.hlavni, druha = p.druha;
+        for (const inv of invoices.filter(i => i.client_id === druha.id)) await upsertInvoice({ ...inv, client_id: hlavni.id });
+        for (const w of workEntries.filter(x => x.client_id === druha.id)) await upsertWorkEntry({ ...w, client_id: hlavni.id });
+        for (const l of assistantLogs.filter(x => x.client_id === druha.id)) await upsertAssistantWorkLog({ ...l, client_id: hlavni.id });
+        for (const t of ["invoices", "work_entries", "assistant_work_logs"]) {
+          const { count, error } = await supabase.from(t).select("id", { count: "exact", head: true }).eq("client_id", druha.id);
+          if (error) throw error;
+          if (count) throw new Error(`na kartě ${druha.name} zůstává ${count} záznamů (${t}) — karta nesmazána`);
+        }
+        const nova = klientSloucit(hlavni, druha);
+        await upsertClient(nova);
+        slite[hlavni.id] = nova;
+        const pr = praniRead(fi);
+        if (pr.osloveni[druha.id] && !pr.osloveni[hlavni.id]) {
+          const it = praniOsloveniSet(fi, hlavni.id, pr.osloveni[druha.id]);
+          await upsertFinanceItem(it);
+          fi = [...fi.filter(x => x.id !== it.id), it];
+        }
+        await deleteClientDb(druha.id);
+        hotovo++;
+      }
+    } catch (e) { mauxToast("Chyba: " + e.message); }
+    finally {
+      try {
+        const [c, i, w, a, f] = await Promise.all([fetchClients(), fetchInvoices(), fetchWorkEntries(), fetchAssistantWorkLogs("asistent@maux.cz"), fetchFinanceItems()]);
+        setClients(c); setInvoices(i); setWorkEntries(w); setAssistantLogs(a); setFinanceItems(f);
+      } catch (e) { console.error("po sloučení:", e); }
+      refreshAudit();
+      setSaving(false);
+      if (hotovo) mauxToast(`Sloučeno: ${hotovo} ${czPocet(hotovo, "dvojice", "dvojice", "dvojic")}. Faktury a výkazy jsou na jedné kartě.`);
+    }
   };
   const doDeleteClient = async (id) => {
     try { await deleteClientDb(id); setClients(p => p.filter(c => c.id !== id)); setConfirmDel(null); setMode("list"); setSel(null); }
@@ -21617,7 +21910,7 @@ export default function MauxCRM() {
 
           {/* DASHBOARD */}
           {mod === "dashboard" && (
-            <Dashboard invoices={invoices} workEntries={workEntries} clients={clients}
+            <Dashboard klientHotovi={klientHotovi} invoices={invoices} workEntries={workEntries} clients={clients}
               auditLog={auditLog} denikCtx={denikCtx} onOpenDenik={openDenik} onOpenDenikVec={openFromDenik}
               financeItems={financeItems}
               dpfoMonths={dpfoMonths}
@@ -21660,10 +21953,10 @@ export default function MauxCRM() {
               loading={dataLoading} />
           )}
           {mod === "vykaz" && mode === "new" && (
-            <WorkEntryForm clients={clients} onSave={saveWorkEntry} onCancel={() => { setMode("list"); setPrefillDate(null); }} saving={saving} prefillDate={prefillDate} assistantLogs={assistantLogs} />
+            <WorkEntryForm clients={clients} onSave={saveWorkEntry} onCancel={() => { setMode("list"); setPrefillDate(null); }} saving={saving} prefillDate={prefillDate} assistantLogs={assistantLogs} hotoviIds={klientHotovi} />
           )}
           {mod === "vykaz" && mode === "edit" && selWorkEntry && (
-            <WorkEntryForm init={selWorkEntry} clients={clients} onSave={saveWorkEntry} onCancel={() => setMode("list")} saving={saving} assistantLogs={assistantLogs} />
+            <WorkEntryForm init={selWorkEntry} clients={clients} onSave={saveWorkEntry} onCancel={() => setMode("list")} saving={saving} assistantLogs={assistantLogs} hotoviIds={klientHotovi} />
           )}
 
           {/* FAKTURACE */}
@@ -21709,10 +22002,10 @@ export default function MauxCRM() {
 
           {/* KLIENTI */}
           {mod === "klienti" && mode === "list" && (
-            <ClientList clients={clients} invoices={invoices} financeItems={financeItems} query={query} setQuery={setQuery} filter={filter} setFilter={setFilter} onOpen={id => { setSel(id); setMode("detail"); }} onNew={() => setMode("new")} onRepairClients={repairClientsFromInvoices} />
+            <ClientList clients={clients} invoices={invoices} financeItems={financeItems} query={query} setQuery={setQuery} filter={filter} setFilter={setFilter} onOpen={id => { setSel(id); setMode("detail"); }} onNew={() => setMode("new")} onRepairClients={repairClientsFromInvoices} stav={klientStav} view={klientView} setView={setKlientView} duplicity={klientDuplicity} onMerge={slucKlienty} />
           )}
           {mod === "klienti" && mode === "detail" && selClient && (
-            <ClientDetail c={selClient} invoices={invoices} workEntries={workEntries} financeItems={financeItems} onFixPaidAt={fixInvoicePaidAt} onBack={() => setMode("list")} onEdit={() => setMode("edit")} onDelete={() => setConfirmDel(selClient.id)}
+            <ClientDetail c={selClient} stav={klientStav.get(selClient.id)} onStav={nastavStavKlienta} invoices={invoices} workEntries={workEntries} financeItems={financeItems} onFixPaidAt={fixInvoicePaidAt} onBack={() => setMode("list")} onEdit={() => setMode("edit")} onDelete={() => setConfirmDel(selClient.id)}
               historie={<HistorieKarty auditLog={auditLog} ctx={denikCtx} tbl="clients" rowId={selClient.id} hledat={selClient.name || ""} onOpen={openFromDenik} onOpenDenik={openDenik} onRevert={revertAudit} />} />
           )}
           {mod === "klienti" && mode === "edit" && selClient && (
