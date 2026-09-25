@@ -1786,6 +1786,28 @@ function klientSloucit(hlavni, druha) {
    • Oslovení v 5. pádě navrhne appka (czVokativ); když se netrefí, Tom ho opraví přímo
      v okně konceptu a appka si ho pamatuje (fi_prani.osloveni — config, bez migrace).
    • Log fi_prani.log → tlačítko se změní na „koncept" a Deník ukáže syntetickou událost. */
+/* ── NEWSLETTER · ODEBÍRÁ (25. 9. 2026) ─────────────────────────────────────────────
+   Tom: „udělej mi zaškrtávací políčko v kartě klienta — ODEBÍRÁ NEWSLETTER".
+   Evidence v config položce fi_newsletter (bez migrace): { odber: { client_id: { od, zdroj } } }.
+   • Políčko je EVIDENCE, ne přihláška — samotný odběr žije v pluginu Newsletter na maux.cz
+     (tam je i doklad o souhlasu). Zaškrtnutí nikoho nepřihlásí ani neodhlásí.
+   • zdroj: „přihlášen na maux.cz" (spárováno s pluginem podle e-mailu) nebo „zaškrtnuto ručně".
+   • Zapisuje se vždy nad čerstvě načtenými finance_items (fetchFinanceItems) — dávkové
+     značení za sebou pak nepřepíše předchozí zápis starým snímkem. */
+const NEWSLETTER_ID = "fi_newsletter";
+function newsletterRead(financeItems) {
+  const it = (financeItems || []).find(i => i.id === NEWSLETTER_ID);
+  try { const p = JSON.parse(it?.notes || "{}") || {}; return { odber: (p.odber && typeof p.odber === "object") ? p.odber : {} }; }
+  catch (e) { return { odber: {} }; }
+}
+function newsletterSet(financeItems, clientId, on, meta) {
+  const d = newsletterRead(financeItems);
+  if (on) d.odber[clientId] = { od: (meta && meta.od) || today(), zdroj: (meta && meta.zdroj) || "zaškrtnuto ručně" };
+  else delete d.odber[clientId];
+  const prev = (financeItems || []).find(i => i.id === NEWSLETTER_ID) || {};
+  return { ...prev, id: NEWSLETTER_ID, category: "config", label: "Newsletter · odběratelé z klientů", amount: 0, notes: JSON.stringify(d) };
+}
+
 const PRANI_ID = "fi_prani";
 const MAUX_ZALOZENI = "2025-10-01";   // Tomovo oficiální založení kanceláře (převzetí Riegrova nám.)
 function praniRead(financeItems) {
@@ -17844,7 +17866,7 @@ function ClientList({ clients, invoices, financeItems, query, setQuery, filter, 
   );
 }
 
-function ClientDetail({ c, invoices, workEntries, financeItems, onFixPaidAt, onBack, onEdit, onDelete, historie, stav = null, onStav }) {
+function ClientDetail({ c, invoices, workEntries, financeItems, onFixPaidAt, onBack, onEdit, onDelete, historie, stav = null, onStav, onNewsletter }) {
   // Fakturováno (Tom 24. 9. 2026, varianta A „číslo a řádek pod ním"): letošní základ z faktur,
   // pod ním řádek důkazů (celkem · počet · loni) a indigem práce čekající na příští fakturu.
   // Klik na číslo rozbalí „Jak vzniklo" — metoda + letošní faktury. Nic se neskrývá, jen přidává.
@@ -17904,6 +17926,18 @@ function ClientDetail({ c, invoices, workEntries, financeItems, onFixPaidAt, onB
           {(c.emails || []).length ? (c.emails || []).map(e => <div key={e}><a href={"mailto:" + e}>{e}</a></div>) : "—"}
         </div></div>
         <div className="fld"><div className="l">Telefon</div><div className="d">{c.phone ? <a href={"tel:" + c.phone}>{c.phone}</a> : "—"}</div></div>
+        {(() => {
+          const nl = newsletterRead(financeItems).odber[c.id] || null;
+          return (
+            <div className="fld"><div className="l">Newsletter</div>
+              <label style={{ display: "inline-flex", alignItems: "center", gap: 9, cursor: "pointer", fontSize: 13.5, color: "var(--txt)" }}>
+                <input type="checkbox" checked={!!nl} onChange={e => onNewsletter && onNewsletter(c, e.target.checked)} style={{ accentColor: "#4A44B8", width: 16, height: 16, cursor: "pointer" }} />
+                Odebírá newsletter
+              </label>
+              <div style={{ fontSize: 12, color: "var(--mut)", marginTop: 4 }}>{nl ? `od ${fmtDate(nl.od)} · ${nl.zdroj}` : "neodebírá"}</div>
+            </div>
+          );
+        })()}
         <div className="fld"><div className="l">Specializace</div>
           <div className="svwrap">
             {(c.services || []).length ? (c.services || []).map(s => (
@@ -21640,6 +21674,15 @@ export default function MauxCRM() {
     catch (e) { mauxToast("Chyba: " + e.message); } finally { setSaving(false); }
   };
   // KLIENTI · DOKONČENO (25. 9. 2026) — ruční přepnutí z karty klienta. Zapisuje Deník (trigger na clients).
+  // NEWSLETTER · ODEBÍRÁ (25. 9. 2026) — evidence na kartě klienta, čerstvý snímek config položky.
+  const nastavNewsletter = async (c, on, meta) => {
+    try {
+      const fi = await fetchFinanceItems();
+      await upsertFinanceItem(newsletterSet(fi, c.id, on, meta));
+      setFinanceItems(await fetchFinanceItems());
+      if (!meta) mauxToast(on ? `${c.name} · odebírá newsletter (evidence v appce, přihlášku to nemění).` : `${c.name} · newsletter odškrtnut.`);
+    } catch (e) { mauxToast("Chyba: " + e.message); }
+  };
   const nastavStavKlienta = async (c, akce) => {
     try {
       const novy = akce === "dokoncit" ? { ...c, status: "dokončeno" } : { ...c, status: "aktivní", last_work_date: today() };
@@ -22005,7 +22048,7 @@ export default function MauxCRM() {
             <ClientList clients={clients} invoices={invoices} financeItems={financeItems} query={query} setQuery={setQuery} filter={filter} setFilter={setFilter} onOpen={id => { setSel(id); setMode("detail"); }} onNew={() => setMode("new")} onRepairClients={repairClientsFromInvoices} stav={klientStav} view={klientView} setView={setKlientView} duplicity={klientDuplicity} onMerge={slucKlienty} />
           )}
           {mod === "klienti" && mode === "detail" && selClient && (
-            <ClientDetail c={selClient} stav={klientStav.get(selClient.id)} onStav={nastavStavKlienta} invoices={invoices} workEntries={workEntries} financeItems={financeItems} onFixPaidAt={fixInvoicePaidAt} onBack={() => setMode("list")} onEdit={() => setMode("edit")} onDelete={() => setConfirmDel(selClient.id)}
+            <ClientDetail c={selClient} stav={klientStav.get(selClient.id)} onStav={nastavStavKlienta} onNewsletter={nastavNewsletter} invoices={invoices} workEntries={workEntries} financeItems={financeItems} onFixPaidAt={fixInvoicePaidAt} onBack={() => setMode("list")} onEdit={() => setMode("edit")} onDelete={() => setConfirmDel(selClient.id)}
               historie={<HistorieKarty auditLog={auditLog} ctx={denikCtx} tbl="clients" rowId={selClient.id} hledat={selClient.name || ""} onOpen={openFromDenik} onOpenDenik={openDenik} onRevert={revertAudit} />} />
           )}
           {mod === "klienti" && mode === "edit" && selClient && (
